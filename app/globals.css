@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+.dark {
+  --background: #020617;
+  --foreground: #e2e8f0;
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* Brand — sampled from the ZoikoSuite mark: deep navy wordmark, gold gradient Z */
+  --color-navy-50: #eef3f9;
+  --color-navy-100: #dbe7f2;
+  --color-navy-200: #b9d0e5;
+  --color-navy-300: #8fb2d1;
+  --color-navy-950: #050e1e;
+  --color-navy-900: #0a1a30;
+  --color-navy-800: #0f2745;
+  --color-navy-700: #16385f;
+  --color-navy-600: #1c4f80;
+  --color-navy-500: #26629c;
+  --color-navy-400: #3d7ab5;
+
+  --color-gold-700: #7a5a17;
+  --color-gold-600: #96731f;
+  --color-gold-500: #bd8f2e;
+  --color-gold-400: #d6ab48;
+  --color-gold-300: #e6c46f;
+  --color-gold-200: #f1dd9e;
+  --color-gold-100: #f8ecc7;
+
+  --animate-fade-up: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fade-in 0.4s ease-out both;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-float-slow: float-slow 9s ease-in-out infinite;
+  --animate-float-slower: float-slow 13s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-4px);
+  }
+  40%,
+  60% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(2%, -3%) scale(1.03);
+  }
+}
+
+html {
+  color-scheme: light;
+  transition: color 0.2s ease;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+@layer utilities {
+  .skeleton {
+    background-image: linear-gradient(
+      100deg,
+      rgba(15, 39, 69, 0.06) 20%,
+      rgba(15, 39, 69, 0.14) 40%,
+      rgba(15, 39, 69, 0.06) 60%
+    );
+    background-size: 200% 100%;
+  }
+
+  .dark .skeleton {
+    background-image: linear-gradient(
+      100deg,
+      rgba(226, 232, 240, 0.04) 20%,
+      rgba(226, 232, 240, 0.12) 40%,
+      rgba(226, 232, 240, 0.04) 60%
+    );
+  }
+
+  .text-gold-gradient {
+    background-image: linear-gradient(
+      95deg,
+      var(--color-gold-300),
+      var(--color-gold-500) 55%,
+      var(--color-gold-600)
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .bg-navy-gradient {
+    background-image: radial-gradient(
+      120% 140% at 15% 0%,
+      var(--color-navy-700) 0%,
+      var(--color-navy-900) 45%,
+      var(--color-navy-950) 100%
+    );
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15, 39, 69, 0.25) transparent;
+  }
+
+  .dark .scrollbar-thin {
+    scrollbar-color: rgba(226, 232, 240, 0.2) transparent;
+  }
+}
