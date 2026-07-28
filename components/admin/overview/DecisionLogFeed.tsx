@@ -1,6 +1,6 @@
-import { CheckCircle2, AlertCircle, XCircle } from "lucide-react";
-import { DECISION_LOG } from "@/lib/mock-data";
-import type { DecisionOutcome } from "@/lib/mock-data";
+import { CheckCircle2, AlertCircle, XCircle, ScrollText, CloudOff } from "lucide-react";
+import { listDecisions, type DecisionOutcome } from "@/lib/api/governance";
+import { PanelEmptyState } from "@/components/admin/shared";
 import { cn } from "@/lib/utils";
 
 const OUTCOME_CONFIG: Record<
@@ -24,13 +24,39 @@ const OUTCOME_CONFIG: Record<
   },
 };
 
-export function DecisionLogFeed() {
+/** Live governance decisions from governance-decision-log-svc (:8083). */
+export async function DecisionLogFeed() {
+  const result = await listDecisions({ limit: 8 });
+
+  if (!result.ok) {
+    return (
+      <PanelEmptyState
+        icon={CloudOff}
+        tone="warning"
+        label="Decision log unavailable"
+        hint={result.error.message}
+      />
+    );
+  }
+
+  const entries = result.data;
+
+  if (entries.length === 0) {
+    return (
+      <PanelEmptyState
+        icon={ScrollText}
+        label="No governance decisions recorded yet"
+        hint="Decisions appear here as soon as the Governance Plane logs its first evidence entry."
+      />
+    );
+  }
+
   return (
     <div className="flow-root">
       <ul className="-mb-6">
-        {DECISION_LOG.map((entry, i) => {
+        {entries.map((entry, i) => {
           const outcome = OUTCOME_CONFIG[entry.outcome];
-          const isLast = i === DECISION_LOG.length - 1;
+          const isLast = i === entries.length - 1;
           return (
             <li key={entry.id}>
               <div className="relative pb-6">
