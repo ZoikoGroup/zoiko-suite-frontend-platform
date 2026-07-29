@@ -12,6 +12,7 @@ const DEFAULTS = {
   governance: "http://localhost:8083",
   configuration: "http://localhost:8086",
   obligations: "http://localhost:8088",
+  purchaseOrder: "http://localhost:8129",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -32,6 +33,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   governance: "/governance-decision-log-svc",
   configuration: "/configuration-feature-flag-svc",
   obligations: "/obligations-svc",
+  purchaseOrder: "/purchase-order-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
@@ -49,8 +51,14 @@ export function serviceUrl(service: ServiceName): string {
     return stripTrailingSlash(gateway) + GATEWAY_PREFIX[service];
   }
 
-  const envKey = `ZOIKO_${service.toUpperCase()}_URL`;
-  return stripTrailingSlash(process.env[envKey] ?? DEFAULTS[service]);
+  return stripTrailingSlash(process.env[envKeyFor(service)] ?? DEFAULTS[service]);
+}
+
+/** `purchaseOrder` → `ZOIKO_PURCHASE_ORDER_URL`. Plain uppercasing would give
+ *  ZOIKO_PURCHASEORDER_URL, which nobody would guess when writing a .env. */
+function envKeyFor(service: ServiceName): string {
+  const snake = service.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+  return `ZOIKO_${snake}_URL`;
 }
 
 function stripTrailingSlash(url: string): string {

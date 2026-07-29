@@ -25,12 +25,42 @@ export type ApiError = {
   message: string;
 };
 
+/**
+ * Resolved caller identity, forwarded as the X-*-Id headers every backend
+ * trusts.
+ *
+ * In production these are set by Traefik from gateway-auth-svc's ForwardAuth
+ * check of the signed identity envelope, and a service that receives a request
+ * without them fails closed. The local single-port gateway routes deliberately
+ * carry no ForwardAuth middleware, so the console supplies them from the
+ * session instead — see lib/auth.ts DEMO_IDENTITY.
+ *
+ * Sending these matters beyond writes: services with row-level security read
+ * X-Tenant-Id to scope the query, and a read that omits it comes back 404 or
+ * empty rather than failing loudly.
+ */
+export type Identity = {
+  principalId?: string;
+  tenantId?: string;
+  legalEntityId?: string;
+};
+
 type GetOptions = {
   /** Query parameters. Undefined and empty values are dropped. */
   query?: Record<string, string | number | undefined>;
   /** Propagated to the backend as X-Correlation-ID for cross-service tracing. */
   correlationId?: string;
+  identity?: Identity;
 };
+
+function identityHeaders(identity: Identity | undefined): Record<string, string> {
+  if (!identity) return {};
+  const headers: Record<string, string> = {};
+  if (identity.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+  return headers;
+}
 
 /**
  * GET a JSON resource from a backend service.
@@ -59,6 +89,7 @@ export async function apiGet<T>(
       headers: {
         Accept: "application/json",
         "X-Correlation-ID": correlationId,
+        ...identityHeaders(options.identity),
       },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -118,7 +149,7 @@ export async function apiPost<T>(
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string } = {},
+  options: { correlationId?: string; identity?: Identity } = {},
 ): Promise<ApiWriteResult<T>> {
   const url = serviceUrl(service) + path;
   const correlationId = options.correlationId ?? crypto.randomUUID();
@@ -131,6 +162,7 @@ export async function apiPost<T>(
         "Content-Type": "application/json",
         Accept: "application/json",
         "X-Correlation-ID": correlationId,
+        ...identityHeaders(options.identity),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -149,10 +181,14 @@ export async function apiPost<T>(
   }
 
   if (!response.ok) {
+    // Services are not uniform about which key carries the human-readable part:
+    // configuration-feature-flag-svc uses `message`, purchase-order-svc uses
+    // `detail`, and validation failures everywhere use `field`. Collect all of
+    // them rather than picking one and silently losing the others.
     const detail = await response
       .json()
-      .then((body: { error?: string; field?: string; message?: string }) =>
-        [body.error, body.field, body.message].filter(Boolean).join(": "),
+      .then((body: { error?: string; field?: string; message?: string; detail?: string }) =>
+        [body.error, body.field, body.message, body.detail].filter(Boolean).join(": "),
       )
       .catch(() => "");
 
