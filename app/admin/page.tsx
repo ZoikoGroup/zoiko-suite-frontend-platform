@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { cookies } from "next/headers";
-import { CardHeader, CardTitle, CardDescription, CardContent, Card } from "@/components/ui";
+import { CardHeader, CardTitle, CardDescription, CardContent, Card, Skeleton } from "@/components/ui";
 import { PageHeader } from "@/components/admin/shared";
 import {
   KpiCardGrid,
-  GovernedActionsChart,
-  ApprovalOutcomesChart,
+  GovernedActionsPanel,
+  ApprovalOutcomesPanel,
   DomainStatusGrid,
   DecisionLogFeed,
   ObligationsPanel,
@@ -15,6 +16,45 @@ import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 export const metadata: Metadata = {
   title: "Overview",
 };
+
+/** Fallback while the KPI reads are in flight. */
+function KpiSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Skeleton key={i} className="h-32 rounded-xl" />
+      ))}
+    </div>
+  );
+}
+
+/** Fallback while every domain's services are being probed. */
+function DomainGridSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: 7 }).map((_, i) => (
+        <Skeleton key={i} className="h-36 rounded-xl" />
+      ))}
+    </div>
+  );
+}
+
+/** Fallback for a panel that is still fetching from its backend service. */
+function PanelSkeleton({ rows }: { rows: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3">
+          <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-3/5" />
+            <Skeleton className="h-3 w-2/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 async function getSessionUser() {
   // Simulates a governed data fetch through the identity + evidence layer.
@@ -35,7 +75,9 @@ export default async function AdminOverviewPage() {
       />
 
       <div className="space-y-6">
-        <KpiCardGrid />
+        <Suspense fallback={<KpiSkeleton />}>
+          <KpiCardGrid />
+        </Suspense>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
           <Card className="xl:col-span-2">
@@ -46,7 +88,9 @@ export default async function AdminOverviewPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <GovernedActionsChart />
+              <Suspense fallback={<Skeleton className="h-72 w-full rounded-lg" />}>
+                <GovernedActionsPanel />
+              </Suspense>
             </CardContent>
           </Card>
 
@@ -58,14 +102,18 @@ export default async function AdminOverviewPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <ApprovalOutcomesChart />
+              <Suspense fallback={<Skeleton className="h-56 w-full rounded-lg" />}>
+                <ApprovalOutcomesPanel />
+              </Suspense>
             </CardContent>
           </Card>
         </div>
 
         <div>
           <h2 className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">Domain status</h2>
-          <DomainStatusGrid />
+          <Suspense fallback={<DomainGridSkeleton />}>
+            <DomainStatusGrid />
+          </Suspense>
         </div>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -77,7 +125,11 @@ export default async function AdminOverviewPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <DecisionLogFeed />
+              {/* Reads governance-decision-log-svc at request time. Its own
+                  boundary so a slow backend can't hold up the whole page. */}
+              <Suspense fallback={<PanelSkeleton rows={5} />}>
+                <DecisionLogFeed />
+              </Suspense>
             </CardContent>
           </Card>
 
@@ -89,7 +141,10 @@ export default async function AdminOverviewPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <ObligationsPanel />
+              {/* Reads obligations-svc at request time. */}
+              <Suspense fallback={<PanelSkeleton rows={4} />}>
+                <ObligationsPanel />
+              </Suspense>
             </CardContent>
           </Card>
         </div>

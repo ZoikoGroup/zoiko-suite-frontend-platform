@@ -11,9 +11,13 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { GOVERNED_ACTIONS_TREND } from "@/lib/mock-data";
+import type { TrendPoint } from "@/lib/api/governance";
 
-export function GovernedActionsChart() {
+/**
+ * Presentational chart. Recharts needs the client, so the data is fetched by
+ * GovernedActionsPanel (a Server Component) and handed down as a prop.
+ */
+export function GovernedActionsChart({ data }: { data: TrendPoint[] }) {
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -28,7 +32,7 @@ export function GovernedActionsChart() {
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={GOVERNED_ACTIONS_TREND} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
           <defs>
             <linearGradient id="authorizedFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="var(--color-navy-600)" stopOpacity={0.35} />

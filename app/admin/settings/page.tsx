@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { KeyRound, ShieldCheck, Building2, Fingerprint } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge } from "@/components/ui";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Skeleton } from "@/components/ui";
 import { PageHeader } from "@/components/admin/shared";
+import { FeatureFlagForm, FeatureFlagTable } from "@/components/admin/settings";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -40,6 +42,27 @@ export default async function SettingsPage() {
         title="Settings"
         description="Session, identity, and platform configuration."
       />
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Feature flags</CardTitle>
+            <CardDescription>
+              Live, writable. Backed by configuration-feature-flag-svc on :8086 — an
+              append-only versioned store, so every change is recorded as a new version
+              rather than overwriting the last one.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <FeatureFlagForm />
+          <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+            <Suspense fallback={<Skeleton className="h-28 w-full rounded-lg" />}>
+              <FeatureFlagTable />
+            </Suspense>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-1">

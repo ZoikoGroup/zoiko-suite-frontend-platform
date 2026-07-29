@@ -3,9 +3,14 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
-import { APPROVAL_OUTCOMES } from "@/lib/mock-data";
+import type { OutcomeSplit } from "@/lib/api/governance";
 
-export function ApprovalOutcomesChart() {
+/**
+ * Presentational chart. Data is fetched by ApprovalOutcomesPanel (a Server
+ * Component) and passed down, since recharts requires the client.
+ */
+export function ApprovalOutcomesChart({ data }: { data: OutcomeSplit }) {
+  const total = data.reduce((sum, entry) => sum + entry.value, 0);
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -20,7 +25,7 @@ export function ApprovalOutcomesChart() {
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={APPROVAL_OUTCOMES}
+              data={data}
               dataKey="value"
               nameKey="name"
               innerRadius={58}
@@ -30,7 +35,7 @@ export function ApprovalOutcomesChart() {
               animationDuration={800}
               stroke="none"
             >
-              {APPROVAL_OUTCOMES.map((entry) => (
+              {data.map((entry) => (
                 <Cell key={entry.name} fill={entry.color} />
               ))}
             </Pie>
@@ -48,14 +53,21 @@ export function ApprovalOutcomesChart() {
         </ResponsiveContainer>
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
-        {APPROVAL_OUTCOMES.map((entry) => (
+        {data.map((entry) => (
           <div key={entry.name} className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
             <span
               className="h-2.5 w-2.5 rounded-full"
               style={{ backgroundColor: entry.color }}
             />
             {entry.name}
-            <span className="font-medium text-slate-800 dark:text-slate-200">{entry.value}%</span>
+            <span className="font-medium text-slate-800 dark:text-slate-200">
+              {entry.value}
+              {total > 0 && (
+                <span className="ml-1 font-normal text-slate-400 dark:text-slate-500">
+                  ({Math.round((entry.value / total) * 100)}%)
+                </span>
+              )}
+            </span>
           </div>
         ))}
       </div>
