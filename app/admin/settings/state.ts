@@ -11,3 +11,9 @@ export type FlagActionState = {
 };
 
 export const IDLE_STATE: FlagActionState = { status: "idle", message: "" };
+
+/** Config entries use the same three outcomes as flags — 201 for a real change,
+ *  200 for a value that already matched — so they share the state shape. */
+export type ConfigActionState = FlagActionState;
+
+export const IDLE_CONFIG_STATE: ConfigActionState = { status: "idle", message: "" };

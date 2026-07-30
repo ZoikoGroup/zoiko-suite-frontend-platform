@@ -19,8 +19,10 @@ import {
   issuePurchaseOrder,
   amendPurchaseOrder,
   closePurchaseOrder,
+  getPurchaseOrder,
   explainWriteError,
 } from "@/lib/api/purchase-orders";
+import type { LookupState } from "@/components/admin/shared/lookup";
 import type { OrderActionState } from "./state";
 
 const PATH = "/admin/commercial-ops";
@@ -178,6 +180,54 @@ export async function closeOrder(
     poNumber: result.data.po_number,
     message: `${result.data.po_number} closed. No further amendments are possible.`,
   };
+}
+
+/**
+ * Read one order by id.
+ *
+ * The full record, which the register's table cannot show: the linked purchase
+ * request and vendor profile, who closed it, and the correlation id that ties the
+ * order to its events elsewhere in the suite.
+ *
+ * Note what this cannot show, because the service exposes no route for it. Every
+ * amendment is written to an append-only `purchase_order_amendments` ledger with
+ * the full before/after value — and there is no endpoint to read it. The
+ * amendment history is genuinely unreadable through any API, so an order's
+ * `version` is the only visible trace that it was ever restated.
+ */
+export async function lookupOrder(
+  _previous: LookupState,
+  formData: FormData,
+): Promise<LookupState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const orderId = String(formData.get("purchase_order_id") ?? "").trim();
+  if (!orderId) return { status: "error", message: "Enter a purchase order ID." };
+  if (!isUuid(orderId)) {
+    // The column is uuid: a malformed id fails inside the driver and comes back
+    // as a 503 that reads like an outage rather than a typo.
+    return { status: "error", message: "A purchase order ID must be a UUID." };
+  }
+
+  const result = await getPurchaseOrder(orderId, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 404) {
+      return {
+        status: "missing",
+        message:
+          "No order with that id exists for this tenant. Row-level security hides another tenant's order the same way, so both read as not found.",
+      };
+    }
+    return { status: "error", message: explainWriteError(result.error.message) };
+  }
+
+  return { status: "found", record: result.data, message: "" };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

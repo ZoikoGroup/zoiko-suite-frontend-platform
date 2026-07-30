@@ -9,6 +9,10 @@ import {
   ShieldCheck,
   ShoppingCart,
   Settings,
+  ScrollText,
+  Gavel,
+  ClipboardCheck,
+  KeyRound,
 } from "lucide-react";
 
 export type DomainKey =
@@ -167,6 +171,21 @@ export const DOMAINS: Domain[] = [
 export const PRIMARY_NAV = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
   ...DOMAINS.map((d) => ({ label: d.label, href: d.href, icon: d.icon })),
+];
+
+/**
+ * The governance control plane.
+ *
+ * Separate from PRIMARY_NAV because these are not business domains — they are the
+ * cross-cutting services every domain is meant to be governed BY. Grouping them
+ * with Finance and Payroll would imply they sit at the same level, when in fact a
+ * policy or evidence requirement configured here constrains all of them.
+ */
+export const PLATFORM_NAV = [
+  { label: "Governance Log", href: "/admin/governance", icon: ScrollText },
+  { label: "Policies", href: "/admin/policies", icon: Gavel },
+  { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },
+  { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },
 ];
 
 export const SECONDARY_NAV = [
