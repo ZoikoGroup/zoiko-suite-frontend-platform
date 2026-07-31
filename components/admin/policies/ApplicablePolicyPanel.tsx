@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { CloudOff, Scale, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState, JsonBlock } from "@/components/admin/shared";
+import { PanelEmptyState, JsonBlock, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
-import { formatDate, formatDateTime, shortId } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listApplicablePolicyVersions,
@@ -118,12 +118,29 @@ export async function ApplicablePolicyPanel({
                         decides
                       </Badge>
                     )}
-                    <p
-                      className="mt-0.5 font-mono text-[11px] font-normal text-slate-400 dark:text-slate-500"
-                      title={version.policy_version_id}
-                    >
-                      {shortId(version.policy_version_id)}
-                    </p>
+                    {/* Both ids, labelled. The three forms below this panel each
+                        ask for one of them, they are indistinguishable UUIDs, and
+                        policy_id appeared nowhere on the page once the
+                        create-policy banner was gone — so it had to be recoverable
+                        from the read view, and it has to be obvious which is which. */}
+                    <dl className="mt-1 space-y-0.5 font-normal">
+                      <div className="flex items-baseline gap-1.5">
+                        <dt className="w-[3.25rem] shrink-0 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          policy
+                        </dt>
+                        <dd>
+                          <CopyableId value={version.policy_id} />
+                        </dd>
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <dt className="w-[3.25rem] shrink-0 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          version
+                        </dt>
+                        <dd>
+                          <CopyableId value={version.policy_version_id} />
+                        </dd>
+                      </div>
+                    </dl>
                   </td>
                   <td className={CELL}>
                     <Badge tone="neutral">{describeScope(version)}</Badge>
@@ -149,10 +166,7 @@ export async function ApplicablePolicyPanel({
                       <>
                         {formatDateTime(version.activated_at)}
                         <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-                          by{" "}
-                          <span title={version.activated_by_principal_id ?? undefined}>
-                            {shortId(version.activated_by_principal_id ?? "—")}
-                          </span>
+                          by <CopyableId value={version.activated_by_principal_id} />
                         </p>
                       </>
                     ) : (

@@ -1,8 +1,8 @@
 import { Badge } from "@/components/ui";
-import { JsonBlock } from "@/components/admin/shared";
+import { JsonBlock, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
-import { formatDateTime, shortId } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { bucketOutcome, type GovernanceDecision } from "@/lib/api/governance";
 
 const TONE = {
@@ -59,11 +59,8 @@ export function DecisionTable({ decisions }: { decisions: GovernanceDecision[] }
               >
                 <td className={cn(CELL, "font-medium text-slate-900 dark:text-slate-100")}>
                   {decision.action_type}
-                  <p
-                    className="mt-0.5 font-mono text-[11px] font-normal text-slate-400 dark:text-slate-500"
-                    title={decision.decision_id}
-                  >
-                    {shortId(decision.decision_id)}
+                  <p className="mt-0.5">
+                    <CopyableId value={decision.decision_id} className="font-normal" />
                   </p>
                 </td>
                 <td className={CELL}>
@@ -88,12 +85,10 @@ export function DecisionTable({ decisions }: { decisions: GovernanceDecision[] }
                   )}
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
-                  <span title={decision.actor_id}>{shortId(decision.actor_id)}</span>
+                  <CopyableId value={decision.actor_id} />
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
-                  <span title={decision.legal_entity_id}>
-                    {shortId(decision.legal_entity_id)}
-                  </span>
+                  <CopyableId value={decision.legal_entity_id} />
                 </td>
                 <td className={cn(CELL, "whitespace-nowrap text-slate-500 dark:text-slate-400")}>
                   {formatDateTime(decision.decided_at)}

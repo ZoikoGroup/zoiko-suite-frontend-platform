@@ -1,9 +1,9 @@
 import { CloudOff, FileClock } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState } from "@/components/admin/shared";
+import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
-import { formatDateTime, shortId } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { listSecretAudit, type AuditFilters } from "@/lib/api/secret-vault";
 
 const EVENT_TONE: Record<string, "success" | "warning" | "danger" | "neutral" | "info"> = {
@@ -105,9 +105,7 @@ export async function AuditPanel({ filters }: { filters: AuditFilters }) {
                   )}
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
-                  <span title={entry.requested_by_principal_id}>
-                    {shortId(entry.requested_by_principal_id)}
-                  </span>
+                  <CopyableId value={entry.requested_by_principal_id} />
                 </td>
                 <td className={cn(CELL, "max-w-[18rem]")}>
                   <span className="break-words text-slate-600 dark:text-slate-300">
@@ -116,11 +114,8 @@ export async function AuditPanel({ filters }: { filters: AuditFilters }) {
                     )}
                   </span>
                   {entry.lease_id && (
-                    <p
-                      className="mt-1 font-mono text-[11px] text-slate-400 dark:text-slate-500"
-                      title={entry.lease_id}
-                    >
-                      lease {shortId(entry.lease_id)}
+                    <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                      lease <CopyableId value={entry.lease_id} />
                     </p>
                   )}
                 </td>

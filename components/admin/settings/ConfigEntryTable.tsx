@@ -1,8 +1,8 @@
 import { CloudOff, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState, JsonBlock } from "@/components/admin/shared";
+import { PanelEmptyState, JsonBlock, CopyableId } from "@/components/admin/shared";
 import { listConfigEntries } from "@/lib/api/configuration";
-import { formatDateTime, shortId } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 
 /**
  * Currently-effective config entries from configuration-feature-flag-svc.
@@ -76,11 +76,8 @@ export async function ConfigEntryTable() {
               </td>
               <td className="py-3 text-xs text-slate-500 dark:text-slate-400">
                 {formatDateTime(entry.effective_from)}
-                <span
-                  className="ml-1.5 text-slate-400 dark:text-slate-500"
-                  title={entry.created_by_principal_id}
-                >
-                  by {shortId(entry.created_by_principal_id)}
+                <span className="ml-1.5 text-slate-400 dark:text-slate-500">
+                  by <CopyableId value={entry.created_by_principal_id} />
                 </span>
               </td>
             </tr>

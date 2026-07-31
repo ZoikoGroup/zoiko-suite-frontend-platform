@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { CloudOff, Lock, Search, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState } from "@/components/admin/shared";
+import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
-import { formatDate, formatDateTime, shortId } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listApplicableSecretPolicyVersions,
@@ -39,13 +39,11 @@ function Workloads({ raw }: { raw: unknown }) {
   return (
     <div className="flex flex-wrap gap-1">
       {workloads.map((workload) => (
-        <code
+        <CopyableId
           key={workload}
-          className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-          title={workload}
-        >
-          {shortId(workload)}
-        </code>
+          value={workload}
+          className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+        />
       ))}
     </div>
   );
@@ -152,8 +150,8 @@ export async function ApplicableSecretPolicyPanel({
               <td className={cn(CELL, "text-right tabular-nums")}>
                 {version.max_lease_duration_seconds}s
               </td>
-              <td className={cn(CELL, "font-mono text-xs text-slate-500 dark:text-slate-400")}>
-                <span title={version.secret_policy_id}>{shortId(version.secret_policy_id)}</span>
+              <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
+                <CopyableId value={version.secret_policy_id} className="text-xs" />
               </td>
             </tr>
           ))}
@@ -260,10 +258,8 @@ export async function SecretVersionHistoryPanel({
                 key={version.secret_policy_version_id}
                 className="align-top transition-colors duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/60"
               >
-                <td className={cn(CELL, "font-mono text-xs")}>
-                  <span title={version.secret_policy_version_id}>
-                    {shortId(version.secret_policy_version_id)}
-                  </span>
+                <td className={CELL}>
+                  <CopyableId value={version.secret_policy_version_id} className="text-xs" />
                 </td>
                 <td className={CELL}>
                   <Badge tone={STATUS_TONE[version.version_status] ?? "neutral"}>

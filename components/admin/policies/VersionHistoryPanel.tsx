@@ -1,15 +1,26 @@
 import { CloudOff, History, Search } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState, JsonBlock } from "@/components/admin/shared";
+import { PanelEmptyState, JsonBlock, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
-import { formatDate, formatDateTime, shortId } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import {
   listPolicyVersionHistory,
   describeScope,
   thresholdAmount,
   type VersionStatus,
 } from "@/lib/api/policies";
+
+/**
+ * Whether a pasted id still carries the ellipsis a table used to shorten it.
+ *
+ * Ids are displayed truncated, and pasting what was on screen instead of the real
+ * value is a dead end that otherwise reports only "no such policy" — a fact about
+ * the store, when the actual problem is the input.
+ */
+function looksTruncated(value: string): boolean {
+  return value.includes("…") || value.includes("...");
+}
 
 const STATUS_TONE: Record<string, "success" | "warning" | "neutral" | "danger" | "info"> = {
   ACTIVE: "success",
@@ -49,7 +60,11 @@ export async function VersionHistoryPanel({ policyId }: { policyId?: string }) {
           icon={History}
           tone="warning"
           label="No such policy"
-          hint="policy-svc has no policy with that ID. Note this is a 404 on the policy itself, which is different from a policy that exists with no versions."
+          hint={
+            looksTruncated(policyId)
+              ? "That is a shortened id — the “…” in the middle is display truncation, not part of the value. Click the id in a table to copy it in full."
+              : "policy-svc has no policy with that ID. This field wants the policy_id, not a policy_version_id or a decision_id — they are all UUIDs and easy to mix up. The Active policy set above lists both of a policy's ids, labelled. Note this is a 404 on the policy itself, which is different from a policy that exists with no versions."
+          }
         />
       );
     }
@@ -123,10 +138,8 @@ export async function VersionHistoryPanel({ policyId }: { policyId?: string }) {
                   key={version.policy_version_id}
                   className="align-top transition-colors duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/60"
                 >
-                  <td className={cn(CELL, "font-mono text-xs")}>
-                    <span title={version.policy_version_id}>
-                      {shortId(version.policy_version_id)}
-                    </span>
+                  <td className={CELL}>
+                    <CopyableId value={version.policy_version_id} className="text-xs" />
                   </td>
                   <td className={CELL}>
                     <Badge tone={STATUS_TONE[status] ?? "neutral"}>
@@ -155,10 +168,7 @@ export async function VersionHistoryPanel({ policyId }: { policyId?: string }) {
                   <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
                     {formatDateTime(version.created_at)}
                     <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-                      by{" "}
-                      <span title={version.created_by_principal_id}>
-                        {shortId(version.created_by_principal_id)}
-                      </span>
+                      by <CopyableId value={version.created_by_principal_id} />
                     </p>
                   </td>
                 </tr>

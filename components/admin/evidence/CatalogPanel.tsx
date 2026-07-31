@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
 import { CloudOff, ClipboardCheck, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState } from "@/components/admin/shared";
+import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
-import { formatDate, shortId } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listEvidenceRequirements,
@@ -182,10 +182,8 @@ export async function CatalogPanel({
                       </p>
                     )}
                   </td>
-                  <td className={cn(CELL, "font-mono text-xs text-slate-500 dark:text-slate-400")}>
-                    <span title={requirement.evidence_requirement_id}>
-                      {shortId(requirement.evidence_requirement_id)}
-                    </span>
+                  <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
+                    <CopyableId value={requirement.evidence_requirement_id} className="text-xs" />
                   </td>
                 </tr>
               );

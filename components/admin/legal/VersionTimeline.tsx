@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { CloudOff, History, ShieldAlert } from "lucide-react";
-import { PanelEmptyState } from "@/components/admin/shared";
+import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listContractVersions } from "@/lib/api/contracts";
-import { formatDateTime, shortId } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { ContractStatusBadge } from "./ContractStatusBadge";
 
 /**
@@ -87,8 +87,7 @@ export async function VersionTimeline({ contractId }: { contractId: string }) {
             )}
           </p>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            {version.title} · by{" "}
-            <span title={version.created_by}>{shortId(version.created_by)}</span>
+            {version.title} · by <CopyableId value={version.created_by} />
           </p>
         </li>
       ))}

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { formatDate, formatDateTime, formatMoney, shortId } from "@/lib/format";
+import { CopyableId } from "@/components/admin/shared";
+import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import type { Contract } from "@/lib/api/contracts";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -56,14 +57,13 @@ export function ContractTerms({ contract }: { contract: Contract }) {
       </Row>
 
       <Row label="Legal entity">
-        <span title={contract.legal_entity_id}>{shortId(contract.legal_entity_id)}</span>
+        <CopyableId value={contract.legal_entity_id} className="text-xs" />
       </Row>
 
       {contract.description ? <Row label="Description">{contract.description}</Row> : null}
 
       <Row label="Drafted">
-        {formatDateTime(contract.created_at)} by{" "}
-        <span title={contract.created_by}>{shortId(contract.created_by)}</span>
+        {formatDateTime(contract.created_at)} by <CopyableId value={contract.created_by} />
       </Row>
 
       {contract.signed_by ? (
@@ -75,7 +75,7 @@ export function ContractTerms({ contract }: { contract: Contract }) {
 
       {contract.document_vault_id ? (
         <Row label="Executed document">
-          <span title={contract.document_vault_id}>{shortId(contract.document_vault_id)}</span>
+          <CopyableId value={contract.document_vault_id} className="text-xs" />
           <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">
             reference only — document-vault-svc is not wired to this console
           </span>
@@ -89,7 +89,7 @@ export function ContractTerms({ contract }: { contract: Contract }) {
           ) : (
             <Absent>date not recorded</Absent>
           )}{" "}
-          by <span title={contract.terminated_by}>{shortId(contract.terminated_by)}</span>
+          by <CopyableId value={contract.terminated_by} />
           {contract.termination_note ? (
             <p className="mt-1 text-slate-600 dark:text-slate-300">{contract.termination_note}</p>
           ) : null}

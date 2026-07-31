@@ -1,9 +1,9 @@
 import { CloudOff, KeyRound } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState } from "@/components/admin/shared";
+import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
-import { formatDateTime, shortId } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { listLeases, summariseLeases, isLeaseLive } from "@/lib/api/secret-vault";
 
 const TILE =
@@ -143,9 +143,7 @@ export async function LeasePanel() {
                     )}
                   </td>
                   <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
-                    <span title={lease.requested_by_principal_id}>
-                      {shortId(lease.requested_by_principal_id)}
-                    </span>
+                    <CopyableId value={lease.requested_by_principal_id} />
                   </td>
                   <td className={cn(CELL, "whitespace-nowrap text-slate-500 dark:text-slate-400")}>
                     {formatDateTime(lease.granted_at)}
@@ -153,8 +151,8 @@ export async function LeasePanel() {
                   <td className={cn(CELL, "whitespace-nowrap text-slate-500 dark:text-slate-400")}>
                     {formatDateTime(lease.expires_at)}
                   </td>
-                  <td className={cn(CELL, "font-mono text-xs text-slate-500 dark:text-slate-400")}>
-                    <span title={lease.lease_id}>{shortId(lease.lease_id)}</span>
+                  <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
+                    <CopyableId value={lease.lease_id} className="text-xs" />
                   </td>
                 </tr>
               );
