@@ -1,0 +1,170 @@
+{
+	"info": {
+		"_postman_id": "zoiko-suite-tax-services-collection",
+		"name": "Zoiko Suite - Tax Domain Microservices",
+		"description": "Postman Collection for testing all 7 Tax Domain Microservices in Zoiko Suite platform.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Tax Rules Service (:8125)",
+			"item": [
+				{
+					"name": "List Tax Rules",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"url": { "raw": "http://localhost:8125/v1/tax-rules", "protocol": "http", "host": ["localhost"], "port": "8125", "path": ["v1", "tax-rules"] }
+					}
+				},
+				{
+					"name": "Create Tax Rule",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"jurisdiction_id\": \"uk-gov-01\",\n  \"rule_code\": \"UK-VAT-STD-2026\",\n  \"name\": \"UK Standard VAT Rate\",\n  \"category\": \"VAT\",\n  \"tax_rate_percentage\": 20.0,\n  \"effective_from\": \"2026-01-01\",\n  \"created_by\": \"33333333-3333-3333-3333-333333333333\"\n}"
+						},
+						"url": { "raw": "http://localhost:8125/v1/tax-rules", "protocol": "http", "host": ["localhost"], "port": "8125", "path": ["v1", "tax-rules"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Tax Determination Service (:8126)",
+			"item": [
+				{
+					"name": "List Tax Determinations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"url": { "raw": "http://localhost:8126/v1/tax-determinations", "protocol": "http", "host": ["localhost"], "port": "8126", "path": ["v1", "tax-determinations"] }
+					}
+				},
+				{
+					"name": "Evaluate Tax Determination",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"transaction_id\": \"po-2026-0412\",\n  \"source_module\": \"PURCHASE_ORDER\",\n  \"legal_entity_id\": \"22222222-2222-2222-2222-222222222222\",\n  \"jurisdiction_id\": \"us-fed-01\",\n  \"tax_category\": \"CORPORATE_INCOME\",\n  \"gross_amount\": 450000.0,\n  \"currency\": \"USD\",\n  \"effective_from\": \"2026-07-01\",\n  \"evaluated_by\": \"tax-determination-engine\"\n}"
+						},
+						"url": { "raw": "http://localhost:8126/v1/tax-determinations", "protocol": "http", "host": ["localhost"], "port": "8126", "path": ["v1", "tax-determinations"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "3. VAT GST Service (:8127)",
+			"item": [
+				{
+					"name": "List VAT Returns",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"url": { "raw": "http://localhost:8127/v1/vat-returns", "protocol": "http", "host": ["localhost"], "port": "8127", "path": ["v1", "vat-returns"] }
+					}
+				},
+				{
+					"name": "Create VAT Return",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"legal_entity_id\": \"22222222-2222-2222-2222-222222222222\",\n  \"jurisdiction_id\": \"uk-gov-01\",\n  \"tax_registration_number\": \"GB-987654321\",\n  \"tax_period\": \"2026-Q2\",\n  \"total_sales_amount\": 1850000.0,\n  \"total_purchase_amount\": 920000.0,\n  \"output_tax_amount\": 370000.0,\n  \"input_tax_amount\": 184000.0,\n  \"currency\": \"GBP\",\n  \"effective_from\": \"2026-04-01\"\n}"
+						},
+						"url": { "raw": "http://localhost:8127/v1/vat-returns", "protocol": "http", "host": ["localhost"], "port": "8127", "path": ["v1", "vat-returns"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Corporate Tax Service (:8128)",
+			"item": [
+				{
+					"name": "List Corporate Tax Returns",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"url": { "raw": "http://localhost:8128/v1/corporate-tax-returns", "protocol": "http", "host": ["localhost"], "port": "8128", "path": ["v1", "corporate-tax-returns"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "5. Withholding Tax Service (:8129)",
+			"item": [
+				{
+					"name": "List Withholding Tax Obligations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"url": { "raw": "http://localhost:8129/v1/withholding-tax", "protocol": "http", "host": ["localhost"], "port": "8129", "path": ["v1", "withholding-tax"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "6. Filing Preparation Service (:8130)",
+			"item": [
+				{
+					"name": "List Filing Drafts",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"url": { "raw": "http://localhost:8130/v1/filing-preparation/drafts", "protocol": "http", "host": ["localhost"], "port": "8130", "path": ["v1", "filing-preparation", "drafts"] }
+					}
+				}
+			]
+		},
+		{
+			"name": "7. Tax Authority Interface Service (:8147)",
+			"item": [
+				{
+					"name": "List Tax Interfaces",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "X-Tenant-Id", "value": "11111111-1111-1111-1111-111111111111" },
+							{ "key": "X-Principal-Id", "value": "33333333-3333-3333-3333-333333333333" }
+						],
+						"url": { "raw": "http://localhost:8147/v1/tax-authority/interfaces", "protocol": "http", "host": ["localhost"], "port": "8147", "path": ["v1", "tax-authority", "interfaces"] }
+					}
+				}
+			]
+		}
+	]
+}

@@ -60,7 +60,7 @@ export const DOMAINS: Domain[] = [
     icon: Wallet,
     purpose:
       "Govern remuneration, deductions, benefits, employer contributions, and payroll tax obligations by jurisdiction and entity.",
-    status: "attention",
+    status: "operational",
     coreServices: [
       "Payroll Run Orchestrator",
       "Compensation Service",
@@ -116,7 +116,7 @@ export const DOMAINS: Domain[] = [
     icon: Percent,
     purpose:
       "Govern direct and indirect tax obligations across entity structures and jurisdictions.",
-    status: "action-required",
+    status: "operational",
     coreServices: [
       "Tax Rules Service",
       "Tax Determination Service",
@@ -135,7 +135,8 @@ export const DOMAINS: Domain[] = [
     icon: ShieldCheck,
     purpose:
       "Govern statutory, regulatory, operational, and internal policy obligations as a managed, evidential system.",
-    status: "attention",
+    status: "operational",
+
     coreServices: [
       "Obligations Registry",
       "Deadline Engine",
