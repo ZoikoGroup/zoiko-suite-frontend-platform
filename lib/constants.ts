@@ -8,6 +8,7 @@ import {
   Percent,
   ShieldCheck,
   ShoppingCart,
+  History,
   Settings,
 } from "lucide-react";
 
@@ -18,7 +19,8 @@ export type DomainKey =
   | "legal"
   | "tax"
   | "compliance"
-  | "commercial-ops";
+  | "commercial-ops"
+  | "audit-events";
 
 export type DomainStatus = "operational" | "attention" | "action-required";
 
@@ -161,6 +163,22 @@ export const DOMAINS: Domain[] = [
       "Invoice Approval Service",
       "Vendor Due Diligence Service",
       "Spend Controls Service",
+    ],
+  },
+  {
+    key: "audit-events",
+    label: "Audit Event Store",
+    href: "/admin/audit-events",
+    icon: History,
+    purpose:
+      "Govern immutable, append-only cryptographic event logging, hash-chain verification, and provenance auditing across all services.",
+    status: "operational",
+    coreServices: [
+      "Audit Event Ingestion Engine",
+      "Cryptographic Hash-Chain Service",
+      "Event Provenance Auditor",
+      "Correlation ID Tracing Service",
+      "Tamper Evidence Verifier",
     ],
   },
 ];

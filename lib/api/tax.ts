@@ -676,7 +676,7 @@ async function fetchServiceWithFallback<TRaw, TOut>(
   try {
     const res = await fetch(urlStr, {
       headers,
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(500),
     });
     if (!res.ok) {
       // If service responds non-200, return fallback data gracefully
