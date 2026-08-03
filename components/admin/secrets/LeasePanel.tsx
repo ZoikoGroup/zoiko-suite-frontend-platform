@@ -1,10 +1,15 @@
 import { CloudOff, KeyRound } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
+import { PanelEmptyState, CopyableId, Pagination } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
-import { listLeases, summariseLeases, isLeaseLive } from "@/lib/api/secret-vault";
+import {
+  listLeases,
+  summariseLeases,
+  isLeaseLive,
+  type LeaseFilters,
+} from "@/lib/api/secret-vault";
 
 const TILE =
   "flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3.5 py-3 dark:border-slate-800";
@@ -17,9 +22,24 @@ const TILE =
  * `expires_at` has passed keeps `status: GRANTED` forever. Counting raw statuses
  * would report long-dead access as live, so live/stale is decided by the
  * timestamp and the two are shown apart.
+ *
+ * The tiles count THIS PAGE, not the register. The route returns no total, so a
+ * filtered or paged view cannot know the whole set — and a "Live: 3" tile that
+ * silently meant "3 on this page" would misreport how much access is current.
+ * Where the view is narrowed, the tiles say so.
  */
-export async function LeasePanel() {
-  const result = await listLeases({ limit: 100 });
+export async function LeasePanel({
+  filters,
+  params,
+}: {
+  filters: LeaseFilters;
+  params: Record<string, string | string[] | undefined>;
+}) {
+  const limit = filters.limit ?? 50;
+  const offset = filters.offset ?? 0;
+  // One row beyond the page — see AuditPanel: the probe row is how a next page
+  // is detected on a route that reports no total.
+  const result = await listLeases({ ...filters, limit: limit + 1, offset });
 
   if (!result.ok) {
     return (
@@ -32,20 +52,47 @@ export async function LeasePanel() {
     );
   }
 
-  if (result.data.length === 0) {
+  const hasMore = result.data.length > limit;
+  const leases = hasMore ? result.data.slice(0, limit) : result.data;
+  const narrowed = Boolean(
+    filters.principal || filters.secretClass || filters.tenantId || filters.from || filters.to,
+  );
+
+  if (leases.length === 0) {
     return (
       <PanelEmptyState
         icon={KeyRound}
-        label="No leases issued"
-        hint="Broker a secret below. A denied request never becomes a lease — it appears in the audit log instead."
+        label={
+          offset > 0
+            ? "Nothing on this page"
+            : narrowed
+              ? "No leases match those filters"
+              : "No leases issued"
+        }
+        hint={
+          offset > 0
+            ? `Fewer than ${offset + 1} leases match — go back a page.`
+            : narrowed
+              ? "Filters compose with AND. Clear one and try again."
+              : "Broker a secret below. A denied request never becomes a lease — it appears in the audit log instead."
+        }
       />
     );
   }
 
-  const stats = summariseLeases(result.data);
+  const stats = summariseLeases(leases);
+  const partial = narrowed || offset > 0 || hasMore;
 
   return (
     <div className="space-y-5">
+      {partial && (
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          These four counts describe the {leases.length} lease
+          {leases.length === 1 ? "" : "s"} shown below, not the whole register — this view is
+          filtered or paged.
+        </p>
+      )}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className={TILE}>
           <span className="text-xs text-slate-500 dark:text-slate-400">Live</span>
@@ -83,9 +130,11 @@ export async function LeasePanel() {
       {stats.staleGranted > 0 && (
         <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
           {stats.staleGranted} lease{stats.staleGranted === 1 ? "" : "s"} passed{" "}
-          <code>expires_at</code> but still read <code>GRANTED</code>. This service has no expiry
-          sweep, so a lease is never transitioned to EXPIRED on its own — anything relying on
-          <code> status</code> alone to decide whether access is current would be wrong.
+          <code>expires_at</code> but still read <code>GRANTED</code>. That should not be
+          reachable: this service computes status on every read as{" "}
+          <code>GRANTED AND expires_at &lt; NOW() → EXPIRED</code>, so a lease in this state means
+          something returned a raw stored status instead of the computed one. Treat it as a bug in
+          whatever served this list, not as access that is still current.
         </p>
       )}
 
@@ -114,7 +163,7 @@ export async function LeasePanel() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {result.data.map((lease) => {
+            {leases.map((lease) => {
               const live = isLeaseLive(lease);
               const stale = lease.status === "GRANTED" && !live;
 
@@ -160,6 +209,18 @@ export async function LeasePanel() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        basePath="/admin/secrets"
+        params={params}
+        offsetParam="lease_offset"
+        offset={offset}
+        limit={limit}
+        count={leases.length}
+        hasMore={hasMore}
+        noun="lease"
+        plural="leases"
+      />
     </div>
   );
 }

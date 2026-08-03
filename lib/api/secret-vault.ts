@@ -248,12 +248,17 @@ export async function createSecretPolicyVersion(
 }
 
 /** Activate a DRAFT version. Legal only from DRAFT — otherwise 409. */
+/** A version plus whether the activating call is what transitioned it. The
+ *  service returns 200 either way; `transitioned` is the only difference
+ *  between a real DRAFT->ACTIVE and a no-op repeat. */
+export type ActivatedVersion = SecretPolicyVersion & { transitioned: boolean };
+
 export async function activateSecretPolicyVersion(input: {
   secretPolicyId: string;
   versionId: string;
   principalId: string;
-}): Promise<ApiWriteResult<SecretPolicyVersion>> {
-  return apiPost<SecretPolicyVersion>(
+}): Promise<ApiWriteResult<ActivatedVersion>> {
+  return apiPost<ActivatedVersion>(
     "secretVault",
     `/v1/secret-policies/${encodeURIComponent(
       input.secretPolicyId,
@@ -417,8 +422,12 @@ export async function getLease(leaseId: string): Promise<ApiResult<SecretLease>>
  * successful response does not by itself prove a revocation happened — the
  * lease's `revoked_at` does.
  */
-export async function revokeLease(leaseId: string): Promise<ApiWriteResult<SecretLease>> {
-  return apiPost<SecretLease>(
+/** A lease plus whether the revoking call is what revoked it. `revoked_at`
+ *  cannot answer that — it is already set on a repeat. */
+export type RevokedLease = SecretLease & { transitioned: boolean };
+
+export async function revokeLease(leaseId: string): Promise<ApiWriteResult<RevokedLease>> {
+  return apiPost<RevokedLease>(
     "secretVault",
     `/v1/secrets/leases/${encodeURIComponent(leaseId)}/revoke`,
     {},
@@ -499,6 +508,11 @@ export function summariseLeases(leases: SecretLease[], now = Date.now()): LeaseS
       expired += 1;
       continue;
     }
+    // staleGranted is a canary, not an expected state. The service computes
+    // status on read (`GRANTED AND expires_at < NOW() -> EXPIRED`), so a lease
+    // that still says GRANTED past its expiry means something bypassed that
+    // read path — a raw stored status, or a changed expiry contract. Counting it
+    // separately keeps it from being reported as live.
     if (new Date(lease.expires_at).getTime() <= now) staleGranted += 1;
     else live += 1;
   }
@@ -517,8 +531,18 @@ export function allowedWorkloads(raw: unknown): string[] {
   return raw.filter((entry): entry is string => typeof entry === "string");
 }
 
+/**
+ * What a failure was about, when the error code alone cannot say.
+ *
+ * `invalid_transition` is returned by two unrelated routes — activating a
+ * non-DRAFT version and revoking a terminal lease — so the code on its own is
+ * not enough to explain the failure. The caller knows which route it invoked;
+ * this carries that through.
+ */
+export type VaultErrorSubject = "version" | "lease";
+
 /** Turn a backend failure into something an operator can act on. */
-export function explainSecretVaultError(message: string): string {
+export function explainSecretVaultError(message: string, subject?: VaultErrorSubject): string {
   if (message.includes("no_applicable_secret_policy")) {
     return "No ACTIVE secret policy covers that path and scope, so access was refused. This service denies by absence — an unconfigured secret is an inaccessible one. Check that a version exists AND has been activated.";
   }
@@ -534,6 +558,12 @@ export function explainSecretVaultError(message: string): string {
   if (message.includes("secret_policy_conflict")) {
     return "That secret path is already registered with a different class. Paths are unique — this is a redefinition, not a retry.";
   }
+  // Checked before secret_policy_not_found: the version code is the more
+  // specific of the two, matching how secret_policy_version_conflict precedes
+  // secret_policy_conflict above.
+  if (message.includes("secret_policy_version_not_found")) {
+    return "That version does not exist under this policy. Check the version ID — and that it belongs to the policy ID in the field above it, because a version from a different policy reads as absent here.";
+  }
   if (message.includes("secret_policy_not_found")) {
     return "That secret policy does not exist.";
   }
@@ -541,7 +571,23 @@ export function explainSecretVaultError(message: string): string {
     return "That lease does not exist.";
   }
   if (message.includes("invalid_transition")) {
-    return "That lease is already REVOKED or EXPIRED and cannot be revoked again.";
+    if (subject === "version") {
+      // Verified against the live service: only DRAFT → ACTIVE is allowed, and
+      // re-activating an ACTIVE version is a 200 no-op (now reported via the
+      // response's `transitioned` flag) rather than a conflict. So a 409 here
+      // means the version was SUPERSEDED by a newer one activated in the same
+      // scope — not that it is already in force.
+      return "This version was SUPERSEDED by a newer one activated for the same scope, and a superseded version cannot be brought back. Only a DRAFT version can be activated — create a new version instead.";
+    }
+    if (subject === "lease") {
+      // Not "already REVOKED": that case is a 200 returning the record
+      // unchanged. A 409 means the lease reads EXPIRED, which is the ordinary
+      // end of its life — status is computed on every read as
+      // `GRANTED AND expires_at < NOW() -> EXPIRED`, so it needs no sweep and no
+      // external write. Verified live against a one-second lease.
+      return "This lease has passed its expiry, so it already grants nothing and only a GRANTED lease can be revoked. Nothing needs doing — expiry is evaluated whenever the lease is read, so this access ended on its own.";
+    }
+    return "That transition is not legal from the record's current state: a version can only be activated while DRAFT, and a lease can only be revoked while GRANTED.";
   }
   if (message.includes("invalid_classification")) {
     return "Data classification must be PUBLIC, INTERNAL, CONFIDENTIAL, or RESTRICTED.";

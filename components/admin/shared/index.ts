@@ -6,4 +6,5 @@ export { JsonBlock } from "./JsonBlock";
 export { CopyableId } from "./CopyableId";
 export { ResultBanner, type BannerTone } from "./ResultBanner";
 export { LookupById } from "./LookupById";
+export { Pagination } from "./Pagination";
 export { IDLE_LOOKUP, type LookupState } from "./lookup";

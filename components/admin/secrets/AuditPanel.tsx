@@ -1,6 +1,6 @@
 import { CloudOff, FileClock } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
+import { PanelEmptyState, CopyableId, Pagination } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
@@ -25,8 +25,18 @@ const EVENT_TONE: Record<string, "success" | "warning" | "danger" | "neutral" | 
  * granted request produces two rows and a denied one also produces two. A lone
  * REQUESTED with no following entry means the service died mid-decision.
  */
-export async function AuditPanel({ filters }: { filters: AuditFilters }) {
-  const result = await listSecretAudit({ ...filters, limit: filters.limit ?? 100 });
+export async function AuditPanel({
+  filters,
+  params,
+}: {
+  filters: AuditFilters;
+  params: Record<string, string | string[] | undefined>;
+}) {
+  const limit = filters.limit ?? 50;
+  const offset = filters.offset ?? 0;
+  // One row beyond the page: its presence is the only signal a next page exists,
+  // since this route returns a bare array with no total.
+  const result = await listSecretAudit({ ...filters, limit: limit + 1, offset });
 
   if (!result.ok) {
     return (
@@ -39,16 +49,29 @@ export async function AuditPanel({ filters }: { filters: AuditFilters }) {
     );
   }
 
-  if (result.data.length === 0) {
-    const filtered = Boolean(filters.principal || filters.secretPath || filters.eventType);
+  const hasMore = result.data.length > limit;
+  const entries = hasMore ? result.data.slice(0, limit) : result.data;
+
+  if (entries.length === 0) {
+    const filtered = Boolean(
+      filters.principal || filters.secretPath || filters.eventType || filters.from || filters.to,
+    );
     return (
       <PanelEmptyState
         icon={FileClock}
-        label={filtered ? "No entries match those filters" : "No access events recorded"}
+        label={
+          offset > 0
+            ? "Nothing on this page"
+            : filtered
+              ? "No entries match those filters"
+              : "No access events recorded"
+        }
         hint={
-          filtered
-            ? "Filters compose with AND. Clear one and try again."
-            : "Broker a secret below — every attempt is recorded here, granted or not."
+          offset > 0
+            ? `The log has fewer than ${offset + 1} entries under these filters — go back a page.`
+            : filtered
+              ? "Filters compose with AND. Clear one and try again."
+              : "Broker a secret below — every attempt is recorded here, granted or not."
         }
       />
     );
@@ -56,9 +79,17 @@ export async function AuditPanel({ filters }: { filters: AuditFilters }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        {result.data.length} entr{result.data.length === 1 ? "y" : "ies"}, newest first
-      </p>
+      <Pagination
+        basePath="/admin/secrets"
+        params={params}
+        offsetParam="audit_offset"
+        offset={offset}
+        limit={limit}
+        count={entries.length}
+        hasMore={hasMore}
+        noun="entry"
+        plural="entries"
+      />
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[54rem] border-collapse text-left">
@@ -82,7 +113,7 @@ export async function AuditPanel({ filters }: { filters: AuditFilters }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {result.data.map((entry) => (
+            {entries.map((entry) => (
               <tr
                 key={entry.audit_log_id}
                 className="align-top transition-colors duration-150 hover:bg-slate-50 dark:hover:bg-slate-800/60"

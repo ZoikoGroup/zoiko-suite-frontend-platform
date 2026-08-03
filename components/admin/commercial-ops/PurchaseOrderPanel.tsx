@@ -18,7 +18,13 @@ import { OrderStats } from "./OrderStats";
  * row-level security on top of it, so this cannot read another tenant's orders
  * even if the query were tampered with.
  */
-export async function PurchaseOrderPanel({ status }: { status?: OrderStatusFilter }) {
+export async function PurchaseOrderPanel({
+  status,
+  legalEntityId,
+}: {
+  status?: OrderStatusFilter;
+  legalEntityId?: string;
+}) {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
 
@@ -40,6 +46,7 @@ export async function PurchaseOrderPanel({ status }: { status?: OrderStatusFilte
       legalEntityId: session.legalEntityId,
     },
     status,
+    legalEntityId,
   });
 
   if (!result.ok) {
@@ -55,14 +62,16 @@ export async function PurchaseOrderPanel({ status }: { status?: OrderStatusFilte
 
   const orders = result.data;
 
+  const narrowed = Boolean(status || legalEntityId);
+
   if (orders.length === 0) {
     return (
       <PanelEmptyState
         icon={ShoppingCart}
-        label={status ? `No ${status.toLowerCase()} orders` : "No purchase orders yet"}
+        label={narrowed ? "No orders match these filters" : "No purchase orders yet"}
         hint={
-          status
-            ? "The filter is applied by the service, not here — clear it to see the whole register."
+          narrowed
+            ? "Both filters are applied by the service, not here, and they compose with AND — clear one to widen the register."
             : "Issue one above and it will appear here immediately — this table reads the service on every request."
         }
       />
@@ -74,10 +83,12 @@ export async function PurchaseOrderPanel({ status }: { status?: OrderStatusFilte
       {/* Stats are computed from the rows returned, so under a filter they
           describe the filtered set rather than the register. Said plainly
           instead of letting "Open orders: 0" read as a fact about the tenant. */}
-      {status && (
+      {narrowed && (
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Filtered to {status}. The totals below describe this filtered set, not the whole
-          register.
+          Filtered to {[status, legalEntityId && `legal entity ${legalEntityId}`]
+            .filter(Boolean)
+            .join(" and ")}
+          . The totals below describe this filtered set, not the whole register.
         </p>
       )}
       <OrderStats stats={summarise(orders)} />

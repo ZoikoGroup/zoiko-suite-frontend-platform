@@ -88,15 +88,28 @@ export function DecisionFilterBar({ filters }: { filters: DecisionFilters }) {
           />
         </div>
         <div>
+          <label htmlFor="to" className={LABEL}>
+            To <span className={OPTIONAL}>(RFC3339)</span>
+          </label>
+          <input
+            id="to"
+            name="to"
+            defaultValue={filters.to ?? ""}
+            placeholder="2026-08-01T00:00:00Z"
+            className={FIELD}
+            autoComplete="off"
+          />
+        </div>
+        <div>
           <label htmlFor="limit" className={LABEL}>
-            Limit <span className={OPTIONAL}>(service caps at 200)</span>
+            Per page <span className={OPTIONAL}>(1–199)</span>
           </label>
           <input
             id="limit"
             name="limit"
             type="number"
             min="1"
-            max="200"
+            max="199"
             defaultValue={filters.limit ?? 50}
             className={FIELD}
           />

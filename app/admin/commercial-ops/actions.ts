@@ -20,10 +20,18 @@ import {
   amendPurchaseOrder,
   closePurchaseOrder,
   getPurchaseOrder,
+  listOrderAmendments,
   explainWriteError,
 } from "@/lib/api/purchase-orders";
+import {
+  createPurchaseRequest,
+  approvePurchaseRequest,
+  rejectPurchaseRequest,
+  getPurchaseRequest,
+  explainRequestError,
+} from "@/lib/api/purchase-requests";
 import type { LookupState } from "@/components/admin/shared/lookup";
-import type { OrderActionState } from "./state";
+import type { OrderActionState, RequestActionState } from "./state";
 
 const PATH = "/admin/commercial-ops";
 
@@ -189,11 +197,9 @@ export async function closeOrder(
  * request and vendor profile, who closed it, and the correlation id that ties the
  * order to its events elsewhere in the suite.
  *
- * Note what this cannot show, because the service exposes no route for it. Every
- * amendment is written to an append-only `purchase_order_amendments` ledger with
- * the full before/after value — and there is no endpoint to read it. The
- * amendment history is genuinely unreadable through any API, so an order's
- * `version` is the only visible trace that it was ever restated.
+ * The amendment history is NOT here — it has its own route and its own reader,
+ * lookupOrderAmendments below. This returns the order's current state; that
+ * returns how it got there.
  */
 export async function lookupOrder(
   _previous: LookupState,
@@ -225,6 +231,234 @@ export async function lookupOrder(
       };
     }
     return { status: "error", message: explainWriteError(result.error.message) };
+  }
+
+  return { status: "found", record: result.data, message: "" };
+}
+
+/**
+ * Read one order's amendment ledger.
+ *
+ * Every amend records the before/after total and the operator's stated reason.
+ * That history used to be genuinely unreadable — no route exposed it, so an
+ * order's `version` was the only trace it had ever been restated. It is now
+ * readable, which is what makes an amendment auditable rather than merely
+ * counted.
+ */
+export async function lookupOrderAmendments(
+  _previous: LookupState,
+  formData: FormData,
+): Promise<LookupState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const orderId = String(formData.get("amendments_purchase_order_id") ?? "").trim();
+  if (!orderId) return { status: "error", message: "Enter a purchase order ID." };
+  if (!isUuid(orderId)) {
+    return { status: "error", message: "A purchase order ID must be a UUID." };
+  }
+
+  const result = await listOrderAmendments(orderId, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 404) {
+      return {
+        status: "missing",
+        message:
+          "No order with that id exists for this tenant. Note this is not the same as an order with no amendments — that returns an empty ledger, not a 404.",
+      };
+    }
+    return { status: "error", message: explainWriteError(result.error.message) };
+  }
+
+  if (result.data.length === 0) {
+    return {
+      status: "missing",
+      message:
+        "This order exists and has never been amended, so its ledger is empty and it is still at version 1.",
+    };
+  }
+
+  return { status: "found", record: result.data, message: "" };
+}
+
+// ── purchase-request-svc (:8100) ─────────────────────────────────────────────
+//
+// Upstream of the order register: an order can only be issued against a request
+// that is APPROVED. These three actions are what make that precondition
+// reachable from the console instead of something an operator has to arrange by
+// hand and paste an id for.
+
+const EXPIRED_REQUEST: RequestActionState = {
+  status: "error",
+  message: "Your session has expired — sign in again.",
+};
+
+/** Raise a purchase request. Lands PENDING; grants nothing on its own. */
+export async function submitPurchaseRequest(
+  _previous: RequestActionState,
+  formData: FormData,
+): Promise<RequestActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED_REQUEST;
+  }
+
+  const description = String(formData.get("description") ?? "").trim();
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const currencyCode = String(formData.get("currency_code") ?? "").trim();
+
+  if (!description) {
+    return { status: "error", message: "A description is required — it is what an approver reads." };
+  }
+  const amount = Number(amountRaw);
+  if (amountRaw === "" || !Number.isFinite(amount) || amount <= 0) {
+    return { status: "error", message: "Amount must be a number greater than zero." };
+  }
+  if (!currencyCode) return { status: "error", message: "Currency is required." };
+
+  const result = await createPurchaseRequest({ identity, description, amount, currencyCode });
+
+  if (!result.ok) {
+    return { status: "error", message: explainRequestError(result.error.message) };
+  }
+
+  revalidatePath(PATH);
+
+  const request = result.data;
+  const money = formatAmount(request.amount, request.currency_code);
+  // The ID goes in the message because it is the only way out of this form: the
+  // next two steps (decide, then issue an order against it) both take it by
+  // hand, and there is no picker. Without it the operator has to go hunting in
+  // the register for the row they just created.
+  return result.status === 201
+    ? {
+        status: "created",
+        requestId: request.request_id,
+        message: `Request raised for ${money}, status ${request.status} — ID ${request.request_id}. It authorises nothing until approved; an order cannot be issued against it yet.`,
+      }
+    : {
+        status: "replayed",
+        requestId: request.request_id,
+        message: `No new request written — this replayed an existing one for ${money}, currently ${request.status}, ID ${request.request_id}. The service is idempotent on correlation ID, so a retried submit resolves to the original rather than duplicating it.`,
+      };
+}
+
+/** Approve a PENDING request. Terminal. */
+export async function submitRequestApproval(
+  _previous: RequestActionState,
+  formData: FormData,
+): Promise<RequestActionState> {
+  return decideRequest(formData, "approve");
+}
+
+/** Reject a PENDING request, with a reason. Terminal. */
+export async function submitRequestRejection(
+  _previous: RequestActionState,
+  formData: FormData,
+): Promise<RequestActionState> {
+  return decideRequest(formData, "reject");
+}
+
+/**
+ * The two decisions share everything except the call and the wording, and both
+ * are terminal — so a 422 is reported as "already decided" rather than an error,
+ * because it is a fact about the record, not a failure of the attempt.
+ */
+async function decideRequest(
+  formData: FormData,
+  decision: "approve" | "reject",
+): Promise<RequestActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED_REQUEST;
+  }
+
+  const requestId = String(formData.get("request_id") ?? "").trim();
+  if (!requestId) return { status: "error", message: "A purchase request ID is required." };
+  if (!isUuid(requestId)) {
+    // uuid column: a malformed id dies in the driver and surfaces as a 503 that
+    // reads like an outage rather than a typo.
+    return { status: "error", message: "A purchase request ID must be a UUID." };
+  }
+
+  let reason = "";
+  if (decision === "reject") {
+    reason = String(formData.get("reason") ?? "").trim();
+    if (!reason) {
+      return {
+        status: "error",
+        message:
+          "A reason is required to reject. The reason is the audit record for the refusal, so the service will not accept an unexplained one.",
+      };
+    }
+  }
+
+  const result =
+    decision === "approve"
+      ? await approvePurchaseRequest(requestId, identity)
+      : await rejectPurchaseRequest(requestId, reason, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 422) {
+      return { status: "already-decided", message: explainRequestError(result.error.message) };
+    }
+    return { status: "error", message: explainRequestError(result.error.message) };
+  }
+
+  revalidatePath(PATH);
+
+  const request = result.data;
+  return decision === "approve"
+    ? {
+        status: "approved",
+        requestId: request.request_id,
+        message: `Request APPROVED and attributed to you. An order can now be issued against it — paste this ID into the issue form above: ${request.request_id}`,
+      }
+    : {
+        status: "rejected",
+        requestId: request.request_id,
+        message: `Request REJECTED, with your reason stored on the record. No order can be issued against it.`,
+      };
+}
+
+/** Read one purchase request by id. */
+export async function lookupPurchaseRequest(
+  _previous: LookupState,
+  formData: FormData,
+): Promise<LookupState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const requestId = String(formData.get("lookup_request_id") ?? "").trim();
+  if (!requestId) return { status: "error", message: "Enter a purchase request ID." };
+  if (!isUuid(requestId)) {
+    return { status: "error", message: "A purchase request ID must be a UUID." };
+  }
+
+  const result = await getPurchaseRequest(requestId, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 404) {
+      return {
+        status: "missing",
+        message:
+          "No purchase request with that id exists for this tenant. A request belonging to another tenant reads as absent in exactly the same way.",
+      };
+    }
+    return { status: "error", message: explainRequestError(result.error.message) };
   }
 
   return { status: "found", record: result.data, message: "" };

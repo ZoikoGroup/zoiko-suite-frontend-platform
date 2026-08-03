@@ -37,6 +37,29 @@ function one(value: string | string[] | undefined): string | undefined {
   return first?.trim() ? first.trim() : undefined;
 }
 
+/**
+ * A page size, or undefined to let the panel default.
+ *
+ * Capped at 199, one below the service's own 200 ceiling: both paged panels ask
+ * for `limit + 1` rows to detect a next page, and a request for 201 would be
+ * silently clamped to 200 — making a full page look like the last one.
+ */
+function pageSize(value: string | string[] | undefined): number | undefined {
+  const raw = one(value);
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return Math.min(n, 199);
+}
+
+/** A non-negative row offset, or undefined for the first page. */
+function rowOffset(value: string | string[] | undefined): number | undefined {
+  const raw = one(value);
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 function TableSkeleton({ rows = 4 }: { rows?: number }) {
   return (
     <div className="space-y-2">
@@ -66,10 +89,27 @@ export default async function SecretsPage({ searchParams }: PageProps) {
 
   const historyPolicyId = one(params.history_policy_id);
 
+  // from/to are passed through as typed, not date-picked: the service wants
+  // RFC3339 and answers 400 on anything else, and surfacing that 400 is more
+  // useful than a picker that can only produce a valid date.
   const auditFilters = {
     principal: one(params.audit_principal),
     secretPath: one(params.audit_path),
     eventType: one(params.audit_event),
+    from: one(params.audit_from),
+    to: one(params.audit_to),
+    limit: pageSize(params.audit_limit),
+    offset: rowOffset(params.audit_offset),
+  };
+
+  const leaseFilters = {
+    principal: one(params.lease_principal),
+    secretClass: one(params.lease_class),
+    tenantId: one(params.lease_tenant),
+    from: one(params.lease_from),
+    to: one(params.lease_to),
+    limit: pageSize(params.lease_limit),
+    offset: rowOffset(params.lease_offset),
   };
 
   return (
@@ -239,8 +279,96 @@ export default async function SecretsPage({ searchParams }: PageProps) {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <Suspense fallback={<TableSkeleton />}>
-            <LeasePanel />
+          <form className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end lg:grid-cols-6">
+            <div>
+              <label htmlFor="lease_class" className={LABEL}>
+                Secret class
+              </label>
+              <select
+                id="lease_class"
+                name="lease_class"
+                defaultValue={leaseFilters.secretClass ?? ""}
+                className={FIELD}
+              >
+                <option value="">All</option>
+                {SECRET_CLASSES.map((cls) => (
+                  <option key={cls} value={cls}>
+                    {cls}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="lease_principal" className={LABEL}>
+                Principal <span className={OPTIONAL}>(exact)</span>
+              </label>
+              <input
+                id="lease_principal"
+                name="lease_principal"
+                defaultValue={leaseFilters.principal ?? ""}
+                className={`${FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label htmlFor="lease_tenant" className={LABEL}>
+                Tenant <span className={OPTIONAL}>(exact)</span>
+              </label>
+              <input
+                id="lease_tenant"
+                name="lease_tenant"
+                defaultValue={leaseFilters.tenantId ?? ""}
+                className={`${FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label htmlFor="lease_from" className={LABEL}>
+                From <span className={OPTIONAL}>(RFC3339)</span>
+              </label>
+              <input
+                id="lease_from"
+                name="lease_from"
+                defaultValue={leaseFilters.from ?? ""}
+                placeholder="2026-08-01T00:00:00Z"
+                className={`${FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label htmlFor="lease_to" className={LABEL}>
+                To <span className={OPTIONAL}>(RFC3339)</span>
+              </label>
+              <input
+                id="lease_to"
+                name="lease_to"
+                defaultValue={leaseFilters.to ?? ""}
+                placeholder="2026-08-31T23:59:59Z"
+                className={`${FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label htmlFor="lease_limit" className={LABEL}>
+                Per page <span className={OPTIONAL}>(1–199)</span>
+              </label>
+              <input
+                id="lease_limit"
+                name="lease_limit"
+                type="number"
+                min="1"
+                max="199"
+                defaultValue={leaseFilters.limit ?? 50}
+                className={FIELD}
+              />
+            </div>
+            <button type="submit" className={`${SUBMIT_BUTTON} lg:col-start-6`}>
+              Filter leases
+            </button>
+          </form>
+
+          <Suspense key={JSON.stringify(leaseFilters)} fallback={<TableSkeleton />}>
+            <LeasePanel filters={leaseFilters} params={params} />
           </Suspense>
           <div className="grid grid-cols-1 gap-6 border-t border-slate-100 pt-5 lg:grid-cols-2 dark:border-slate-800">
             <LookupById
@@ -266,7 +394,7 @@ export default async function SecretsPage({ searchParams }: PageProps) {
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
-          <form className="grid grid-cols-1 gap-3 sm:grid-cols-4 sm:items-end">
+          <form className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end lg:grid-cols-6">
             <div>
               <label htmlFor="audit_event" className={LABEL}>
                 Event type
@@ -309,14 +437,58 @@ export default async function SecretsPage({ searchParams }: PageProps) {
                 autoComplete="off"
               />
             </div>
+            <div>
+              <label htmlFor="audit_from" className={LABEL}>
+                From <span className={OPTIONAL}>(RFC3339)</span>
+              </label>
+              <input
+                id="audit_from"
+                name="audit_from"
+                defaultValue={auditFilters.from ?? ""}
+                placeholder="2026-08-01T00:00:00Z"
+                className={`${FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label htmlFor="audit_to" className={LABEL}>
+                To <span className={OPTIONAL}>(RFC3339)</span>
+              </label>
+              <input
+                id="audit_to"
+                name="audit_to"
+                defaultValue={auditFilters.to ?? ""}
+                placeholder="2026-08-31T23:59:59Z"
+                className={`${FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label htmlFor="audit_limit" className={LABEL}>
+                Per page <span className={OPTIONAL}>(1–199)</span>
+              </label>
+              <input
+                id="audit_limit"
+                name="audit_limit"
+                type="number"
+                min="1"
+                max="199"
+                defaultValue={auditFilters.limit ?? 50}
+                className={FIELD}
+              />
+            </div>
             <button type="submit" className={SUBMIT_BUTTON}>
               Filter log
             </button>
           </form>
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            Filters compose with AND. A malformed timestamp is a 400 from the service, not an empty
+            result — the difference matters, so it is reported rather than swallowed.
+          </p>
 
           <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
             <Suspense key={JSON.stringify(auditFilters)} fallback={<TableSkeleton />}>
-              <AuditPanel filters={auditFilters} />
+              <AuditPanel filters={auditFilters} params={params} />
             </Suspense>
           </div>
         </CardContent>

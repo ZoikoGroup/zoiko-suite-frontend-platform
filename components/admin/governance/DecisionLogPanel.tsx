@@ -1,5 +1,5 @@
 import { CloudOff, FilterX, ScrollText } from "lucide-react";
-import { PanelEmptyState } from "@/components/admin/shared";
+import { PanelEmptyState, Pagination } from "@/components/admin/shared";
 import {
   listDecisionRecords,
   explainDecisionError,
@@ -15,8 +15,20 @@ import { DecisionTable } from "./DecisionTable";
  * would not change what comes back. The page states that rather than implying a
  * scoping that does not exist.
  */
-export async function DecisionLogPanel({ filters }: { filters: DecisionFilters }) {
-  const result = await listDecisionRecords(filters);
+export async function DecisionLogPanel({
+  filters,
+  params,
+}: {
+  filters: DecisionFilters;
+  params: Record<string, string | string[] | undefined>;
+}) {
+  const limit = filters.limit ?? 50;
+  const offset = filters.offset ?? 0;
+  // One row past the page: this route returns a bare array with no total, so the
+  // probe row is the only way to know a next page exists. Before this, the panel
+  // guessed — "this is a full page, so there are probably more" — and offered no
+  // way to reach them, because nothing wired up the offset the service accepts.
+  const result = await listDecisionRecords({ ...filters, limit: limit + 1, offset });
 
   if (!result.ok) {
     // A 400 is a malformed filter — the service is healthy and rejected the
@@ -38,7 +50,20 @@ export async function DecisionLogPanel({ filters }: { filters: DecisionFilters }
     );
   }
 
-  if (result.data.length === 0) {
+  const hasMore = result.data.length > limit;
+  const decisions = hasMore ? result.data.slice(0, limit) : result.data;
+
+  if (decisions.length === 0 && offset > 0) {
+    return (
+      <PanelEmptyState
+        icon={ScrollText}
+        label="Nothing on this page"
+        hint={`Fewer than ${offset + 1} decisions match these filters — go back a page.`}
+      />
+    );
+  }
+
+  if (decisions.length === 0) {
     // Name the filters that are actually applied. Every one of them is an exact
     // equality AND-ed with the rest, so four plausible-looking values can match
     // nothing — and "no results" on its own gives the reader no way to see which
@@ -91,17 +116,18 @@ export async function DecisionLogPanel({ filters }: { filters: DecisionFilters }
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        {result.data.length} record{result.data.length === 1 ? "" : "s"}
-        {result.data.length >= (filters.limit ?? 50) && (
-          <span className="text-amber-600 dark:text-amber-400">
-            {" "}
-            — this is a full page, so there are probably more. Raise the limit or page with
-            offset.
-          </span>
-        )}
-      </p>
-      <DecisionTable decisions={result.data} />
+      <Pagination
+        basePath="/admin/governance"
+        params={params}
+        offsetParam="offset"
+        offset={offset}
+        limit={limit}
+        count={decisions.length}
+        hasMore={hasMore}
+        noun="record"
+        plural="records"
+      />
+      <DecisionTable decisions={decisions} />
     </div>
   );
 }

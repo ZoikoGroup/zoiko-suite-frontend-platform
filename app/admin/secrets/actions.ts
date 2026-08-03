@@ -33,6 +33,7 @@ import {
   explainSecretVaultError,
   SECRET_CLASSES,
   DATA_CLASSIFICATIONS,
+  type VaultErrorSubject,
 } from "@/lib/api/secret-vault";
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type { BrokerState, RevokeState, RotateState, VaultWriteState } from "./state";
@@ -55,9 +56,14 @@ const EXPIRED: VaultWriteState = {
   message: "Your session has expired — sign in again.",
 };
 
-function writeFailure(status: number | undefined, message: string): VaultWriteState {
-  if (status === 409) return { status: "conflict", message: explainSecretVaultError(message) };
-  return { status: "error", message: explainSecretVaultError(message) };
+function writeFailure(
+  status: number | undefined,
+  message: string,
+  subject?: VaultErrorSubject,
+): VaultWriteState {
+  if (status === 409)
+    return { status: "conflict", message: explainSecretVaultError(message, subject) };
+  return { status: "error", message: explainSecretVaultError(message, subject) };
 }
 
 /** Register a secret path. Step 1 of 3 — grants come from its versions. */
@@ -200,14 +206,26 @@ export async function submitSecretActivation(
     principalId: identity.principalId,
   });
 
-  if (!result.ok) return writeFailure(result.error.status, result.error.message);
+  if (!result.ok) return writeFailure(result.error.status, result.error.message, "version");
 
   revalidatePath(PATH);
+
+  // The service answers 200 whether it transitioned a DRAFT or short-circuited
+  // on an already-ACTIVE version, so `transitioned` is what separates a real
+  // activation from a no-op repeat — reported as two different outcomes rather
+  // than one green banner covering both.
+  if (!result.data.transitioned) {
+    return {
+      status: "replayed",
+      version: result.data,
+      message: `No change — this version was already ${result.data.version_status}, so nothing was written and no activation was attributed to you. The earlier activation stands.`,
+    };
+  }
 
   return {
     status: "created",
     version: result.data,
-    message: `Version is now ${result.data.version_status}. Brokering will still fail until material is seeded for this path.`,
+    message: `Version is now ${result.data.version_status}, activated by you. Brokering will still fail until material is seeded for this path.`,
   };
 }
 
@@ -337,9 +355,12 @@ export async function submitRevoke(
 
   if (!result.ok) {
     if (result.error.status === 409) {
-      return { status: "already-terminal", message: explainSecretVaultError("invalid_transition") };
+      return {
+        status: "already-terminal",
+        message: explainSecretVaultError("invalid_transition", "lease"),
+      };
     }
-    return { status: "error", message: explainSecretVaultError(result.error.message) };
+    return { status: "error", message: explainSecretVaultError(result.error.message, "lease") };
   }
 
   revalidatePath(PATH);
@@ -350,6 +371,18 @@ export async function submitRevoke(
       status: "already-terminal",
       lease,
       message: `The service returned this lease unchanged and it carries no revoked_at, so nothing was revoked — its status is ${lease.status}.`,
+    };
+  }
+
+  // Revoking an already-REVOKED lease is a 200 returning the record untouched,
+  // not the 409 this once assumed — the store short-circuits on status REVOKED
+  // and writes no second audit entry. `revoked_at` cannot tell the two apart
+  // because it is already set on a repeat, so `transitioned` is what does.
+  if (!lease.transitioned) {
+    return {
+      status: "already-terminal",
+      lease,
+      message: `No change — this lease was already REVOKED as of ${lease.revoked_at}. Nothing was written and no second REVOKED entry was added to the audit log.`,
     };
   }
 
@@ -435,7 +468,7 @@ export async function lookupLease(
     if (result.error.status === 404) {
       return { status: "missing", message: "No lease with that id exists." };
     }
-    return { status: "error", message: explainSecretVaultError(result.error.message) };
+    return { status: "error", message: explainSecretVaultError(result.error.message, "lease") };
   }
 
   return { status: "found", record: result.data, message: "" };

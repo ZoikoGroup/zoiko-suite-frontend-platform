@@ -40,6 +40,7 @@ export default async function GovernancePage({ searchParams }: PageProps) {
   const params = await searchParams;
 
   const limitRaw = Number(one(params.limit));
+  const offsetRaw = Number(one(params.offset));
   const filters: DecisionFilters = {
     actor: one(params.actor),
     entity: one(params.entity),
@@ -47,10 +48,11 @@ export default async function GovernancePage({ searchParams }: PageProps) {
     ruleBasis: one(params.rule_basis),
     from: one(params.from),
     to: one(params.to),
-    // Clamped to the service's own maximum. Sending 5000 is not an error there —
-    // it silently caps — so clamping here keeps the "this is a full page" hint
-    // on the panel honest.
-    limit: Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50,
+    // Clamped to 199, one below the service's own 200 ceiling: the panel asks for
+    // `limit + 1` rows to detect a next page, and a request for 201 would be
+    // silently capped at 200 — making a full page look like the last one.
+    limit: Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 199) : 50,
+    offset: Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : undefined,
   };
 
   // The panel re-reads whenever the filters change, and Suspense keys off them
@@ -98,7 +100,7 @@ export default async function GovernancePage({ searchParams }: PageProps) {
           <DecisionFilterBar filters={filters} />
           <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
             <Suspense key={suspenseKey} fallback={<LogSkeleton />}>
-              <DecisionLogPanel filters={filters} />
+              <DecisionLogPanel filters={filters} params={params} />
             </Suspense>
           </div>
         </CardContent>
