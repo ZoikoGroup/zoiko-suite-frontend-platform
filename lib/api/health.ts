@@ -60,6 +60,9 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "purchase-order-svc", port: 8129 },
     { name: "invoice-approval-svc", port: 8107 },
   ],
+  "audit-events": [
+    { name: "audit-event-store-svc", port: 8084 },
+  ],
 };
 
 export type DomainHealth = {

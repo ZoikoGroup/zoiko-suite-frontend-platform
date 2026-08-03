@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
-import { ShieldCheck, Store, Wallet } from "lucide-react";
+import { ShieldCheck, Store, Wallet, ShoppingCart } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader, LookupById } from "@/components/admin/shared";
 import {
@@ -10,6 +10,8 @@ import {
   PurchaseRequestPanel,
   RaiseRequestForm,
   DecideRequestForm,
+  CommercialOpsActionHeader,
+  PurchaseOrdersAndSpendPanel,
 } from "@/components/admin/commercial-ops";
 import { DOMAINS } from "@/lib/constants";
 import type { OrderStatusFilter } from "@/lib/api/purchase-orders";
@@ -76,6 +78,66 @@ function isUuid(value: string): boolean {
 function one(value: string | string[] | undefined): string | undefined {
   const first = Array.isArray(value) ? value[0] : value;
   return first?.trim() ? first.trim() : undefined;
+}
+
+/**
+ * Section wrapper for the domain-summary panel that came from the platform work
+ * on main. Kept alongside the procurement workflow above rather than replacing
+ * it: the workflow is the verified write path against purchase-request-svc and
+ * purchase-order-svc, this is a read-only summary that also covers spend
+ * controls, and both are wanted.
+ */
+function SectionCard({
+  icon: Icon,
+  title,
+  subtitle,
+  ports,
+  children,
+}: {
+  icon: React.ElementType;
+  title: string;
+  subtitle: string;
+  ports: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      aria-labelledby={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
+      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
+    >
+      <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/50">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/20">
+            <Icon className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+          </span>
+          <div>
+            <h2
+              id={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
+              className="text-sm font-semibold text-slate-800 dark:text-slate-200"
+            >
+              {title}
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
+          </div>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+          :{ports}
+        </span>
+      </div>
+
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function PanelSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="space-y-2 animate-pulse">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
+      ))}
+    </div>
+  );
 }
 
 function TableSkeleton() {
@@ -423,6 +485,38 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Domain summary from the platform work on main, kept below the workflow
+          rather than in place of it. Note its own note: this panel falls back to
+          sample rows when the service response does not match the shape it
+          expects, so treat its contents as indicative — the registers above read
+          purchase-order-svc and purchase-request-svc directly. */}
+      <CommercialOpsActionHeader />
+
+      <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+        {DOMAIN.coreServices.map((svc) => (
+          <div
+            key={svc}
+            className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+          >
+            <span className="truncate">{svc}</span>
+            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6">
+        <SectionCard
+          icon={ShoppingCart}
+          title="Procurement & Spend Controls"
+          subtitle="purchase-order-svc & spend-controls-svc — purchase order management and departmental spend limits"
+          ports="8129, 8136"
+        >
+          <Suspense fallback={<PanelSkeleton rows={4} />}>
+            <PurchaseOrdersAndSpendPanel />
+          </Suspense>
+        </SectionCard>
+      </div>
     </div>
   );
 }

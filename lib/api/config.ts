@@ -18,6 +18,10 @@ const DEFAULTS = {
   contracts: "http://localhost:8119",
   purchaseOrder: "http://localhost:8129",
   evidence: "http://localhost:8130",
+  accountsReceivable: "http://localhost:8101",
+  auditEventStore: "http://localhost:8084",
+  tenantRegistry: "http://localhost:8081",
+  financialClose: "http://localhost:8104",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -44,6 +48,10 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   contracts: "/contract-lifecycle-svc",
   purchaseOrder: "/purchase-order-svc",
   evidence: "/evidence-requirements-svc",
+  accountsReceivable: "/accounts-receivable-svc",
+  auditEventStore: "/audit-event-store-svc",
+  tenantRegistry: "/tenant-entity-registry-svc",
+  financialClose: "/financial-close-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";

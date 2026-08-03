@@ -7,3 +7,7 @@ export { OrderStats } from "./OrderStats";
 export { PurchaseRequestPanel } from "./PurchaseRequestPanel";
 export { PurchaseRequestTable } from "./PurchaseRequestTable";
 export { RaiseRequestForm, DecideRequestForm } from "./PurchaseRequestForms";
+// Domain-view components from the platform work on main. Kept exported so both
+// the workflow panels above and the summary view below stay reachable.
+export { CommercialOpsActionHeader } from "./CommercialOpsActionHeader";
+export { PurchaseOrdersAndSpendPanel } from "./PurchaseOrdersAndSpendPanel";
