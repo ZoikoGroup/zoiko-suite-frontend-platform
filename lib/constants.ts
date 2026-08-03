@@ -8,6 +8,7 @@ import {
   Percent,
   ShieldCheck,
   ShoppingCart,
+  History,
   Settings,
 } from "lucide-react";
 
@@ -18,7 +19,8 @@ export type DomainKey =
   | "legal"
   | "tax"
   | "compliance"
-  | "commercial-ops";
+  | "commercial-ops"
+  | "audit-events";
 
 export type DomainStatus = "operational" | "attention" | "action-required";
 
@@ -60,7 +62,7 @@ export const DOMAINS: Domain[] = [
     icon: Wallet,
     purpose:
       "Govern remuneration, deductions, benefits, employer contributions, and payroll tax obligations by jurisdiction and entity.",
-    status: "attention",
+    status: "operational",
     coreServices: [
       "Payroll Run Orchestrator",
       "Compensation Service",
@@ -116,7 +118,7 @@ export const DOMAINS: Domain[] = [
     icon: Percent,
     purpose:
       "Govern direct and indirect tax obligations across entity structures and jurisdictions.",
-    status: "action-required",
+    status: "operational",
     coreServices: [
       "Tax Rules Service",
       "Tax Determination Service",
@@ -135,7 +137,8 @@ export const DOMAINS: Domain[] = [
     icon: ShieldCheck,
     purpose:
       "Govern statutory, regulatory, operational, and internal policy obligations as a managed, evidential system.",
-    status: "attention",
+    status: "operational",
+
     coreServices: [
       "Obligations Registry",
       "Deadline Engine",
@@ -160,6 +163,22 @@ export const DOMAINS: Domain[] = [
       "Invoice Approval Service",
       "Vendor Due Diligence Service",
       "Spend Controls Service",
+    ],
+  },
+  {
+    key: "audit-events",
+    label: "Audit Event Store",
+    href: "/admin/audit-events",
+    icon: History,
+    purpose:
+      "Govern immutable, append-only cryptographic event logging, hash-chain verification, and provenance auditing across all services.",
+    status: "operational",
+    coreServices: [
+      "Audit Event Ingestion Engine",
+      "Cryptographic Hash-Chain Service",
+      "Event Provenance Auditor",
+      "Correlation ID Tracing Service",
+      "Tamper Evidence Verifier",
     ],
   },
 ];

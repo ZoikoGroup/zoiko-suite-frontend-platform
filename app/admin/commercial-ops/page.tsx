@@ -1,125 +1,107 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { FileText, ShieldCheck, Store, Wallet } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
-import { PageHeader } from "@/components/admin/shared";
-import { IssueOrderForm, PurchaseOrderPanel } from "@/components/admin/commercial-ops";
+import { ShoppingCart, ShieldCheck } from "lucide-react";
 import { DOMAINS } from "@/lib/constants";
+import {
+  CommercialOpsActionHeader,
+  PurchaseOrdersAndSpendPanel,
+} from "@/components/admin/commercial-ops";
 
-export const metadata: Metadata = { title: "Commercial Ops" };
+export const metadata: Metadata = { title: "Commercial Ops & Procurement | Zoiko Suite" };
 
-const DOMAIN = DOMAINS.find((d) => d.key === "commercial-ops")!;
-
-/** Services in this domain that are not yet wired to the console. */
-const UPCOMING = [
-  {
-    icon: FileText,
-    title: "Purchase Request Service",
-    body: "Pre-commitment approval. An APPROVED request is what a purchase order normally originates from.",
-  },
-  {
-    icon: Store,
-    title: "Vendor Due Diligence",
-    body: "Counterparty screening and vendor approval state, checked before spend is committed.",
-  },
-  {
-    icon: Wallet,
-    title: "Invoice Approval Service",
-    body: "Three-way match between order, receipt, and invoice before payment is released.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Spend Controls",
-    body: "Per-entity limits and signatory authority enforced through the approval matrix.",
-  },
-];
-
-function TableSkeleton() {
+function PanelSkeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-16 rounded-lg" />
-        ))}
-      </div>
-      <div className="space-y-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-lg" />
-        ))}
-      </div>
+    <div className="space-y-2 animate-pulse">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
+      ))}
     </div>
   );
 }
 
-export default function CommercialOpsPage() {
+function SectionCard({
+  icon: Icon,
+  title,
+  subtitle,
+  ports,
+  children,
+}: {
+  icon: React.ElementType;
+  title: string;
+  subtitle: string;
+  ports: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div>
-      <PageHeader title={DOMAIN.label} description={DOMAIN.purpose} />
-
-      <Card className="mb-6">
-        <CardHeader>
+    <section
+      aria-labelledby={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
+      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
+    >
+      <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/50">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/20">
+            <Icon className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+          </span>
           <div>
-            <CardTitle>Issue a purchase order</CardTitle>
-            <CardDescription>
-              Live, writable. Backed by purchase-order-svc, reached on the single gateway
-              port at /purchase-order-svc. Issue, amend, and close are each checked against
-              authorization-svc first and fail closed — if authorization cannot be
-              determined, the action is refused rather than allowed.
-            </CardDescription>
+            <h2
+              id={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
+              className="text-sm font-semibold text-slate-800 dark:text-slate-200"
+            >
+              {title}
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
-        </CardHeader>
-        <CardContent>
-          <IssueOrderForm />
-        </CardContent>
-      </Card>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+          :{ports}
+        </span>
+      </div>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <div>
-            <CardTitle>Order register</CardTitle>
-            <CardDescription>
-              Every order for this tenant. Amending restates the total and appends an
-              immutable amendment record — it never overwrites history, and it does not
-              change the order&apos;s status. Closing is terminal.
-            </CardDescription>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+export default async function CommercialOpsPage() {
+  const domain = DOMAINS.find((d) => d.key === "commercial-ops")!;
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-8 p-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+          {domain.label}
+        </h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{domain.purpose}</p>
+      </div>
+
+      <CommercialOpsActionHeader />
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+        {domain.coreServices.map((svc) => (
+          <div
+            key={svc}
+            className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+          >
+            <span className="truncate">{svc}</span>
+            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
           </div>
-        </CardHeader>
-        <CardContent>
-          {/* Its own boundary so a slow backend can't hold up the issue form. */}
-          <Suspense fallback={<TableSkeleton />}>
-            <PurchaseOrderPanel />
+        ))}
+      </div>
+
+      <hr className="border-slate-200 dark:border-slate-800" />
+
+      <div className="space-y-6">
+        <SectionCard
+          icon={ShoppingCart}
+          title="Procurement & Spend Controls"
+          subtitle="purchase-order-svc & spend-controls-svc — purchase order management and departmental spend limits"
+          ports="8117, 8136"
+        >
+          <Suspense fallback={<PanelSkeleton rows={4} />}>
+            <PurchaseOrdersAndSpendPanel />
           </Suspense>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Rest of the domain</CardTitle>
-            <CardDescription>Wired to the console as each service comes online</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {UPCOMING.map((item) => (
-              <div
-                key={item.title}
-                className="flex gap-3 rounded-lg border border-slate-200 p-3.5 transition-colors duration-150 hover:border-navy-300 hover:bg-slate-50 dark:border-slate-800 dark:hover:border-navy-500 dark:hover:bg-slate-800/60"
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-navy-50 dark:bg-navy-500/10">
-                  <item.icon className="h-4.5 w-4.5 text-navy-700 dark:text-navy-300" aria-hidden="true" />
-                </span>
-                <div>
-                  <p className="text-sm font-medium text-slate-800 dark:text-slate-200">{item.title}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                    {item.body}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        </SectionCard>
+      </div>
     </div>
   );
 }
