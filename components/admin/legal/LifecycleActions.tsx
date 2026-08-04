@@ -59,13 +59,29 @@ export function LifecycleActions({ contract }: { contract: Contract }) {
   const nothingAllowed =
     !allowed.revise && !allowed.submit && !allowed.activate && !allowed.terminate;
 
+  // TERMINATED is the only status with no transitions left, and terminating is what
+  // gets you there — so this branch renders immediately after a successful
+  // termination, replacing the panel the user just submitted from.
+  //
+  // The feedback banners have to render here too. Returning only the empty state
+  // swallowed the one confirmation that matters most: the write succeeded, the
+  // revalidate re-rendered with the new status, this branch took over, and the
+  // "terminated" banner was destroyed before it could be read. The user was left
+  // with "No transitions available" and no confirmation that their own action was
+  // what did it — or, if the action had failed, no error either. Every other
+  // transition keeps at least one action available, so terminate was the only one
+  // that lost its result. Found by driving the page in a real browser.
   if (nothingAllowed) {
     return (
-      <PanelEmptyState
-        icon={ShieldOff}
-        label="No transitions available"
-        hint="This contract is TERMINATED. Termination is terminal — it cannot be revised, reactivated, or reopened."
-      />
+      <div className="space-y-4">
+        <ActionFeedback state={terminateState} />
+        <ActionFeedback state={activateState} />
+        <PanelEmptyState
+          icon={ShieldOff}
+          label="No transitions available"
+          hint="This contract is TERMINATED. Termination is terminal — it cannot be revised, reactivated, or reopened."
+        />
+      </div>
     );
   }
 
