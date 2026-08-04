@@ -13,6 +13,7 @@ import {
   ScrollText,
   Gavel,
   ClipboardCheck,
+  ClipboardList,
   KeyRound,
 } from "lucide-react";
 
@@ -203,6 +204,7 @@ export const PRIMARY_NAV = [
 export const PLATFORM_NAV = [
   { label: "Governance Log", href: "/admin/governance", icon: ScrollText },
   { label: "Policies", href: "/admin/policies", icon: Gavel },
+  { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },
   { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },
   { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },
 ];

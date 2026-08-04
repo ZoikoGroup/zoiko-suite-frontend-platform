@@ -20,10 +20,17 @@
 // Both are properties of the backend, not of this console, and the Legal pages
 // say so rather than implying a control that isn't there.
 //
-// Tenant isolation IS real: every store call opens a transaction and sets
-// `app.tenant_id` from the X-Tenant-Id header, and Postgres row-level security
-// filters on it. A read without the header falls back to the literal tenant
-// "default" and returns that tenant's rows — an empty register, not an error.
+// Tenant isolation is real, but NOT because of the row-level security the schema
+// declares. An earlier version of this comment credited RLS; live testing proved
+// that false. The service connects as a Postgres superuser, which bypasses RLS
+// unconditionally, so a second tenant could read and mutate another tenant's
+// contracts by sending a different X-Tenant-Id. What makes isolation real is the
+// explicit `tenant_id = $n` predicate now present in every query in the service's
+// store — the same belt-and-braces purchase-order-svc was built with. Verified
+// live across all four write paths plus both reads.
+//
+// A read without the header falls back to the literal tenant "default" and
+// returns that tenant's rows — an empty register, not an error.
 
 import {
   apiGet,
