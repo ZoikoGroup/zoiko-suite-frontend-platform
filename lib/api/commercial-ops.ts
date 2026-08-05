@@ -8,13 +8,6 @@
 
 import { type ApiResult, type Identity } from "./client";
 
-function procurementUrl(): string {
-  return (process.env.ZOIKO_PROCUREMENT_URL ?? "http://localhost:8109").replace(/\/$/, "");
-}
-
-function purchaseRequestUrl(): string {
-  return (process.env.ZOIKO_PURCHASE_REQUEST_URL ?? "http://localhost:8110").replace(/\/$/, "");
-}
 
 function purchaseOrderUrl(): string {
   return (process.env.ZOIKO_PURCHASE_ORDER_URL ?? "http://localhost:8117").replace(/\/$/, "");

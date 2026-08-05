@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  frontend-platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zoiko-suite-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - ZOIKO_TAX_RULES_URL=http://host.docker.internal:8125
+      - ZOIKO_TAX_DETERMINATION_URL=http://host.docker.internal:8126
+      - ZOIKO_VAT_GST_URL=http://host.docker.internal:8127
+      - ZOIKO_CORPORATE_TAX_URL=http://host.docker.internal:8128
+      - ZOIKO_WITHHOLDING_TAX_URL=http://host.docker.internal:8129
+      - ZOIKO_FILING_PREP_URL=http://host.docker.internal:8130
+      - ZOIKO_TAX_AUTHORITY_URL=http://host.docker.internal:8147
+      - ZOIKO_CONTRACT_LIFECYCLE_URL=http://host.docker.internal:8118
+      - ZOIKO_CLAUSE_TEMPLATE_URL=http://host.docker.internal:8119
+      - ZOIKO_OBLIGATION_TRACKING_URL=http://host.docker.internal:8120
+      - ZOIKO_BOARD_RESOLUTIONS_URL=http://host.docker.internal:8121
+      - ZOIKO_CORPORATE_ACTIONS_URL=http://host.docker.internal:8122
+      - ZOIKO_LEGAL_APPROVALS_URL=http://host.docker.internal:8123
+      - ZOIKO_COUNTERPARTY_URL=http://host.docker.internal:8124
+    restart: unless-stopped
