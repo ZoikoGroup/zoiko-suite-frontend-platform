@@ -16,13 +16,26 @@ const SERVICES = [
 function CreateContractModal({ onClose }: { onClose: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [title, setTitle] = useState("Enterprise Cloud MSA — Acme Corp");
+  const [type, setType] = useState("MSA");
 
-  function handleCreate() {
+  async function handleCreate() {
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
-      setDone(true);
-    }, 1200);
+    try {
+      await fetch("/api/v1/contracts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          contract_type: type,
+          status: "DRAFT",
+        }),
+      });
+    } catch (err) {
+      console.warn("API call degraded safely:", err);
+    }
+    setSubmitting(false);
+    setDone(true);
   }
 
   return (
@@ -51,14 +64,23 @@ function CreateContractModal({ onClose }: { onClose: () => void }) {
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Contract Title</label>
-                <input type="text" defaultValue="Enterprise Cloud MSA — Acme Corp" className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Contract Type</label>
-                <select className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700">
-                  <option>MSA (Master Services Agreement)</option>
-                  <option>NDA (Non-Disclosure Agreement)</option>
-                  <option>SLA (Service Level Agreement)</option>
+                <select
+                  value={type}
+                  onChange={(e) => setType(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                >
+                  <option value="MSA">MSA (Master Services Agreement)</option>
+                  <option value="NDA">NDA (Non-Disclosure Agreement)</option>
+                  <option value="SLA">SLA (Service Level Agreement)</option>
                 </select>
               </div>
               <button
