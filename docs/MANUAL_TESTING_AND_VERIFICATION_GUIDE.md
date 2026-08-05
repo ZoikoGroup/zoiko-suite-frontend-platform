@@ -16,15 +16,62 @@ Welcome! This guide provides step-by-step instructions for manually testing ever
 
 ### Step 2: Test Tax Governance (`/admin/tax`)
 1. Click **Tax** in the left sidebar or go to **[http://localhost:3000/admin/tax](http://localhost:3000/admin/tax)**.
-2. **Verify Interactive Header**:
-   - Confirm the **`7 Services Active`** badge display (`:8125` to `:8147`).
-3. **Test Interactive Action Buttons**:
-   - Click **`+ New Tax Rule`** ➔ Confirm the green notification banner appears (*"Action triggered: New Tax Rule..."*).
-   - Click **`Evaluate Determination`** ➔ Confirm notification feedback.
-   - Click **`Assemble Filing`** ➔ Confirm notification feedback.
-4. **Verify Data Tables**:
-   - Check **Configured Tax Rules** table (`UK-VAT-STD-2026`, `US-CIT-FED-2026`, `SG-GST-2026`).
-   - Check **VAT Returns** table (`GB-987654321`, `2026-Q1`, `2026-Q2`).
+
+2. **Verify KPI Summary Bar** (4 metric cards at top):
+   - Confirm **Active Tax Rules** card shows `4` with "All active" label.
+   - Confirm **Net VAT / GST Payable** card shows `£326K` with "+33% Q2 vs Q1" trend.
+   - Confirm **Corporate Tax Balance Due** card shows `$50K` with "Submitted" label.
+   - Confirm **Upcoming Filing Deadlines** card shows `1` with "Action needed" label.
+
+3. **Verify Interactive Action Header**:
+   - Confirm the **`7 Services Active`** badge displays with animated pulse.
+   - Confirm the **service health strip** shows 7 port badges (`:8125` → `:8147`) with green dots.
+   - Click **`+ New Tax Rule`** → Confirm the **3-step modal overlay** opens:
+     - Step 1: Select jurisdiction (UK/US/SG/DE) and effective date.
+     - Step 2: Select tax category and rate.
+     - Step 3: Review summary then click **Create Rule** → loading spinner → success screen.
+   - Click **`Evaluate Determination`** → Confirm the **step-through wizard** opens with 3 sequential steps.
+   - Click **`Assemble Filing`** → Confirm the **filing confirmation panel** shows draft details → click **Confirm Assembly**.
+
+4. **Verify Tax Governance Process Timeline**:
+   - Confirm 7 nodes render: Transaction → Determination → Rule Applied → Return → Filing → Authority → Settled.
+   - Confirm completed steps show **green** dots, active steps show **blue/animated** dots, pending shows **amber**.
+   - Click any node → Confirm the **inline detail panel** expands with service name, port, description, and example records.
+   - Click another node to switch detail. Click ✕ to close.
+
+5. **Verify Jurisdiction Overview Grid** (4 cards: UK 🇬🇧, US 🇺🇸, SG 🇸🇬, DE 🇩🇪):
+   - Each card shows tax types (VAT, GST, CORPORATE_INCOME, WHT) as monospace badges.
+   - Check VAT/GST status badges (ACCEPTED for Q2, FILED for Q1 in UK).
+   - Check Filing status (FINALIZED for UK, PREPARED for US).
+   - Check Authority status (ACTIVE for UK, US, SG; INACTIVE for DE).
+
+6. **Verify Enhanced Tax Rules Panel** (section 1):
+   - Confirm **Jurisdiction** column shows flag + code pill (🇬🇧 UK, 🇺🇸 US, 🇸🇬 SG, 🇩🇪 DE).
+   - Confirm **Rate bar** shows a visual green bar proportional to the rate (e.g., 20% for UK VAT).
+   - Confirm **Effective date** column shows effective_from date.
+   - Confirm **Category** column shows monospace badge (VAT, CORPORATE_INCOME, GST, WITHHOLDING).
+   - Check **Determinations table** has Jurisdiction column with flag pills.
+
+7. **Verify Enhanced VAT/GST Returns Panel** (section 2):
+   - Confirm **Output vs Input** column shows a blue stacked bar with compact currency labels.
+   - Confirm **Period Trend** column shows `—` for first row, `+33%↑` for Q2 vs Q1.
+   - Confirm **Filed By** column shows email + date in two lines.
+   - Confirm **total net payable** footer shows `£326,000`.
+
+8. **Verify Enhanced Corporate & Withholding Tax Panel** (section 3):
+   - Confirm the **Tax Liability Waterfall** for the US corporate return shows pill chain:
+     `Gross Revenue → – Deductions → = Taxable Income → × 21% → – Credits → Net Tax → Balance Due`.
+   - Balance Due pill should have amber border highlighting.
+   - Confirm WHT table has **Treaty** column with blue `🛡 Treaty` badge for `wht-001` (Germany, tax treaty exemption).
+   - Confirm `wht-002` (Singapore, PENDING_REMITTANCE) and `wht-003` (UK, CALCULATED) rows appear.
+
+9. **Verify Enhanced Filing Prep & Authority Panel** (section 4):
+   - Confirm **Due Date / Countdown** column shows `Xd left` with urgency color coding.
+   - Confirm **Readiness** progress bar: FINALIZED = full green bar, PREPARED = 50% blue bar.
+   - For FINALIZED draft: CheckCircle2 icon appears in status badge.
+   - Confirm **Auth Type** column shows styled badges: `OAuth2` (blue), `mTLS + SAML2` (purple), `Corppass OIDC` (teal).
+   - Confirm **Test** button exists in Action column (disabled, with tooltip).
+   - Confirm authority status shows animated pulse dot for ACTIVE connections.
 
 ---
 

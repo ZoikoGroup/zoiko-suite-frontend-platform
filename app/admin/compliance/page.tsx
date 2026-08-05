@@ -2,9 +2,15 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { ShieldCheck, FileCheck } from "lucide-react";
 import { DOMAINS } from "@/lib/constants";
-import { FilingTrackerPanel, StatusAndEscalationPanel, ComplianceActionHeader } from "@/components/admin/compliance";
+import {
+  FilingTrackerPanel,
+  StatusAndEscalationPanel,
+  ComplianceActionHeader,
+  ComplianceSummaryBar,
+  ComplianceProcessTimeline,
+} from "@/components/admin/compliance";
 
-export const metadata: Metadata = { title: "Compliance Governance | Zoiko Suite" };
+export const metadata: Metadata = { title: "Compliance Governance & Evidence | Zoiko Suite" };
 
 function PanelSkeleton({ rows = 3 }: { rows?: number }) {
   return (
@@ -30,22 +36,14 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      aria-labelledby={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
-      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
-    >
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/50">
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/20">
-            <Icon className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-500/20">
+            <Icon className="h-4.5 w-4.5 text-purple-600 dark:text-purple-400" aria-hidden="true" />
           </span>
           <div>
-            <h2
-              id={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
-              className="text-sm font-semibold text-slate-800 dark:text-slate-200"
-            >
-              {title}
-            </h2>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{title}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
@@ -53,7 +51,6 @@ function SectionCard({
           :{ports}
         </span>
       </div>
-
       <div className="p-5">{children}</div>
     </section>
   );
@@ -71,7 +68,13 @@ export default async function CompliancePage() {
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{domain.purpose}</p>
       </div>
 
+      <Suspense fallback={<PanelSkeleton rows={4} />}>
+        <ComplianceSummaryBar />
+      </Suspense>
+
       <ComplianceActionHeader />
+
+      <ComplianceProcessTimeline />
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
         {domain.coreServices.map((svc) => (
@@ -80,7 +83,7 @@ export default async function CompliancePage() {
             className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
           >
             <span className="truncate">{svc}</span>
-            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-purple-500" />
           </div>
         ))}
       </div>
@@ -90,9 +93,9 @@ export default async function CompliancePage() {
       <div className="space-y-6">
         <SectionCard
           icon={FileCheck}
-          title="Filing Tracker & Statutory Obligations"
-          subtitle="filing-tracker-svc — statutory and regulatory filing requirements"
-          ports="8131"
+          title="Statutory Filing Requirements"
+          subtitle="obligations-svc & evidence-requirements-svc — regulatory obligations and evidentiary standards"
+          ports="8088, 8089"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <FilingTrackerPanel />
@@ -101,9 +104,9 @@ export default async function CompliancePage() {
 
         <SectionCard
           icon={ShieldCheck}
-          title="Compliance Status & Exception Escalation"
-          subtitle="compliance-status-svc & exception-escalation-svc — overall compliance scores and high-severity escalations"
-          ports="8132, 8133"
+          title="Compliance Status & Exception Escalations"
+          subtitle="evidence-manifest-svc & exception-escalation-svc — verified evidence manifests and SLA breach tracking"
+          ports="8087, 8088"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <StatusAndEscalationPanel />
