@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listTaxRules, listTaxDeterminations, listVATReturns, listCorporateTaxReturns, listWithholdingObligations, listFilingDrafts, listTaxAuthorityInterfaces } from "@/lib/api/tax";
 import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties } from "@/lib/api/legal";
+import { listJournalEntries, listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
 import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions } from "@/lib/api/payroll";
 import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts } from "@/lib/api/hr";
@@ -68,6 +69,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   if (endpoint === "counterparties") {
     const res = await listCounterparties(identity);
     return NextResponse.json({ counterparties: res.ok ? res.data : [] });
+  }
+
+  // Finance Domain
+  if (endpoint === "journal-entries") {
+    const res = await listJournalEntries(identity);
+    return NextResponse.json({ journal_entries: res.ok ? res.data : [] });
+  }
+  if (endpoint === "cash-positions") {
+    const res = await listCashPositions(identity);
+    return NextResponse.json({ cash_positions: res.ok ? res.data : [] });
+  }
+  if (endpoint === "finance/summary") {
+    const res = await getFinanceSummaryStats(identity);
+    return NextResponse.json({ summary: res.ok ? res.data : {} });
   }
 
   // Commercial Ops Domain

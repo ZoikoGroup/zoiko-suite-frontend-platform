@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { CloudOff, Users, Calendar, Building, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts, type Employee, type LeaveRequest, type Department, type ComplianceAlert } from "@/lib/api/hr";
+import { listEmployees, listLeaveRequests, listDepartments, type Employee, type LeaveRequest, type Department } from "@/lib/api/hr";
 
 export async function EmployeeMasterPanel() {
   const store = await cookies();

@@ -8,6 +8,9 @@ import {
   CorporateAndWithholdingTaxPanel,
   FilingPrepAndAuthorityPanel,
   TaxActionHeader,
+  TaxSummaryBar,
+  TaxProcessTimeline,
+  TaxJurisdictionPanel,
 } from "@/components/admin/tax";
 
 export const metadata: Metadata = { title: "Tax Governance & Engine | Zoiko Suite" };
@@ -18,6 +21,28 @@ function PanelSkeleton({ rows = 3 }: { rows?: number }) {
     <div className="space-y-2 animate-pulse">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
+      ))}
+    </div>
+  );
+}
+
+/** Skeleton for the KPI summary bar. */
+function KpiSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 animate-pulse">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="h-32 rounded-xl bg-slate-100 dark:bg-slate-800" />
+      ))}
+    </div>
+  );
+}
+
+/** Skeleton for the jurisdiction grid. */
+function JurisdictionSkeleton() {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 animate-pulse">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="h-36 rounded-xl bg-slate-100 dark:bg-slate-800" />
       ))}
     </div>
   );
@@ -45,8 +70,8 @@ function SectionCard({
       {/* Card header */}
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/50">
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/20">
-            <Icon className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-navy-100 dark:bg-navy-500/20">
+            <Icon className="h-4.5 w-4.5 text-navy-600 dark:text-navy-400" aria-hidden="true" />
           </span>
           <div>
             <h2
@@ -74,7 +99,7 @@ export default async function TaxPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 p-6">
-      {/* ── Page Header ────────────────────────────────────────────── */}
+      {/* ── Page Header ─────────────────────────────────────────────────── */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
           {domain.label}
@@ -82,25 +107,27 @@ export default async function TaxPage() {
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{domain.purpose}</p>
       </div>
 
-      {/* ── Interactive Action Header ───────────────────────────────── */}
+      {/* ── KPI Summary Bar ──────────────────────────────────────────────── */}
+      <Suspense fallback={<KpiSkeleton />}>
+        <TaxSummaryBar />
+      </Suspense>
+
+      {/* ── Interactive Action Header ────────────────────────────────────── */}
       <TaxActionHeader />
 
-      {/* ── Core Service Badges ─────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-        {domain.coreServices.map((svc) => (
-          <div
-            key={svc}
-            className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
-          >
-            <span className="truncate">{svc}</span>
-            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-          </div>
-        ))}
-      </div>
+      {/* ── Process Timeline ─────────────────────────────────────────────── */}
+      <TaxProcessTimeline />
 
       <hr className="border-slate-200 dark:border-slate-800" />
 
-      {/* ── Live Service Panels ─────────────────────────────────────── */}
+      {/* ── Jurisdiction Overview ────────────────────────────────────────── */}
+      <Suspense fallback={<JurisdictionSkeleton />}>
+        <TaxJurisdictionPanel />
+      </Suspense>
+
+      <hr className="border-slate-200 dark:border-slate-800" />
+
+      {/* ── Live Service Panels ──────────────────────────────────────────── */}
       <div className="space-y-6">
         {/* 1 — Tax Rules & Determination */}
         <SectionCard

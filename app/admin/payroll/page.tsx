@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { Wallet, Layers, AlertCircle } from "lucide-react";
+import { Wallet, Gift, Percent } from "lucide-react";
 import { DOMAINS } from "@/lib/constants";
 import {
   PayrollRunsPanel,
   CompensationAndBenefitsPanel,
   PayrollTaxAndExceptionsPanel,
   PayrollActionHeader,
+  PayrollSummaryBar,
+  PayrollProcessTimeline,
 } from "@/components/admin/payroll";
 
 export const metadata: Metadata = { title: "Payroll & Remuneration | Zoiko Suite" };
 
-/** Skeleton row used while a panel's Suspense boundary is resolving. */
 function PanelSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="space-y-2 animate-pulse">
@@ -22,7 +23,6 @@ function PanelSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** Reusable section card with a header strip. */
 function SectionCard({
   icon: Icon,
   title,
@@ -37,23 +37,14 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      aria-labelledby={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
-      className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
-    >
-      {/* Card header */}
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/50">
         <div className="flex items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/20">
             <Icon className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
           </span>
           <div>
-            <h2
-              id={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
-              className="text-sm font-semibold text-slate-800 dark:text-slate-200"
-            >
-              {title}
-            </h2>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{title}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
@@ -61,8 +52,6 @@ function SectionCard({
           :{ports}
         </span>
       </div>
-
-      {/* Card body */}
       <div className="p-5">{children}</div>
     </section>
   );
@@ -73,7 +62,6 @@ export default async function PayrollPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 p-6">
-      {/* ── Page Header ────────────────────────────────────────────── */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
           {domain.label}
@@ -81,10 +69,14 @@ export default async function PayrollPage() {
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{domain.purpose}</p>
       </div>
 
-      {/* ── Interactive Action Header ───────────────────────────────── */}
+      <Suspense fallback={<PanelSkeleton rows={4} />}>
+        <PayrollSummaryBar />
+      </Suspense>
+
       <PayrollActionHeader />
 
-      {/* ── Core Service Badges ─────────────────────────────────────── */}
+      <PayrollProcessTimeline />
+
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
         {domain.coreServices.map((svc) => (
           <div
@@ -99,38 +91,34 @@ export default async function PayrollPage() {
 
       <hr className="border-slate-200 dark:border-slate-800" />
 
-      {/* ── Live Service Panels ─────────────────────────────────────── */}
       <div className="space-y-6">
-        {/* 1 — Payroll Runs */}
         <SectionCard
           icon={Wallet}
           title="Payroll Run Orchestration"
-          subtitle="payroll-run-svc — monthly pay period processing, net pay calculation, and finalization"
-          ports="8105"
+          subtitle="payroll-run-svc & payslip-svc — pay period execution, gross-to-net calculation, and payslip issuance"
+          ports="8090, 8095"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <PayrollRunsPanel />
           </Suspense>
         </SectionCard>
 
-        {/* 2 — Compensation & Benefits */}
         <SectionCard
-          icon={Layers}
-          title="Compensation & Benefits Management"
-          subtitle="compensation-svc & benefits-svc — pay grades, salary structures, and corporate benefit plans"
-          ports="8111, 8112"
+          icon={Gift}
+          title="Compensation & Benefit Schemes"
+          subtitle="compensation-svc, benefits-svc & deductions-svc — salary grades, health plans, and pre-tax deductions"
+          ports="8091, 8092, 8097"
         >
-          <Suspense fallback={<PanelSkeleton rows={3} />}>
+          <Suspense fallback={<PanelSkeleton rows={4} />}>
             <CompensationAndBenefitsPanel />
           </Suspense>
         </SectionCard>
 
-        {/* 3 — Payroll Tax & Exceptions */}
         <SectionCard
-          icon={AlertCircle}
-          title="Payroll Tax & Exceptions"
-          subtitle="payroll-tax-svc & payroll-exceptions-svc — tax profile withholding and pay period exceptions"
-          ports="8113, 8114"
+          icon={Percent}
+          title="Payroll Tax & Exception Auditing"
+          subtitle="payroll-tax-svc, employer-contributions-svc & payroll-exceptions-svc — PAYE tax, NI, and anomaly audits"
+          ports="8093, 8094, 8096"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <PayrollTaxAndExceptionsPanel />

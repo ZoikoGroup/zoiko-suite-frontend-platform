@@ -133,6 +133,7 @@ export const DOMAINS: Domain[] = [
       "Withholding Tax Service",
       "Filing Preparation Service",
       "Tax Evidence Service",
+      "Tax Authority Interface Service",
     ],
   },
   {

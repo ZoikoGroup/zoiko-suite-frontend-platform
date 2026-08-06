@@ -57,8 +57,6 @@ function PanelSkeleton({ rows }: { rows: number }) {
 }
 
 async function getSessionUser() {
-  // Simulates a governed data fetch through the identity + evidence layer.
-  await new Promise((resolve) => setTimeout(resolve, 350));
   const cookieStore = await cookies();
   return decodeSession(cookieStore.get(SESSION_COOKIE)?.value);
 }

@@ -106,4 +106,4 @@ function stripTrailingSlash(url: string): string {
 }
 
 /** Per-request timeout. Dashboard panels degrade to an empty state on timeout. */
-export const REQUEST_TIMEOUT_MS = Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 5000);
+export const REQUEST_TIMEOUT_MS = Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1500);

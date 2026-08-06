@@ -482,6 +482,48 @@ const MOCK_WITHHOLDING_OBLIGATIONS: WithholdingTaxObligation[] = [
     created_at: "2026-06-15T09:00:00Z",
     updated_at: "2026-06-30T16:00:00Z",
   },
+  {
+    obligation_id: "wht-002",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "sg-iras-01",
+    counterparty_id: "cp-sg-fintech",
+    payment_reference: "PAY-SG-INT-2026-07",
+    payment_type: "INTEREST",
+    gross_payment_amount: 250000.0,
+    taxable_base_amount: 250000.0,
+    withholding_rate_percent: 15.0,
+    withheld_amount: 37500.0,
+    currency: "SGD",
+    tax_treaty_exemption: false,
+    status: "PENDING_REMITTANCE",
+    notes: "Interest payment to Singapore-registered counterparty — standard WHT rate.",
+    effective_from: "2026-07-01",
+    created_by: "treasury@zoiko.com",
+    created_at: "2026-07-01T09:00:00Z",
+    updated_at: "2026-07-15T12:00:00Z",
+  },
+  {
+    obligation_id: "wht-003",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "uk-gov-01",
+    counterparty_id: "cp-uk-media",
+    payment_reference: "PAY-UK-ROYALT-2026-07",
+    payment_type: "ROYALTY",
+    gross_payment_amount: 180000.0,
+    taxable_base_amount: 180000.0,
+    withholding_rate_percent: 20.0,
+    withheld_amount: 36000.0,
+    currency: "GBP",
+    tax_treaty_exemption: false,
+    status: "CALCULATED",
+    notes: "UK domestic royalty payment — basic rate WHT deducted at source.",
+    effective_from: "2026-07-15",
+    created_by: "treasury@zoiko.com",
+    created_at: "2026-07-15T10:00:00Z",
+    updated_at: "2026-07-15T10:00:00Z",
+  },
 ];
 
 type WithholdingResponse = { obligations: WithholdingTaxObligation[]; total: number };
@@ -654,7 +696,141 @@ export async function listTaxAuthorityInterfaces(
   );
 }
 
+// ─── 8. Tax Summary Stats (KPI Aggregator) ──────────────────────────────────
+
+export type TaxSummaryStats = {
+  activeRules: number;
+  totalDeterminations: number;
+  netVatPayableGBP: number;
+  corporateBalanceDueUSD: number;
+  withheldTotalEUR: number;
+  upcomingFilingCount: number;
+  finalizedDraftCount: number;
+  activeAuthorityConnections: number;
+};
+
+export async function getTaxSummaryStats(identity?: Identity): Promise<ApiResult<TaxSummaryStats>> {
+  const [rulesRes, detRes, vatRes, corpRes, whtRes, draftsRes, authRes] = await Promise.all([
+    listTaxRules(identity),
+    listTaxDeterminations(identity),
+    listVATReturns(identity),
+    listCorporateTaxReturns(identity),
+    listWithholdingObligations(identity),
+    listFilingDrafts(identity),
+    listTaxAuthorityInterfaces(identity),
+  ]);
+
+  const rules = rulesRes.ok ? rulesRes.data : MOCK_TAX_RULES;
+  const dets = detRes.ok ? detRes.data : MOCK_TAX_DETERMINATIONS;
+  const vatReturns = vatRes.ok ? vatRes.data : MOCK_VAT_RETURNS;
+  const corpReturns = corpRes.ok ? corpRes.data : MOCK_CORPORATE_RETURNS;
+  const whtObligations = whtRes.ok ? whtRes.data : MOCK_WITHHOLDING_OBLIGATIONS;
+  const drafts = draftsRes.ok ? draftsRes.data : MOCK_FILING_DRAFTS;
+  const authorities = authRes.ok ? authRes.data : MOCK_TAX_AUTHORITY_INTERFACES;
+
+  const netVatPayableGBP = vatReturns
+    .filter((v) => v.currency === "GBP")
+    .reduce((acc, v) => acc + v.net_tax_payable, 0);
+
+  const corporateBalanceDueUSD = corpReturns
+    .filter((c) => c.currency === "USD")
+    .reduce((acc, c) => acc + c.balance_due, 0);
+
+  const withheldTotalEUR = whtObligations
+    .filter((w) => w.currency === "EUR" && w.status === "REMITTED")
+    .reduce((acc, w) => acc + w.withheld_amount, 0);
+
+  const today = new Date();
+  const thirtyDaysOut = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const upcomingFilingCount = drafts.filter((d) => {
+    const due = new Date(d.due_date);
+    return due >= today && due <= thirtyDaysOut;
+  }).length;
+
+  return {
+    ok: true,
+    data: {
+      activeRules: rules.filter((r) => r.status === "ACTIVE").length,
+      totalDeterminations: dets.length,
+      netVatPayableGBP,
+      corporateBalanceDueUSD,
+      withheldTotalEUR,
+      upcomingFilingCount,
+      finalizedDraftCount: drafts.filter((d) => d.validation_status === "FINALIZED").length,
+      activeAuthorityConnections: authorities.filter((a) => a.status === "ACTIVE").length,
+    },
+  };
+}
+
+// ─── 9. Upcoming Tax Deadlines ────────────────────────────────────────────────
+
+export type TaxDeadline = {
+  id: string;
+  label: string;
+  jurisdiction: string;
+  dueDate: string;
+  daysUntilDue: number;
+  type: "VAT_FILING" | "CORPORATE_TAX" | "WHT_REMITTANCE" | "ESTIMATED_PAYMENT";
+  urgency: "overdue" | "urgent" | "upcoming" | "comfortable";
+};
+
+export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<ApiResult<TaxDeadline[]>> {
+  const [draftsRes, whtRes] = await Promise.all([
+    listFilingDrafts(identity),
+    listWithholdingObligations(identity),
+  ]);
+
+  const drafts = draftsRes.ok ? draftsRes.data : MOCK_FILING_DRAFTS;
+  const whtObligations = whtRes.ok ? whtRes.data : MOCK_WITHHOLDING_OBLIGATIONS;
+
+  const today = new Date();
+
+  function urgency(days: number): TaxDeadline["urgency"] {
+    if (days < 0) return "overdue";
+    if (days <= 7) return "urgent";
+    if (days <= 21) return "upcoming";
+    return "comfortable";
+  }
+
+  const deadlines: TaxDeadline[] = [
+    // From filing drafts
+    ...drafts.map((d) => {
+      const due = new Date(d.due_date);
+      const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        id: d.draft_id,
+        label: `${d.filing_type} — ${d.period_key}`,
+        jurisdiction: d.jurisdiction_id,
+        dueDate: d.due_date,
+        daysUntilDue: days,
+        type: "VAT_FILING" as const,
+        urgency: urgency(days),
+      };
+    }),
+    // WHT remittances pending
+    ...whtObligations
+      .filter((w) => w.status === "PENDING_REMITTANCE" || w.status === "CALCULATED")
+      .map((w) => {
+        const due = new Date(w.effective_from);
+        due.setDate(due.getDate() + 30); // 30-day remittance window
+        const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        return {
+          id: w.obligation_id,
+          label: `WHT Remittance — ${w.payment_type} (${w.payment_reference})`,
+          jurisdiction: w.jurisdiction_id,
+          dueDate: due.toISOString().split("T")[0],
+          daysUntilDue: days,
+          type: "WHT_REMITTANCE" as const,
+          urgency: urgency(days),
+        };
+      }),
+  ].sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+
+  return { ok: true, data: deadlines };
+}
+
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
+
 
 async function fetchServiceWithFallback<TRaw, TOut>(
   urlStr: string,

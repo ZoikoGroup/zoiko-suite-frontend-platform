@@ -7,9 +7,9 @@ import {
   ScrollText,
   Scale,
   FileText,
-  AlertTriangle,
-  FileCode,
-  Briefcase,
+  CheckSquare,
+  Vote,
+  Building2,
 } from "lucide-react";
 import {
   Card,
@@ -23,16 +23,18 @@ import { PageHeader } from "@/components/admin/shared";
 import {
   ContractRegisterPanel,
   DraftContractForm,
-  LegalActionHeader,
   ContractLifecyclePanel,
   ClausesAndTemplatesPanel,
   ObligationTrackingPanel,
   BoardResolutionsPanel,
   CorporateActionsAndCounterpartiesPanel,
+  LegalActionHeader,
+  LegalSummaryBar,
+  LegalProcessTimeline,
 } from "@/components/admin/legal";
 import { DOMAINS } from "@/lib/constants";
 
-export const metadata: Metadata = { title: "Legal & Contracts" };
+export const metadata: Metadata = { title: "Legal & Contracts Governance | Zoiko Suite" };
 
 const DOMAIN = DOMAINS.find((d) => d.key === "legal")!;
 
@@ -90,12 +92,7 @@ function SectionCard({
             <Icon className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
           </span>
           <div>
-            <h2
-              id={`section-${title.toLowerCase().replace(/\s+/g, "-")}`}
-              className="text-sm font-semibold text-slate-800 dark:text-slate-200"
-            >
-              {title}
-            </h2>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{title}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
@@ -269,7 +266,19 @@ export default function LegalPage() {
 
       {/* Domain summaries across the wider legal estate, from the platform work
           on main. Kept below the contract console rather than in place of it. */}
-      <LegalActionHeader />
+      <div className="mt-6">
+        <Suspense fallback={<PanelSkeleton rows={4} />}>
+          <LegalSummaryBar />
+        </Suspense>
+      </div>
+
+      <div className="mt-6">
+        <LegalActionHeader />
+      </div>
+
+      <div className="mt-6">
+        <LegalProcessTimeline />
+      </div>
 
       <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
         {DOMAIN.coreServices.map((svc) => (
@@ -278,7 +287,7 @@ export default function LegalPage() {
             className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
           >
             <span className="truncate">{svc}</span>
-            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-indigo-500" />
           </div>
         ))}
       </div>
@@ -287,8 +296,8 @@ export default function LegalPage() {
         <SectionCard
           icon={FileText}
           title="Contract Lifecycle Management"
-          subtitle="contract-lifecycle-svc — agreements, counterparties, and lifecycle transitions"
-          ports="8119"
+          subtitle="contract-lifecycle-svc — active contracts, negotiations, and signature status"
+          ports="8118"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ContractLifecyclePanel />
@@ -296,10 +305,10 @@ export default function LegalPage() {
         </SectionCard>
 
         <SectionCard
-          icon={FileCode}
-          title="Clauses & Contract Templates"
-          subtitle="clause-template-svc — standard clause library and contract assembly templates"
-          ports="8120"
+          icon={Scale}
+          title="Clause Library & Template Governance"
+          subtitle="clause-template-svc & legal-approvals-svc — pre-vetted indemnity and liability templates"
+          ports="8119, 8123"
         >
           <Suspense fallback={<PanelSkeleton rows={3} />}>
             <ClausesAndTemplatesPanel />
@@ -307,10 +316,10 @@ export default function LegalPage() {
         </SectionCard>
 
         <SectionCard
-          icon={AlertTriangle}
+          icon={CheckSquare}
           title="Legal Obligation Tracking"
-          subtitle="obligation-tracking-svc — contractual, regulatory, and policy commitments"
-          ports="8121"
+          subtitle="obligation-tracking-svc — compliance milestones, audit triggers, and SLA deadlines"
+          ports="8120"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ObligationTrackingPanel />
@@ -318,21 +327,21 @@ export default function LegalPage() {
         </SectionCard>
 
         <SectionCard
-          icon={Scale}
+          icon={Vote}
           title="Board Governance & Resolutions"
-          subtitle="board-resolutions-svc — board meetings, resolution voting, and corporate minutes"
-          ports="8122"
+          subtitle="board-resolutions-svc — board meeting minutes, voting logs, and shareholder resolutions"
+          ports="8121"
         >
-          <Suspense fallback={<PanelSkeleton rows={4} />}>
+          <Suspense fallback={<PanelSkeleton rows={3} />}>
             <BoardResolutionsPanel />
           </Suspense>
         </SectionCard>
 
         <SectionCard
-          icon={Briefcase}
-          title="Corporate Actions & Counterparties"
-          subtitle="corporate-actions-svc & counterparty-management-svc — equity execution and vendor risk governance"
-          ports="8123, 8124"
+          icon={Building2}
+          title="Corporate Actions & Counterparty Risk"
+          subtitle="corporate-actions-svc & counterparty-management-svc — entity changes, share issuances, and UBO verification"
+          ports="8122, 8124"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <CorporateActionsAndCounterpartiesPanel />
