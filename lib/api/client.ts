@@ -195,14 +195,41 @@ export async function apiPut<T>(
   return apiWrite<T>("PUT", service, path, body, options);
 }
 
+/**
+ * DELETE a resource.
+ *
+ * tenant-entity-registry-svc uses DELETE for its two end-dating operations
+ * (entity hierarchies and jurisdiction assignments). Despite the verb nothing
+ * is removed — both set effective_to, per the no-hard-delete doctrine — and
+ * both take the end date as a required `end_date` query parameter rather than
+ * a body, which is why this takes `query` and no payload.
+ */
+export async function apiDelete<T>(
+  service: ServiceName,
+  path: string,
+  options: {
+    query?: Record<string, string | number | undefined>;
+    correlationId?: string;
+    identity?: Identity;
+  } = {},
+): Promise<ApiWriteResult<T>> {
+  const url = new URL(serviceUrl(service) + path);
+  for (const [key, value] of Object.entries(options.query ?? {})) {
+    if (value === undefined || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+  return apiWrite<T>("DELETE", service, url.toString(), undefined, options, true);
+}
+
 async function apiWrite<T>(
-  method: "POST" | "PUT",
+  method: "POST" | "PUT" | "DELETE",
   service: ServiceName,
   path: string,
   body: unknown,
   options: { correlationId?: string; identity?: Identity } = {},
+  absoluteURL = false,
 ): Promise<ApiWriteResult<T>> {
-  const url = serviceUrl(service) + path;
+  const url = absoluteURL ? path : serviceUrl(service) + path;
   const correlationId = options.correlationId ?? crypto.randomUUID();
 
   let response: Response;
@@ -215,7 +242,7 @@ async function apiWrite<T>(
         "X-Correlation-ID": correlationId,
         ...identityHeaders(options.identity),
       },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (cause) {
@@ -243,6 +270,15 @@ async function apiWrite<T>(
           : `${serviceLabel(service)} returned ${response.status} for ${path}`,
       },
     };
+  }
+
+  // 204 is a success with no body, and several tenant-entity-registry-svc
+  // writes use it — lifecycle transitions, status transitions, and both
+  // end-dating routes. Parsing it as JSON would report a completed write as
+  // `malformed`, i.e. an outright failure, which is the worst possible reading
+  // of "it worked".
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return { ok: true, status: response.status, data: undefined as T };
   }
 
   try {

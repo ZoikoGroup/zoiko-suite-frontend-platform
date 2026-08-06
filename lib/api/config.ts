@@ -26,6 +26,7 @@ const DEFAULTS = {
   accountsReceivable: "http://localhost:8101",
   auditEventStore: "http://localhost:8084",
   tenantRegistry: "http://localhost:8081",
+  schemaRegistry: "http://localhost:8093",
   financialClose: "http://localhost:8104",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
@@ -60,6 +61,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   accountsReceivable: "/accounts-receivable-svc",
   auditEventStore: "/audit-event-store-svc",
   tenantRegistry: "/tenant-entity-registry-svc",
+  schemaRegistry: "/schema-registry-svc",
   financialClose: "/financial-close-svc",
 };
 
