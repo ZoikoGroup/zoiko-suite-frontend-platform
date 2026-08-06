@@ -1,20 +1,20 @@
 // Server-side API clients for Commercial Ops domain microservices:
 // - procurement-workflow-svc (8109)
 // - purchase-request-svc (8110)
-// - purchase-order-svc (8117)
+// - purchase-order-svc (8129)
 // - invoice-approval-svc (8134)
 // - vendor-due-diligence-svc (8135)
-// - spend-controls-svc (8136)
+// - spend-controls-svc (8131)
 
 import { type ApiResult, type Identity } from "./client";
 
 
 function purchaseOrderUrl(): string {
-  return (process.env.ZOIKO_PURCHASE_ORDER_URL ?? "http://localhost:8117").replace(/\/$/, "");
+  return (process.env.ZOIKO_PURCHASE_ORDER_URL ?? "http://localhost:8129").replace(/\/$/, "");
 }
 
 function spendControlsUrl(): string {
-  return (process.env.ZOIKO_SPEND_CONTROLS_URL ?? "http://localhost:8136").replace(/\/$/, "");
+  return (process.env.ZOIKO_SPEND_CONTROLS_URL ?? "http://localhost:8131").replace(/\/$/, "");
 }
 
 // ─── 1. Purchase Orders ──────────────────────────────────────────────────────
