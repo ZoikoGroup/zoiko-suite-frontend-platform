@@ -49,7 +49,7 @@ export async function CompensationAndBenefitsPanel() {
                   <tr key={s.structure_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{s.title}</td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{s.wage_type}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{s.currency} {s.base_pay.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{s.currency} {s.base_pay.toLocaleString("en-US")}</td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{s.pay_frequency}</td>
                   </tr>
                 ))}

@@ -31,7 +31,7 @@ function formatCurrency(value: number, currency: string): string {
       maximumFractionDigits: 0,
     }).format(value);
   } catch {
-    return `${currency} ${value.toLocaleString()}`;
+    return `${currency} ${value.toLocaleString("en-US")}`;
   }
 }
 
