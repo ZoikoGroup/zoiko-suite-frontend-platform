@@ -3,6 +3,8 @@
 // - leave-absence-svc (8115)
 // - org-structure-svc (8116)
 // - workforce-compliance-svc (8118)
+// - talent-management-svc (8132)
+// - onboarding-svc (8133)
 
 import { type ApiResult, type Identity } from "./client";
 
@@ -208,6 +210,94 @@ export async function listWorkforceAlerts(identity?: Identity): Promise<ApiResul
     identity,
     (d) => d.alerts ?? [],
     MOCK_ALERTS
+  );
+}
+
+// ─── 5. Talent Management ─────────────────────────────────────────────────────
+
+function talentManagementUrl(): string {
+  return (process.env.ZOIKO_TALENT_MANAGEMENT_URL ?? "http://localhost:8132").replace(/\/$/, "");
+}
+
+export type TalentProfile = {
+  profile_id: string;
+  tenant_id: string;
+  employee_id: string;
+  performance_rating: string;
+  skill_tags: string[];
+  career_track: string;
+  promotion_eligible: boolean;
+  last_review_date: string;
+  created_at: string;
+};
+
+const MOCK_TALENT_PROFILES: TalentProfile[] = [
+  {
+    profile_id: "tal-001",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    employee_id: "emp-101",
+    performance_rating: "EXCEEDS_EXPECTATIONS",
+    skill_tags: ["TypeScript", "System Design", "Cloud Architecture"],
+    career_track: "PRINCIPAL_ENGINEER",
+    promotion_eligible: true,
+    last_review_date: "2026-06-30",
+    created_at: "2026-01-01T00:00:00Z",
+  },
+];
+
+type TalentProfilesResponse = { profiles: TalentProfile[]; total: number };
+
+export async function listTalentProfiles(identity?: Identity): Promise<ApiResult<TalentProfile[]>> {
+  const base = talentManagementUrl();
+  const url = `${base}/v1/talent/profiles`;
+  return fetchServiceWithFallback<TalentProfilesResponse, TalentProfile[]>(
+    url, base, "talent-management-svc", identity,
+    (d) => d.profiles ?? [], MOCK_TALENT_PROFILES
+  );
+}
+
+// ─── 6. Onboarding ───────────────────────────────────────────────────────────
+
+function onboardingUrl(): string {
+  return (process.env.ZOIKO_ONBOARDING_URL ?? "http://localhost:8133").replace(/\/$/, "");
+}
+
+export type OnboardingCase = {
+  case_id: string;
+  tenant_id: string;
+  employee_id: string;
+  legal_entity_id: string;
+  start_date: string;
+  checklist_items_total: number;
+  checklist_items_completed: number;
+  status: string;
+  assigned_buddy_id?: string;
+  created_at: string;
+};
+
+const MOCK_ONBOARDING_CASES: OnboardingCase[] = [
+  {
+    case_id: "ob-2026-0891",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    employee_id: "emp-2026-0891",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    start_date: "2026-08-01",
+    checklist_items_total: 14,
+    checklist_items_completed: 9,
+    status: "IN_PROGRESS",
+    assigned_buddy_id: "emp-101",
+    created_at: "2026-07-28T08:00:00Z",
+  },
+];
+
+type OnboardingCasesResponse = { cases: OnboardingCase[]; total: number };
+
+export async function listOnboardingCases(identity?: Identity): Promise<ApiResult<OnboardingCase[]>> {
+  const base = onboardingUrl();
+  const url = `${base}/v1/onboarding/cases`;
+  return fetchServiceWithFallback<OnboardingCasesResponse, OnboardingCase[]>(
+    url, base, "onboarding-svc", identity,
+    (d) => d.cases ?? [], MOCK_ONBOARDING_CASES
   );
 }
 
