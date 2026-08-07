@@ -12,7 +12,7 @@ function fmtCurrency(amount: number, currency: string) {
       maximumFractionDigits: 1,
     }).format(amount);
   } catch {
-    return `${currency} ${amount.toLocaleString()}`;
+    return `${currency} ${amount.toLocaleString("en-US")}`;
   }
 }
 
@@ -57,7 +57,7 @@ export async function FinanceSummaryBar() {
     {
       icon: Scale,
       label: "GL Journal Volume",
-      value: stats.journalEntryCount.toLocaleString(),
+      value: stats.journalEntryCount.toLocaleString("en-US"),
       sub: `${stats.activeAccountsCount} active COA accounts`,
       accent: "text-purple-600 dark:text-purple-400",
       bg: "bg-purple-100 dark:bg-purple-500/20",

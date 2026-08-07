@@ -111,9 +111,8 @@ export function AuditEventsProcessTimeline() {
               <div key={step.id} className="flex items-start">
                 <button
                   onClick={() => setActiveStep(isOpen ? null : step.id)}
-                  className={`flex flex-col items-center gap-2 w-28 text-center rounded-lg p-1.5 transition-all ${
-                    isOpen ? "bg-slate-50 dark:bg-slate-800/60" : "hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
-                  }`}
+                  className={`flex flex-col items-center gap-2 w-28 text-center rounded-lg p-1.5 transition-all ${isOpen ? "bg-slate-50 dark:bg-slate-800/60" : "hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
+                    }`}
                 >
                   <span className="flex h-10 w-10 items-center justify-center rounded-full ring-2 ring-slate-200 bg-white dark:bg-slate-900 dark:ring-slate-700">
                     <step.icon className="h-4.5 w-4.5 text-slate-700 dark:text-slate-300" />
@@ -122,7 +121,7 @@ export function AuditEventsProcessTimeline() {
                     {step.title}
                   </span>
                   <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                    {step.count.toLocaleString()}
+                    {step.count.toLocaleString("en-US")}
                   </span>
                   <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{step.port}</span>
                 </button>

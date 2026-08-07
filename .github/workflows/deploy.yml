@@ -16,7 +16,10 @@ jobs:
           key: ${{ secrets.GCP_SSH_KEY }}
           script: |
             cd /var/www/zoiko-suite/app
+            git reset --hard HEAD
+            git clean -fd
             git pull origin main
-            npm install
+            npm ci
+            export NODE_OPTIONS="--max-old-space-size=4096"
             npm run build
             pm2 restart zoiko-suite

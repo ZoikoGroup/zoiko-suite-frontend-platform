@@ -1,5 +1,5 @@
 // Server-side API clients for Payroll domain microservices:
-// - payroll-run-svc (8105)
+// - payroll-run-svc (8110)
 // - compensation-svc (8111)
 // - benefits-svc (8112)
 // - payroll-tax-svc (8113)
@@ -8,7 +8,7 @@
 import { type ApiResult, type Identity } from "./client";
 
 function payrollRunUrl(): string {
-  return (process.env.ZOIKO_PAYROLL_RUN_URL ?? "http://localhost:8105").replace(/\/$/, "");
+  return (process.env.ZOIKO_PAYROLL_RUN_URL ?? "http://localhost:8110").replace(/\/$/, "");
 }
 
 function compensationUrl(): string {

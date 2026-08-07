@@ -12,7 +12,7 @@ function fmtCurrency(amount: number, currency: string, compact = true) {
       maximumFractionDigits: compact ? 1 : 0,
     }).format(amount);
   } catch {
-    return `${currency} ${amount.toLocaleString()}`;
+    return `${currency} ${amount.toLocaleString("en-US")}`;
   }
 }
 

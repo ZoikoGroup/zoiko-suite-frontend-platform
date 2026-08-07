@@ -50,8 +50,8 @@ export async function PayrollRunsPanel() {
                   <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200">{r.pay_period_code}</td>
                   <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{r.period_start_date} → {r.period_end_date}</td>
                   <td className="px-4 py-3 text-xs font-medium">{r.total_employee_count}</td>
-                  <td className="px-4 py-3 text-xs">${r.total_gross_pay.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-xs font-bold text-emerald-600 dark:text-emerald-400">${r.total_net_pay.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-xs">${r.total_gross_pay.toLocaleString("en-US")}</td>
+                  <td className="px-4 py-3 text-xs font-bold text-emerald-600 dark:text-emerald-400">${r.total_net_pay.toLocaleString("en-US")}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[r.status] ?? "bg-slate-100 text-slate-600"}`}>
                       {r.status}

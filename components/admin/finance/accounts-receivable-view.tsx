@@ -277,7 +277,7 @@ export function AccountsReceivableView() {
                       {inv.customer_id}
                     </td>
                     <td className="py-3 px-4 font-medium text-zinc-900 dark:text-zinc-100">
-                      {inv.currency_code} {inv.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {inv.currency_code} {inv.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
                     </td>
                     <td className="py-3 px-4">
                       <span
