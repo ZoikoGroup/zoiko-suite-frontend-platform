@@ -173,13 +173,18 @@ export type CreatePolicyInput = {
 
 /** Create a named policy container. Carries no rule content — that needs a version. */
 export async function createPolicy(input: CreatePolicyInput): Promise<ApiWriteResult<Policy>> {
-  return apiPost<Policy>("policy", "/v1/policies", {
-    ...(input.policyId ? { policy_id: input.policyId } : {}),
-    policy_code: input.policyCode,
-    policy_name: input.policyName,
-    policy_type: input.policyType,
-    created_by_principal_id: input.principalId,
-  });
+  return apiPost<Policy>(
+    "policy",
+    "/v1/policies",
+    {
+      ...(input.policyId ? { policy_id: input.policyId } : {}),
+      policy_code: input.policyCode,
+      policy_name: input.policyName,
+      policy_type: input.policyType,
+      created_by_principal_id: input.principalId,
+    },
+    { identity: { principalId: input.principalId } },
+  );
 }
 
 export type CreatePolicyVersionInput = {
@@ -219,6 +224,7 @@ export async function createPolicyVersion(
       ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
       created_by_principal_id: input.principalId,
     },
+    { identity: { principalId: input.principalId } },
   );
 }
 
@@ -240,6 +246,7 @@ export async function activatePolicyVersion(input: {
       input.versionId,
     )}/activate`,
     { activated_by_principal_id: input.principalId },
+    { identity: { principalId: input.principalId } },
   );
 }
 
