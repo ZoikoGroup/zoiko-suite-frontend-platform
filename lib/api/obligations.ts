@@ -1,8 +1,41 @@
-// obligations-svc (:8088) — the statutory / regulatory obligation registry.
+// obligations-svc (:8088) — the statutory / regulatory obligation registry, and
+// the filing requirements scoped under each obligation.
 //
-// Contract: GET /v1/obligations returns a JSON array of obligations.
+// Six endpoints, all wired here and all verified live (e2e_obligations.sh, 69/69).
+// Five properties of this service shape the console and are easy to get wrong:
+//
+//  1. NO TENANT HEADER. This service reads no X-Tenant-Id and has no RLS. The
+//     only scoping that exists is the legal_entity_id filter, which is a filter
+//     and not an isolation boundary — an unfiltered list returns every entity's
+//     obligations. The register therefore always sends the session legal entity,
+//     and the page says what that does and does not guarantee.
+//
+//  2. DEDUP IS GLOBAL ON obligation_code, and it compares only FOUR attributes:
+//     legal_entity_id, jurisdiction_id, obligation_type, due_date. A repeat POST
+//     that differs in any of those is 409. A repeat that differs only in
+//     severity_level, responsible_function, source_reference, or the source
+//     pointers returns 200 with the ORIGINAL row and silently discards the new
+//     values. So a 200 is never "saved" — it is "an obligation with that code
+//     already exists, here it is, unchanged". Verified: posting CRITICAL over a
+//     HIGH row returns HIGH.
+//
+//  3. JURISDICTION VALIDATION FAILS CLOSED — 404 for an unknown id, 503 when
+//     jurisdiction-rules-svc cannot be reached. The second is an outage, not a
+//     bad input, and the two are reported apart.
+//
+//  4. A MALFORMED UUID IN THE PATH IS 503 `store_unavailable`, not 404 — it dies
+//     in the pg driver. Same trap as purchase-order-svc and document-vault-svc.
+//     The console pre-validates so a typo does not read as an outage.
+//
+//  5. AN UNKNOWN STATUS STRING IS 409 `invalid_transition`, not 400. The status
+//     field is not validated against a vocabulary; it simply fails to match any
+//     legal transition. Verified with "BANANA".
+//
+// One thing this service does NOT have, which the page must not imply: there is
+// no endpoint that advances filing_status. Every filing requirement is created
+// PENDING and stays PENDING forever. Create and read are the whole surface.
 
-import { apiGet, type ApiResult } from "./client";
+import { apiGet, apiPost, type ApiResult, type ApiWriteResult } from "./client";
 
 /** Wire shape from the backend. Field names match the Go json tags exactly. */
 export type Obligation = {
@@ -19,9 +52,382 @@ export type Obligation = {
   responsible_function: string;
   source_reference: string;
   created_at: string;
+  created_by_principal_id: string;
   updated_at: string;
   closed_at: string | null;
 };
+
+export type FilingRequirement = {
+  filing_requirement_id: string;
+  obligation_id: string;
+  filing_type: string;
+  filing_authority: string;
+  /** Always "PENDING" in practice — nothing in this service advances it. */
+  filing_status: string;
+  created_at: string;
+};
+
+/**
+ * The obligation_status state machine, exactly as the store enforces it.
+ *
+ * CLOSED is absent as a key because it is terminal. Requesting the status a row
+ * is already in is a 200 no-op rather than an error, which is why "already there"
+ * is not modelled as a transition.
+ */
+export const LEGAL_TRANSITIONS: Record<string, readonly string[]> = {
+  OPEN: ["IN_PROGRESS", "OVERDUE", "CLOSED"],
+  IN_PROGRESS: ["OVERDUE", "CLOSED"],
+  OVERDUE: ["CLOSED"],
+  CLOSED: [],
+};
+
+export const OBLIGATION_STATUSES = ["OPEN", "IN_PROGRESS", "OVERDUE", "CLOSED"] as const;
+
+/** Data-only tags in the backend — these constrain the console's own forms only. */
+export const OBLIGATION_TYPES = [
+  "FILING",
+  "TAX_PAYMENT",
+  "REGULATORY_REPORT",
+  "DISCLOSURE",
+  "LICENCE_RENEWAL",
+  "CONTRACTUAL_DELIVERABLE",
+] as const;
+
+export const SOURCE_TYPES = [
+  "CONTRACT_CLAUSE",
+  "FILING_RULE",
+  "POLICY_MANDATE",
+  "JURISDICTION_RULE",
+] as const;
+
+export const SEVERITY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+
+export const RESPONSIBLE_FUNCTIONS = [
+  "Finance",
+  "Legal",
+  "Tax",
+  "Compliance",
+  "Payroll",
+  "HR",
+] as const;
+
+/**
+ * CLOSED is the only terminal state, and the only one that means the duty is
+ * discharged. Named rather than compared inline so the register and the state
+ * machine cannot drift apart.
+ */
+export function isTerminal(status: string): boolean {
+  return status === "CLOSED";
+}
+
+// ── Reads ───────────────────────────────────────────────────────────────────
+
+export type ListObligationsInput = {
+  legalEntityId?: string;
+  jurisdictionId?: string;
+  obligationType?: string;
+  status?: string;
+  /** RFC3339. The service 400s on anything else and names the field. */
+  dueBefore?: string;
+  dueAfter?: string;
+};
+
+/**
+ * List obligations, soonest-due first.
+ *
+ * The service orders by created_at DESC and offers no sort parameter, but a
+ * compliance register is read by deadline — so the ordering is applied here.
+ * There is also no pagination anywhere on this service (no limit/offset), so a
+ * long register renders in full rather than silently truncating.
+ */
+export async function listObligations(
+  input: ListObligationsInput = {},
+): Promise<ApiResult<Obligation[]>> {
+  const result = await apiGet<Obligation[]>("obligations", "/v1/obligations", {
+    query: {
+      legal_entity_id: input.legalEntityId,
+      jurisdiction_id: input.jurisdictionId,
+      obligation_type: input.obligationType,
+      status: input.status,
+      due_before: input.dueBefore,
+      due_after: input.dueAfter,
+    },
+  });
+
+  if (!result.ok) return result;
+
+  if (!Array.isArray(result.data)) {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: "obligations returned a non-array list" },
+    };
+  }
+
+  return {
+    ok: true,
+    data: [...result.data].sort(
+      (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime(),
+    ),
+  };
+}
+
+export async function getObligation(obligationId: string): Promise<ApiResult<Obligation>> {
+  return apiGet<Obligation>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(obligationId)}`,
+  );
+}
+
+/**
+ * List the filing requirements under one obligation.
+ *
+ * Unlike the contract version ledger, this DOES 404 for an unknown obligation
+ * rather than returning an empty array — so "no such obligation" and "no filings
+ * yet" stay distinguishable. Verified live.
+ */
+export async function listFilingRequirements(
+  obligationId: string,
+): Promise<ApiResult<FilingRequirement[]>> {
+  const result = await apiGet<FilingRequirement[]>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(obligationId)}/filing-requirements`,
+  );
+
+  if (!result.ok) return result;
+
+  if (!Array.isArray(result.data)) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "obligations returned a non-array filing requirement list",
+      },
+    };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+// ── Writes ──────────────────────────────────────────────────────────────────
+
+export type RaiseObligationInput = {
+  principalId: string;
+  legalEntityId: string;
+  jurisdictionId: string;
+  obligationSourceType: string;
+  obligationSourceId: string;
+  obligationCode: string;
+  obligationType: string;
+  /** RFC3339 — the service decodes into time.Time and rejects a bare date. */
+  dueDate: string;
+  severityLevel: string;
+  responsibleFunction: string;
+  sourceReference: string;
+  correlationId?: string;
+};
+
+/**
+ * Raise an obligation.
+ *
+ * 201 means a row was written. 200 means obligation_code already existed with
+ * matching key attributes and the response is the EXISTING row — see note 2 at
+ * the top of this file. Callers must not report 200 as a save.
+ *
+ * obligation_id is deliberately not sent: the service generates one. Supplying
+ * it would let a caller pick the primary key while dedup still keys on
+ * obligation_code, so two different ids could contend for one code.
+ */
+export async function raiseObligation(
+  input: RaiseObligationInput,
+): Promise<ApiWriteResult<Obligation>> {
+  return apiPost<Obligation>(
+    "obligations",
+    "/v1/obligations",
+    {
+      legal_entity_id: input.legalEntityId,
+      jurisdiction_id: input.jurisdictionId,
+      obligation_source_type: input.obligationSourceType,
+      obligation_source_id: input.obligationSourceId,
+      obligation_code: input.obligationCode,
+      obligation_type: input.obligationType,
+      due_date: input.dueDate,
+      severity_level: input.severityLevel,
+      responsible_function: input.responsibleFunction,
+      source_reference: input.sourceReference,
+      created_by_principal_id: input.principalId,
+    },
+    { correlationId: input.correlationId },
+  );
+}
+
+/**
+ * Transition an obligation's status.
+ *
+ * Always 200 on success, whether a real transition happened or the row was
+ * already in that status — the response body carries only the obligation, with
+ * no `transitioned` flag, so the two are indistinguishable from the response
+ * alone. The caller passes the status it last read as `expectedStatus` and this
+ * module reports which of the two occurred; see `describeTransition`.
+ */
+export async function transitionObligation(input: {
+  obligationId: string;
+  status: string;
+  correlationId?: string;
+}): Promise<ApiWriteResult<Obligation>> {
+  return apiPost<Obligation>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(input.obligationId)}/status`,
+    { obligation_status: input.status },
+    { correlationId: input.correlationId },
+  );
+}
+
+export async function addFilingRequirement(input: {
+  obligationId: string;
+  filingType: string;
+  filingAuthority: string;
+  submissionChannel: string;
+  correlationId?: string;
+}): Promise<ApiWriteResult<FilingRequirement>> {
+  return apiPost<FilingRequirement>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(input.obligationId)}/filing-requirements`,
+    {
+      filing_type: input.filingType,
+      filing_authority: input.filingAuthority,
+      submission_channel: input.submissionChannel,
+    },
+    { correlationId: input.correlationId },
+  );
+}
+
+// ── Interpretation ──────────────────────────────────────────────────────────
+
+/**
+ * Did the status call change anything?
+ *
+ * `expected` is the status the console last read for this row. Equal to the
+ * requested status means the caller asked for what was already there, which the
+ * service treats as an idempotent no-op. This is accurate unless another writer
+ * moved the row between the render and the submit — in which case it reports a
+ * transition that this caller did not cause, which is why the copy says "is now"
+ * rather than "you moved it".
+ */
+export function describeTransition(
+  expected: string,
+  requested: string,
+  returned: string,
+): { changed: boolean; message: string } {
+  if (requested === expected) {
+    return {
+      changed: false,
+      message: `Already ${requested} — the service accepted the request and changed nothing.`,
+    };
+  }
+  if (returned === requested) {
+    return {
+      changed: true,
+      message: `Moved from ${expected} to ${returned}.`,
+    };
+  }
+  // Should not happen: a 200 with neither the requested nor the expected status.
+  return {
+    changed: true,
+    message: `The service returned ${returned} after a request for ${requested}.`,
+  };
+}
+
+/**
+ * Turn a backend error string into something a reader can act on.
+ *
+ * apiGet/apiPost fold `error`, `field`, `message` and `detail` into one string,
+ * so this matches on the machine code inside it.
+ */
+export function explainObligationError(message: string): string {
+  if (message.includes("jurisdiction_not_found")) {
+    return "That jurisdiction does not exist in jurisdiction-rules-svc. An obligation must be jurisdiction-bound, so the write was refused rather than stored unvalidated.";
+  }
+  if (message.includes("jurisdiction_service_unavailable")) {
+    return "jurisdiction-rules-svc could not be reached, so the jurisdiction could not be validated. This service fails closed and refused the write — it did not store an unvalidated jurisdiction. This is an outage, not a problem with what you entered.";
+  }
+  if (message.includes("obligation_conflict")) {
+    return "An obligation with that code already exists with a different legal entity, jurisdiction, type, or due date. Codes are the dedup key and are global, so pick a different code — or correct the four fields to match the existing record.";
+  }
+  if (message.includes("invalid_transition")) {
+    return "That status transition is not legal. OPEN can move to IN_PROGRESS, OVERDUE or CLOSED; IN_PROGRESS to OVERDUE or CLOSED; OVERDUE to CLOSED. CLOSED is terminal. An unrecognised status value also lands here rather than as a validation error.";
+  }
+  if (message.includes("obligation_not_found")) {
+    return "No obligation with that ID. This service has no tenant scoping, so this genuinely means the ID does not exist rather than that it belongs to someone else.";
+  }
+  if (message.includes("missing_field")) {
+    return `A required field was missing — ${message}. Every field on an obligation is mandatory, including source_reference, which is what makes an obligation traceable to what created it.`;
+  }
+  if (message.includes("invalid_field")) {
+    return `A filter was rejected — ${message}. Date filters must be full RFC3339 timestamps, not bare dates.`;
+  }
+  if (message.includes("store_unavailable")) {
+    return "obligations-svc could not reach its database. Note that a malformed UUID also produces this, because the ID is rejected by the driver rather than by validation — check the ID before assuming an outage.";
+  }
+  return message;
+}
+
+// ── Roll-ups ────────────────────────────────────────────────────────────────
+
+export type ObligationSummary = {
+  total: number;
+  open: number;
+  inProgress: number;
+  overdue: number;
+  closed: number;
+  /** OPEN or IN_PROGRESS rows whose due_date has passed but which are not marked
+   *  OVERDUE. Real and expected: nothing in this service sweeps deadlines. */
+  pastDueNotFlagged: number;
+  dueWithin7Days: number;
+};
+
+export function summariseObligations(obligations: Obligation[]): ObligationSummary {
+  let open = 0;
+  let inProgress = 0;
+  let overdue = 0;
+  let closed = 0;
+  let pastDueNotFlagged = 0;
+  let dueWithin7Days = 0;
+
+  for (const o of obligations) {
+    switch (o.obligation_status) {
+      case "OPEN":
+        open += 1;
+        break;
+      case "IN_PROGRESS":
+        inProgress += 1;
+        break;
+      case "OVERDUE":
+        overdue += 1;
+        break;
+      case "CLOSED":
+        closed += 1;
+        break;
+    }
+
+    if (o.obligation_status === "CLOSED") continue;
+
+    const days = daysUntil(o.due_date);
+    if (days < 0 && o.obligation_status !== "OVERDUE") pastDueNotFlagged += 1;
+    if (days >= 0 && days <= 7) dueWithin7Days += 1;
+  }
+
+  return {
+    total: obligations.length,
+    open,
+    inProgress,
+    overdue,
+    closed,
+    pastDueNotFlagged,
+    dueWithin7Days,
+  };
+}
+
+// ── Overview-page helpers (kept — consumed by KpiCardGrid and ObligationsPanel) ──
 
 export type UpcomingObligation = {
   id: string;
@@ -34,8 +440,9 @@ export type UpcomingObligation = {
 /**
  * Fetch obligations, sorted soonest-due first and mapped for the UI.
  *
- * The backend has no due-date sort or "upcoming only" filter, so ordering and
- * the closed-obligation filter happen here.
+ * "Not closed" is read from obligation_status rather than from closed_at. Both
+ * agree today — closed_at is stamped by the same UPDATE that sets CLOSED — but
+ * status is the field the state machine actually enforces.
  */
 export async function listUpcomingObligations(
   limit = 5,
@@ -52,7 +459,7 @@ export async function listUpcomingObligations(
   }
 
   const upcoming = result.data
-    .filter((o) => o.closed_at === null)
+    .filter((o) => o.obligation_status !== "CLOSED")
     .map(toUpcoming)
     .sort((a, b) => a.dueInDays - b.dueInDays)
     .slice(0, limit);
@@ -85,7 +492,7 @@ export async function getObligationStats(): Promise<ApiResult<ObligationStats>> 
     };
   }
 
-  const open = result.data.filter((o) => o.closed_at === null);
+  const open = result.data.filter((o) => o.obligation_status !== "CLOSED");
   const days = open.map((o) => daysUntil(o.due_date));
   const overdue = days.filter((d) => d < 0).length;
 
@@ -115,7 +522,7 @@ function toUpcoming(obligation: Obligation): UpcomingObligation {
   };
 }
 
-function daysUntil(isoDate: string): number {
+export function daysUntil(isoDate: string): number {
   const due = new Date(isoDate).getTime();
   if (Number.isNaN(due)) return 0;
   return Math.ceil((due - Date.now()) / (24 * 60 * 60 * 1000));

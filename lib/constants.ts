@@ -10,6 +10,13 @@ import {
   ShoppingCart,
   History,
   Settings,
+  ScrollText,
+  Gavel,
+  ClipboardCheck,
+  ClipboardList,
+  KeyRound,
+  Building2,
+  FileJson,
 } from "lucide-react";
 
 export type DomainKey =
@@ -187,6 +194,29 @@ export const DOMAINS: Domain[] = [
 export const PRIMARY_NAV = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
   ...DOMAINS.map((d) => ({ label: d.label, href: d.href, icon: d.icon })),
+];
+
+/**
+ * The governance control plane.
+ *
+ * Separate from PRIMARY_NAV because these are not business domains — they are the
+ * cross-cutting services every domain is meant to be governed BY. Grouping them
+ * with Finance and Payroll would imply they sit at the same level, when in fact a
+ * policy or evidence requirement configured here constrains all of them.
+ */
+export const PLATFORM_NAV = [
+  // First in the list because it is first in the dependency order: nothing else
+  // in the platform can be created until a tenant and a legal entity exist here,
+  // and every other service scopes its data by the ids this registry issues.
+  { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },
+  { label: "Governance Log", href: "/admin/governance", icon: ScrollText },
+  { label: "Policies", href: "/admin/policies", icon: Gavel },
+  { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },
+  { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },
+  { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },
+  // Event contracts constrain every domain rather than belonging to one, so
+  // this sits with the platform services and not under a business area.
+  { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
 ];
 
 export const SECONDARY_NAV = [

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronLeft, X } from "lucide-react";
-import { PRIMARY_NAV, SECONDARY_NAV } from "@/lib/constants";
+import { PRIMARY_NAV, PLATFORM_NAV, SECONDARY_NAV } from "@/lib/constants";
 import { Logo } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +67,27 @@ function NavLink({
   );
 }
 
+/** Group heading. Collapses to nothing when the sidebar is collapsed — a
+ *  truncated label is worse than none, since the icons carry tooltips. */
+function SectionLabel({
+  collapsed,
+  children,
+}: {
+  collapsed: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <p
+      className={cn(
+        "mb-2 overflow-hidden whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 transition-all duration-200 dark:text-slate-500",
+        collapsed ? "max-h-0 opacity-0" : "max-h-5 opacity-100",
+      )}
+    >
+      {children}
+    </p>
+  );
+}
+
 function NavList({
   pathname,
   collapsed = false,
@@ -79,15 +100,24 @@ function NavList({
   return (
     <nav className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden scrollbar-thin px-3 py-6">
       <div className="space-y-0.5">
-        <p
-          className={cn(
-            "mb-2 overflow-hidden whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 transition-all duration-200 dark:text-slate-500",
-            collapsed ? "max-h-0 opacity-0" : "max-h-5 opacity-100",
-          )}
-        >
-          Platform
-        </p>
+        <SectionLabel collapsed={collapsed}>Domains</SectionLabel>
         {PRIMARY_NAV.map((item) => (
+          <NavLink
+            key={item.href}
+            item={item}
+            active={isActive(pathname, item.href)}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </div>
+
+      {/* Its own group, not folded into the domains above: a policy or evidence
+          requirement configured here constrains every domain, so it does not sit
+          at the same level as one of them. */}
+      <div className="space-y-0.5">
+        <SectionLabel collapsed={collapsed}>Governance plane</SectionLabel>
+        {PLATFORM_NAV.map((item) => (
           <NavLink
             key={item.href}
             item={item}
