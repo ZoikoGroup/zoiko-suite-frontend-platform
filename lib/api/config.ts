@@ -21,7 +21,7 @@ const DEFAULTS = {
   jurisdictionRules: "http://localhost:8082",
   purchaseRequest: "http://localhost:8100",
   contracts: "http://localhost:8119",
-  purchaseOrder: "http://localhost:8129",
+  purchaseOrder: "http://localhost:8112",
   evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
   auditEventStore: "http://localhost:8084",

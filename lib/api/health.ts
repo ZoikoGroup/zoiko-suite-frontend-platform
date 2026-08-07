@@ -27,14 +27,17 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "benefits-svc", port: 8112 },
     { name: "payroll-tax-svc", port: 8113 },
     { name: "payroll-exceptions-svc", port: 8114 },
+    { name: "wage-garnishment-svc", port: 8095 },
+    { name: "direct-deposit-svc", port: 8096 },
+    { name: "year-end-filing-svc", port: 8097 },
   ],
   hr: [
     { name: "employee-master-svc", port: 8108 },
-    { name: "employment-contracts-svc", port: 8109 },
     { name: "leave-absence-svc", port: 8115 },
     { name: "org-structure-svc", port: 8116 },
-    { name: "offboarding-severance-svc", port: 8117 },
     { name: "workforce-compliance-svc", port: 8118 },
+    { name: "talent-management-svc", port: 8132 },
+    { name: "onboarding-svc", port: 8133 },
   ],
   legal: [
     { name: "contract-lifecycle-svc", port: 8119 },
@@ -43,6 +46,7 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "board-resolutions-svc", port: 8122 },
     { name: "corporate-actions-svc", port: 8123 },
     { name: "counterparty-management-svc", port: 8124 },
+    { name: "legal-approvals-svc", port: 8123 },
   ],
   tax: [
     { name: "tax-rules-svc", port: 8125 },
@@ -61,10 +65,20 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   "commercial-ops": [
     { name: "purchase-request-svc", port: 8100 },
     { name: "purchase-order-svc", port: 8112 },
+    { name: "supplier-intelligence-svc", port: 8114 },
+    { name: "catalog-governance-svc", port: 8115 },
+    { name: "requisition-engine-svc", port: 8116 },
+    { name: "contract-match-svc", port: 8117 },
     { name: "invoice-approval-svc", port: 8107 },
+    { name: "spend-controls-svc", port: 8131 },
+    { name: "procurement-workflow-svc", port: 8109 },
+    { name: "vendor-due-diligence-svc", port: 8135 },
   ],
   "audit-events": [
+    { name: "audit-event-ingestion-svc", port: 8081 },
+    { name: "audit-log-query-svc", port: 8082 },
     { name: "audit-event-store-svc", port: 8084 },
+    { name: "tamper-detection-svc", port: 8085 },
   ],
 };
 
