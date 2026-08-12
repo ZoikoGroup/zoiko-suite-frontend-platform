@@ -44,7 +44,11 @@ export async function PurchaseOrdersAndSpendPanel() {
   }
 
   const orders: PurchaseOrder[] = poRes.ok ? poRes.data : [];
+  // Kept apart from "no limits configured". listSpendLimits used to answer ok:true
+  // with sample data on any failure — and on an empty result too — so this panel
+  // could never tell the difference and showed invented budgets either way.
   const spendLimits: SpendLimit[] = spendRes.ok ? spendRes.data : [];
+  const spendUnavailable = spendRes.ok ? null : spendRes.error.message;
 
   return (
     <div className="space-y-6">
@@ -87,8 +91,15 @@ export async function PurchaseOrdersAndSpendPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Departmental Spend Controls & Budget Caps ({spendLimits.length})
         </h3>
-        {spendLimits.length === 0 ? (
-          <PanelEmptyState icon={ShoppingCart} label="No spend limits configured" hint="Spend limits created in spend-controls-svc will appear here." />
+        {spendUnavailable ? (
+          <PanelEmptyState
+            icon={CloudOff}
+            tone="warning"
+            label="Spend limits unavailable"
+            hint={spendUnavailable}
+          />
+        ) : spendLimits.length === 0 ? (
+          <PanelEmptyState icon={ShoppingCart} label="No spend limits configured" hint="Set one in the Spend controls card above — until a category has a limit, a check against it is not evaluated at all." />
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">

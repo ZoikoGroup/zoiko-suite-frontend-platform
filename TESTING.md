@@ -1,13 +1,18 @@
-# Manual test guide — the six wired services
+# Manual test guide — the eight wired services
 
 Every step below is a real request to a real service. Where a step's *expected*
 result looks like a failure, that is called out — several of these services are
 deliberately fail-closed, and confirming they refuse correctly matters as much as
 confirming they succeed.
 
-Nothing here has been run against a live backend. It was derived from the Go
-handlers, stores, and migrations. Treat the expectations as what the code says
-should happen, and tell me where reality differs.
+**How much of this has actually been run.** Sections 1–6 were written from the Go
+handlers, stores, and migrations *before* anything was executed, and several of
+their expectations turned out to be wrong — see
+[Known-stale claims](#known-stale-claims-in-this-document) before trusting a
+status code here. Sections 7 (Payables) and 8 (Spend controls) were written
+*after* their contract suites and browser click-throughs — 65 and 69 assertions
+respectively, plus 36 and 33 in a real browser — so their expectations are
+observed rather than inferred.
 
 ---
 
@@ -16,36 +21,68 @@ should happen, and tell me where reality differs.
 **1. Start Docker Desktop.** Then, from the backend repo (`zoiko-suite/zoiko-suite`):
 
 ```powershell
-$env:GATEWAY_PORT = "8000"
 docker compose -f deployments/docker-compose.yml up -d `
-  gateway authorization-svc `
+  authorization-svc `
   governance-svc policy-svc configuration-feature-flag-svc `
   secret-vault-integration-svc purchase-order-svc evidence-requirements-svc `
+  purchase-request-svc accounts-payable-svc spend-controls-svc `
   contract-lifecycle-svc obligations-svc
 ```
 
-`authorization-svc` is **not** optional. Commercial Ops and Evidence check it
-before every write and both fail closed, so without it those writes are refused —
-correctly, but you will spend ten minutes wondering why.
+**No `gateway`, deliberately.** The console's `.env.local` ships
+`ZOIKO_USE_GATEWAY=false`, so it talks to service ports directly. Starting Traefik
+drags in its whole `depends_on` chain — eight support containers for a routing
+layer. Add `gateway` (with `$env:GATEWAY_PORT = "8000"`) only when you want to
+exercise the path prefixes, which is a real failure mode: a wrong prefix gives a
+404 indistinguishable from a dead service.
+
+`authorization-svc` is **not** optional. Payables, Commercial Ops and Evidence
+check it before every write and all fail closed, so without it those writes are
+refused — correctly, but you will spend ten minutes wondering why.
 
 **2. Seed the demo principal's permissions:**
 
 ```powershell
-./deployments/scripts/seed-demo-rbac.ps1
+# Gateway-less, matching the compose line above:
+./deployments/scripts/seed-demo-rbac.ps1 -AuthzUrl http://localhost:8089
+
+# Or, if you started the gateway:
+./deployments/scripts/seed-demo-rbac.ps1 -GatewayUrl http://localhost:8000
 ```
 
 Without this, `authorization-svc` answers `DENIED / no_grant` and every gated
-write is refused. The script is idempotent.
+write is refused. The script is idempotent and grants all five services' actions;
+it re-probes every action rather than short-circuiting on the first, so re-running
+it after it gains a service does add the new grants.
 
-**3. Confirm the gateway is routing** before blaming the console:
+**3. Confirm the services are up** before blaming the console:
 
 ```powershell
-curl http://localhost:8000/policy-svc/healthz
-curl http://localhost:8000/evidence-requirements-svc/healthz
+curl http://localhost:8085/healthz   # policy-svc
+curl http://localhost:8099/healthz   # accounts-payable-svc
 ```
 
-A Traefik 404 here looks exactly like a service being down. If you get one, the
-prefix is wrong, not the service.
+**Check the image dates too.** A container image older than your checkout returns
+plausible-looking wrong answers rather than failing, which reads as a code bug:
+
+```powershell
+$img = docker inspect accounts-payable-svc --format "{{.Image}}"
+docker inspect $img --format "{{.Created}}"
+```
+
+**Check that migrations were actually applied.** `deployments/init-db.sh` runs
+**only when the Postgres data directory is empty**, so any migration added after
+the volume was first created has silently never run. Compare `\di` — indexes, not
+just `\dt` — against the migrations directory:
+
+```powershell
+docker exec zoiko-postgres psql -U postgres -d accounts_payable -c "\d vendor_invoices"
+```
+
+A missing partial unique index makes every idempotent write fail with
+`42P10 no unique or exclusion constraint matching the ON CONFLICT specification`,
+which surfaces as `store_unavailable` while reads work fine — so it looks like a
+write-path code bug.
 
 **4. Start the console:**
 
@@ -417,6 +454,231 @@ a console one, and it needs a `GET /v1/purchase-orders/{id}/amendments`.
 
 ---
 
+## 7. Payables — `accounts-payable-svc` (:8099)
+
+Lives on **`/admin/finance`**, above the domain-overview panels. Unlike every
+section above, this one **has** been run against the live service: a 52-assertion
+contract suite plus a browser click-through, both passing. Where a step below
+says "expect", that is an observed result, not a reading of the handler.
+
+**What it is.** The liability side of the ledger: vendor invoice intake through
+to payment readiness. The lifecycle is strictly linear and **no stage can be
+skipped** —
+
+```
+RECEIVED ──validate──▶ VALIDATED ──approve──▶ APPROVED ──request-payment──▶ PAYMENT_REQUESTED
+```
+
+That sequence *is* the enforcement of the spec's constraint that no payable
+reaches payment initiation without approval-state validation: `PAYMENT_REQUESTED`
+is reachable only from `APPROVED`, itself only from `VALIDATED`. Each hop is a
+**separate authorization grant** (`AP_INVOICE_CREATE`, `AP_INVOICE_VALIDATE`,
+`AP_INVOICE_APPROVE`, `AP_PAYMENT_REQUEST`), so holding one does not imply the
+next. `PAYMENT_REQUESTED` is terminal here — executing the payment belongs to a
+future Treasury service, which consumes the `payment.requested` event.
+
+### Bring it up
+
+```powershell
+docker compose -f deployments/docker-compose.yml up -d accounts-payable-svc
+```
+
+Its `depends_on` pulls in `postgres`, `kafka`, and `authorization-svc`, all as
+`service_healthy` — none are skippable. **Rebuild first if the image predates
+your checkout**; a stale binary returns plausible-looking wrong answers rather
+than failing:
+
+```powershell
+docker compose -f deployments/docker-compose.yml build accounts-payable-svc
+docker compose -f deployments/docker-compose.yml up -d --force-recreate accounts-payable-svc
+```
+
+### Test the intake form
+
+1. **Record an invoice.** Vendor `VND-DELL-UK`, number `INV-2026-00417`, amount
+   `14750.50`, `GBP`, due date about a month out.
+   → **Expect 201**, status `RECEIVED`, and **the invoice ID in the banner as a
+   copy button**. The ID has to leave this form by hand for the lookup panel, and
+   text inside a banner cannot be clicked.
+2. **Submit the exact same form again.**
+   → **Expect an amber "already on the register" banner**, naming the vendor and
+   number. Not green (nothing was written) and not red (nothing is broken).
+   `(tenant, vendor, invoice_number)` is unique. This used to answer **503
+   `store_unavailable`**, i.e. a re-keyed number read as a dead database.
+3. **Same number, different vendor** (`VND-ARUP-ENG`).
+   → **Expect 201.** The constraint is per vendor; two vendors both numbering an
+   invoice `INV-001` is ordinary.
+4. **Amount `0`.** → **Expect 400**, refused by the console before it is sent.
+
+### Test the linear state machine — the interesting part
+
+5. **Look at the register.** Each row shows a stage badge, a **four-segment
+   meter** ("2 of 4"), and **exactly one action button** — the only transition
+   legal from where that row stands.
+   → **Expect:** a `RECEIVED` row offers only *Validate*, an `APPROVED` row only
+   *Request payment*, and a `PAYMENT_REQUESTED` row offers nothing but
+   "Terminal — handed to Treasury". Three buttons per row would be offering two
+   refusals.
+6. **Walk one invoice all the way:** Validate → Approve → Request payment.
+   → **Expect** each to succeed, the meter to advance, and each banner to name
+   the *next* step and that it is a separate grant.
+7. **Prove a stage cannot be skipped.** With a `RECEIVED` invoice, call approve
+   directly:
+   ```powershell
+   curl -X POST http://localhost:8099/v1/invoices/<id>/approve `
+     -H "X-Principal-Id: 33333333-3333-3333-3333-333333333333" `
+     -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111"
+   ```
+   → **Expect 422 `invalid_transition`**, not 409. The service moves an invoice
+   with one atomic `UPDATE … WHERE status = <expected>`, so there is no read-then-
+   write race to exploit.
+8. **Request payment twice.** → **Expect 422** on the second: terminal means
+   terminal.
+
+### Test the reads and the absence cases
+
+9. **Filter by stage** (chips) **and by vendor and legal entity** (the form).
+   → **Expect:** all three applied *by the service*, composing with AND, and the
+   tile totals stating they describe the filtered set.
+10. **Filter by a partial vendor reference** (`VND-DELL`).
+    → **Expect an empty register.** The comparison is `vendor_id = $3` — exact,
+    no `LIKE`. A near miss is not a match.
+11. **Filter by a malformed legal entity.**
+    → **Expect the console to drop it and say so.** The service casts the
+    *column* to text rather than the parameter to uuid, so a malformed value does
+    not error — it silently matches nothing, and an empty register reads as "this
+    entity has no invoices".
+12. **Paste an unknown-but-valid UUID** into **Read one invoice**.
+    → **Expect "absent"**, not an error.
+13. **Paste `not-a-uuid`.** → **Expect the console to refuse it.** The service now
+    answers **404** for this (it used to be a **503 that read like an outage**), so
+    the check only saves a round trip.
+14. **Stop `authorization-svc`** and try to validate an invoice.
+    → **Expect** the fail-closed wording — "could not verify authorization, so the
+    action was refused" — distinct from the 403 you get with no RBAC seed. Same
+    assertion as Evidence step 4 and Commercial Ops step 8, third service.
+
+### Watch for
+
+- **`vendor_id` is validated by nothing.** No Vendor Master service exists
+  anywhere in this platform, so a mistyped vendor produces a perfectly valid
+  invoice against one that does not exist. There is no `vendor_not_found`. The
+  form says so under the field; that is the only guard there is.
+- **Overdue counts anything short of `PAYMENT_REQUESTED`** whose due date has
+  passed, not just approved rows — an invoice still unvalidated past its due date
+  is the more urgent problem.
+- **Amounts are never summed across currencies.** Nothing in this suite holds an
+  FX rate.
+
+---
+
+## 8. Spend controls — `spend-controls-svc` (:8131)
+
+Lives on **`/admin/commercial-ops`**, above the order flow — a limit governs a
+commitment, so the check belongs before it. Like section 7, this was written after
+the fact: a 69-assertion contract suite, a 33-assertion browser click-through, and
+a 10-way concurrency probe, all passing.
+
+**What it is.** The limit across procurement: what a legal entity may spend on a
+category, enforced either **per transaction** or cumulatively over a **calendar
+month** or **year** (UTC). A spend check asks whether a proposed amount fits, and
+records it when it does.
+
+### Bring it up
+
+```powershell
+docker compose -f deployments/docker-compose.yml up -d spend-controls-svc
+./deployments/scripts/seed-demo-rbac.ps1 -AuthzUrl http://localhost:8089
+```
+
+Deps are postgres + kafka + authorization-svc — the same three as payables, so if
+section 7 is running this adds nothing. **The `spend_controls` database may not
+exist**: `init-db.sh` only runs on an empty data directory, so on any pre-existing
+volume you must create it and apply the migration by hand (gotcha in section 0).
+
+### Test the four readings — the whole point of this service
+
+A spend check answers **200 for all four**, so a status code tells you nothing.
+What separates them is the decision body, and the console renders each differently:
+
+| Submit | Reading | Renders |
+| --- | --- | --- |
+| Amount inside the limit | `ALLOWED` / `within_threshold` | green — recorded, budget consumed |
+| Amount over the limit | `BLOCKED` / `threshold_exceeded` | **amber** — a refusal, not a failure |
+| A category with **no** limit | `ALLOWED` / `no_policy_configured` | **neutral** — *not* an approval |
+| The same correlation id twice | `replayed_prior_decision` | neutral — nothing new recorded |
+
+1. **Set a limit.** Category `PROCUREMENT`, window `Per calendar month`, limit
+   `300`, `GBP`. → **Expect** a banner naming the window and the policy ID as a
+   copy control.
+2. **Check `100`.** → **Expect green**, "taking committed spend to £100.00 of
+   £300.00", and the figures panel showing already-committed, projected, and the
+   limit.
+3. **Check `5000`.** → **Expect amber**, explicitly labelled *"The control worked.
+   This is a refusal, not a failure."*, stating £5,100 against a £300 limit, and
+   that it **consumed none of the budget**.
+4. **Check `100` again.** → **Expect green** — proving step 3 consumed nothing:
+   prior is still £100, not £5,100.
+5. **Check a category you never configured.** → **Expect neutral**, and the words
+   *"Not checked, not approved"*. This is the assertion that matters most on this
+   page: the service says ALLOWED, but no control was applied, and showing it green
+   would report an ungoverned spend as a governed one that agreed.
+6. **Check in `USD` against the `GBP` limit.** → **Expect 422 `currency_mismatch`**,
+   rendered as a refusal explaining that nothing in this platform holds an FX rate.
+   Nothing is booked against the GBP budget.
+7. **Set a second limit on the same category** (`900`). → **Expect an amber
+   "supersedes the previous limit"** banner. There is no update route; the newest
+   active policy wins and the old row is kept, so what the limit used to be stays
+   on record.
+
+### Test the enforcement is atomic
+
+8. Fire ten simultaneous checks of `100` against a `300` limit:
+   ```bash
+   for i in $(seq 1 10); do curl -s -X POST http://localhost:8131/v1/spend-checks/ \
+     -H 'Content-Type: application/json' \
+     -H "X-Principal-Id: 33333333-3333-3333-3333-333333333333" \
+     -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111" \
+     -d "{\"legal_entity_id\":\"22222222-2222-2222-2222-222222222222\",\"category\":\"RACE\",\"amount\":100,\"currency_code\":\"GBP\",\"correlation_id\":\"race-$i\"}" & done; wait
+   ```
+   → **Expect exactly 3 ALLOWED and 7 BLOCKED**, and a recorded total of exactly
+   300. The sum and the insert happen in one transaction with the policy row
+   locked; before that they were separate transactions, so all ten read the same
+   prior total, all ten concluded they fit, and the limit could be overspent
+   without bound.
+
+### Watch for
+
+- **A refused attempt is recorded**, as a `BLOCKED` row excluded from the running
+  total. It used to exist only as a Kafka event, so a refusal left nothing
+  queryable — and `decision_outcome` was a column that was always `ALLOWED`.
+- **Categories are free text.** There is no category registry anywhere in the
+  platform, so a typo silently creates a limit nothing will ever check against.
+  The form offers suggestions but does not constrain the field.
+- **`PER_TRANSACTION` rows show no meter**, deliberately: each spend is judged
+  alone, so a cumulative bar would imply an allowance that fills up.
+- **The read routes are authorized even with no filter.** Omitting
+  `legal_entity_id` used to skip the authorization check entirely; the tenant is
+  now the scope, so `SPEND_POLICY_VIEW` is required either way.
+
+---
+
+## Known-stale claims in this document
+
+Sections 1–6 were written from the Go source before any of it had been run. Most
+held up, but these did not, and the surrounding text still asserts the old
+behaviour:
+
+| Claim | Actually |
+| --- | --- |
+| An illegal `purchase-order-svc` transition is 409 | **422 `invalid_transition`** |
+| Re-retiring an evidence requirement is 409 | **422 `already_retired`** |
+| Re-activating an already-`ACTIVE` policy version conflicts | **200** — the store short-circuits. The 409 fires for re-activating a **SUPERSEDED** version |
+| secret-vault leases never expire | They **do** — status is computed on every read, and revoking an expired lease is a genuine 409 |
+| Section 0's gateway setup | The console's `.env.local` ships `ZOIKO_USE_GATEWAY=false`, so it talks to service ports directly and the gateway is not needed |
+
+---
+
 ## Summary of what to watch for
 
 These are the assertions worth caring about most, because getting them wrong
@@ -434,6 +696,13 @@ would be a governance failure rather than a bug:
 | 8 | An expired-but-GRANTED lease is not counted as live | Secret Vault, leases panel |
 | 9 | Retired requirements stay visible | Evidence step 10 |
 | 10 | A policy evaluation's evidence row is verified, not assumed | Policies step 13 |
+| 11 | A payment stage cannot be skipped, and skipping is refused not ignored | Payables step 7 |
+| 12 | A duplicate invoice number reads as a duplicate, not as an outage | Payables step 2 |
+| 13 | Each row offers only the one transition that is legal from where it stands | Payables step 5 |
+| 14 | `no_policy_configured` never renders as an approval — nothing was checked | Spend controls step 5 |
+| 15 | A BLOCKED spend reads as a refusal, not a failure, and consumes no budget | Spend controls steps 3–4 |
+| 16 | A threshold cannot be overspent by simultaneous checks | Spend controls step 8 |
+| 17 | A limit in one currency never judges an amount in another | Spend controls step 6 |
 
 Report back anything where the console's claim and the service's behaviour
 disagree — those are the interesting failures.

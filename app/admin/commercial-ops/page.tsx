@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
-import { ShieldCheck, Store, Wallet, ShoppingCart } from "lucide-react";
+import { Wallet, ShoppingCart } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader, LookupById } from "@/components/admin/shared";
 import {
@@ -11,6 +11,11 @@ import {
   RaiseRequestForm,
   DecideRequestForm,
   PurchaseOrdersAndSpendPanel,
+  SpendPolicyForm,
+  SpendCheckForm,
+  SpendControlsPanel,
+  VendorCheckForm,
+  VendorDueDiligencePanel,
   CommercialOpsActionHeader,
   CommercialOpsSummaryBar,
   CommercialOpsProcessTimeline,
@@ -18,7 +23,12 @@ import {
 import { DOMAINS } from "@/lib/constants";
 import type { OrderStatusFilter } from "@/lib/api/purchase-orders";
 import type { RequestStatus } from "@/lib/api/purchase-requests";
-import { lookupOrder, lookupOrderAmendments, lookupPurchaseRequest } from "./actions";
+import {
+  lookupOrder,
+  lookupOrderAmendments,
+  lookupPurchaseRequest,
+  lookupVendorCheck,
+} from "./actions";
 
 export const metadata: Metadata = { title: "Commercial Operations & Procurement | Zoiko Suite" };
 
@@ -42,22 +52,16 @@ const REQUEST_FILTERS: { label: string; value?: RequestStatus }[] = [
   { label: "Rejected", value: "REJECTED" },
 ];
 
-/** Services in this domain that are not yet wired to the console. */
+/** Services in this domain that are not yet wired to the console.
+ *
+ *  Spend Controls was listed here while the page was simultaneously displaying
+ *  hardcoded sample budgets as though they were live — it is now genuinely wired,
+ *  so it has moved out of this list. Vendor Due Diligence has now done the same. */
 const UPCOMING = [
-  {
-    icon: Store,
-    title: "Vendor Due Diligence",
-    body: "Counterparty screening and vendor approval state, checked before spend is committed.",
-  },
   {
     icon: Wallet,
     title: "Invoice Approval Service",
     body: "Three-way match between order, receipt, and invoice before payment is released.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Spend Controls",
-    body: "Per-entity limits and signatory authority enforced through the approval matrix.",
   },
 ];
 
@@ -178,6 +182,20 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
     requestEntityRaw && isUuid(requestEntityRaw) ? requestEntityRaw : undefined;
   const requestEntityRejected = Boolean(requestEntityRaw) && !requestEntity;
 
+  // Its own param, like the two status filters: one shared key would make
+  // filtering the limits silently re-filter the registers.
+  const spendCategory = one(params.spend_category);
+
+  // The vendor register's own filter and offset. NOT UUID-validated, unlike the
+  // two above: this service's legal_entity_id and counterparty_id are VARCHAR(255)
+  // columns rather than uuid ones, so a malformed value is a valid comparison that
+  // matches nothing. Rejecting it here would claim a validation the schema does not
+  // perform, and the empty register is the honest answer.
+  const vendorCounterparty = one(params.vendor_counterparty);
+  const vendorOffsetRaw = Number(one(params.vendor_offset) ?? 0);
+  const vendorOffset =
+    Number.isInteger(vendorOffsetRaw) && vendorOffsetRaw > 0 ? vendorOffsetRaw : 0;
+
   /** The current query string with some keys overridden, so a status chip does
    *  not silently drop the entity filter (or the other register's filters). */
   const hrefWith = (overrides: Record<string, string | undefined>) => {
@@ -270,6 +288,11 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
             <input type="hidden" name="status" value={status ?? ""} />
             <input type="hidden" name="request_status" value={requestStatus ?? ""} />
             <input type="hidden" name="entity" value={entity ?? ""} />
+            {/* This form previously carried no spend_category either, so choosing a
+                request entity silently cleared the limits filter. Four registers now
+                share one URL; each GET form must carry every param it does not own. */}
+            <input type="hidden" name="spend_category" value={spendCategory ?? ""} />
+            <input type="hidden" name="vendor_counterparty" value={vendorCounterparty ?? ""} />
             <div className="flex-1">
               <label htmlFor="request_entity" className={FILTER_LABEL}>
                 Legal entity <span className="font-normal text-slate-400">(UUID, blank = all entities in this tenant)</span>
@@ -311,6 +334,192 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
               hint="The full record, including the rejection reason and who decided it. A non-UUID fails inside the Postgres driver and surfaces as a 503, so it is rejected here first."
             />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── vendor-due-diligence-svc (:8135) ──────────────────────────────────
+          Above the spend controls, which are themselves above the order flow. The
+          sequence is deliberate and it is a governance claim, not a layout
+          preference: a limit answers "how much may be committed", an order commits
+          it, and this answers the question that precedes both — should this party be
+          committed to at all. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Screen a counterparty</CardTitle>
+            <CardDescription>
+              Live, writable. Backed by vendor-due-diligence-svc.{" "}
+              <strong className="font-medium">
+                Read the outcome carefully: a no-match is not a clearance.
+              </strong>{" "}
+              The only screening implemented is an exact, case-insensitive match against a hardcoded
+              list of two names — there is no sanctions or watchlist feed anywhere on this platform
+              to call, so the stub stands in for an integration that does not exist rather than
+              shortcutting one that does. The screening outcome and the evidence supporting it are
+              written in one transaction, so a conclusion can never outlive its evidence. Starting a
+              screening (VENDOR_DD_INITIATE) and reading the register (VENDOR_DD_VIEW) are separate
+              authorization grants.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <VendorCheckForm />
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Screening register</CardTitle>
+            <CardDescription>
+              Every check for this tenant, newest first — each run, not one row per counterparty,
+              because the history is the audit trail. Four outcomes, and they do not collapse into
+              pass and fail. <strong className="font-medium">Flagged</strong> is a finding, and the
+              counterparty is pushed to REJECTED with risk HIGH.{" "}
+              <strong className="font-medium">Screened, no match</strong> means a comparison ran and
+              returned nothing — recorded, and not an approval.{" "}
+              <strong className="font-medium">No outcome</strong> and{" "}
+              <strong className="font-medium">Failed</strong> both mean the counterparty has not been
+              screened at all: screening is synchronous here, so a check without a conclusion is a
+              lost result rather than one still running, and an empty outcome column is the state
+              most easily mistaken for benign.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <form className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <input type="hidden" name="status" value={status ?? ""} />
+            <input type="hidden" name="request_status" value={requestStatus ?? ""} />
+            <input type="hidden" name="entity" value={entity ?? ""} />
+            <input type="hidden" name="request_entity" value={requestEntity ?? ""} />
+            <input type="hidden" name="spend_category" value={spendCategory ?? ""} />
+            <div className="flex-1">
+              <label htmlFor="vendor_counterparty" className={FILTER_LABEL}>
+                Counterparty{" "}
+                <span className="font-normal text-slate-400">(exact match, blank = all)</span>
+              </label>
+              <input
+                id="vendor_counterparty"
+                name="vendor_counterparty"
+                defaultValue={vendorCounterparty ?? ""}
+                placeholder="33333333-3333-3333-3333-333333333333"
+                className={`${FILTER_FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <button type="submit" className={FILTER_SUBMIT}>
+              Filter checks
+            </button>
+          </form>
+
+          {/* Keyed on the offset too, so paging re-suspends rather than showing the
+              previous page's rows while the next one streams in. */}
+          <Suspense
+            key={`vendor:${vendorCounterparty ?? "all"}:${vendorOffset}`}
+            fallback={<TableSkeleton />}
+          >
+            <VendorDueDiligencePanel
+              counterpartyId={vendorCounterparty}
+              offset={vendorOffset}
+              params={params}
+            />
+          </Suspense>
+
+          <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
+            <LookupById
+              action={lookupVendorCheck}
+              inputName="vendor_check_id"
+              label="Read one check"
+              placeholder="Must be a UUID"
+              hint="The full record with every evidence row gathered for it, including any document reference. check_id IS a uuid column here, unlike this service's entity and counterparty columns, so a non-UUID is rejected before it reaches the driver."
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── spend-controls-svc (:8131) ────────────────────────────────────────
+          Above the order flow because a limit governs it: the point of a spend
+          check is to run BEFORE the commitment, not to explain it afterwards. */}
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Spend controls</CardTitle>
+            <CardDescription>
+              Live, writable. Backed by spend-controls-svc — the limit across procurement. A limit
+              applies to one category on one legal entity, enforced either per transaction or
+              cumulatively over a calendar month or year. Setting a limit
+              (SPEND_POLICY_MANAGE), reading them (SPEND_POLICY_VIEW), and spending against them
+              (SPEND_CHECK_SUBMIT) are three separate authorization grants.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <SpendPolicyForm />
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Check a spend before committing it</CardTitle>
+            <CardDescription>
+              Four outcomes, and they do not collapse into pass and fail.{" "}
+              <strong className="font-medium">Permitted</strong> means a limit was evaluated and the
+              spend fits, and it is recorded against the budget immediately.{" "}
+              <strong className="font-medium">Refused</strong> means the limit was evaluated and says
+              no — the control working, not failing, and it consumes none of the budget.{" "}
+              <strong className="font-medium">Not evaluated</strong> means the category has no limit
+              at all: the service answers ALLOWED, but nothing was checked, so it is not an
+              approval. A spend in a currency other than the limit&apos;s is refused rather than
+              converted, because nothing in this platform holds an FX rate.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <SpendCheckForm />
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Limits in force</CardTitle>
+            <CardDescription>
+              Every limit for this tenant with what has been committed against it. Enforcement is
+              atomic: the running total is summed and the spend recorded in one transaction with the
+              policy locked, so simultaneous checks cannot each see the same remaining budget and
+              all be admitted.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <form className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <input type="hidden" name="status" value={status ?? ""} />
+            <input type="hidden" name="request_status" value={requestStatus ?? ""} />
+            <input type="hidden" name="entity" value={entity ?? ""} />
+            <input type="hidden" name="request_entity" value={requestEntity ?? ""} />
+            <input type="hidden" name="vendor_counterparty" value={vendorCounterparty ?? ""} />
+            <div className="flex-1">
+              <label htmlFor="spend_category" className={FILTER_LABEL}>
+                Category <span className="font-normal text-slate-400">(exact match, blank = all)</span>
+              </label>
+              <input
+                id="spend_category"
+                name="spend_category"
+                defaultValue={spendCategory ?? ""}
+                placeholder="PROCUREMENT"
+                className={FILTER_FIELD}
+                autoComplete="off"
+              />
+            </div>
+            <button type="submit" className={FILTER_SUBMIT}>
+              Filter limits
+            </button>
+          </form>
+
+          <Suspense key={`spend:${spendCategory ?? "all"}`} fallback={<TableSkeleton />}>
+            <SpendControlsPanel category={spendCategory} />
+          </Suspense>
         </CardContent>
       </Card>
 
@@ -369,6 +578,8 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
             <input type="hidden" name="status" value={status ?? ""} />
             <input type="hidden" name="request_status" value={requestStatus ?? ""} />
             <input type="hidden" name="request_entity" value={requestEntity ?? ""} />
+            <input type="hidden" name="spend_category" value={spendCategory ?? ""} />
+            <input type="hidden" name="vendor_counterparty" value={vendorCounterparty ?? ""} />
             <div className="flex-1">
               <label htmlFor="entity" className={FILTER_LABEL}>
                 Legal entity <span className="font-normal text-slate-400">(UUID, blank = all entities in this tenant)</span>
@@ -479,11 +690,11 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
         </CardContent>
       </Card>
 
-      {/* Domain summary from the platform work on main, kept below the workflow
-          rather than in place of it. Note its own note: this panel falls back to
-          sample rows when the service response does not match the shape it
-          expects, so treat its contents as indicative — the registers above read
-          purchase-order-svc and purchase-request-svc directly. */}
+      {/* Domain KPI summary. Every figure here is now read live from the four
+          wired services; it previously showed hardcoded values, including a
+          fabricated "Vendor Due Diligence Pass — 98.4% (AML/UBO)" claim about
+          screening that does not exist on this platform. A tile whose service
+          cannot be read says so rather than showing a plausible number. */}
       <div className="mt-6">
         <Suspense fallback={<PanelSkeleton rows={4} />}>
           <CommercialOpsSummaryBar />

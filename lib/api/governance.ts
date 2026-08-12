@@ -7,7 +7,7 @@
 // POST is idempotent on a caller-supplied decision_id, so a retry cannot inflate
 // the record. Recording is the only write.
 
-import { apiGet, apiPost, type ApiResult, type ApiWriteResult } from "./client";
+import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 
 /** Wire shape from the backend. Field names match the Go json tags exactly. */
 export type GovernanceDecision = {
@@ -350,6 +350,10 @@ export type RecordDecisionInput = {
    *  when it was logged. Omitted means the service stamps receipt time, which
    *  silently conflates the two — so the console always sends it. */
   decidedAt?: string;
+  /** Caller identity, forwarded as X-Principal-Id / X-Tenant-Id /
+   *  X-Legal-Entity-Id. Required for the write: the service answers 401
+   *  missing_principal without X-Principal-Id, before any authz check. */
+  identity: Identity;
 };
 
 /**
@@ -382,7 +386,7 @@ export async function recordDecision(
         : { evaluation_context: input.evaluationContext }),
       ...(input.decidedAt ? { decided_at: input.decidedAt } : {}),
     },
-    { correlationId: input.correlationId },
+    { correlationId: input.correlationId, identity: input.identity },
   );
 }
 

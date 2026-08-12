@@ -108,6 +108,11 @@ export async function submitDecision(
     correlationId,
     evaluationContext,
     decidedAt: new Date().toISOString(),
+    identity: {
+      principalId: identity.principalId,
+      tenantId: identity.tenantId,
+      legalEntityId: identity.legalEntityId,
+    },
   });
 
   if (!result.ok) {

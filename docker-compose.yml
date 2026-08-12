@@ -25,4 +25,4 @@ services:
       - ZOIKO_CORPORATE_ACTIONS_URL=http://host.docker.internal:8123
       - ZOIKO_LEGAL_APPROVALS_URL=http://host.docker.internal:8123
       - ZOIKO_COUNTERPARTY_URL=http://host.docker.internal:8124
-    restart: unless-stopped
+    restart: unless-stop
