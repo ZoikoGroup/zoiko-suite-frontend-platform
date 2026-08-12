@@ -7,7 +7,7 @@
 // /admin matcher.
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   upsertFeatureFlag,
@@ -19,7 +19,11 @@ import {
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type { ConfigActionState, FlagActionState } from "./state";
 
-const PATH = "/admin/settings";
+// Writes end in refresh(), not revalidatePath. Nothing on this route is cached
+// — cacheComponents is off and every panel reads cookies() for the session — so
+// there was no cache for revalidatePath to invalidate, while in a Server
+// Function it additionally refreshes every previously visited page. refresh()
+// re-renders just this route, which is what these actions actually want.
 
 /**
  * The principal a write is attributed to.
@@ -92,7 +96,7 @@ export async function submitFlag(
     return { status: "error", message: explainConfigurationError(result.error.message), key };
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   return result.status === 201
     ? {
@@ -127,7 +131,7 @@ export async function toggleFlag(formData: FormData): Promise<void> {
     principalId,
   });
 
-  revalidatePath(PATH);
+  refresh();
 }
 
 /**
@@ -181,7 +185,7 @@ export async function submitConfigEntry(
     return { status: "error", message: explainConfigurationError(result.error.message), key };
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   // 201 covers two different facts the service does not distinguish: the first
   // write at this scope, and a changed value at a scope that already had one.

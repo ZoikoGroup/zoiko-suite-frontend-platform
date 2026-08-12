@@ -13,7 +13,7 @@
 // grant something the governance plane would refuse.
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   createVendorInvoice,
@@ -28,7 +28,11 @@ import { formatMoney } from "@/lib/format";
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type { PayableActionState } from "./state";
 
-const PATH = "/admin/finance";
+// Writes end in refresh(), not revalidatePath. Nothing on this route is cached
+// — cacheComponents is off and every panel reads cookies() for the session — so
+// there was no cache for revalidatePath to invalidate, while in a Server
+// Function it additionally refreshes every previously visited page. refresh()
+// re-renders just this route, which is what these actions actually want.
 
 async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
@@ -121,7 +125,7 @@ export async function recordVendorInvoice(
     return { status: "error", message: explainPayableError(result.error.message) };
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   const invoice = result.data;
   const money = formatMoney(invoice.amount, invoice.currency_code);
@@ -184,7 +188,7 @@ export async function advanceInvoice(
     return { status: "error", message: explainPayableError(result.error.message) };
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   const invoice = result.data;
   const next = NEXT_STEP[invoice.status];
