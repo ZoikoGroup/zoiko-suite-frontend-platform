@@ -9,7 +9,43 @@
 
 import type { DomainKey } from "@/lib/constants";
 
-/** Service ports per domain, from deployments/docker-compose.yml. */
+/**
+ * Service ports per domain. Every entry below is a real service: it has a
+ * directory under `services/` AND a block in `deployments/docker-compose.yml`,
+ * and the port is the host port that block publishes.
+ *
+ * That was not true of this table. Across the eight domains, **fourteen entries
+ * named services that do not exist** — no directory, no compose block, nothing:
+ *
+ *   payroll         wage-garnishment-svc, direct-deposit-svc, year-end-filing-svc
+ *   hr              talent-management-svc, onboarding-svc
+ *   legal           legal-approvals-svc
+ *   tax             tax-authority-interface-svc
+ *   commercial-ops  supplier-intelligence-svc, catalog-governance-svc,
+ *                   requisition-engine-svc, contract-match-svc,
+ *                   procurement-workflow-svc
+ *   audit-events    audit-event-ingestion-svc, audit-log-query-svc,
+ *                   tamper-detection-svc
+ *
+ * This matters more than a stale list usually would, because of how the probe
+ * treats a failure: a service that cannot be connected to counts as DOWN. So a
+ * domain carrying invented entries could never read "operational" however healthy
+ * its real services were, and the names it listed as down sent whoever read the
+ * grid hunting for containers that have never existed. audit-events could report
+ * at best 1 of 4; commercial-ops at best 5 of 10.
+ *
+ * Several of the invented ports also collided with real, unrelated services —
+ * `direct-deposit-svc` on 8096 (search-indexer-svc), `year-end-filing-svc` on 8097
+ * (workflow-history-svc), `audit-log-query-svc` on 8082 (jurisdiction-svc),
+ * `tamper-detection-svc` on 8085 (policy-svc) — so those probes answered 200 and
+ * reported a non-existent service as READY. That is worse than reporting it down:
+ * the grid was affirmatively vouching for something that isn't there.
+ *
+ * Two services are deliberately NOT listed even though their directories exist:
+ * `withholding-tax-svc` and `filing-preparation-svc` have no compose block, so
+ * they cannot be running and listing them would guarantee the tax domain never
+ * reads operational. Add them here when they are added to compose.
+ */
 const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   finance: [
     { name: "general-ledger-svc", port: 8098 },
@@ -27,17 +63,16 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "benefits-svc", port: 8112 },
     { name: "payroll-tax-svc", port: 8113 },
     { name: "payroll-exceptions-svc", port: 8114 },
-    { name: "wage-garnishment-svc", port: 8095 },
-    { name: "direct-deposit-svc", port: 8096 },
-    { name: "year-end-filing-svc", port: 8097 },
   ],
   hr: [
     { name: "employee-master-svc", port: 8108 },
+    // Both real and both previously missing from this domain, while two invented
+    // services occupied the slots.
+    { name: "employment-contracts-svc", port: 8109 },
     { name: "leave-absence-svc", port: 8115 },
     { name: "org-structure-svc", port: 8116 },
+    { name: "offboarding-severance-svc", port: 8117 },
     { name: "workforce-compliance-svc", port: 8118 },
-    { name: "talent-management-svc", port: 8132 },
-    { name: "onboarding-svc", port: 8133 },
   ],
   legal: [
     { name: "contract-lifecycle-svc", port: 8119 },
@@ -46,16 +81,12 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "board-resolutions-svc", port: 8122 },
     { name: "corporate-actions-svc", port: 8123 },
     { name: "counterparty-management-svc", port: 8124 },
-    { name: "legal-approvals-svc", port: 8123 },
   ],
   tax: [
     { name: "tax-rules-svc", port: 8125 },
     { name: "tax-determination-svc", port: 8126 },
     { name: "vat-gst-svc", port: 8127 },
     { name: "corporate-tax-svc", port: 8128 },
-    { name: "withholding-tax-svc", port: 8129 },
-    { name: "filing-preparation-svc", port: 8130 },
-    { name: "tax-authority-interface-svc", port: 8147 },
   ],
   compliance: [
     { name: "obligations-svc", port: 8088 },
@@ -64,22 +95,16 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   ],
   "commercial-ops": [
     { name: "purchase-request-svc", port: 8100 },
-    { name: "purchase-order-svc", port: 8112 },
-    { name: "supplier-intelligence-svc", port: 8114 },
-    { name: "catalog-governance-svc", port: 8115 },
-    { name: "requisition-engine-svc", port: 8116 },
-    { name: "contract-match-svc", port: 8117 },
+    // 8129, not 8112: compose gave 8112 to benefits-svc as well, so the two could
+    // never both start. Traefik and .env.local both already said 8129.
+    { name: "purchase-order-svc", port: 8129 },
     { name: "invoice-approval-svc", port: 8107 },
     { name: "spend-controls-svc", port: 8131 },
-    { name: "procurement-workflow-svc", port: 8109 },
     { name: "vendor-due-diligence-svc", port: 8135 },
   ],
-  "audit-events": [
-    { name: "audit-event-ingestion-svc", port: 8081 },
-    { name: "audit-log-query-svc", port: 8082 },
-    { name: "audit-event-store-svc", port: 8084 },
-    { name: "tamper-detection-svc", port: 8085 },
-  ],
+  // One service, not four. The other three were invented, and two of them probed
+  // ports belonging to jurisdiction-svc and policy-svc — so they reported READY.
+  "audit-events": [{ name: "audit-event-store-svc", port: 8084 }],
 };
 
 export type DomainHealth = {

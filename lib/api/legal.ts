@@ -63,49 +63,6 @@ export type Contract = {
   updated_at: string;
 };
 
-const MOCK_CONTRACTS: Contract[] = [
-  {
-    contract_id: "cnt-2026-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    contract_type: "MSA",
-    title: "Global Enterprise Cloud Infrastructure MSA",
-    description: "Multi-region cloud infrastructure services agreement with SLA commitments.",
-    counterparty_id: "cp-acme-corp",
-    counterparty_name: "Acme Cloud Infrastructure Inc.",
-    status: "ACTIVE",
-    version: 2,
-    effective_from: "2026-01-01",
-    effective_to: "2028-12-31",
-    signed_at: "2025-12-20T14:30:00Z",
-    signed_by: "legal-director@zoiko.com",
-    currency: "USD",
-    total_value: 450000.0,
-    created_by: "legal-director@zoiko.com",
-    created_at: "2025-12-15T09:00:00Z",
-    updated_at: "2025-12-20T14:30:00Z",
-  },
-  {
-    contract_id: "cnt-2026-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    contract_type: "PARTNERSHIP",
-    title: "Strategic Joint Venture Agreement",
-    description: "Cross-border financial technology partnership for EMEA region.",
-    counterparty_id: "cp-fintech-eu",
-    counterparty_name: "FinTech Alliance Europe GmbH",
-    status: "PENDING_APPROVAL",
-    version: 1,
-    effective_from: "2026-09-01",
-    effective_to: "2029-08-31",
-    currency: "EUR",
-    total_value: 1200000.0,
-    created_by: "corporate-counsel@zoiko.com",
-    created_at: "2026-07-10T11:00:00Z",
-    updated_at: "2026-07-18T16:00:00Z",
-  },
-];
-
 type ContractsResponse = { contracts: Contract[]; total: number };
 
 export async function listContracts(
@@ -117,13 +74,12 @@ export async function listContracts(
   if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
   if (options?.status) url.searchParams.set("status", options.status);
 
-  return fetchServiceWithFallback<ContractsResponse | Contract[], Contract[]>(
+  return fetchDomainService<ContractsResponse | Contract[], Contract[]>(
     url.toString(),
     base,
     "contract-lifecycle-svc",
     identity,
     (body) => (Array.isArray(body) ? body : body.contracts ?? []),
-    MOCK_CONTRACTS
   );
 }
 
@@ -155,74 +111,30 @@ export type ContractTemplate = {
   created_at: string;
 };
 
-const MOCK_CLAUSES: Clause[] = [
-  {
-    clause_id: "cls-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    title: "Standard Limitation of Liability (Cap 100% Fees)",
-    category: "LIABILITY",
-    body: "Neither party shall be liable for indirect or consequential damages. Direct damages capped at 12 months fees.",
-    is_standard: true,
-    jurisdiction_id: "us-fed-01",
-    status: "APPROVED",
-    created_by: "legal-ops@zoiko.com",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    clause_id: "cls-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    title: "Mutual Non-Disclosure & Confidentiality",
-    category: "CONFIDENTIALITY",
-    body: "Recipient shall protect Discloser Confidential Information with at least reasonable care for 5 years.",
-    is_standard: true,
-    jurisdiction_id: "uk-gov-01",
-    status: "APPROVED",
-    created_by: "legal-ops@zoiko.com",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
-
-const MOCK_TEMPLATES: ContractTemplate[] = [
-  {
-    template_id: "tmpl-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    name: "Standard Vendor Master Services Agreement (2026)",
-    contract_type: "MSA",
-    description: "Approved boilerplate template for all IT software vendor procurements.",
-    jurisdiction_id: "us-fed-01",
-    version: 3,
-    status: "PUBLISHED",
-    created_by: "head-of-legal@zoiko.com",
-    created_at: "2026-01-15T10:00:00Z",
-  },
-];
-
 type ClausesResponse = { clauses: Clause[]; total: number };
 type TemplatesResponse = { templates: ContractTemplate[]; total: number };
 
 export async function listClauses(identity?: Identity): Promise<ApiResult<Clause[]>> {
   const base = clauseTemplateUrl();
   const url = `${base}/v1/clauses`;
-  return fetchServiceWithFallback<ClausesResponse, Clause[]>(
+  return fetchDomainService<ClausesResponse, Clause[]>(
     url,
     base,
     "clause-template-svc",
     identity,
     (d) => d.clauses ?? [],
-    MOCK_CLAUSES
   );
 }
 
 export async function listTemplates(identity?: Identity): Promise<ApiResult<ContractTemplate[]>> {
   const base = clauseTemplateUrl();
   const url = `${base}/v1/templates`;
-  return fetchServiceWithFallback<TemplatesResponse, ContractTemplate[]>(
+  return fetchDomainService<TemplatesResponse, ContractTemplate[]>(
     url,
     base,
     "clause-template-svc",
     identity,
     (d) => d.templates ?? [],
-    MOCK_TEMPLATES
   );
 }
 
@@ -255,45 +167,6 @@ export type Obligation = {
   updated_at: string;
 };
 
-const MOCK_OBLIGATIONS: Obligation[] = [
-  {
-    obligation_id: "obl-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    source_type: "CONTRACT",
-    source_id: "cnt-2026-001",
-    title: "SOC 2 Type II Annual Audit Attestation Delivery",
-    description: "Deliver annual third-party SOC 2 Type II audit report to enterprise customer.",
-    obligation_type: "CONTRACTUAL",
-    risk_level: "HIGH",
-    status: "IN_PROGRESS",
-    due_date: "2026-08-31",
-    assigned_to: "security-compliance@zoiko.com",
-    effective_from: "2026-01-01",
-    created_by: "legal-ops@zoiko.com",
-    created_at: "2026-01-10T10:00:00Z",
-    updated_at: "2026-07-01T09:00:00Z",
-  },
-  {
-    obligation_id: "obl-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    source_type: "REGULATION",
-    source_id: "gdpr-art-30",
-    title: "GDPR Records of Processing Activities (RoPA) Review",
-    description: "Annual statutory update of data processing inventory under GDPR Article 30.",
-    obligation_type: "REGULATORY",
-    risk_level: "CRITICAL",
-    status: "PENDING",
-    due_date: "2026-09-30",
-    assigned_to: "dpo@zoiko.com",
-    effective_from: "2026-01-01",
-    created_by: "dpo@zoiko.com",
-    created_at: "2026-02-01T11:00:00Z",
-    updated_at: "2026-02-01T11:00:00Z",
-  },
-];
-
 type ObligationsResponse = { obligations: Obligation[]; total: number };
 
 export async function listObligations(
@@ -306,13 +179,12 @@ export async function listObligations(
   if (options?.status) url.searchParams.set("status", options.status);
   if (options?.sourceType) url.searchParams.set("source_type", options.sourceType);
 
-  return fetchServiceWithFallback<ObligationsResponse, Obligation[]>(
+  return fetchDomainService<ObligationsResponse, Obligation[]>(
     url.toString(),
     base,
     "obligation-tracking-svc",
     identity,
     (d) => d.obligations ?? [],
-    MOCK_OBLIGATIONS
   );
 }
 
@@ -362,45 +234,6 @@ export type BoardResolution = {
   updated_at: string;
 };
 
-const MOCK_MEETINGS: BoardMeeting[] = [
-  {
-    meeting_id: "mtg-2026-q3",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    title: "Q3 2026 Board of Directors Meeting",
-    scheduled_at: "2026-08-15T10:00:00Z",
-    location: "Executive Boardroom & Zoom Video Link",
-    status: "SCHEDULED",
-    effective_from: "2026-08-15",
-    created_by: "corporate-secretary@zoiko.com",
-    created_at: "2026-07-01T09:00:00Z",
-    updated_at: "2026-07-01T09:00:00Z",
-  },
-];
-
-const MOCK_RESOLUTIONS: BoardResolution[] = [
-  {
-    resolution_id: "res-2026-008",
-    meeting_id: "mtg-2026-q3",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    resolution_number: "BR-2026-08",
-    title: "Approval of FY2027 Capital Expenditure Budget ($5M)",
-    content: "RESOLVED, that the Board hereby approves the strategic CapEx budget for expanding regional data centers.",
-    category: "FINANCIAL",
-    status: "PASSED",
-    votes_for: 7,
-    votes_against: 0,
-    abstentions: 0,
-    passed_at: "2026-07-15T15:00:00Z",
-    passed_by: "chairman@zoiko.com",
-    effective_from: "2026-07-15",
-    created_by: "corporate-secretary@zoiko.com",
-    created_at: "2026-07-01T10:00:00Z",
-    updated_at: "2026-07-15T15:00:00Z",
-  },
-];
-
 type MeetingsResponse = { meetings: BoardMeeting[]; total: number };
 type ResolutionsResponse = { resolutions: BoardResolution[]; total: number };
 
@@ -409,13 +242,12 @@ export async function listBoardMeetings(identity?: Identity, legalEntityId?: str
   const url = new URL(`${base}/v1/meetings`);
   if (legalEntityId) url.searchParams.set("legal_entity_id", legalEntityId);
 
-  return fetchServiceWithFallback<MeetingsResponse, BoardMeeting[]>(
+  return fetchDomainService<MeetingsResponse, BoardMeeting[]>(
     url.toString(),
     base,
     "board-resolutions-svc",
     identity,
     (d) => d.meetings ?? [],
-    MOCK_MEETINGS
   );
 }
 
@@ -429,13 +261,12 @@ export async function listBoardResolutions(
   if (options?.meetingId) url.searchParams.set("meeting_id", options.meetingId);
   if (options?.status) url.searchParams.set("status", options.status);
 
-  return fetchServiceWithFallback<ResolutionsResponse, BoardResolution[]>(
+  return fetchDomainService<ResolutionsResponse, BoardResolution[]>(
     url.toString(),
     base,
     "board-resolutions-svc",
     identity,
     (d) => d.resolutions ?? [],
-    MOCK_RESOLUTIONS
   );
 }
 
@@ -457,37 +288,18 @@ export type CorporateAction = {
   created_at: string;
 };
 
-const MOCK_CORPORATE_ACTIONS: CorporateAction[] = [
-  {
-    action_id: "ca-2026-01",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    action_type: "SHARE_ISSUANCE",
-    title: "Series C Preferred Stock Issuance (1,000,000 shares)",
-    description: "Issuance of preferred equity shares pursuant to Board Resolution BR-2026-08.",
-    resolution_id: "res-2026-008",
-    status: "EXECUTED",
-    effective_date: "2026-07-20",
-    executed_at: "2026-07-20T16:00:00Z",
-    executed_by: "general-counsel@zoiko.com",
-    created_by: "general-counsel@zoiko.com",
-    created_at: "2026-07-16T09:00:00Z",
-  },
-];
-
 type CorporateActionsResponse = { actions: CorporateAction[]; total: number };
 
 export async function listCorporateActions(identity?: Identity): Promise<ApiResult<CorporateAction[]>> {
   const base = corporateActionsUrl();
   const url = `${base}/v1/corporate-actions`;
 
-  return fetchServiceWithFallback<CorporateActionsResponse, CorporateAction[]>(
+  return fetchDomainService<CorporateActionsResponse, CorporateAction[]>(
     url,
     base,
     "corporate-actions-svc",
     identity,
     (d) => d.actions ?? [],
-    MOCK_CORPORATE_ACTIONS
   );
 }
 
@@ -508,62 +320,46 @@ export type Counterparty = {
   created_at: string;
 };
 
-const MOCK_COUNTERPARTIES: Counterparty[] = [
-  {
-    counterparty_id: "cp-acme-corp",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    name: "Acme Cloud Infrastructure Inc.",
-    legal_name: "Acme Cloud Technologies Corporation",
-    counterparty_type: "VENDOR",
-    registration_number: "US-DE-4491823",
-    tax_identifier: "EIN-98-1234567",
-    country: "USA",
-    compliance_status: "VERIFIED",
-    risk_rating: "LOW",
-    created_by: "procurement@zoiko.com",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    counterparty_id: "cp-fintech-eu",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    name: "FinTech Alliance Europe GmbH",
-    legal_name: "FinTech Alliance Europe GmbH",
-    counterparty_type: "PARTNER",
-    registration_number: "DE-HRB-881920",
-    tax_identifier: "DE-312984712",
-    country: "DEU",
-    compliance_status: "VERIFIED",
-    risk_rating: "LOW",
-    created_by: "legal-ops@zoiko.com",
-    created_at: "2026-05-10T12:00:00Z",
-  },
-];
-
 type CounterpartiesResponse = { counterparties: Counterparty[]; total: number };
 
 export async function listCounterparties(identity?: Identity): Promise<ApiResult<Counterparty[]>> {
   const base = counterpartyManagementUrl();
   const url = `${base}/v1/counterparties`;
 
-  return fetchServiceWithFallback<CounterpartiesResponse, Counterparty[]>(
+  return fetchDomainService<CounterpartiesResponse, Counterparty[]>(
     url,
     base,
     "counterparty-management-svc",
     identity,
     (d) => d.counterparties ?? [],
-    MOCK_COUNTERPARTIES
   );
 }
 
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
 
-async function fetchServiceWithFallback<TRaw, TOut>(
+/**
+ * GET a JSON resource from a domain service and report what actually happened.
+ *
+ * This replaces `fetchServiceWithFallback`, which substituted hardcoded sample
+ * data and reported it as `{ ok: true }`. It did so in three cases — a non-OK
+ * status, a thrown request, AND **a successful response whose list was empty** —
+ * and that last one is the dangerous one: a healthy service with no records
+ * displayed invented rows indistinguishable from real ones. There was no way for a
+ * caller, or a reader of the page, to tell.
+ *
+ * It also made the panels' own error handling unreachable. Every consumer of these
+ * functions already branches on `!res.ok` to render a "service unavailable" state;
+ * because the helper never returned `ok: false`, that branch was dead code. Failing
+ * honestly is what makes it live again.
+ *
+ * An empty list is now an empty list. An unreachable service is an error.
+ */
+async function fetchDomainService<TRaw, TOut>(
   urlStr: string,
   base: string,
   serviceName: string,
   identity: Identity | undefined,
   transform: (raw: TRaw) => TOut,
-  fallbackData: TOut
 ): Promise<ApiResult<TOut>> {
   const correlationId = crypto.randomUUID();
   const headers: Record<string, string> = {
@@ -574,21 +370,39 @@ async function fetchServiceWithFallback<TRaw, TOut>(
   if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
   if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
 
+  let res: Response;
   try {
-    const res = await fetch(urlStr, {
-      headers,
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) {
-      return { ok: true, data: fallbackData };
-    }
-    const raw: TRaw = await res.json();
-    const resultData = transform(raw);
-    if (Array.isArray(resultData) && resultData.length === 0) {
-      return { ok: true, data: fallbackData };
-    }
-    return { ok: true, data: resultData };
+    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
   } catch {
-    return { ok: true, data: fallbackData };
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
   }
 }

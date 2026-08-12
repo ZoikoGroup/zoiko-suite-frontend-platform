@@ -1,13 +1,24 @@
-// Server-side API clients for the Finance domain services:
-// - general-ledger-svc (8100)
+// Sample-data panels for the Finance domain overview.
+//
+// Nothing in this file calls a backend — every export returns hardcoded rows, so
+// the panels built on it show the domain's shape rather than its contents. The one
+// live, writable Finance client is lib/api/accounts-payable.ts, read by the
+// payables register at the top of /admin/finance.
+//
+// Ports below are as published in deployments/docker-compose.yml, re-checked
+// against it. Six of the nine listed here were previously wrong — including
+// accounts-payable-svc at 8102, which is bank-reconciliation-svc's port — and
+// nothing caught it because no call site existed to break.
+// - general-ledger-svc (8098)
+// - accounts-payable-svc (8099) — see lib/api/accounts-payable.ts
 // - accounts-receivable-svc (8101)
-// - accounts-payable-svc (8102)
-// - bank-reconciliation-svc (8103)
+// - bank-reconciliation-svc (8102)
+// - treasury-svc (8103)
 // - financial-close-svc (8104)
-// - treasury-svc (8105)
-// - intercompany-accounting-svc (8106)
-// - consolidation-svc (8107)
-// - chart-of-accounts-svc (8108)
+// - intercompany-accounting-svc (8105)
+// - consolidation-svc (8106)
+// - a Chart of Accounts service is named in the domain but does not exist yet in
+//   the backend, which is why general-ledger-svc's account_code is unvalidated.
 
 import { type ApiResult, type Identity } from "./client";
 

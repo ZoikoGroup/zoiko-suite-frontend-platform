@@ -21,9 +21,26 @@ const DEFAULTS = {
   jurisdictionRules: "http://localhost:8082",
   purchaseRequest: "http://localhost:8100",
   contracts: "http://localhost:8119",
-  purchaseOrder: "http://localhost:8112",
+  // 8129. This said 8112, which compose also gave to benefits-svc — the two
+  // could never both start. Traefik's all-services.yml has always routed this
+  // service to :8129 and .env.local has always said 8129, so 8112 was wrong in
+  // three places at once; compose now agrees with the other two.
+  purchaseOrder: "http://localhost:8129",
   evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
+  // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is
+  // in the compose file and in health.ts; the stale comment was the only place
+  // that disagreed, and nothing called it, so nothing caught it.
+  accountsPayable: "http://localhost:8099",
+  // 8131. CommercialOpsActionHeader had this as 8113 — transposed digits, the
+  // same class of error as accounts-payable-svc's 8102, and equally uncaught
+  // because the only code path that used a spend-controls URL pointed at a route
+  // the service does not have.
+  spendControls: "http://localhost:8131",
+  // 8135, per compose. The service's own config.Load defaulted PORT to 8132 — a
+  // port nothing in this platform uses — so it was reachable only because compose
+  // overrides PORT. Fixed there too; this is the number both now agree on.
+  vendorDueDiligence: "http://localhost:8135",
   auditEventStore: "http://localhost:8084",
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
@@ -59,6 +76,9 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   purchaseOrder: "/purchase-order-svc",
   evidence: "/evidence-requirements-svc",
   accountsReceivable: "/accounts-receivable-svc",
+  accountsPayable: "/accounts-payable-svc",
+  spendControls: "/spend-controls-svc",
+  vendorDueDiligence: "/vendor-due-diligence-svc",
   auditEventStore: "/audit-event-store-svc",
   tenantRegistry: "/tenant-entity-registry-svc",
   schemaRegistry: "/schema-registry-svc",

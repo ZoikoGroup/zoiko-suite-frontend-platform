@@ -1,18 +1,39 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, FilePlus, Scale, ShieldAlert, ShoppingCart, PackageCheck, Receipt, X } from "lucide-react";
+import { ArrowRight, FilePlus, Scale, ShieldAlert, ShoppingCart, Receipt, X } from "lucide-react";
 
+/**
+ * The procurement sequence, as an explanatory diagram of how the domain fits
+ * together. It deliberately shows no figures.
+ *
+ * It used to show a per-step item count and a worked example on every step, all
+ * hardcoded and none real: "24 items", "128 items", "PR-2026-091 · $450,000 Cloud
+ * Nodes", "Eng Budget Cap $2.5M · Passed", "Acme Cloud Inc. · Passed Score 98%".
+ * Every port was also wrong — :8114, :8113, :8117, :8115, :8112, :8116, not one of
+ * which is the port of the service it was printed beside — and one step named
+ * `procurement-workflow-svc`, which has no directory under services/ and no compose
+ * entry. The vendor step claimed "Sanctions, AML screening, and liability insurance
+ * verification", none of which exists anywhere on this platform.
+ *
+ * The counts and examples are gone rather than corrected, because the live figures
+ * already have a home: the KPI strip above reads them from the four wired services,
+ * and the registers below list the records themselves. A diagram's job here is to
+ * explain the order of the controls, and it can do that honestly without numbers.
+ *
+ * `wired` distinguishes a step the console can actually drive from one that only
+ * exists as a stage in the sequence — a step drawn identically to its neighbours
+ * implies a capability that isn't there.
+ */
 type Step = {
   id: string;
   icon: React.ElementType;
   title: string;
   service: string;
   port: string;
-  count: number;
-  status: "complete" | "active" | "pending";
+  /** True when this step is live and writable from this page. */
+  wired: boolean;
   detail: string;
-  examples: string[];
 };
 
 const STEPS: Step[] = [
@@ -21,66 +42,50 @@ const STEPS: Step[] = [
     icon: FilePlus,
     title: "Purchase Requisition",
     service: "purchase-request-svc",
-    port: ":8114",
-    count: 24,
-    status: "complete",
-    detail: "Internal purchase request created and routed for initial department sign-off.",
-    examples: ["PR-2026-091 · $450,000 Cloud Nodes"],
+    port: ":8100",
+    wired: true,
+    detail:
+      "The requisition an order originates from. Lands PENDING and authorises nothing — purchase-order-svc refuses to issue against anything not APPROVED.",
+  },
+  {
+    id: "diligence",
+    icon: ShieldAlert,
+    title: "Counterparty Screening",
+    service: "vendor-due-diligence-svc",
+    port: ":8135",
+    wired: true,
+    detail:
+      "Screens the counterparty before commitment. The only screening implemented is an exact, case-insensitive match against a hardcoded list of two names — there is no sanctions, AML, or UBO feed on this platform — so a no-match is a recorded absence of a finding and NOT a clearance. The outcome and its evidence are written in one transaction.",
   },
   {
     id: "budget",
     icon: Scale,
     title: "Spend Control Check",
     service: "spend-controls-svc",
-    port: ":8113",
-    count: 24,
-    status: "complete",
-    detail: "Automated budget check against department spending limit cap.",
-    examples: ["Eng Budget Cap $2.5M · Passed"],
-  },
-  {
-    id: "diligence",
-    icon: ShieldAlert,
-    title: "Vendor Diligence",
-    service: "vendor-due-diligence-svc",
-    port: ":8117",
-    count: 128,
-    status: "complete",
-    detail: "Sanctions, AML screening, and liability insurance verification.",
-    examples: ["Acme Cloud Inc. · Passed Score 98%"],
+    port: ":8131",
+    wired: true,
+    detail:
+      "Checks a proposed spend against the limit for that category and entity, per transaction or cumulatively over a calendar month or year. Enforcement is atomic, so simultaneous checks cannot each see the same remaining budget. A cross-currency spend is refused rather than converted.",
   },
   {
     id: "po-issue",
     icon: ShoppingCart,
     title: "PO Issued",
     service: "purchase-order-svc",
-    port: ":8115",
-    count: 14,
-    status: "active",
-    detail: "Legally binding Purchase Order generated and sent to vendor.",
-    examples: ["PO-2026-0412 · $450,000 Issued"],
-  },
-  {
-    id: "receipt",
-    icon: PackageCheck,
-    title: "Goods Receipt",
-    service: "procurement-workflow-svc",
-    port: ":8112",
-    count: 12,
-    status: "active",
-    detail: "Fulfillment confirmation and service delivery receipt logged.",
-    examples: ["GRN-2026-088 · 100% Delivered"],
+    port: ":8129",
+    wired: true,
+    detail:
+      "The binding commitment, issued only against an APPROVED requisition owned by the same tenant and legal entity. Amending restates the total and appends an immutable amendment record; closing is terminal.",
   },
   {
     id: "invoice-match",
     icon: Receipt,
     title: "3-Way Match & Pay",
     service: "invoice-approval-svc",
-    port: ":8116",
-    count: 10,
-    status: "pending",
-    detail: "PO vs Receipt vs Invoice 3-way match approval for AP payment execution.",
-    examples: ["INV-ACME-9912 · Approved for AP"],
+    port: ":8107",
+    wired: false,
+    detail:
+      "Matches order, receipt, and invoice before payment is released. The service exists and is in compose, but it is not yet wired to this console — nothing on this page reads or writes it.",
   },
 ];
 
@@ -93,15 +98,17 @@ export function CommercialOpsProcessTimeline() {
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5 dark:border-slate-800">
         <div>
           <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-            Procurement & Commercial Execution Flow
+            Procurement &amp; Commercial Execution Flow
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Requisition ➔ Spend Control ➔ Vendor Screening ➔ PO Issue ➔ Goods Receipt ➔ 3-Way Match
+            The order the controls run in. Screening the counterparty and checking the limit both
+            come <em>before</em> the commitment. Select a step for what it does — no figures here,
+            they are in the summary and registers above.
           </p>
         </div>
       </div>
 
-      <div className="overflow-x-auto px-5 py-5 scrollbar-thin">
+      <div className="scrollbar-thin overflow-x-auto px-5 py-5">
         <div className="flex min-w-max items-start gap-0">
           {STEPS.map((step, idx) => {
             const isLast = idx === STEPS.length - 1;
@@ -111,25 +118,54 @@ export function CommercialOpsProcessTimeline() {
               <div key={step.id} className="flex items-start">
                 <button
                   onClick={() => setActiveStep(isOpen ? null : step.id)}
-                  className={`flex flex-col items-center gap-2 w-28 text-center rounded-lg p-1.5 transition-all ${
-                    isOpen ? "bg-slate-50 dark:bg-slate-800/60" : "hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
+                  aria-expanded={isOpen}
+                  className={`flex w-32 flex-col items-center gap-2 rounded-lg p-1.5 text-center transition-all ${
+                    isOpen
+                      ? "bg-slate-50 dark:bg-slate-800/60"
+                      : "hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
                   }`}
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full ring-2 ring-amber-200 bg-white dark:bg-slate-900 dark:ring-amber-500/30">
-                    <step.icon className="h-4.5 w-4.5 text-amber-600 dark:text-amber-400" />
+                  <span
+                    className={`flex h-10 w-10 items-center justify-center rounded-full bg-white ring-2 dark:bg-slate-900 ${
+                      step.wired
+                        ? "ring-amber-200 dark:ring-amber-500/30"
+                        : "ring-slate-200 dark:ring-slate-700"
+                    }`}
+                  >
+                    <step.icon
+                      className={`h-4.5 w-4.5 ${
+                        step.wired
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-slate-400 dark:text-slate-500"
+                      }`}
+                      aria-hidden="true"
+                    />
                   </span>
                   <span className="text-[11px] font-semibold leading-tight text-slate-700 dark:text-slate-300">
                     {step.title}
                   </span>
-                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
-                    {step.count} items
+                  {/* Says whether the console can drive this step, rather than an
+                      invented item count. */}
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      step.wired
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+                        : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                    }`}
+                  >
+                    {step.wired ? "live here" : "not wired"}
                   </span>
-                  <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{step.port}</span>
+                  <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                    {step.port}
+                  </span>
                 </button>
                 {!isLast && (
-                  <div className="flex items-center self-center mt-2 mx-1">
+                  <div className="mx-1 mt-2 flex items-center self-center">
                     <div className="h-0.5 w-6 bg-amber-400" />
-                    <ArrowRight className="h-3 w-3 text-slate-300 dark:text-slate-700 -ml-0.5" />
+                    <ArrowRight
+                      className="-ml-0.5 h-3 w-3 text-slate-300 dark:text-slate-700"
+                      aria-hidden="true"
+                    />
                   </div>
                 )}
               </div>
@@ -142,22 +178,28 @@ export function CommercialOpsProcessTimeline() {
         <div className="mx-5 mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 mb-2">
-                <openStep.icon className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{openStep.title}</h4>
-                <span className="font-mono text-[11px] text-slate-500">{openStep.service} {openStep.port}</span>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <openStep.icon
+                  className="h-4 w-4 text-amber-600 dark:text-amber-400"
+                  aria-hidden="true"
+                />
+                <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                  {openStep.title}
+                </h4>
+                <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                  {openStep.service} {openStep.port}
+                </span>
               </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">{openStep.detail}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {openStep.examples.map((ex) => (
-                  <span key={ex} className="rounded-md bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-mono text-slate-600 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400">
-                    {ex}
-                  </span>
-                ))}
-              </div>
+              <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+                {openStep.detail}
+              </p>
             </div>
-            <button onClick={() => setActiveStep(null)} className="rounded-md p-1 text-slate-400 hover:text-slate-600">
-              <X className="h-3.5 w-3.5" />
+            <button
+              onClick={() => setActiveStep(null)}
+              aria-label="Close step detail"
+              className="rounded-md p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
         </div>
