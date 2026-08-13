@@ -1,5 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listTaxRules, listTaxDeterminations, listVATReturns, listCorporateTaxReturns, listWithholdingObligations, listFilingDrafts, listTaxAuthorityInterfaces } from "@/lib/api/tax";
+import {
+  listTaxRules,
+  listTaxDeterminations,
+  listVATReturns,
+  listCorporateTaxReturns,
+  listWithholdingObligations,
+  listFilingDrafts,
+  listTaxAuthorityInterfaces,
+  getTaxSummaryStats,
+  listUpcomingTaxDeadlines,
+  createTaxRule,
+  updateTaxRule,
+  evaluateTaxDetermination,
+  createVATReturn,
+  createFilingDraft,
+  validateFilingDraft,
+  finalizeFilingDraft,
+  updateFilingDraft,
+} from "@/lib/api/tax";
+import type { ApiWriteResult } from "@/lib/api/client";
 import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties } from "@/lib/api/legal";
 import { listJournalEntries, listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
@@ -11,9 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   const { path } = await params;
   const endpoint = path.join("/");
 
-  const tenantId = req.headers.get("X-Tenant-Id") ?? "11111111-1111-1111-1111-111111111111";
-  const principalId = req.headers.get("X-Principal-Id") ?? "33333333-3333-3333-3333-333333333333";
-  const identity = { tenantId, principalId };
+  const identity = callerIdentity(req);
 
   // Tax Domain
   if (endpoint === "tax-rules") {
@@ -43,6 +60,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   if (endpoint === "tax-authority/interfaces") {
     const res = await listTaxAuthorityInterfaces(identity);
     return NextResponse.json({ interfaces: res.ok ? res.data : [] });
+  }
+  if (endpoint === "tax/summary") {
+    const res = await getTaxSummaryStats(identity);
+    return NextResponse.json({ summary: res.ok ? res.data : {} });
+  }
+  if (endpoint === "tax/deadlines") {
+    const res = await listUpcomingTaxDeadlines(identity);
+    return NextResponse.json({ deadlines: res.ok ? res.data : [] });
   }
 
   // Legal Domain
@@ -156,6 +181,41 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   const { path } = await params;
   const endpoint = path.join("/");
   const body = await req.json().catch(() => ({}));
+  const identity = callerIdentity(req);
+
+  // Tax Domain — writes are forwarded to the real backend services.
+  if (endpoint === "tax-rules") {
+    return writeResponse(
+      await createTaxRule(
+        { ...body, created_by: body.created_by ?? identity.principalId },
+        identity,
+      ),
+    );
+  }
+  if (endpoint === "tax-determinations") {
+    return writeResponse(await evaluateTaxDetermination(body, identity));
+  }
+  if (endpoint === "vat-returns") {
+    return writeResponse(
+      await createVATReturn({ ...body, created_by: body.created_by ?? identity.principalId }, identity),
+    );
+  }
+  if (endpoint === "filing-preparation/drafts") {
+    return writeResponse(
+      await createFilingDraft(
+        { ...body, created_by: body.created_by ?? identity.principalId },
+        identity,
+      ),
+    );
+  }
+  const validateMatch = endpoint.match(/^filing-preparation\/drafts\/([^/]+)\/validate$/);
+  if (validateMatch) {
+    return writeResponse(await validateFilingDraft(validateMatch[1], body, identity));
+  }
+  const finalizeMatch = endpoint.match(/^filing-preparation\/drafts\/([^/]+)\/finalize$/);
+  if (finalizeMatch) {
+    return writeResponse(await finalizeFilingDraft(finalizeMatch[1], body, identity));
+  }
 
   return NextResponse.json({
     message: `Resource created/processed successfully at /v1/${endpoint}`,
@@ -163,4 +223,49 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     status: "CREATED",
     timestamp: new Date().toISOString(),
   }, { status: 201 });
+}
+
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  const endpoint = path.join("/");
+  const body = await req.json().catch(() => ({}));
+  const identity = callerIdentity(req);
+
+  // Tax Domain — idempotent updates forwarded to the real backend services.
+  const ruleMatch = endpoint.match(/^tax-rules\/([^/]+)$/);
+  if (ruleMatch) {
+    return writeResponse(
+      await updateTaxRule(ruleMatch[1], { ...body, updated_by: body.updated_by ?? identity.principalId }, identity),
+    );
+  }
+  const draftMatch = endpoint.match(/^filing-preparation\/drafts\/([^/]+)$/);
+  if (draftMatch) {
+    return writeResponse(await updateFilingDraft(draftMatch[1], body, identity));
+  }
+
+  return NextResponse.json({
+    message: `Resource updated at /v1/${endpoint}`,
+    received_payload: body,
+    status: "UPDATED",
+    timestamp: new Date().toISOString(),
+  }, { status: 200 });
+}
+
+/**
+ * Map an ApiWriteResult to an HTTP response. Backend error detail is passed
+ * through so validation failures reach the UI intact.
+ */
+function writeResponse<T>(res: ApiWriteResult<T>): NextResponse {
+  if (res.ok) return NextResponse.json(res.data, { status: res.status });
+  const status =
+    res.error.status ??
+    (res.error.kind === "unreachable" || res.error.kind === "timeout" ? 502 : 500);
+  return NextResponse.json({ error: res.error.message }, { status });
+}
+
+/** Caller identity from the X-* headers, with the console demo defaults. */
+function callerIdentity(req: NextRequest) {
+  const tenantId = req.headers.get("X-Tenant-Id") ?? "11111111-1111-1111-1111-111111111111";
+  const principalId = req.headers.get("X-Principal-Id") ?? "33333333-3333-3333-3333-333333333333";
+  return { tenantId, principalId };
 }

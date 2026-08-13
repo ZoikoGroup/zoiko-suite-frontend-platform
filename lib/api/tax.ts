@@ -1,45 +1,38 @@
 // Server-side API clients for the Tax domain services:
-// - tax-rules-svc (8125)
-// - tax-determination-svc (8126)
-// - vat-gst-svc (8127)
-// - corporate-tax-svc (8128)
-// - withholding-tax-svc (8129)
-// - filing-preparation-svc (8130)
-// - tax-authority-interface-svc (8147)
+// - tax-rules-svc        (taxRules         → :8125)
+// - tax-determination-svc(taxDetermination  → :8126)
+// - vat-gst-svc          (vatGst            → :8127)
+// - corporate-tax-svc    (corporateTax      → :8128)
+// - withholding-tax-svc  (withholdingTax    → :8129)
+// - filing-preparation-svc(filingPreparation → :8130)
+// - tax-authority-interface-svc(taxAuthorityInterface → :8147)
+//
+// All service names are registered in lib/api/config.ts.
+// All calls use apiGet() from lib/api/client.ts so that:
+//   1. Errors surface as ok:false (panels can render CloudOff states)
+//   2. The shared REQUEST_TIMEOUT_MS and X-Correlation-ID headers are applied
+//   3. Gateway routing works transparently when ZOIKO_USE_GATEWAY=true
 
-import { type ApiResult, type Identity } from "./client";
+import {
+  apiGet,
+  apiPost,
+  apiPut,
+  type ApiResult,
+  type ApiWriteResult,
+  type Identity,
+} from "./client";
 
-function taxRulesUrl(): string {
-  return (process.env.ZOIKO_TAX_RULES_URL ?? "http://localhost:8125").replace(/\/$/, "");
-}
+// ─── 1. Tax Rules ─────────────────────────────────────────────────────────────
 
-function taxDeterminationUrl(): string {
-  return (process.env.ZOIKO_TAX_DETERMINATION_URL ?? "http://localhost:8126").replace(/\/$/, "");
-}
+export type TaxCategory =
+  | "VAT"
+  | "GST"
+  | "SALES_TAX"
+  | "CORPORATE_INCOME"
+  | "WITHHOLDING"
+  | "EXCISE"
+  | "CUSTOMS";
 
-function vatGstUrl(): string {
-  return (process.env.ZOIKO_VAT_GST_URL ?? "http://localhost:8127").replace(/\/$/, "");
-}
-
-function corporateTaxUrl(): string {
-  return (process.env.ZOIKO_CORPORATE_TAX_URL ?? "http://localhost:8128").replace(/\/$/, "");
-}
-
-function withholdingTaxUrl(): string {
-  return (process.env.ZOIKO_WITHHOLDING_TAX_URL ?? "http://localhost:8129").replace(/\/$/, "");
-}
-
-function filingPrepUrl(): string {
-  return (process.env.ZOIKO_FILING_PREPARATION_URL ?? "http://localhost:8130").replace(/\/$/, "");
-}
-
-function taxAuthorityUrl(): string {
-  return (process.env.ZOIKO_TAX_AUTHORITY_URL ?? "http://localhost:8147").replace(/\/$/, "");
-}
-
-// ─── 1. Tax Rules ────────────────────────────────────────────────────────────
-
-export type TaxCategory = "VAT" | "GST" | "SALES_TAX" | "CORPORATE_INCOME" | "WITHHOLDING" | "EXCISE" | "CUSTOMS";
 export type RuleStatus = "DRAFT" | "ACTIVE" | "DEPRECATED";
 
 export type TaxRule = {
@@ -61,7 +54,7 @@ export type TaxRule = {
   updated_at: string;
 };
 
-const MOCK_TAX_RULES: TaxRule[] = [
+export const MOCK_TAX_RULES: TaxRule[] = [
   {
     rule_id: "rule-001",
     tenant_id: "11111111-1111-1111-1111-111111111111",
@@ -130,25 +123,69 @@ export async function listTaxRules(
   identity?: Identity,
   options?: { jurisdictionId?: string; category?: string; status?: string }
 ): Promise<ApiResult<TaxRule[]>> {
-  const base = taxRulesUrl();
-  const url = new URL(`${base}/v1/tax-rules`);
-  if (options?.jurisdictionId) url.searchParams.set("jurisdiction_id", options.jurisdictionId);
-  if (options?.category) url.searchParams.set("category", options.category);
-  if (options?.status) url.searchParams.set("status", options.status);
-
-  return fetchServiceWithFallback<TaxRulesResponse, TaxRule[]>(
-    url.toString(),
-    base,
-    "tax-rules-svc",
+  const res = await apiGet<TaxRulesResponse>("taxRules", "/v1/tax-rules", {
     identity,
-    (d) => d.rules ?? [],
-    MOCK_TAX_RULES
-  );
+    query: {
+      jurisdiction_id: options?.jurisdictionId,
+      category: options?.category,
+      status: options?.status,
+    },
+  });
+
+  if (!res.ok) return res;
+  const rules = res.data.rules ?? [];
+  // Fall back to mock if the service returned an empty list (fresh DB)
+  return { ok: true, data: rules.length > 0 ? rules : MOCK_TAX_RULES };
 }
 
-// ─── 2. Tax Determination ───────────────────────────────────────────────────
+export type CreateTaxRuleInput = {
+  jurisdiction_id: string;
+  rule_code: string;
+  name: string;
+  category: TaxCategory;
+  tax_rate_percentage: number;
+  standard_deductions?: number;
+  exemptions_json?: string;
+  effective_from: string;
+  effective_to?: string;
+  created_by?: string;
+};
 
-export type DeterminationStatus = "CALCULATED" | "APPLIED" | "OVERRIDDEN" | "REVERSED";
+/** POST /v1/tax-rules — registers a new rule in tax-rules-svc (:8125). */
+export async function createTaxRule(
+  input: CreateTaxRuleInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<TaxRule>> {
+  return apiPost<TaxRule>("taxRules", "/v1/tax-rules", input, { identity });
+}
+
+export type UpdateTaxRuleInput = {
+  name?: string;
+  category?: TaxCategory;
+  tax_rate_percentage?: number;
+  standard_deductions?: number;
+  exemptions_json?: string;
+  status?: RuleStatus;
+  effective_to?: string;
+  updated_by?: string;
+};
+
+/** PUT /v1/tax-rules/{id} — partial update of an existing rule. */
+export async function updateTaxRule(
+  ruleId: string,
+  input: UpdateTaxRuleInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<TaxRule>> {
+  return apiPut<TaxRule>("taxRules", `/v1/tax-rules/${ruleId}`, input, { identity });
+}
+
+// ─── 2. Tax Determination ────────────────────────────────────────────────────
+
+export type DeterminationStatus =
+  | "CALCULATED"
+  | "APPLIED"
+  | "OVERRIDDEN"
+  | "REVERSED";
 
 export type TaxDetermination = {
   determination_id: string;
@@ -174,7 +211,7 @@ export type TaxDetermination = {
   updated_at: string;
 };
 
-const MOCK_TAX_DETERMINATIONS: TaxDetermination[] = [
+export const MOCK_TAX_DETERMINATIONS: TaxDetermination[] = [
   {
     determination_id: "det-001",
     tenant_id: "11111111-1111-1111-1111-111111111111",
@@ -227,23 +264,52 @@ export async function listTaxDeterminations(
   identity?: Identity,
   options?: { legalEntityId?: string; transactionId?: string; status?: string }
 ): Promise<ApiResult<TaxDetermination[]>> {
-  const base = taxDeterminationUrl();
-  const url = new URL(`${base}/v1/tax-determinations`);
-  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
-  if (options?.transactionId) url.searchParams.set("transaction_id", options.transactionId);
-  if (options?.status) url.searchParams.set("status", options.status);
-
-  return fetchServiceWithFallback<DeterminationsResponse, TaxDetermination[]>(
-    url.toString(),
-    base,
-    "tax-determination-svc",
-    identity,
-    (d) => d.determinations ?? [],
-    MOCK_TAX_DETERMINATIONS
+  const res = await apiGet<DeterminationsResponse>(
+    "taxDetermination",
+    "/v1/tax-determinations",
+    {
+      identity,
+      query: {
+        legal_entity_id: options?.legalEntityId,
+        transaction_id: options?.transactionId,
+        status: options?.status,
+      },
+    }
   );
+
+  if (!res.ok) return res;
+  const dets = res.data.determinations ?? [];
+  return { ok: true, data: dets.length > 0 ? dets : MOCK_TAX_DETERMINATIONS };
 }
 
-// ─── 3. VAT / GST ─────────────────────────────────────────────────────────────
+export type EvaluateTaxDeterminationInput = {
+  transaction_id: string;
+  source_module?: string;
+  legal_entity_id: string;
+  jurisdiction_id: string;
+  tax_category: string;
+  gross_amount: number;
+  exempt_amount?: number;
+  currency?: string;
+  effective_from?: string;
+  evaluated_by?: string;
+};
+
+/**
+ * POST /v1/tax-determinations — runs the determination engine in
+ * tax-determination-svc (:8126). The service resolves the active rule from
+ * tax-rules-svc, computes the tax, and stores the CALCULATED determination.
+ */
+export async function evaluateTaxDetermination(
+  input: EvaluateTaxDeterminationInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<TaxDetermination>> {
+  return apiPost<TaxDetermination>("taxDetermination", "/v1/tax-determinations", input, {
+    identity,
+  });
+}
+
+// ─── 3. VAT / GST ────────────────────────────────────────────────────────────
 
 export type VATFilingStatus = "DRAFT" | "FILED" | "ACCEPTED" | "REJECTED";
 
@@ -270,7 +336,7 @@ export type VATReturn = {
   updated_at: string;
 };
 
-const MOCK_VAT_RETURNS: VATReturn[] = [
+export const MOCK_VAT_RETURNS: VATReturn[] = [
   {
     return_id: "vat-2026-q1",
     tenant_id: "11111111-1111-1111-1111-111111111111",
@@ -321,24 +387,49 @@ export async function listVATReturns(
   identity?: Identity,
   options?: { legalEntityId?: string; status?: string }
 ): Promise<ApiResult<VATReturn[]>> {
-  const base = vatGstUrl();
-  const url = new URL(`${base}/v1/vat-returns`);
-  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
-  if (options?.status) url.searchParams.set("status", options.status);
-
-  return fetchServiceWithFallback<VATReturnsResponse, VATReturn[]>(
-    url.toString(),
-    base,
-    "vat-gst-svc",
+  const res = await apiGet<VATReturnsResponse>("vatGst", "/v1/vat-returns", {
     identity,
-    (d) => d.vat_returns ?? [],
-    MOCK_VAT_RETURNS
-  );
+    query: {
+      legal_entity_id: options?.legalEntityId,
+      status: options?.status,
+    },
+  });
+
+  if (!res.ok) return res;
+  const returns = res.data.vat_returns ?? [];
+  return { ok: true, data: returns.length > 0 ? returns : MOCK_VAT_RETURNS };
 }
 
-// ─── 4. Corporate Tax ────────────────────────────────────────────────────────
+export type CreateVATReturnInput = {
+  legal_entity_id: string;
+  jurisdiction_id: string;
+  tax_registration_number: string;
+  tax_period: string;
+  total_sales_amount: number;
+  total_purchase_amount: number;
+  output_tax_amount: number;
+  input_tax_amount: number;
+  currency: string;
+  effective_from?: string;
+  created_by?: string;
+};
 
-export type CorporateFilingStatus = "DRAFT" | "SUBMITTED" | "ASSESSED" | "SETTLED" | "DISPUTED";
+/** POST /v1/vat-returns — records a new VAT / GST return in vat-gst-svc (:8127). */
+export async function createVATReturn(
+  input: CreateVATReturnInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<VATReturn>> {
+  return apiPost<VATReturn>("vatGst", "/v1/vat-returns", input, { identity });
+}
+
+// ─── 4. Corporate Tax ─────────────────────────────────────────────────────────
+
+export type CorporateFilingStatus =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "ASSESSED"
+  | "SETTLED"
+  | "DISPUTED";
 
 export type CorporateTaxReturn = {
   return_id: string;
@@ -372,7 +463,7 @@ export type CorporateTaxReturn = {
   updated_at: string;
 };
 
-const MOCK_CORPORATE_RETURNS: CorporateTaxReturn[] = [
+export const MOCK_CORPORATE_RETURNS: CorporateTaxReturn[] = [
   {
     return_id: "cit-2025-us",
     tenant_id: "11111111-1111-1111-1111-111111111111",
@@ -409,25 +500,32 @@ export async function listCorporateTaxReturns(
   identity?: Identity,
   options?: { legalEntityId?: string; fiscalYear?: number; status?: string }
 ): Promise<ApiResult<CorporateTaxReturn[]>> {
-  const base = corporateTaxUrl();
-  const url = new URL(`${base}/v1/corporate-tax-returns`);
-  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
-  if (options?.fiscalYear) url.searchParams.set("fiscal_year", String(options.fiscalYear));
-  if (options?.status) url.searchParams.set("status", options.status);
-
-  return fetchServiceWithFallback<CorporateTaxResponse, CorporateTaxReturn[]>(
-    url.toString(),
-    base,
-    "corporate-tax-svc",
-    identity,
-    (d) => d.returns ?? [],
-    MOCK_CORPORATE_RETURNS
+  const res = await apiGet<CorporateTaxResponse>(
+    "corporateTax",
+    "/v1/corporate-tax-returns",
+    {
+      identity,
+      query: {
+        legal_entity_id: options?.legalEntityId,
+        fiscal_year: options?.fiscalYear,
+        status: options?.status,
+      },
+    }
   );
+
+  if (!res.ok) return res;
+  const returns = res.data.returns ?? [];
+  return { ok: true, data: returns.length > 0 ? returns : MOCK_CORPORATE_RETURNS };
 }
 
-// ─── 5. Withholding Tax ──────────────────────────────────────────────────────
+// ─── 5. Withholding Tax ───────────────────────────────────────────────────────
 
-export type WithholdingStatus = "DRAFT" | "CALCULATED" | "PENDING_REMITTANCE" | "REMITTED" | "CANCELLED";
+export type WithholdingStatus =
+  | "DRAFT"
+  | "CALCULATED"
+  | "PENDING_REMITTANCE"
+  | "REMITTED"
+  | "CANCELLED";
 
 export type WithholdingTaxObligation = {
   obligation_id: string;
@@ -457,7 +555,7 @@ export type WithholdingTaxObligation = {
   updated_at: string;
 };
 
-const MOCK_WITHHOLDING_OBLIGATIONS: WithholdingTaxObligation[] = [
+export const MOCK_WITHHOLDING_OBLIGATIONS: WithholdingTaxObligation[] = [
   {
     obligation_id: "wht-001",
     tenant_id: "11111111-1111-1111-1111-111111111111",
@@ -532,24 +630,33 @@ export async function listWithholdingObligations(
   identity?: Identity,
   options?: { legalEntityId?: string; status?: string }
 ): Promise<ApiResult<WithholdingTaxObligation[]>> {
-  const base = withholdingTaxUrl();
-  const url = new URL(`${base}/v1/withholding-tax`);
-  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
-  if (options?.status) url.searchParams.set("status", options.status);
-
-  return fetchServiceWithFallback<WithholdingResponse, WithholdingTaxObligation[]>(
-    url.toString(),
-    base,
-    "withholding-tax-svc",
-    identity,
-    (d) => d.obligations ?? [],
-    MOCK_WITHHOLDING_OBLIGATIONS
+  const res = await apiGet<WithholdingResponse>(
+    "withholdingTax",
+    "/v1/withholding-tax",
+    {
+      identity,
+      query: {
+        legal_entity_id: options?.legalEntityId,
+        status: options?.status,
+      },
+    }
   );
+
+  if (!res.ok) return res;
+  const obligations = res.data.obligations ?? [];
+  return {
+    ok: true,
+    data: obligations.length > 0 ? obligations : MOCK_WITHHOLDING_OBLIGATIONS,
+  };
 }
 
-// ─── 6. Filing Preparation ───────────────────────────────────────────────────
+// ─── 6. Filing Preparation ────────────────────────────────────────────────────
 
-export type ValidationStatus = "UNVALIDATED" | "PREPARED" | "BLOCKED" | "FINALIZED";
+export type ValidationStatus =
+  | "UNVALIDATED"
+  | "PREPARED"
+  | "BLOCKED"
+  | "FINALIZED";
 
 export type FilingDraft = {
   draft_id: string;
@@ -569,7 +676,7 @@ export type FilingDraft = {
   updated_at: string;
 };
 
-const MOCK_FILING_DRAFTS: FilingDraft[] = [
+export const MOCK_FILING_DRAFTS: FilingDraft[] = [
   {
     draft_id: "draft-hmrc-q2",
     tenant_id: "11111111-1111-1111-1111-111111111111",
@@ -609,22 +716,103 @@ export async function listFilingDrafts(
   identity?: Identity,
   options?: { legalEntityId?: string; status?: string }
 ): Promise<ApiResult<FilingDraft[]>> {
-  const base = filingPrepUrl();
-  const url = new URL(`${base}/v1/filing-preparation/drafts`);
-  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
-  if (options?.status) url.searchParams.set("status", options.status);
+  const res = await apiGet<FilingDraftsResponse>(
+    "filingPreparation",
+    "/v1/filing-preparation/drafts",
+    {
+      identity,
+      query: {
+        legal_entity_id: options?.legalEntityId,
+        status: options?.status,
+      },
+    }
+  );
 
-  return fetchServiceWithFallback<FilingDraftsResponse, FilingDraft[]>(
-    url.toString(),
-    base,
-    "filing-preparation-svc",
+  if (!res.ok) return res;
+  const drafts = res.data.drafts ?? [];
+  return { ok: true, data: drafts.length > 0 ? drafts : MOCK_FILING_DRAFTS };
+}
+
+export type CreateFilingDraftInput = {
+  legal_entity_id: string;
+  jurisdiction_id: string;
+  filing_type?: string;
+  period_key: string;
+  due_date: string;
+  payload_data?: string;
+  evidence_manifest_ref?: string;
+  notes?: string;
+  created_by?: string;
+};
+
+/** POST /v1/filing-preparation/drafts — creates a draft in filing-preparation-svc (:8130). */
+export async function createFilingDraft(
+  input: CreateFilingDraftInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<FilingDraft>> {
+  return apiPost<FilingDraft>("filingPreparation", "/v1/filing-preparation/drafts", input, {
     identity,
-    (d) => d.drafts ?? [],
-    MOCK_FILING_DRAFTS
+  });
+}
+
+export type ValidateFilingDraftInput = {
+  validation_status?: string;
+  block_reasons?: string;
+};
+
+/** POST /v1/filing-preparation/drafts/{id}/validate — runs validation on a draft. */
+export async function validateFilingDraft(
+  draftId: string,
+  input: ValidateFilingDraftInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<FilingDraft>> {
+  return apiPost<FilingDraft>(
+    "filingPreparation",
+    `/v1/filing-preparation/drafts/${draftId}/validate`,
+    input,
+    { identity },
   );
 }
 
-// ─── 7. Tax Authority Interface ──────────────────────────────────────────────
+export type FinalizeFilingDraftInput = {
+  notes?: string;
+};
+
+/** POST /v1/filing-preparation/drafts/{id}/finalize — marks a draft ready for authority submission. */
+export async function finalizeFilingDraft(
+  draftId: string,
+  input: FinalizeFilingDraftInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<FilingDraft>> {
+  return apiPost<FilingDraft>(
+    "filingPreparation",
+    `/v1/filing-preparation/drafts/${draftId}/finalize`,
+    input,
+    { identity },
+  );
+}
+
+export type UpdateFilingDraftInput = {
+  payload_data?: string;
+  evidence_manifest_ref?: string;
+  notes?: string;
+};
+
+/** PUT /v1/filing-preparation/drafts/{id} — updates draft payload / evidence / notes. */
+export async function updateFilingDraft(
+  draftId: string,
+  input: UpdateFilingDraftInput,
+  identity?: Identity,
+): Promise<ApiWriteResult<FilingDraft>> {
+  return apiPut<FilingDraft>(
+    "filingPreparation",
+    `/v1/filing-preparation/drafts/${draftId}`,
+    input,
+    { identity },
+  );
+}
+
+// ─── 7. Tax Authority Interface ───────────────────────────────────────────────
 
 export type TaxAuthorityInterface = {
   interface_id: string;
@@ -639,7 +827,7 @@ export type TaxAuthorityInterface = {
   created_at: string;
 };
 
-const MOCK_TAX_AUTHORITY_INTERFACES: TaxAuthorityInterface[] = [
+export const MOCK_TAX_AUTHORITY_INTERFACES: TaxAuthorityInterface[] = [
   {
     interface_id: "if-hmrc-mtd",
     tenant_id: "11111111-1111-1111-1111-111111111111",
@@ -683,20 +871,21 @@ type TaxAuthorityResponse = { interfaces: TaxAuthorityInterface[]; total: number
 export async function listTaxAuthorityInterfaces(
   identity?: Identity
 ): Promise<ApiResult<TaxAuthorityInterface[]>> {
-  const base = taxAuthorityUrl();
-  const url = new URL(`${base}/v1/tax-authority/interfaces`);
-
-  return fetchServiceWithFallback<TaxAuthorityResponse, TaxAuthorityInterface[]>(
-    url.toString(),
-    base,
-    "tax-authority-interface-svc",
-    identity,
-    (d) => d.interfaces ?? [],
-    MOCK_TAX_AUTHORITY_INTERFACES
+  const res = await apiGet<TaxAuthorityResponse>(
+    "taxAuthorityInterface",
+    "/v1/tax-authority/interfaces",
+    { identity }
   );
+
+  if (!res.ok) return res;
+  const interfaces = res.data.interfaces ?? [];
+  return {
+    ok: true,
+    data: interfaces.length > 0 ? interfaces : MOCK_TAX_AUTHORITY_INTERFACES,
+  };
 }
 
-// ─── 8. Tax Summary Stats (KPI Aggregator) ──────────────────────────────────
+// ─── 8. Tax Summary Stats (KPI Aggregator) ────────────────────────────────────
 
 export type TaxSummaryStats = {
   activeRules: number;
@@ -709,17 +898,21 @@ export type TaxSummaryStats = {
   activeAuthorityConnections: number;
 };
 
-export async function getTaxSummaryStats(identity?: Identity): Promise<ApiResult<TaxSummaryStats>> {
-  const [rulesRes, detRes, vatRes, corpRes, whtRes, draftsRes, authRes] = await Promise.all([
-    listTaxRules(identity),
-    listTaxDeterminations(identity),
-    listVATReturns(identity),
-    listCorporateTaxReturns(identity),
-    listWithholdingObligations(identity),
-    listFilingDrafts(identity),
-    listTaxAuthorityInterfaces(identity),
-  ]);
+export async function getTaxSummaryStats(
+  identity?: Identity
+): Promise<ApiResult<TaxSummaryStats>> {
+  const [rulesRes, detRes, vatRes, corpRes, whtRes, draftsRes, authRes] =
+    await Promise.all([
+      listTaxRules(identity),
+      listTaxDeterminations(identity),
+      listVATReturns(identity),
+      listCorporateTaxReturns(identity),
+      listWithholdingObligations(identity),
+      listFilingDrafts(identity),
+      listTaxAuthorityInterfaces(identity),
+    ]);
 
+  // Each function already applies mock fallback, so we always get data arrays here
   const rules = rulesRes.ok ? rulesRes.data : MOCK_TAX_RULES;
   const dets = detRes.ok ? detRes.data : MOCK_TAX_DETERMINATIONS;
   const vatReturns = vatRes.ok ? vatRes.data : MOCK_VAT_RETURNS;
@@ -774,7 +967,9 @@ export type TaxDeadline = {
   urgency: "overdue" | "urgent" | "upcoming" | "comfortable";
 };
 
-export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<ApiResult<TaxDeadline[]>> {
+export async function listUpcomingTaxDeadlines(
+  identity?: Identity
+): Promise<ApiResult<TaxDeadline[]>> {
   const [draftsRes, whtRes] = await Promise.all([
     listFilingDrafts(identity),
     listWithholdingObligations(identity),
@@ -807,12 +1002,12 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
         urgency: urgency(days),
       };
     }),
-    // WHT remittances pending
+    // WHT remittances pending (30-day remittance window)
     ...whtObligations
       .filter((w) => w.status === "PENDING_REMITTANCE" || w.status === "CALCULATED")
       .map((w) => {
         const due = new Date(w.effective_from);
-        due.setDate(due.getDate() + 30); // 30-day remittance window
+        due.setDate(due.getDate() + 30);
         const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         return {
           id: w.obligation_id,
@@ -827,45 +1022,4 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
   ].sort((a, b) => a.daysUntilDue - b.daysUntilDue);
 
   return { ok: true, data: deadlines };
-}
-
-// ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
-
-
-async function fetchServiceWithFallback<TRaw, TOut>(
-  urlStr: string,
-  base: string,
-  serviceName: string,
-  identity: Identity | undefined,
-  transform: (raw: TRaw) => TOut,
-  fallbackData: TOut
-): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "X-Correlation-ID": correlationId,
-  };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
-
-  try {
-    const res = await fetch(urlStr, {
-      headers,
-      signal: AbortSignal.timeout(500),
-    });
-    if (!res.ok) {
-      // If service responds non-200, return fallback data gracefully
-      return { ok: true, data: fallbackData };
-    }
-    const raw: TRaw = await res.json();
-    const resultData = transform(raw);
-    if (Array.isArray(resultData) && resultData.length === 0) {
-      return { ok: true, data: fallbackData };
-    }
-    return { ok: true, data: resultData };
-  } catch {
-    // If backend is unreachable or times out, fallback to rich domain dataset
-    return { ok: true, data: fallbackData };
-  }
 }

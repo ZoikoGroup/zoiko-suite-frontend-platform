@@ -213,3 +213,75 @@ export async function apiPost<T>(
     };
   }
 }
+
+/**
+ * PUT a JSON body to a backend service.
+ *
+ * Mirrors apiPost, but uses PUT for idempotent full/partial updates (e.g. the
+ * tax-rules-svc UpdateTaxRule and filing-preparation-svc Update endpoints,
+ * which map to `r.Put("/{id}", ...)`).
+ */
+export async function apiPut<T>(
+  service: ServiceName,
+  path: string,
+  body: unknown,
+  options: { correlationId?: string; identity?: Identity } = {},
+): Promise<ApiWriteResult<T>> {
+  const url = serviceUrl(service) + path;
+  const correlationId = options.correlationId ?? crypto.randomUUID();
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Correlation-ID": correlationId,
+        ...identityHeaders(options.identity),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${service} did not respond within ${REQUEST_TIMEOUT_MS}ms`
+          : `${service} is unreachable at ${serviceUrl(service)}`,
+      },
+    };
+  }
+
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((body: { error?: string; field?: string; message?: string; detail?: string }) =>
+        [body.error, body.field, body.message, body.detail].filter(Boolean).join(": "),
+      )
+      .catch(() => "");
+
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: response.status,
+        message: detail
+          ? `${service} rejected the update (${response.status}) — ${detail}`
+          : `${service} returned ${response.status} for ${path}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, status: response.status, data: (await response.json()) as T };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${service} returned a non-JSON body for ${path}` },
+    };
+  }
+}

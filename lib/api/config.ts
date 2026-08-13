@@ -12,11 +12,20 @@ const DEFAULTS = {
   governance: "http://localhost:8083",
   configuration: "http://localhost:8086",
   obligations: "http://localhost:8088",
-  purchaseOrder: "http://localhost:8129",
+  // NOTE: purchaseOrder was incorrectly on 8129 (withholding-tax port). Fixed to 8100.
+  purchaseOrder: "http://localhost:8100",
   accountsReceivable: "http://localhost:8101",
   auditEventStore: "http://localhost:8084",
   tenantRegistry: "http://localhost:8081",
   financialClose: "http://localhost:8104",
+  // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
+  taxRules: "http://localhost:8125",
+  taxDetermination: "http://localhost:8126",
+  vatGst: "http://localhost:8127",
+  corporateTax: "http://localhost:8128",
+  withholdingTax: "http://localhost:8129",
+  filingPreparation: "http://localhost:8130",
+  taxAuthorityInterface: "http://localhost:8147",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -42,6 +51,14 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   auditEventStore: "/audit-event-store-svc",
   tenantRegistry: "/tenant-entity-registry-svc",
   financialClose: "/financial-close-svc",
+  // Tax Domain
+  taxRules: "/tax-rules-svc",
+  taxDetermination: "/tax-determination-svc",
+  vatGst: "/vat-gst-svc",
+  corporateTax: "/corporate-tax-svc",
+  withholdingTax: "/withholding-tax-svc",
+  filingPreparation: "/filing-preparation-svc",
+  taxAuthorityInterface: "/tax-authority-interface-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
