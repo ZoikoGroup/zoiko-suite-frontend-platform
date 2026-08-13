@@ -37,45 +37,17 @@ export type Employee = {
   created_at: string;
 };
 
-const MOCK_EMPLOYEES: Employee[] = [
-  {
-    employee_id: "emp-101",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    first_name: "Sarah",
-    last_name: "Jenkins",
-    email: "s.jenkins@zoiko.com",
-    employment_type: "FULL_TIME",
-    status: "ACTIVE",
-    hire_date: "2024-03-15",
-    created_at: "2024-03-15T09:00:00Z",
-  },
-  {
-    employee_id: "emp-102",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    first_name: "David",
-    last_name: "Chen",
-    email: "d.chen@zoiko.com",
-    employment_type: "FULL_TIME",
-    status: "ACTIVE",
-    hire_date: "2023-08-01",
-    created_at: "2023-08-01T09:00:00Z",
-  },
-];
-
 type EmployeesResponse = { employees: Employee[]; total: number };
 
 export async function listEmployees(identity?: Identity): Promise<ApiResult<Employee[]>> {
   const base = employeeMasterUrl();
   const url = `${base}/v1/employees`;
-  return fetchServiceWithFallback<EmployeesResponse, Employee[]>(
+  return fetchDomainService<EmployeesResponse, Employee[]>(
     url,
     base,
     "employee-master-svc",
     identity,
     (d) => d.employees ?? [],
-    MOCK_EMPLOYEES
   );
 }
 
@@ -93,32 +65,17 @@ export type LeaveRequest = {
   created_at: string;
 };
 
-const MOCK_LEAVE: LeaveRequest[] = [
-  {
-    request_id: "leave-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    employee_id: "emp-101",
-    leave_type_id: "ANNUAL_LEAVE",
-    start_date: "2026-08-10",
-    end_date: "2026-08-14",
-    days_requested: 5,
-    status: "APPROVED",
-    created_at: "2026-07-20T10:00:00Z",
-  },
-];
-
 type LeaveRequestsResponse = { requests: LeaveRequest[]; total: number };
 
 export async function listLeaveRequests(identity?: Identity): Promise<ApiResult<LeaveRequest[]>> {
   const base = leaveAbsenceUrl();
   const url = `${base}/v1/leave/requests`;
-  return fetchServiceWithFallback<LeaveRequestsResponse, LeaveRequest[]>(
+  return fetchDomainService<LeaveRequestsResponse, LeaveRequest[]>(
     url,
     base,
     "leave-absence-svc",
     identity,
     (d) => d.requests ?? [],
-    MOCK_LEAVE
   );
 }
 
@@ -134,39 +91,17 @@ export type Department = {
   created_at: string;
 };
 
-const MOCK_DEPARTMENTS: Department[] = [
-  {
-    department_id: "dept-eng",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    code: "ENG-01",
-    name: "Software Engineering & Technology",
-    manager_id: "emp-102",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    department_id: "dept-fin",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    code: "FIN-01",
-    name: "Corporate Finance & Treasury",
-    manager_id: "emp-101",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
-
 type DepartmentsResponse = { departments: Department[]; total: number };
 
 export async function listDepartments(identity?: Identity): Promise<ApiResult<Department[]>> {
   const base = orgStructureUrl();
   const url = `${base}/v1/org/departments`;
-  return fetchServiceWithFallback<DepartmentsResponse, Department[]>(
+  return fetchDomainService<DepartmentsResponse, Department[]>(
     url,
     base,
     "org-structure-svc",
     identity,
     (d) => d.departments ?? [],
-    MOCK_DEPARTMENTS
   );
 }
 
@@ -183,43 +118,45 @@ export type ComplianceAlert = {
   created_at: string;
 };
 
-const MOCK_ALERTS: ComplianceAlert[] = [
-  {
-    alert_id: "alt-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    employee_id: "emp-102",
-    alert_type: "VISA_EXPIRY_WARNING",
-    severity: "WARNING",
-    description: "Employee H-1B work authorization visa expires in 90 days.",
-    status: "OPEN",
-    created_at: "2026-07-25T09:00:00Z",
-  },
-];
-
 type AlertsResponse = { alerts: ComplianceAlert[]; total: number };
 
 export async function listWorkforceAlerts(identity?: Identity): Promise<ApiResult<ComplianceAlert[]>> {
   const base = workforceComplianceUrl();
   const url = `${base}/v1/compliance/alerts`;
-  return fetchServiceWithFallback<AlertsResponse, ComplianceAlert[]>(
+  return fetchDomainService<AlertsResponse, ComplianceAlert[]>(
     url,
     base,
     "workforce-compliance-svc",
     identity,
     (d) => d.alerts ?? [],
-    MOCK_ALERTS
   );
 }
 
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
 
-async function fetchServiceWithFallback<TRaw, TOut>(
+/**
+ * GET a JSON resource from a domain service and report what actually happened.
+ *
+ * This replaces `fetchServiceWithFallback`, which substituted hardcoded sample
+ * data and reported it as `{ ok: true }`. It did so in three cases — a non-OK
+ * status, a thrown request, AND **a successful response whose list was empty** —
+ * and that last one is the dangerous one: a healthy service with no records
+ * displayed invented rows indistinguishable from real ones. There was no way for a
+ * caller, or a reader of the page, to tell.
+ *
+ * It also made the panels' own error handling unreachable. Every consumer of these
+ * functions already branches on `!res.ok` to render a "service unavailable" state;
+ * because the helper never returned `ok: false`, that branch was dead code. Failing
+ * honestly is what makes it live again.
+ *
+ * An empty list is now an empty list. An unreachable service is an error.
+ */
+async function fetchDomainService<TRaw, TOut>(
   urlStr: string,
   base: string,
   serviceName: string,
   identity: Identity | undefined,
   transform: (raw: TRaw) => TOut,
-  fallbackData: TOut
 ): Promise<ApiResult<TOut>> {
   const correlationId = crypto.randomUUID();
   const headers: Record<string, string> = {
@@ -230,17 +167,39 @@ async function fetchServiceWithFallback<TRaw, TOut>(
   if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
   if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
 
+  let res: Response;
   try {
-    const res = await fetch(urlStr, {
-      headers,
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) return { ok: true, data: fallbackData };
-    const raw: TRaw = await res.json();
-    const resultData = transform(raw);
-    if (Array.isArray(resultData) && resultData.length === 0) return { ok: true, data: fallbackData };
-    return { ok: true, data: resultData };
+    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
   } catch {
-    return { ok: true, data: fallbackData };
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
   }
 }

@@ -2,8 +2,12 @@
 //
 // Contract: GET /v1/decisions returns a JSON array (never null), newest first.
 // Optional filters: actor, entity, action, rule_basis, from, to, limit, offset.
+//
+// Append-only in the strict sense: there is no UPDATE and no DELETE route, and
+// POST is idempotent on a caller-supplied decision_id, so a retry cannot inflate
+// the record. Recording is the only write.
 
-import { apiGet, type ApiResult } from "./client";
+import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 
 /** Wire shape from the backend. Field names match the Go json tags exactly. */
 export type GovernanceDecision = {
@@ -246,4 +250,179 @@ function formatTimeAgo(isoTimestamp: string): string {
     }
   }
   return "just now";
+}
+
+// ─── The rest of the service's surface ───────────────────────────────────────
+//
+// Everything above serves the Overview page, which wants the log pre-digested
+// into feed entries and chart series. The Governance page wants the opposite:
+// the raw records, every filter the service accepts, and the ability to write
+// one. Both live here rather than in two modules, because they are one service.
+//
+// Note what this service does NOT do: there is no tenant scoping. GET
+// /v1/decisions reads no identity header and applies no row-level security — it
+// returns every decision in the store, filtered only by the query parameters
+// given. The tenant boundary on this log is whatever the caller asks for, so
+// the console always passes an entity filter when it means to scope a read.
+
+/** Every filter GET /v1/decisions accepts. All optional, AND-composed. */
+export type DecisionFilters = {
+  actor?: string;
+  /** Matches legal_entity_id, not tenant_id — the service has no tenant filter. */
+  entity?: string;
+  action?: string;
+  ruleBasis?: string;
+  /** RFC3339. The service answers 400 `invalid_from` on anything else. */
+  from?: string;
+  to?: string;
+  /** Service caps at 200 and defaults to 50. */
+  limit?: number;
+  offset?: number;
+};
+
+/**
+ * List raw decision records with the service's full filter set.
+ *
+ * Separate from listDecisions() above, which flattens each record into a feed
+ * entry and drops evaluation_context. An evidence log read for audit purposes
+ * needs the record as stored, including the context blob.
+ */
+export async function listDecisionRecords(
+  filters: DecisionFilters = {},
+): Promise<ApiResult<GovernanceDecision[]>> {
+  const result = await apiGet<GovernanceDecision[]>("governance", "/v1/decisions", {
+    query: {
+      actor: filters.actor,
+      entity: filters.entity,
+      action: filters.action,
+      rule_basis: filters.ruleBasis,
+      from: filters.from,
+      to: filters.to,
+      limit: filters.limit ?? 50,
+      offset: filters.offset,
+    },
+  });
+
+  if (!result.ok) return result;
+  if (!Array.isArray(result.data)) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "governance-decision-log-svc returned a non-array decision list",
+      },
+    };
+  }
+  return { ok: true, data: result.data };
+}
+
+/**
+ * Fetch one decision by its id.
+ *
+ * 404 means no record with that id exists anywhere in the store — not "not
+ * visible to you", because this service applies no tenant filter to a lookup.
+ */
+export async function getDecision(
+  decisionId: string,
+): Promise<ApiResult<GovernanceDecision>> {
+  return apiGet<GovernanceDecision>(
+    "governance",
+    `/v1/decisions/${encodeURIComponent(decisionId)}`,
+  );
+}
+
+export type RecordDecisionInput = {
+  /** Caller-supplied. This is the idempotency key: a second POST with the same
+   *  id returns 200 and writes nothing, rather than duplicating the evidence. */
+  decisionId: string;
+  tenantId: string;
+  legalEntityId: string;
+  actorId: string;
+  actionType: string;
+  outcome: string;
+  /** The rule that produced the outcome. Required — doctrine here is that an
+   *  outcome without its basis is not evidence. */
+  ruleBasis: string;
+  correlationId: string;
+  /** Arbitrary JSON. Anything without a first-class column goes here. */
+  evaluationContext?: unknown;
+  /** RFC3339. When the decision was made UPSTREAM, which is not the same as
+   *  when it was logged. Omitted means the service stamps receipt time, which
+   *  silently conflates the two — so the console always sends it. */
+  decidedAt?: string;
+  /** Caller identity, forwarded as X-Principal-Id / X-Tenant-Id /
+   *  X-Legal-Entity-Id. Required for the write: the service answers 401
+   *  missing_principal without X-Principal-Id, before any authz check. */
+  identity: Identity;
+};
+
+/**
+ * Append a decision to the evidence log.
+ *
+ * 201 means a new record was written. 200 means this decision_id was already
+ * recorded and nothing changed — reported distinctly, because a log that
+ * silently accepts a replay as a fresh fact is not an evidence log.
+ *
+ * Every field except evaluation_context and decided_at is required; the service
+ * answers 400 with the name of the first missing one.
+ */
+export async function recordDecision(
+  input: RecordDecisionInput,
+): Promise<ApiWriteResult<GovernanceDecision>> {
+  return apiPost<GovernanceDecision>(
+    "governance",
+    "/v1/decisions",
+    {
+      decision_id: input.decisionId,
+      tenant_id: input.tenantId,
+      legal_entity_id: input.legalEntityId,
+      actor_id: input.actorId,
+      action_type: input.actionType,
+      outcome: input.outcome,
+      rule_basis: input.ruleBasis,
+      correlation_id: input.correlationId,
+      ...(input.evaluationContext === undefined
+        ? {}
+        : { evaluation_context: input.evaluationContext }),
+      ...(input.decidedAt ? { decided_at: input.decidedAt } : {}),
+    },
+    { correlationId: input.correlationId, identity: input.identity },
+  );
+}
+
+/** Outcomes the console offers when recording by hand. The column is free-text
+ *  with no constraint, so this narrows the console's own form — it is not a
+ *  statement about what the service accepts. */
+export const DECISION_OUTCOMES = ["GRANTED", "DENIED", "ESCALATED"] as const;
+
+/** Map a raw record onto the UI's three buckets, for callers that hold records
+ *  rather than feed entries. Re-exported so the Governance page badges match the
+ *  Overview page exactly. */
+export function bucketOutcome(raw: string): { outcome: DecisionOutcome; unmapped: boolean } {
+  return normaliseOutcome(raw);
+}
+
+/**
+ * Turn a backend failure into something an operator can act on.
+ *
+ * This service answers in machine codes rather than prose, so matching is on
+ * those codes.
+ */
+export function explainDecisionError(message: string): string {
+  if (message.includes("missing_field")) {
+    return `The service rejected the record as incomplete: ${message.split("missing_field").pop()?.trim() || "a required field was empty"}. Every field but evaluation_context and decided_at is mandatory.`;
+  }
+  if (message.includes("invalid_from") || message.includes("invalid_to")) {
+    return "The date range was not valid RFC3339. Use a full timestamp, e.g. 2026-07-30T00:00:00Z.";
+  }
+  if (message.includes("invalid_json")) {
+    return "The evaluation context was not valid JSON, so the service could not parse the request.";
+  }
+  if (message.includes("store_unavailable")) {
+    return "governance-decision-log-svc could not reach its database. Nothing was written.";
+  }
+  if (message.includes("404")) {
+    return "No decision with that id exists in the log.";
+  }
+  return message;
 }

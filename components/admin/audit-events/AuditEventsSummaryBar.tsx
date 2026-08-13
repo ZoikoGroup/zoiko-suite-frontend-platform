@@ -1,11 +1,7 @@
-import { cookies } from "next/headers";
 import { History, ShieldCheck, Lock, Sliders, TrendingUp } from "lucide-react";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { IllustrativeNotice } from "@/components/admin/shared";
 
-export async function AuditEventsSummaryBar() {
-  const store = await cookies();
-  const _session = decodeSession(store.get(SESSION_COOKIE)?.value);
-
+export function AuditEventsSummaryBar() {
   const kpis = [
     {
       icon: History,
@@ -46,6 +42,8 @@ export async function AuditEventsSummaryBar() {
   ];
 
   return (
+    <div className="space-y-3">
+      <IllustrativeNotice services={"audit-event-store-svc is in compose; this strip does not read it."} />
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Audit Events KPI summary">
       {kpis.map((kpi) => (
         <div
@@ -73,6 +71,7 @@ export async function AuditEventsSummaryBar() {
           <div className={`absolute bottom-0 left-0 h-0.5 w-full ${kpi.bg} opacity-60`} />
         </div>
       ))}
+    </div>
     </div>
   );
 }

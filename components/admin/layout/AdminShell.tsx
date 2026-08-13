@@ -31,7 +31,16 @@ export function AdminShell({ children, user }: AdminShellProps) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 dark:bg-slate-950">
+    // `fixed inset-0`, not `h-screen`: with the shell in normal flow the
+    // document itself stayed scrollable, so a page long enough to scroll <main>
+    // could ALSO be scrolled at the document level — dragging the sticky Topbar
+    // and the sidebar off the top of the screen and leaving dead space below.
+    // Measured before the change: documentElement.scrollHeight 6067 against an
+    // 834px viewport, and window.scrollTo(0, 600) moved the header to -600 even
+    // though every overflowing descendant was already clipped by <main>. Taking
+    // the shell out of flow leaves the document with nothing to scroll, so
+    // <main> and the sidebar's nav are the only scrollers.
+    <div className="fixed inset-0 flex overflow-hidden bg-slate-50 dark:bg-slate-950">
       <Sidebar
         mobileOpen={mobileOpen}
         onClose={() => setMobileOpen(false)}

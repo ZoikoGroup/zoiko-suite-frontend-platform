@@ -18,11 +18,11 @@ services:
       - ZOIKO_WITHHOLDING_TAX_URL=http://host.docker.internal:8129
       - ZOIKO_FILING_PREP_URL=http://host.docker.internal:8130
       - ZOIKO_TAX_AUTHORITY_URL=http://host.docker.internal:8147
-      - ZOIKO_CONTRACT_LIFECYCLE_URL=http://host.docker.internal:8118
-      - ZOIKO_CLAUSE_TEMPLATE_URL=http://host.docker.internal:8119
-      - ZOIKO_OBLIGATION_TRACKING_URL=http://host.docker.internal:8120
-      - ZOIKO_BOARD_RESOLUTIONS_URL=http://host.docker.internal:8121
-      - ZOIKO_CORPORATE_ACTIONS_URL=http://host.docker.internal:8122
+      - ZOIKO_CONTRACT_LIFECYCLE_URL=http://host.docker.internal:8119
+      - ZOIKO_CLAUSE_TEMPLATE_URL=http://host.docker.internal:8120
+      - ZOIKO_OBLIGATION_TRACKING_URL=http://host.docker.internal:8121
+      - ZOIKO_BOARD_RESOLUTIONS_URL=http://host.docker.internal:8122
+      - ZOIKO_CORPORATE_ACTIONS_URL=http://host.docker.internal:8123
       - ZOIKO_LEGAL_APPROVALS_URL=http://host.docker.internal:8123
       - ZOIKO_COUNTERPARTY_URL=http://host.docker.internal:8124
-    restart: unless-stopped
+    restart: unless-stop

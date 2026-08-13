@@ -1,38 +1,45 @@
 // Server-side API clients for the Tax domain services:
-// - tax-rules-svc        (taxRules         → :8125)
-// - tax-determination-svc(taxDetermination  → :8126)
-// - vat-gst-svc          (vatGst            → :8127)
-// - corporate-tax-svc    (corporateTax      → :8128)
-// - withholding-tax-svc  (withholdingTax    → :8129)
-// - filing-preparation-svc(filingPreparation → :8130)
-// - tax-authority-interface-svc(taxAuthorityInterface → :8147)
-//
-// All service names are registered in lib/api/config.ts.
-// All calls use apiGet() from lib/api/client.ts so that:
-//   1. Errors surface as ok:false (panels can render CloudOff states)
-//   2. The shared REQUEST_TIMEOUT_MS and X-Correlation-ID headers are applied
-//   3. Gateway routing works transparently when ZOIKO_USE_GATEWAY=true
+// - tax-rules-svc (8125)
+// - tax-determination-svc (8126)
+// - vat-gst-svc (8127)
+// - corporate-tax-svc (8128)
+// - withholding-tax-svc (8129)
+// - filing-preparation-svc (8130)
+// - tax-authority-interface-svc (8147)
 
-import {
-  apiGet,
-  apiPost,
-  apiPut,
-  type ApiResult,
-  type ApiWriteResult,
-  type Identity,
-} from "./client";
+import { type ApiResult, type Identity } from "./client";
 
-// ─── 1. Tax Rules ─────────────────────────────────────────────────────────────
+function taxRulesUrl(): string {
+  return (process.env.ZOIKO_TAX_RULES_URL ?? "http://localhost:8125").replace(/\/$/, "");
+}
 
-export type TaxCategory =
-  | "VAT"
-  | "GST"
-  | "SALES_TAX"
-  | "CORPORATE_INCOME"
-  | "WITHHOLDING"
-  | "EXCISE"
-  | "CUSTOMS";
+function taxDeterminationUrl(): string {
+  return (process.env.ZOIKO_TAX_DETERMINATION_URL ?? "http://localhost:8126").replace(/\/$/, "");
+}
 
+function vatGstUrl(): string {
+  return (process.env.ZOIKO_VAT_GST_URL ?? "http://localhost:8127").replace(/\/$/, "");
+}
+
+function corporateTaxUrl(): string {
+  return (process.env.ZOIKO_CORPORATE_TAX_URL ?? "http://localhost:8128").replace(/\/$/, "");
+}
+
+function withholdingTaxUrl(): string {
+  return (process.env.ZOIKO_WITHHOLDING_TAX_URL ?? "http://localhost:8129").replace(/\/$/, "");
+}
+
+function filingPrepUrl(): string {
+  return (process.env.ZOIKO_FILING_PREPARATION_URL ?? "http://localhost:8130").replace(/\/$/, "");
+}
+
+function taxAuthorityUrl(): string {
+  return (process.env.ZOIKO_TAX_AUTHORITY_URL ?? "http://localhost:8147").replace(/\/$/, "");
+}
+
+// ─── 1. Tax Rules ────────────────────────────────────────────────────────────
+
+export type TaxCategory = "VAT" | "GST" | "SALES_TAX" | "CORPORATE_INCOME" | "WITHHOLDING" | "EXCISE" | "CUSTOMS";
 export type RuleStatus = "DRAFT" | "ACTIVE" | "DEPRECATED";
 
 export type TaxRule = {
@@ -54,138 +61,30 @@ export type TaxRule = {
   updated_at: string;
 };
 
-export const MOCK_TAX_RULES: TaxRule[] = [
-  {
-    rule_id: "rule-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "uk-gov-01",
-    rule_code: "UK-VAT-STD-2026",
-    name: "UK Standard VAT Rate",
-    category: "VAT",
-    tax_rate_percentage: 20.0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system-seed",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "us-fed-01",
-    rule_code: "US-CIT-FED-2026",
-    name: "US Federal Corporate Income Tax",
-    category: "CORPORATE_INCOME",
-    tax_rate_percentage: 21.0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system-seed",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-003",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "sg-iras-01",
-    rule_code: "SG-GST-2026",
-    name: "Singapore Goods & Services Tax",
-    category: "GST",
-    tax_rate_percentage: 9.0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system-seed",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-004",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "de-bzst-01",
-    rule_code: "DE-WHT-DIV-2026",
-    name: "German Dividend Withholding Tax",
-    category: "WITHHOLDING",
-    tax_rate_percentage: 15.0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system-seed",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-];
-
 type TaxRulesResponse = { rules: TaxRule[]; total: number };
 
 export async function listTaxRules(
   identity?: Identity,
   options?: { jurisdictionId?: string; category?: string; status?: string }
 ): Promise<ApiResult<TaxRule[]>> {
-  const res = await apiGet<TaxRulesResponse>("taxRules", "/v1/tax-rules", {
+  const base = taxRulesUrl();
+  const url = new URL(`${base}/v1/tax-rules`);
+  if (options?.jurisdictionId) url.searchParams.set("jurisdiction_id", options.jurisdictionId);
+  if (options?.category) url.searchParams.set("category", options.category);
+  if (options?.status) url.searchParams.set("status", options.status);
+
+  return fetchDomainService<TaxRulesResponse, TaxRule[]>(
+    url.toString(),
+    base,
+    "tax-rules-svc",
     identity,
-    query: {
-      jurisdiction_id: options?.jurisdictionId,
-      category: options?.category,
-      status: options?.status,
-    },
-  });
-
-  if (!res.ok) return res;
-  const rules = res.data.rules ?? [];
-  // Fall back to mock if the service returned an empty list (fresh DB)
-  return { ok: true, data: rules.length > 0 ? rules : MOCK_TAX_RULES };
+    (d) => d.rules ?? [],
+  );
 }
 
-export type CreateTaxRuleInput = {
-  jurisdiction_id: string;
-  rule_code: string;
-  name: string;
-  category: TaxCategory;
-  tax_rate_percentage: number;
-  standard_deductions?: number;
-  exemptions_json?: string;
-  effective_from: string;
-  effective_to?: string;
-  created_by?: string;
-};
+// ─── 2. Tax Determination ───────────────────────────────────────────────────
 
-/** POST /v1/tax-rules — registers a new rule in tax-rules-svc (:8125). */
-export async function createTaxRule(
-  input: CreateTaxRuleInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<TaxRule>> {
-  return apiPost<TaxRule>("taxRules", "/v1/tax-rules", input, { identity });
-}
-
-export type UpdateTaxRuleInput = {
-  name?: string;
-  category?: TaxCategory;
-  tax_rate_percentage?: number;
-  standard_deductions?: number;
-  exemptions_json?: string;
-  status?: RuleStatus;
-  effective_to?: string;
-  updated_by?: string;
-};
-
-/** PUT /v1/tax-rules/{id} — partial update of an existing rule. */
-export async function updateTaxRule(
-  ruleId: string,
-  input: UpdateTaxRuleInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<TaxRule>> {
-  return apiPut<TaxRule>("taxRules", `/v1/tax-rules/${ruleId}`, input, { identity });
-}
-
-// ─── 2. Tax Determination ────────────────────────────────────────────────────
-
-export type DeterminationStatus =
-  | "CALCULATED"
-  | "APPLIED"
-  | "OVERRIDDEN"
-  | "REVERSED";
+export type DeterminationStatus = "CALCULATED" | "APPLIED" | "OVERRIDDEN" | "REVERSED";
 
 export type TaxDetermination = {
   determination_id: string;
@@ -211,105 +110,28 @@ export type TaxDetermination = {
   updated_at: string;
 };
 
-export const MOCK_TAX_DETERMINATIONS: TaxDetermination[] = [
-  {
-    determination_id: "det-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    transaction_id: "inv-2026-0891",
-    source_module: "AR",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    rule_id: "rule-001",
-    tax_category: "VAT",
-    gross_amount: 120000.0,
-    taxable_amount: 100000.0,
-    tax_rate_percentage: 20.0,
-    calculated_tax_amount: 20000.0,
-    exempt_amount: 0.0,
-    currency: "GBP",
-    status: "APPLIED",
-    effective_from: "2026-07-01",
-    evaluated_at: "2026-07-15T10:30:00Z",
-    evaluated_by: "tax-determination-engine",
-    created_at: "2026-07-15T10:30:00Z",
-    updated_at: "2026-07-15T10:30:00Z",
-  },
-  {
-    determination_id: "det-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    transaction_id: "po-2026-0412",
-    source_module: "PURCHASE_ORDER",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "us-fed-01",
-    rule_id: "rule-002",
-    tax_category: "CORPORATE_INCOME",
-    gross_amount: 450000.0,
-    taxable_amount: 450000.0,
-    tax_rate_percentage: 21.0,
-    calculated_tax_amount: 94500.0,
-    exempt_amount: 0.0,
-    currency: "USD",
-    status: "CALCULATED",
-    effective_from: "2026-07-01",
-    evaluated_at: "2026-07-20T14:15:00Z",
-    evaluated_by: "tax-determination-engine",
-    created_at: "2026-07-20T14:15:00Z",
-    updated_at: "2026-07-20T14:15:00Z",
-  },
-];
-
 type DeterminationsResponse = { determinations: TaxDetermination[]; total: number };
 
 export async function listTaxDeterminations(
   identity?: Identity,
   options?: { legalEntityId?: string; transactionId?: string; status?: string }
 ): Promise<ApiResult<TaxDetermination[]>> {
-  const res = await apiGet<DeterminationsResponse>(
-    "taxDetermination",
-    "/v1/tax-determinations",
-    {
-      identity,
-      query: {
-        legal_entity_id: options?.legalEntityId,
-        transaction_id: options?.transactionId,
-        status: options?.status,
-      },
-    }
-  );
+  const base = taxDeterminationUrl();
+  const url = new URL(`${base}/v1/tax-determinations`);
+  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
+  if (options?.transactionId) url.searchParams.set("transaction_id", options.transactionId);
+  if (options?.status) url.searchParams.set("status", options.status);
 
-  if (!res.ok) return res;
-  const dets = res.data.determinations ?? [];
-  return { ok: true, data: dets.length > 0 ? dets : MOCK_TAX_DETERMINATIONS };
-}
-
-export type EvaluateTaxDeterminationInput = {
-  transaction_id: string;
-  source_module?: string;
-  legal_entity_id: string;
-  jurisdiction_id: string;
-  tax_category: string;
-  gross_amount: number;
-  exempt_amount?: number;
-  currency?: string;
-  effective_from?: string;
-  evaluated_by?: string;
-};
-
-/**
- * POST /v1/tax-determinations — runs the determination engine in
- * tax-determination-svc (:8126). The service resolves the active rule from
- * tax-rules-svc, computes the tax, and stores the CALCULATED determination.
- */
-export async function evaluateTaxDetermination(
-  input: EvaluateTaxDeterminationInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<TaxDetermination>> {
-  return apiPost<TaxDetermination>("taxDetermination", "/v1/tax-determinations", input, {
+  return fetchDomainService<DeterminationsResponse, TaxDetermination[]>(
+    url.toString(),
+    base,
+    "tax-determination-svc",
     identity,
-  });
+    (d) => d.determinations ?? [],
+  );
 }
 
-// ─── 3. VAT / GST ────────────────────────────────────────────────────────────
+// ─── 3. VAT / GST ─────────────────────────────────────────────────────────────
 
 export type VATFilingStatus = "DRAFT" | "FILED" | "ACCEPTED" | "REJECTED";
 
@@ -336,100 +158,29 @@ export type VATReturn = {
   updated_at: string;
 };
 
-export const MOCK_VAT_RETURNS: VATReturn[] = [
-  {
-    return_id: "vat-2026-q1",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    tax_registration_number: "GB-987654321",
-    tax_period: "2026-Q1",
-    total_sales_amount: 1500000.0,
-    total_purchase_amount: 800000.0,
-    output_tax_amount: 300000.0,
-    input_tax_amount: 160000.0,
-    net_tax_payable: 140000.0,
-    currency: "GBP",
-    status: "FILED",
-    filed_at: "2026-04-15T09:00:00Z",
-    filed_by: "tax-officer@zoiko.com",
-    effective_from: "2026-01-01",
-    created_by: "tax-officer@zoiko.com",
-    created_at: "2026-04-10T10:00:00Z",
-    updated_at: "2026-04-15T09:00:00Z",
-  },
-  {
-    return_id: "vat-2026-q2",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    tax_registration_number: "GB-987654321",
-    tax_period: "2026-Q2",
-    total_sales_amount: 1850000.0,
-    total_purchase_amount: 920000.0,
-    output_tax_amount: 370000.0,
-    input_tax_amount: 184000.0,
-    net_tax_payable: 186000.0,
-    currency: "GBP",
-    status: "ACCEPTED",
-    filed_at: "2026-07-14T11:20:00Z",
-    filed_by: "tax-officer@zoiko.com",
-    effective_from: "2026-04-01",
-    created_by: "tax-officer@zoiko.com",
-    created_at: "2026-07-10T12:00:00Z",
-    updated_at: "2026-07-14T11:20:00Z",
-  },
-];
-
 type VATReturnsResponse = { vat_returns: VATReturn[]; total: number };
 
 export async function listVATReturns(
   identity?: Identity,
   options?: { legalEntityId?: string; status?: string }
 ): Promise<ApiResult<VATReturn[]>> {
-  const res = await apiGet<VATReturnsResponse>("vatGst", "/v1/vat-returns", {
+  const base = vatGstUrl();
+  const url = new URL(`${base}/v1/vat-returns`);
+  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
+  if (options?.status) url.searchParams.set("status", options.status);
+
+  return fetchDomainService<VATReturnsResponse, VATReturn[]>(
+    url.toString(),
+    base,
+    "vat-gst-svc",
     identity,
-    query: {
-      legal_entity_id: options?.legalEntityId,
-      status: options?.status,
-    },
-  });
-
-  if (!res.ok) return res;
-  const returns = res.data.vat_returns ?? [];
-  return { ok: true, data: returns.length > 0 ? returns : MOCK_VAT_RETURNS };
+    (d) => d.vat_returns ?? [],
+  );
 }
 
-export type CreateVATReturnInput = {
-  legal_entity_id: string;
-  jurisdiction_id: string;
-  tax_registration_number: string;
-  tax_period: string;
-  total_sales_amount: number;
-  total_purchase_amount: number;
-  output_tax_amount: number;
-  input_tax_amount: number;
-  currency: string;
-  effective_from?: string;
-  created_by?: string;
-};
+// ─── 4. Corporate Tax ────────────────────────────────────────────────────────
 
-/** POST /v1/vat-returns — records a new VAT / GST return in vat-gst-svc (:8127). */
-export async function createVATReturn(
-  input: CreateVATReturnInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<VATReturn>> {
-  return apiPost<VATReturn>("vatGst", "/v1/vat-returns", input, { identity });
-}
-
-// ─── 4. Corporate Tax ─────────────────────────────────────────────────────────
-
-export type CorporateFilingStatus =
-  | "DRAFT"
-  | "SUBMITTED"
-  | "ASSESSED"
-  | "SETTLED"
-  | "DISPUTED";
+export type CorporateFilingStatus = "DRAFT" | "SUBMITTED" | "ASSESSED" | "SETTLED" | "DISPUTED";
 
 export type CorporateTaxReturn = {
   return_id: string;
@@ -463,69 +214,30 @@ export type CorporateTaxReturn = {
   updated_at: string;
 };
 
-export const MOCK_CORPORATE_RETURNS: CorporateTaxReturn[] = [
-  {
-    return_id: "cit-2025-us",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "us-fed-01",
-    tax_registration_number: "EIN-12-3456789",
-    fiscal_year: 2025,
-    accounting_period_start: "2025-01-01",
-    accounting_period_end: "2025-12-31",
-    gross_revenue: 8500000.0,
-    allowable_deductions: 5200000.0,
-    taxable_income: 3300000.0,
-    tax_rate_percent: 21.0,
-    gross_tax_liability: 693000.0,
-    tax_credits: 43000.0,
-    net_tax_payable: 650000.0,
-    tax_already_paid: 600000.0,
-    balance_due: 50000.0,
-    currency: "USD",
-    status: "SUBMITTED",
-    submitted_at: "2026-03-15T14:00:00Z",
-    submitted_by: "cfo@zoiko.com",
-    notes: "Filed Form 1120 with R&D Tax Credit schedules attached.",
-    effective_from: "2025-01-01",
-    created_by: "cfo@zoiko.com",
-    created_at: "2026-03-01T10:00:00Z",
-    updated_at: "2026-03-15T14:00:00Z",
-  },
-];
-
 type CorporateTaxResponse = { returns: CorporateTaxReturn[]; total: number };
 
 export async function listCorporateTaxReturns(
   identity?: Identity,
   options?: { legalEntityId?: string; fiscalYear?: number; status?: string }
 ): Promise<ApiResult<CorporateTaxReturn[]>> {
-  const res = await apiGet<CorporateTaxResponse>(
-    "corporateTax",
-    "/v1/corporate-tax-returns",
-    {
-      identity,
-      query: {
-        legal_entity_id: options?.legalEntityId,
-        fiscal_year: options?.fiscalYear,
-        status: options?.status,
-      },
-    }
-  );
+  const base = corporateTaxUrl();
+  const url = new URL(`${base}/v1/corporate-tax-returns`);
+  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
+  if (options?.fiscalYear) url.searchParams.set("fiscal_year", String(options.fiscalYear));
+  if (options?.status) url.searchParams.set("status", options.status);
 
-  if (!res.ok) return res;
-  const returns = res.data.returns ?? [];
-  return { ok: true, data: returns.length > 0 ? returns : MOCK_CORPORATE_RETURNS };
+  return fetchDomainService<CorporateTaxResponse, CorporateTaxReturn[]>(
+    url.toString(),
+    base,
+    "corporate-tax-svc",
+    identity,
+    (d) => d.returns ?? [],
+  );
 }
 
-// ─── 5. Withholding Tax ───────────────────────────────────────────────────────
+// ─── 5. Withholding Tax ──────────────────────────────────────────────────────
 
-export type WithholdingStatus =
-  | "DRAFT"
-  | "CALCULATED"
-  | "PENDING_REMITTANCE"
-  | "REMITTED"
-  | "CANCELLED";
+export type WithholdingStatus = "DRAFT" | "CALCULATED" | "PENDING_REMITTANCE" | "REMITTED" | "CANCELLED";
 
 export type WithholdingTaxObligation = {
   obligation_id: string;
@@ -555,108 +267,29 @@ export type WithholdingTaxObligation = {
   updated_at: string;
 };
 
-export const MOCK_WITHHOLDING_OBLIGATIONS: WithholdingTaxObligation[] = [
-  {
-    obligation_id: "wht-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "de-bzst-01",
-    counterparty_id: "cp-de-tech",
-    payment_reference: "PAY-DE-DIV-2026-01",
-    payment_type: "DIVIDEND",
-    gross_payment_amount: 500000.0,
-    taxable_base_amount: 500000.0,
-    withholding_rate_percent: 15.0,
-    withheld_amount: 75000.0,
-    currency: "EUR",
-    tax_treaty_exemption: true,
-    exemption_certificate_ref: "CERT-DE-US-TREATY-2026",
-    status: "REMITTED",
-    remittance_reference: "REMIT-BZST-99812",
-    remitted_at: "2026-06-30T16:00:00Z",
-    notes: "Double Tax Treaty rate (15%) applied under US-DE Tax Treaty Art. 10.",
-    effective_from: "2026-06-01",
-    created_by: "treasury@zoiko.com",
-    created_at: "2026-06-15T09:00:00Z",
-    updated_at: "2026-06-30T16:00:00Z",
-  },
-  {
-    obligation_id: "wht-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "sg-iras-01",
-    counterparty_id: "cp-sg-fintech",
-    payment_reference: "PAY-SG-INT-2026-07",
-    payment_type: "INTEREST",
-    gross_payment_amount: 250000.0,
-    taxable_base_amount: 250000.0,
-    withholding_rate_percent: 15.0,
-    withheld_amount: 37500.0,
-    currency: "SGD",
-    tax_treaty_exemption: false,
-    status: "PENDING_REMITTANCE",
-    notes: "Interest payment to Singapore-registered counterparty — standard WHT rate.",
-    effective_from: "2026-07-01",
-    created_by: "treasury@zoiko.com",
-    created_at: "2026-07-01T09:00:00Z",
-    updated_at: "2026-07-15T12:00:00Z",
-  },
-  {
-    obligation_id: "wht-003",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    counterparty_id: "cp-uk-media",
-    payment_reference: "PAY-UK-ROYALT-2026-07",
-    payment_type: "ROYALTY",
-    gross_payment_amount: 180000.0,
-    taxable_base_amount: 180000.0,
-    withholding_rate_percent: 20.0,
-    withheld_amount: 36000.0,
-    currency: "GBP",
-    tax_treaty_exemption: false,
-    status: "CALCULATED",
-    notes: "UK domestic royalty payment — basic rate WHT deducted at source.",
-    effective_from: "2026-07-15",
-    created_by: "treasury@zoiko.com",
-    created_at: "2026-07-15T10:00:00Z",
-    updated_at: "2026-07-15T10:00:00Z",
-  },
-];
-
 type WithholdingResponse = { obligations: WithholdingTaxObligation[]; total: number };
 
 export async function listWithholdingObligations(
   identity?: Identity,
   options?: { legalEntityId?: string; status?: string }
 ): Promise<ApiResult<WithholdingTaxObligation[]>> {
-  const res = await apiGet<WithholdingResponse>(
-    "withholdingTax",
-    "/v1/withholding-tax",
-    {
-      identity,
-      query: {
-        legal_entity_id: options?.legalEntityId,
-        status: options?.status,
-      },
-    }
-  );
+  const base = withholdingTaxUrl();
+  const url = new URL(`${base}/v1/withholding-tax`);
+  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
+  if (options?.status) url.searchParams.set("status", options.status);
 
-  if (!res.ok) return res;
-  const obligations = res.data.obligations ?? [];
-  return {
-    ok: true,
-    data: obligations.length > 0 ? obligations : MOCK_WITHHOLDING_OBLIGATIONS,
-  };
+  return fetchDomainService<WithholdingResponse, WithholdingTaxObligation[]>(
+    url.toString(),
+    base,
+    "withholding-tax-svc",
+    identity,
+    (d) => d.obligations ?? [],
+  );
 }
 
-// ─── 6. Filing Preparation ────────────────────────────────────────────────────
+// ─── 6. Filing Preparation ───────────────────────────────────────────────────
 
-export type ValidationStatus =
-  | "UNVALIDATED"
-  | "PREPARED"
-  | "BLOCKED"
-  | "FINALIZED";
+export type ValidationStatus = "UNVALIDATED" | "PREPARED" | "BLOCKED" | "FINALIZED";
 
 export type FilingDraft = {
   draft_id: string;
@@ -676,143 +309,27 @@ export type FilingDraft = {
   updated_at: string;
 };
 
-export const MOCK_FILING_DRAFTS: FilingDraft[] = [
-  {
-    draft_id: "draft-hmrc-q2",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    filing_type: "VAT100_MTD",
-    period_key: "2026-Q2",
-    due_date: "2026-08-07",
-    payload_data: "{\"box1\": 370000, \"box5\": 186000}",
-    evidence_manifest_ref: "ev-manifest-2026-q2",
-    validation_status: "FINALIZED",
-    notes: "All evidence manifests verified against General Ledger.",
-    created_by: "tax-prep@zoiko.com",
-    created_at: "2026-07-05T08:00:00Z",
-    updated_at: "2026-07-12T11:00:00Z",
-  },
-  {
-    draft_id: "draft-irs-1120s",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "us-fed-01",
-    filing_type: "US_FORM_1120",
-    period_key: "2026-Q3-ESTIMATED",
-    due_date: "2026-09-15",
-    payload_data: "{\"estimated_payment\": 162500}",
-    validation_status: "PREPARED",
-    notes: "Q3 Estimated corporate tax installment draft.",
-    created_by: "tax-prep@zoiko.com",
-    created_at: "2026-07-20T09:00:00Z",
-    updated_at: "2026-07-22T15:00:00Z",
-  },
-];
-
 type FilingDraftsResponse = { drafts: FilingDraft[]; total: number };
 
 export async function listFilingDrafts(
   identity?: Identity,
   options?: { legalEntityId?: string; status?: string }
 ): Promise<ApiResult<FilingDraft[]>> {
-  const res = await apiGet<FilingDraftsResponse>(
-    "filingPreparation",
-    "/v1/filing-preparation/drafts",
-    {
-      identity,
-      query: {
-        legal_entity_id: options?.legalEntityId,
-        status: options?.status,
-      },
-    }
-  );
+  const base = filingPrepUrl();
+  const url = new URL(`${base}/v1/filing-preparation/drafts`);
+  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
+  if (options?.status) url.searchParams.set("status", options.status);
 
-  if (!res.ok) return res;
-  const drafts = res.data.drafts ?? [];
-  return { ok: true, data: drafts.length > 0 ? drafts : MOCK_FILING_DRAFTS };
-}
-
-export type CreateFilingDraftInput = {
-  legal_entity_id: string;
-  jurisdiction_id: string;
-  filing_type?: string;
-  period_key: string;
-  due_date: string;
-  payload_data?: string;
-  evidence_manifest_ref?: string;
-  notes?: string;
-  created_by?: string;
-};
-
-/** POST /v1/filing-preparation/drafts — creates a draft in filing-preparation-svc (:8130). */
-export async function createFilingDraft(
-  input: CreateFilingDraftInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<FilingDraft>> {
-  return apiPost<FilingDraft>("filingPreparation", "/v1/filing-preparation/drafts", input, {
+  return fetchDomainService<FilingDraftsResponse, FilingDraft[]>(
+    url.toString(),
+    base,
+    "filing-preparation-svc",
     identity,
-  });
-}
-
-export type ValidateFilingDraftInput = {
-  validation_status?: string;
-  block_reasons?: string;
-};
-
-/** POST /v1/filing-preparation/drafts/{id}/validate — runs validation on a draft. */
-export async function validateFilingDraft(
-  draftId: string,
-  input: ValidateFilingDraftInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<FilingDraft>> {
-  return apiPost<FilingDraft>(
-    "filingPreparation",
-    `/v1/filing-preparation/drafts/${draftId}/validate`,
-    input,
-    { identity },
+    (d) => d.drafts ?? [],
   );
 }
 
-export type FinalizeFilingDraftInput = {
-  notes?: string;
-};
-
-/** POST /v1/filing-preparation/drafts/{id}/finalize — marks a draft ready for authority submission. */
-export async function finalizeFilingDraft(
-  draftId: string,
-  input: FinalizeFilingDraftInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<FilingDraft>> {
-  return apiPost<FilingDraft>(
-    "filingPreparation",
-    `/v1/filing-preparation/drafts/${draftId}/finalize`,
-    input,
-    { identity },
-  );
-}
-
-export type UpdateFilingDraftInput = {
-  payload_data?: string;
-  evidence_manifest_ref?: string;
-  notes?: string;
-};
-
-/** PUT /v1/filing-preparation/drafts/{id} — updates draft payload / evidence / notes. */
-export async function updateFilingDraft(
-  draftId: string,
-  input: UpdateFilingDraftInput,
-  identity?: Identity,
-): Promise<ApiWriteResult<FilingDraft>> {
-  return apiPut<FilingDraft>(
-    "filingPreparation",
-    `/v1/filing-preparation/drafts/${draftId}`,
-    input,
-    { identity },
-  );
-}
-
-// ─── 7. Tax Authority Interface ───────────────────────────────────────────────
+// ─── 7. Tax Authority Interface ──────────────────────────────────────────────
 
 export type TaxAuthorityInterface = {
   interface_id: string;
@@ -827,67 +344,38 @@ export type TaxAuthorityInterface = {
   created_at: string;
 };
 
-export const MOCK_TAX_AUTHORITY_INTERFACES: TaxAuthorityInterface[] = [
-  {
-    interface_id: "if-hmrc-mtd",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "uk-gov-01",
-    authority_code: "HMRC_MTD_VAT",
-    authority_name: "HM Revenue & Customs (MTD API Gateway)",
-    api_endpoint: "https://api.service.hmrc.gov.uk/organisations/vat",
-    auth_type: "OAuth2",
-    protocol: "REST / JSON-Schema",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    interface_id: "if-irs-mef",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "us-fed-01",
-    authority_code: "IRS_MEF_SYSTEM",
-    authority_name: "IRS Modernized e-File (MeF) Gateway",
-    api_endpoint: "https://mef.irs.gov/a2a/mefservices",
-    auth_type: "mTLS + SAML2",
-    protocol: "SOAP / XML",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    interface_id: "if-iras-efile",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "sg-iras-01",
-    authority_code: "IRAS_EFILE_API",
-    authority_name: "IRAS Singapore Corporate Tax API",
-    api_endpoint: "https://api.iras.gov.sg/corporate-tax/v1",
-    auth_type: "Singpass / Corppass OIDC",
-    protocol: "REST / OpenAPI 3.0",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
-
 type TaxAuthorityResponse = { interfaces: TaxAuthorityInterface[]; total: number };
 
 export async function listTaxAuthorityInterfaces(
   identity?: Identity
 ): Promise<ApiResult<TaxAuthorityInterface[]>> {
-  const res = await apiGet<TaxAuthorityResponse>(
-    "taxAuthorityInterface",
-    "/v1/tax-authority/interfaces",
-    { identity }
-  );
+  const base = taxAuthorityUrl();
+  const url = new URL(`${base}/v1/tax-authority/interfaces`);
 
-  if (!res.ok) return res;
-  const interfaces = res.data.interfaces ?? [];
-  return {
-    ok: true,
-    data: interfaces.length > 0 ? interfaces : MOCK_TAX_AUTHORITY_INTERFACES,
-  };
+  return fetchDomainService<TaxAuthorityResponse, TaxAuthorityInterface[]>(
+    url.toString(),
+    base,
+    "tax-authority-interface-svc",
+    identity,
+    (d) => d.interfaces ?? [],
+  );
 }
 
-// ─── 8. Tax Summary Stats (KPI Aggregator) ────────────────────────────────────
+// ─── 8. Tax Summary Stats (KPI Aggregator) ──────────────────────────────────
 
 export type TaxSummaryStats = {
+  /**
+   * Services whose read failed, so their contribution to every figure below is
+   * ZERO rather than unknown.
+   *
+   * These aggregates used to fall back to hardcoded sample arrays on a failed read,
+   * which meant a KPI computed entirely from invented records was reported exactly
+   * like a real one. Falling back to an empty list is more honest but still not
+   * self-describing: a zero total and "we could not read it" look identical. This
+   * field is what tells them apart, and it is non-empty precisely when the numbers
+   * are understated.
+   */
+  sourcesUnavailable: string[];
   activeRules: number;
   totalDeterminations: number;
   netVatPayableGBP: number;
@@ -898,28 +386,42 @@ export type TaxSummaryStats = {
   activeAuthorityConnections: number;
 };
 
-export async function getTaxSummaryStats(
-  identity?: Identity
-): Promise<ApiResult<TaxSummaryStats>> {
-  const [rulesRes, detRes, vatRes, corpRes, whtRes, draftsRes, authRes] =
-    await Promise.all([
-      listTaxRules(identity),
-      listTaxDeterminations(identity),
-      listVATReturns(identity),
-      listCorporateTaxReturns(identity),
-      listWithholdingObligations(identity),
-      listFilingDrafts(identity),
-      listTaxAuthorityInterfaces(identity),
-    ]);
+export async function getTaxSummaryStats(identity?: Identity): Promise<ApiResult<TaxSummaryStats>> {
+  const [rulesRes, detRes, vatRes, corpRes, whtRes, draftsRes, authRes] = await Promise.all([
+    listTaxRules(identity),
+    listTaxDeterminations(identity),
+    listVATReturns(identity),
+    listCorporateTaxReturns(identity),
+    listWithholdingObligations(identity),
+    listFilingDrafts(identity),
+    listTaxAuthorityInterfaces(identity),
+  ]);
 
-  // Each function already applies mock fallback, so we always get data arrays here
-  const rules = rulesRes.ok ? rulesRes.data : MOCK_TAX_RULES;
-  const dets = detRes.ok ? detRes.data : MOCK_TAX_DETERMINATIONS;
-  const vatReturns = vatRes.ok ? vatRes.data : MOCK_VAT_RETURNS;
-  const corpReturns = corpRes.ok ? corpRes.data : MOCK_CORPORATE_RETURNS;
-  const whtObligations = whtRes.ok ? whtRes.data : MOCK_WITHHOLDING_OBLIGATIONS;
-  const drafts = draftsRes.ok ? draftsRes.data : MOCK_FILING_DRAFTS;
-  const authorities = authRes.ok ? authRes.data : MOCK_TAX_AUTHORITY_INTERFACES;
+  const rules = rulesRes.ok ? rulesRes.data : [];
+  const dets = detRes.ok ? detRes.data : [];
+  const vatReturns = vatRes.ok ? vatRes.data : [];
+  const corpReturns = corpRes.ok ? corpRes.data : [];
+  const whtObligations = whtRes.ok ? whtRes.data : [];
+  const drafts = draftsRes.ok ? draftsRes.data : [];
+  const authorities = authRes.ok ? authRes.data : [];
+
+  // Which reads failed, so a caller can tell an understated figure from a real
+  // one. Every aggregate below treats a failed source as contributing zero, and
+  // without this list that is indistinguishable from the source genuinely having
+  // nothing in it.
+  const sourcesUnavailable = (
+    [
+      [rulesRes.ok, "tax-rules-svc"],
+      [detRes.ok, "tax-determination-svc"],
+      [vatRes.ok, "vat-gst-svc"],
+      [corpRes.ok, "corporate-tax-svc"],
+      [whtRes.ok, "withholding-tax-svc"],
+      [draftsRes.ok, "filing-preparation-svc"],
+      [authRes.ok, "tax-authority-interface-svc"],
+    ] as const
+  )
+    .filter(([ok]) => !ok)
+    .map(([, name]) => name);
 
   const netVatPayableGBP = vatReturns
     .filter((v) => v.currency === "GBP")
@@ -943,6 +445,7 @@ export async function getTaxSummaryStats(
   return {
     ok: true,
     data: {
+      sourcesUnavailable,
       activeRules: rules.filter((r) => r.status === "ACTIVE").length,
       totalDeterminations: dets.length,
       netVatPayableGBP,
@@ -967,16 +470,14 @@ export type TaxDeadline = {
   urgency: "overdue" | "urgent" | "upcoming" | "comfortable";
 };
 
-export async function listUpcomingTaxDeadlines(
-  identity?: Identity
-): Promise<ApiResult<TaxDeadline[]>> {
+export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<ApiResult<TaxDeadline[]>> {
   const [draftsRes, whtRes] = await Promise.all([
     listFilingDrafts(identity),
     listWithholdingObligations(identity),
   ]);
 
-  const drafts = draftsRes.ok ? draftsRes.data : MOCK_FILING_DRAFTS;
-  const whtObligations = whtRes.ok ? whtRes.data : MOCK_WITHHOLDING_OBLIGATIONS;
+  const drafts = draftsRes.ok ? draftsRes.data : [];
+  const whtObligations = whtRes.ok ? whtRes.data : [];
 
   const today = new Date();
 
@@ -1002,12 +503,12 @@ export async function listUpcomingTaxDeadlines(
         urgency: urgency(days),
       };
     }),
-    // WHT remittances pending (30-day remittance window)
+    // WHT remittances pending
     ...whtObligations
       .filter((w) => w.status === "PENDING_REMITTANCE" || w.status === "CALCULATED")
       .map((w) => {
         const due = new Date(w.effective_from);
-        due.setDate(due.getDate() + 30);
+        due.setDate(due.getDate() + 30); // 30-day remittance window
         const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         return {
           id: w.obligation_id,
@@ -1022,4 +523,77 @@ export async function listUpcomingTaxDeadlines(
   ].sort((a, b) => a.daysUntilDue - b.daysUntilDue);
 
   return { ok: true, data: deadlines };
+}
+
+// ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
+
+
+/**
+ * GET a JSON resource from a domain service and report what actually happened.
+ *
+ * This replaces `fetchServiceWithFallback`, which substituted hardcoded sample
+ * data and reported it as `{ ok: true }`. It did so in three cases — a non-OK
+ * status, a thrown request, AND **a successful response whose list was empty** —
+ * and that last one is the dangerous one: a healthy service with no records
+ * displayed invented rows indistinguishable from real ones. There was no way for a
+ * caller, or a reader of the page, to tell.
+ *
+ * It also made the panels' own error handling unreachable. Every consumer of these
+ * functions already branches on `!res.ok` to render a "service unavailable" state;
+ * because the helper never returned `ok: false`, that branch was dead code. Failing
+ * honestly is what makes it live again.
+ *
+ * An empty list is now an empty list. An unreachable service is an error.
+ */
+async function fetchDomainService<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
+  }
 }

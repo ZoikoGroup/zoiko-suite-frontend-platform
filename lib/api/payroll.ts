@@ -49,55 +49,17 @@ export type PayrollRun = {
   updated_at: string;
 };
 
-const MOCK_PAYROLL_RUNS: PayrollRun[] = [
-  {
-    payroll_run_id: "pr-2026-07",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    pay_period_code: "2026-M07",
-    period_start_date: "2026-07-01",
-    period_end_date: "2026-07-31",
-    payment_date: "2026-07-31",
-    status: "FINALIZED",
-    total_gross_pay: 425000.0,
-    total_net_pay: 318750.0,
-    total_tax_deductions: 106250.0,
-    total_employee_count: 85,
-    created_by: "payroll-admin@zoiko.com",
-    created_at: "2026-07-25T09:00:00Z",
-    updated_at: "2026-07-31T17:00:00Z",
-  },
-  {
-    payroll_run_id: "pr-2026-08",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    pay_period_code: "2026-M08",
-    period_start_date: "2026-08-01",
-    period_end_date: "2026-08-31",
-    payment_date: "2026-08-31",
-    status: "CALCULATED",
-    total_gross_pay: 430000.0,
-    total_net_pay: 322500.0,
-    total_tax_deductions: 107500.0,
-    total_employee_count: 87,
-    created_by: "payroll-admin@zoiko.com",
-    created_at: "2026-07-28T10:00:00Z",
-    updated_at: "2026-07-30T14:00:00Z",
-  },
-];
-
 type PayrollRunsResponse = { payroll_runs: PayrollRun[]; total: number };
 
 export async function listPayrollRuns(identity?: Identity): Promise<ApiResult<PayrollRun[]>> {
   const base = payrollRunUrl();
   const url = `${base}/v1/payroll-runs`;
-  return fetchServiceWithFallback<PayrollRunsResponse, PayrollRun[]>(
+  return fetchDomainService<PayrollRunsResponse, PayrollRun[]>(
     url,
     base,
     "payroll-run-svc",
     identity,
     (d) => d.payroll_runs ?? [],
-    MOCK_PAYROLL_RUNS
   );
 }
 
@@ -118,45 +80,17 @@ export type CompensationStructure = {
   created_at: string;
 };
 
-const MOCK_COMPENSATION: CompensationStructure[] = [
-  {
-    structure_id: "comp-eng-lead",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    title: "Lead Software Engineer Pay Grade",
-    wage_type: "SALARY",
-    base_pay: 145000.0,
-    currency: "USD",
-    pay_frequency: "MONTHLY",
-    effective_from: "2026-01-01",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    structure_id: "comp-sales-dir",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    title: "Director of Global Sales",
-    wage_type: "COMMISSION",
-    base_pay: 180000.0,
-    currency: "USD",
-    pay_frequency: "MONTHLY",
-    effective_from: "2026-01-01",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
-
 type CompStructuresResponse = { structures: CompensationStructure[]; total: number };
 
 export async function listCompensationStructures(identity?: Identity): Promise<ApiResult<CompensationStructure[]>> {
   const base = compensationUrl();
   const url = `${base}/v1/compensation/structures`;
-  return fetchServiceWithFallback<CompStructuresResponse, CompensationStructure[]>(
+  return fetchDomainService<CompStructuresResponse, CompensationStructure[]>(
     url,
     base,
     "compensation-svc",
     identity,
     (d) => d.structures ?? [],
-    MOCK_COMPENSATION
   );
 }
 
@@ -175,45 +109,17 @@ export type BenefitPlan = {
   created_at: string;
 };
 
-const MOCK_BENEFITS: BenefitPlan[] = [
-  {
-    plan_id: "ben-health-ppo",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    name: "Executive Health PPO Plan",
-    benefit_type: "HEALTH_INSURANCE",
-    provider_name: "BlueCross BlueShield",
-    employer_contribution_percent: 80.0,
-    currency: "USD",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    plan_id: "ben-401k-match",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    name: "Corporate 401(k) Matching Program",
-    benefit_type: "RETIREMENT",
-    provider_name: "Fidelity Investments",
-    employer_contribution_percent: 100.0,
-    currency: "USD",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
-
 type BenefitPlansResponse = { plans: BenefitPlan[]; total: number };
 
 export async function listBenefitPlans(identity?: Identity): Promise<ApiResult<BenefitPlan[]>> {
   const base = benefitsUrl();
   const url = `${base}/v1/benefits/plans`;
-  return fetchServiceWithFallback<BenefitPlansResponse, BenefitPlan[]>(
+  return fetchDomainService<BenefitPlansResponse, BenefitPlan[]>(
     url,
     base,
     "benefits-svc",
     identity,
     (d) => d.plans ?? [],
-    MOCK_BENEFITS
   );
 }
 
@@ -233,34 +139,17 @@ export type TaxProfile = {
   created_at: string;
 };
 
-const MOCK_TAX_PROFILES: TaxProfile[] = [
-  {
-    profile_id: "tx-prof-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "us-fed-01",
-    tax_identifier: "W4-SINGLE-01",
-    filing_status: "SINGLE",
-    withholding_allowances: 2,
-    additional_withholding_amount: 50.0,
-    currency: "USD",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
-
 type TaxProfilesResponse = { profiles: TaxProfile[]; total: number };
 
 export async function listPayrollTaxProfiles(identity?: Identity): Promise<ApiResult<TaxProfile[]>> {
   const base = payrollTaxUrl();
   const url = `${base}/v1/payroll-tax/profiles`;
-  return fetchServiceWithFallback<TaxProfilesResponse, TaxProfile[]>(
+  return fetchDomainService<TaxProfilesResponse, TaxProfile[]>(
     url,
     base,
     "payroll-tax-svc",
     identity,
     (d) => d.profiles ?? [],
-    MOCK_TAX_PROFILES
   );
 }
 
@@ -281,44 +170,45 @@ export type PayrollException = {
   created_at: string;
 };
 
-const MOCK_EXCEPTIONS: PayrollException[] = [
-  {
-    exception_id: "exc-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    payroll_run_id: "pr-2026-08",
-    employee_id: "emp-102",
-    exception_type: "MISSING_BANK_ACCOUNT",
-    severity: "WARNING",
-    status: "OPEN",
-    description: "Employee bank direct deposit routing number missing verification.",
-    created_at: "2026-07-29T10:00:00Z",
-  },
-];
-
 type ExceptionsResponse = { exceptions: PayrollException[]; total: number };
 
 export async function listPayrollExceptions(identity?: Identity): Promise<ApiResult<PayrollException[]>> {
   const base = payrollExceptionsUrl();
   const url = `${base}/v1/payroll-exceptions`;
-  return fetchServiceWithFallback<ExceptionsResponse, PayrollException[]>(
+  return fetchDomainService<ExceptionsResponse, PayrollException[]>(
     url,
     base,
     "payroll-exceptions-svc",
     identity,
     (d) => d.exceptions ?? [],
-    MOCK_EXCEPTIONS
   );
 }
 
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
 
-async function fetchServiceWithFallback<TRaw, TOut>(
+/**
+ * GET a JSON resource from a domain service and report what actually happened.
+ *
+ * This replaces `fetchServiceWithFallback`, which substituted hardcoded sample
+ * data and reported it as `{ ok: true }`. It did so in three cases — a non-OK
+ * status, a thrown request, AND **a successful response whose list was empty** —
+ * and that last one is the dangerous one: a healthy service with no records
+ * displayed invented rows indistinguishable from real ones. There was no way for a
+ * caller, or a reader of the page, to tell.
+ *
+ * It also made the panels' own error handling unreachable. Every consumer of these
+ * functions already branches on `!res.ok` to render a "service unavailable" state;
+ * because the helper never returned `ok: false`, that branch was dead code. Failing
+ * honestly is what makes it live again.
+ *
+ * An empty list is now an empty list. An unreachable service is an error.
+ */
+async function fetchDomainService<TRaw, TOut>(
   urlStr: string,
   base: string,
   serviceName: string,
   identity: Identity | undefined,
   transform: (raw: TRaw) => TOut,
-  fallbackData: TOut
 ): Promise<ApiResult<TOut>> {
   const correlationId = crypto.randomUUID();
   const headers: Record<string, string> = {
@@ -329,17 +219,39 @@ async function fetchServiceWithFallback<TRaw, TOut>(
   if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
   if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
 
+  let res: Response;
   try {
-    const res = await fetch(urlStr, {
-      headers,
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) return { ok: true, data: fallbackData };
-    const raw: TRaw = await res.json();
-    const resultData = transform(raw);
-    if (Array.isArray(resultData) && resultData.length === 0) return { ok: true, data: fallbackData };
-    return { ok: true, data: resultData };
+    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
   } catch {
-    return { ok: true, data: fallbackData };
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
   }
 }

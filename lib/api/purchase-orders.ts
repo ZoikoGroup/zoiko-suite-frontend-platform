@@ -94,6 +94,37 @@ export async function getPurchaseOrder(
   return apiGet<PurchaseOrder>("purchaseOrder", `/v1/purchase-orders/${orderId}`, { identity });
 }
 
+/** One entry in an order's append-only amendment ledger. */
+export type PurchaseOrderAmendment = {
+  amendment_id: string;
+  purchase_order_id: string;
+  from_version: number;
+  to_version: number;
+  previous_total_amount: number;
+  new_total_amount: number;
+  reason: string;
+  amended_by_principal_id: string;
+  amended_at: string;
+};
+
+/**
+ * The amendment ledger for one order, oldest first.
+ *
+ * An unknown order is a 404 rather than an empty list, so "this order has never
+ * been amended" and "there is no such order" stay distinguishable. Tenant scope
+ * is applied server-side, so another tenant's ledger reads as absent.
+ */
+export async function listOrderAmendments(
+  orderId: string,
+  identity: Identity & { tenantId: string },
+): Promise<ApiResult<PurchaseOrderAmendment[]>> {
+  return apiGet<PurchaseOrderAmendment[]>(
+    "purchaseOrder",
+    `/v1/purchase-orders/${orderId}/amendments`,
+    { identity },
+  );
+}
+
 export type IssueOrderInput = {
   identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
   totalAmount: number;

@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { ShieldCheck, Percent, Landmark, CalendarClock, TrendingUp } from "lucide-react";
+import { ShieldCheck, Percent, Landmark, CalendarClock, TrendingUp, CloudOff } from "lucide-react";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { getTaxSummaryStats, type TaxSummaryStats } from "@/lib/api/tax";
 
@@ -83,19 +83,30 @@ export async function TaxSummaryBar() {
     ? { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId }
     : undefined;
 
+  // The hardcoded fallback that used to sit here is gone. It substituted a set of
+  // plausible tax figures — £326,000 VAT payable, $50,000 corporate balance due —
+  // whenever the aggregate could not be produced, in the same tiles and the same
+  // style as real ones, so an operator could not tell a computed figure from an
+  // invented one. Tax numbers are the last place that should be guessed at.
+  //
+  // getTaxSummaryStats now also reports which of the seven sources it could not
+  // read; each of those contributes zero to the totals below, so an unread source
+  // makes every figure an understatement rather than a fact.
   const res = await getTaxSummaryStats(identity);
-  const stats: TaxSummaryStats = res.ok
-    ? res.data
-    : {
-        activeRules: 4,
-        totalDeterminations: 2,
-        netVatPayableGBP: 326000,
-        corporateBalanceDueUSD: 50000,
-        withheldTotalEUR: 75000,
-        upcomingFilingCount: 1,
-        finalizedDraftCount: 1,
-        activeAuthorityConnections: 3,
-      };
+
+  if (!res.ok) {
+    return (
+      <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+        <CloudOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          Tax headline figures are unavailable — {res.error.message}. No numbers are shown rather
+          than substituted ones.
+        </span>
+      </div>
+    );
+  }
+
+  const stats: TaxSummaryStats = res.data;
 
   const kpis: KpiCardProps[] = [
     {
@@ -141,13 +152,30 @@ export async function TaxSummaryBar() {
   ];
 
   return (
-    <div
-      className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
-      aria-label="Tax governance KPI summary"
-    >
-      {kpis.map((kpi) => (
-        <KpiCard key={kpi.label} {...kpi} />
-      ))}
+    <div className="space-y-3">
+      {/* A source that could not be read contributes zero to every figure above,
+          which is indistinguishable from it genuinely being empty. Saying which
+          ones failed is what makes an understated total readable as understated. */}
+      {stats.sourcesUnavailable.length > 0 && (
+        <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50/60 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <CloudOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>
+            <strong className="font-semibold">
+              {stats.sourcesUnavailable.length} of 7 sources could not be read
+            </strong>{" "}
+            ({stats.sourcesUnavailable.join(", ")}), so each contributes nothing to the figures
+            below. Treat them as understated, not as current.
+          </span>
+        </p>
+      )}
+      <div
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Tax governance KPI summary"
+      >
+        {kpis.map((kpi) => (
+          <KpiCard key={kpi.label} {...kpi} />
+        ))}
+      </div>
     </div>
   );
 }

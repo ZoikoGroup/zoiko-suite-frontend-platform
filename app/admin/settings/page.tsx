@@ -3,9 +3,15 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { KeyRound, ShieldCheck, Building2, Fingerprint } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Skeleton } from "@/components/ui";
-import { PageHeader } from "@/components/admin/shared";
-import { FeatureFlagForm, FeatureFlagTable } from "@/components/admin/settings";
+import { PageHeader, LookupById } from "@/components/admin/shared";
+import {
+  FeatureFlagForm,
+  FeatureFlagTable,
+  ConfigEntryForm,
+  ConfigEntryTable,
+} from "@/components/admin/settings";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { lookupConfigEntry, lookupFeatureFlag } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -61,6 +67,58 @@ export default async function SettingsPage() {
               <FeatureFlagTable />
             </Suspense>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Config entries</CardTitle>
+            <CardDescription>
+              Live, writable. The other half of configuration-feature-flag-svc — arbitrary JSON
+              values on the same append-only, effective-dated model as the flags above.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <ConfigEntryForm />
+          <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+            <Suspense fallback={<Skeleton className="h-28 w-full rounded-lg" />}>
+              <ConfigEntryTable />
+            </Suspense>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Resolve one exact scope</CardTitle>
+            <CardDescription>
+              What a service would actually read. These lookups match{" "}
+              <em>(key, environment, tenant)</em> exactly and never fall back — so a miss at
+              tenant scope says nothing about whether a global default exists. The tables above
+              behave the opposite way, listing across all scopes at once.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <LookupById
+            action={lookupFeatureFlag}
+            inputName="flag_key"
+            label="Feature flag"
+            placeholder="checkout.new_flow local tenant"
+            hint="Space-separated: key, then environment, then tenant or global. Defaults to local and tenant."
+            buttonLabel="Resolve flag"
+          />
+          <LookupById
+            action={lookupConfigEntry}
+            inputName="config_key"
+            label="Config entry"
+            placeholder="payroll.cutoff_hour local tenant"
+            hint="Same three parts. A 404 here is scope-specific, not proof the key is unset."
+            buttonLabel="Resolve config"
+          />
         </CardContent>
       </Card>
 

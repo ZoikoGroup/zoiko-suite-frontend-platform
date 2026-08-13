@@ -1,11 +1,7 @@
-import { cookies } from "next/headers";
 import { Wallet, DollarSign, Percent, AlertCircle, TrendingUp } from "lucide-react";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { IllustrativeNotice } from "@/components/admin/shared";
 
-export async function PayrollSummaryBar() {
-  const store = await cookies();
-  const _session = decodeSession(store.get(SESSION_COOKIE)?.value);
-
+export function PayrollSummaryBar() {
   const kpis = [
     {
       icon: Wallet,
@@ -46,6 +42,8 @@ export async function PayrollSummaryBar() {
   ];
 
   return (
+    <div className="space-y-3">
+      <IllustrativeNotice services={"payroll-run-svc, compensation-svc, benefits-svc, payroll-tax-svc and payroll-exceptions-svc are all in compose but none is wired to this console yet."} />
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Payroll KPI summary">
       {kpis.map((kpi) => (
         <div
@@ -73,6 +71,7 @@ export async function PayrollSummaryBar() {
           <div className={`absolute bottom-0 left-0 h-0.5 w-full ${kpi.bg} opacity-60`} />
         </div>
       ))}
+    </div>
     </div>
   );
 }

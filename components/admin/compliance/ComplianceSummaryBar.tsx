@@ -1,11 +1,7 @@
-import { cookies } from "next/headers";
 import { ShieldCheck, FileCheck, ShieldAlert, AlertTriangle, TrendingUp } from "lucide-react";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { IllustrativeNotice } from "@/components/admin/shared";
 
-export async function ComplianceSummaryBar() {
-  const store = await cookies();
-  const _session = decodeSession(store.get(SESSION_COOKIE)?.value);
-
+export function ComplianceSummaryBar() {
   const kpis = [
     {
       icon: ShieldCheck,
@@ -46,6 +42,8 @@ export async function ComplianceSummaryBar() {
   ];
 
   return (
+    <div className="space-y-3">
+      <IllustrativeNotice services={"obligations-svc and evidence-requirements-svc are wired on their own pages; these headline figures are not read from either."} />
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Compliance KPI summary">
       {kpis.map((kpi) => (
         <div
@@ -73,6 +71,7 @@ export async function ComplianceSummaryBar() {
           <div className={`absolute bottom-0 left-0 h-0.5 w-full ${kpi.bg} opacity-60`} />
         </div>
       ))}
+    </div>
     </div>
   );
 }
