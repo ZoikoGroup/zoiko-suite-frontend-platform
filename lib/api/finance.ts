@@ -1,15 +1,21 @@
 // Sample-data panels for the Finance domain overview.
 //
 // Nothing in this file calls a backend — every export returns hardcoded rows, so
-// the panels built on it show the domain's shape rather than its contents. The one
-// live, writable Finance client is lib/api/accounts-payable.ts, read by the
-// payables register at the top of /admin/finance.
+// the panels built on it show the domain's shape rather than its contents. Two
+// live, writable Finance clients exist alongside it and are NOT here:
+// lib/api/general-ledger.ts and lib/api/accounts-payable.ts, read by the journal
+// and payables registers at the top of /admin/finance.
+//
+// The journal entries that used to live here are gone rather than relabelled.
+// general-ledger-svc is wired now, so a second, fictional set of journals would
+// not be "the domain's shape" — it would be a competing answer to a question the
+// page already answers truthfully a few hundred pixels higher up.
 //
 // Ports below are as published in deployments/docker-compose.yml, re-checked
 // against it. Six of the nine listed here were previously wrong — including
 // accounts-payable-svc at 8102, which is bank-reconciliation-svc's port — and
 // nothing caught it because no call site existed to break.
-// - general-ledger-svc (8098)
+// - general-ledger-svc (8098) — see lib/api/general-ledger.ts
 // - accounts-payable-svc (8099) — see lib/api/accounts-payable.ts
 // - accounts-receivable-svc (8101)
 // - bank-reconciliation-svc (8102)
@@ -21,18 +27,6 @@
 //   the backend, which is why general-ledger-svc's account_code is unvalidated.
 
 import { type ApiResult, type Identity } from "./client";
-
-export type JournalEntry = {
-  entry_id: string;
-  posting_date: string;
-  account_code: string;
-  account_name: string;
-  debit: number;
-  credit: number;
-  currency: string;
-  status: "POSTED" | "DRAFT" | "REVERSED";
-  reference: string;
-};
 
 export type CashPosition = {
   account_id: string;
@@ -52,31 +46,6 @@ export type FinanceSummaryStats = {
   activeAccountsCount: number;
 };
 
-const MOCK_JOURNAL_ENTRIES: JournalEntry[] = [
-  {
-    entry_id: "jv-2026-001",
-    posting_date: "2026-07-31",
-    account_code: "1100-AR",
-    account_name: "Trade Accounts Receivable",
-    debit: 120000.0,
-    credit: 0.0,
-    currency: "USD",
-    status: "POSTED",
-    reference: "INV-2026-0891",
-  },
-  {
-    entry_id: "jv-2026-002",
-    posting_date: "2026-07-31",
-    account_code: "4000-REV",
-    account_name: "Software License Revenue",
-    debit: 0.0,
-    credit: 120000.0,
-    currency: "USD",
-    status: "POSTED",
-    reference: "INV-2026-0891",
-  },
-];
-
 const MOCK_CASH_POSITIONS: CashPosition[] = [
   {
     account_id: "bank-op-01",
@@ -95,10 +64,6 @@ const MOCK_CASH_POSITIONS: CashPosition[] = [
     status: "ACTIVE",
   },
 ];
-
-export async function listJournalEntries(_identity?: Identity): Promise<ApiResult<JournalEntry[]>> {
-  return { ok: true, data: MOCK_JOURNAL_ENTRIES };
-}
 
 export async function listCashPositions(_identity?: Identity): Promise<ApiResult<CashPosition[]>> {
   return { ok: true, data: MOCK_CASH_POSITIONS };

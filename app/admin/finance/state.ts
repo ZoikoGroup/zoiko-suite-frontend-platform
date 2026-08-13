@@ -5,6 +5,7 @@
 // async functions, so the initial-state constant cannot live there.
 
 import type { InvoiceStatus } from "@/lib/api/accounts-payable";
+import type { JournalStatus } from "@/lib/api/general-ledger";
 
 /**
  * Outcomes of a payables write.
@@ -47,3 +48,88 @@ export const IDLE_PAYABLE_STATE: PayableActionState = { status: "idle", message:
  *  accepts any three-letter code; these are the ones the demo entities transact
  *  in, matching the commercial-ops forms. */
 export const CURRENCIES = ["GBP", "EUR", "USD", "INR"] as const;
+
+// ─── general-ledger-svc ──────────────────────────────────────────────────────
+
+/**
+ * Outcomes of a general ledger write.
+ *
+ * Four of these are deliberately not `error`, because each is a true statement
+ * about the journal rather than a failure of the service, and each has a
+ * different remedy:
+ *
+ *  - `unbalanced` — the debits and credits do not agree, so validation refused
+ *    and the journal is still PENDING. A draft is ALLOWED to be unbalanced, so
+ *    this is a normal stop on the way, not a malfunction. The fix is to correct
+ *    the lines and file it again.
+ *  - `period-locked` — financial-close-svc reports the fiscal period CLOSED or
+ *    LOCKED, so nothing was written. The books are shut, which is the system
+ *    working; the fix is a different period, or reopening this one.
+ *  - `out-of-sequence` — a 422 on a transition. The journal simply was not in
+ *    the stage that transition moves out of, usually because the register on
+ *    screen is a moment behind the ledger.
+ *  - `replayed` — the service is idempotent on (tenant_id, correlation_id) and
+ *    resolved a retry to the ORIGINAL journal. Rendering it as a success would
+ *    claim a second posting that does not exist, which is the precise thing the
+ *    idempotency key prevents.
+ */
+export type LedgerActionState = {
+  status:
+    | "idle"
+    | "recorded"
+    | "replayed"
+    | "advanced"
+    | "reversed"
+    | "unbalanced"
+    | "period-locked"
+    | "out-of-sequence"
+    | "error";
+  message: string;
+  /** Echoed back so the operator has the id without hunting the register for the
+   *  row they just created. On a reversal this is the REVERSING journal. */
+  journalId?: string;
+  stage?: JournalStatus;
+};
+
+export const IDLE_LEDGER_STATE: LedgerActionState = { status: "idle", message: "" };
+
+// ─── financial-close-svc ─────────────────────────────────────────────────────
+
+/**
+ * Outcomes of a financial close write.
+ *
+ * `blocked` is the important one, and it is not an error: the period has
+ * outstanding items, which is the close doing its job. It carries the reasons
+ * so the panel can list them rather than printing one line of prose.
+ *
+ * `unevidenced` is the outcome that needs a human. The period IS locked and the
+ * trial balance IS in the vault, but the signed hash was not persisted — so the
+ * books are sealed and the record of what they said at the moment of sealing is
+ * missing. It is separated from `error` because the remedy is completely
+ * different: nothing can be retried, and the close must not be treated as
+ * evidenced.
+ */
+export type CloseActionState = {
+  status:
+    | "idle"
+    | "registered"
+    | "replayed"
+    | "closed"
+    | "blocked"
+    | "ready"
+    | "unevidenced"
+    | "error";
+  message: string;
+  periodId?: string;
+  /** Populated on `blocked` and `ready` — the readiness check's findings. */
+  blockingIssues?: string[];
+};
+
+export const IDLE_CLOSE_STATE: CloseActionState = { status: "idle", message: "" };
+
+/** How many line rows the record-journal form starts with and allows.
+ *
+ *  Two is the minimum that can balance, and every posting this form exists to
+ *  make has at least a debit and a credit. The cap is a form limit, not a
+ *  service one — the service accepts any number of lines. */
+export const JOURNAL_LINE_SLOTS = { initial: 2, max: 10 } as const;

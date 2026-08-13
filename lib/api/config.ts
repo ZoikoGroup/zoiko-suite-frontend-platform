@@ -28,6 +28,10 @@ const DEFAULTS = {
   purchaseOrder: "http://localhost:8129",
   evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
+  // 8098. The hub of the Finance domain — treasury, financial-close,
+  // bank-reconciliation, intercompany and consolidation all read it — and the
+  // service behind the journal register on /admin/finance.
+  generalLedger: "http://localhost:8098",
   // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is
   // in the compose file and in health.ts; the stale comment was the only place
   // that disagreed, and nothing called it, so nothing caught it.
@@ -76,6 +80,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   purchaseOrder: "/purchase-order-svc",
   evidence: "/evidence-requirements-svc",
   accountsReceivable: "/accounts-receivable-svc",
+  generalLedger: "/general-ledger-svc",
   accountsPayable: "/accounts-payable-svc",
   spendControls: "/spend-controls-svc",
   vendorDueDiligence: "/vendor-due-diligence-svc",
