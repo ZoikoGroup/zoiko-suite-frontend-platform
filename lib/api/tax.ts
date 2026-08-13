@@ -525,313 +525,22 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
   return { ok: true, data: deadlines };
 }
 
-// ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
-
+// ─── Shared Fetch Helper ──────────────────────────────────────────────────────
 
 /**
  * GET a JSON resource from a domain service and report what actually happened.
  *
- * This replaces `fetchServiceWithFallback`, which substituted hardcoded sample
- * data and reported it as `{ ok: true }`. It did so in three cases — a non-OK
- * status, a thrown request, AND **a successful response whose list was empty** —
- * and that last one is the dangerous one: a healthy service with no records
- * displayed invented rows indistinguishable from real ones. There was no way for a
- * caller, or a reader of the page, to tell.
+ * Design principles (matching the pattern established in PR #9):
+ * - An unreachable service returns `{ ok: false, error: { kind: "unreachable" } }`
+ * - A non-OK HTTP status returns `{ ok: false, error: { kind: "http" } }`
+ * - A malformed body returns `{ ok: false, error: { kind: "malformed" } }`
+ * - An **empty list** from a healthy service returns `{ ok: true, data: [] }` — it
+ *   is NOT substituted with mock data. A healthy service with no records is
+ *   genuinely empty; showing invented rows in its place is misleading.
  *
- * It also made the panels' own error handling unreachable. Every consumer of these
- * functions already branches on `!res.ok` to render a "service unavailable" state;
- * because the helper never returned `ok: false`, that branch was dead code. Failing
- * honestly is what makes it live again.
- *
- * An empty list is now an empty list. An unreachable service is an error.
+ * All MOCK_* arrays that used to be passed as `fallbackData` have been removed.
+ * Panels that previously relied on them now render an honest empty state.
  */
-// ─── Shared Mock Fallback Data ────────────────────────────────────────────────
-
-export const MOCK_TAX_RULES: TaxRule[] = [
-  {
-    rule_id: "rule-uk-vat-01",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "uk-gov-01",
-    rule_code: "UK-VAT-STD-20",
-    name: "UK Standard VAT Rate",
-    category: "VAT",
-    tax_rate_percentage: 20,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-us-corp-02",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "us-fed-01",
-    rule_code: "US-CORP-FED-21",
-    name: "US Federal Corporate Tax",
-    category: "CORPORATE_INCOME",
-    tax_rate_percentage: 21,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-sg-gst-03",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "sg-iras-01",
-    rule_code: "SG-GST-STD-09",
-    name: "Singapore Goods & Services Tax",
-    category: "GST",
-    tax_rate_percentage: 9,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-de-wht-04",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "de-bzst-01",
-    rule_code: "DE-WHT-DIV-15",
-    name: "Germany Dividend Withholding Tax",
-    category: "WITHHOLDING",
-    tax_rate_percentage: 15,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-];
-
-export const MOCK_TAX_DETERMINATIONS: TaxDetermination[] = [
-  {
-    determination_id: "det-2026-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    transaction_id: "tx-inv-1001",
-    source_module: "AR_INVOICES",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    rule_id: "rule-uk-vat-01",
-    tax_category: "VAT",
-    gross_amount: 100000,
-    taxable_amount: 100000,
-    tax_rate_percentage: 20,
-    calculated_tax_amount: 20000,
-    exempt_amount: 0,
-    currency: "GBP",
-    status: "APPLIED",
-    effective_from: "2026-06-01",
-    evaluated_at: "2026-06-01T10:00:00Z",
-    evaluated_by: "engine",
-    created_at: "2026-06-01T10:00:00Z",
-    updated_at: "2026-06-01T10:00:00Z",
-  },
-  {
-    determination_id: "det-2026-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    transaction_id: "tx-inv-1002",
-    source_module: "AR_INVOICES",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "us-fed-01",
-    rule_id: "rule-us-corp-02",
-    tax_category: "CORPORATE_INCOME",
-    gross_amount: 250000,
-    taxable_amount: 250000,
-    tax_rate_percentage: 21,
-    calculated_tax_amount: 52500,
-    exempt_amount: 0,
-    currency: "USD",
-    status: "APPLIED",
-    effective_from: "2026-06-15",
-    evaluated_at: "2026-06-15T14:30:00Z",
-    evaluated_by: "engine",
-    created_at: "2026-06-15T14:30:00Z",
-    updated_at: "2026-06-15T14:30:00Z",
-  },
-];
-
-export const MOCK_VAT_RETURNS: VATReturn[] = [
-  {
-    return_id: "vat-2026-q1",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    tax_registration_number: "GB999888777",
-    tax_period: "2026-Q1",
-    total_sales_amount: 500000,
-    total_purchase_amount: 200000,
-    output_tax_amount: 100000,
-    input_tax_amount: 40000,
-    net_tax_payable: 60000,
-    currency: "GBP",
-    status: "ACCEPTED",
-    filed_at: "2026-04-15T09:00:00Z",
-    filed_by: "finance-lead",
-    effective_from: "2026-01-01",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-04-15T09:00:00Z",
-  },
-  {
-    return_id: "vat-2026-q2",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    tax_registration_number: "GB999888777",
-    tax_period: "2026-Q2",
-    total_sales_amount: 650000,
-    total_purchase_amount: 250000,
-    output_tax_amount: 130000,
-    input_tax_amount: 50000,
-    net_tax_payable: 80000,
-    currency: "GBP",
-    status: "DRAFT",
-    effective_from: "2026-04-01",
-    created_by: "system",
-    created_at: "2026-04-01T00:00:00Z",
-    updated_at: "2026-07-01T00:00:00Z",
-  },
-];
-
-export const MOCK_CORPORATE_RETURNS: CorporateTaxReturn[] = [
-  {
-    return_id: "cit-2025-us",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "us-fed-01",
-    tax_registration_number: "12-3456789",
-    fiscal_year: 2025,
-    accounting_period_start: "2025-01-01",
-    accounting_period_end: "2025-12-31",
-    gross_revenue: 5000000,
-    allowable_deductions: 3500000,
-    taxable_income: 1500000,
-    tax_rate_percent: 21,
-    gross_tax_liability: 315000,
-    tax_credits: 40000,
-    net_tax_payable: 275000,
-    tax_already_paid: 200000,
-    balance_due: 75000,
-    currency: "USD",
-    status: "SUBMITTED",
-    submitted_at: "2026-03-15T11:00:00Z",
-    submitted_by: "cfo",
-    effective_from: "2025-01-01",
-    created_by: "system",
-    created_at: "2025-01-01T00:00:00Z",
-    updated_at: "2026-03-15T11:00:00Z",
-  },
-];
-
-export const MOCK_WHT_OBLIGATIONS: WithholdingTaxObligation[] = [
-  {
-    obligation_id: "wht-2026-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "de-bzst-01",
-    counterparty_id: "cp-acme-corp",
-    payment_reference: "PMT-DE-8821",
-    payment_type: "DIVIDEND",
-    gross_payment_amount: 100000,
-    taxable_base_amount: 100000,
-    withholding_rate_percent: 15,
-    withheld_amount: 15000,
-    currency: "EUR",
-    tax_treaty_exemption: false,
-    status: "REMITTED",
-    remittance_reference: "REMIT-BZST-401",
-    remitted_at: "2026-05-10T08:00:00Z",
-    effective_from: "2026-05-01",
-    created_by: "system",
-    created_at: "2026-05-01T00:00:00Z",
-    updated_at: "2026-05-10T08:00:00Z",
-  },
-  {
-    obligation_id: "wht-2026-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "de-bzst-01",
-    counterparty_id: "cp-tech-corp",
-    payment_reference: "PMT-DE-8822",
-    payment_type: "ROYALTY",
-    gross_payment_amount: 200000,
-    taxable_base_amount: 200000,
-    withholding_rate_percent: 15,
-    withheld_amount: 30000,
-    currency: "EUR",
-    tax_treaty_exemption: false,
-    status: "PENDING_REMITTANCE",
-    effective_from: "2026-07-15",
-    created_by: "system",
-    created_at: "2026-07-15T00:00:00Z",
-    updated_at: "2026-07-15T00:00:00Z",
-  },
-];
-
-export const MOCK_FILING_DRAFTS: FilingDraft[] = [
-  {
-    draft_id: "draft-hmrc-q2",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "uk-gov-01",
-    filing_type: "VAT100_MTD",
-    period_key: "2026-Q2",
-    due_date: "2026-08-31",
-    payload_data: '{"box1":370000,"box5":186000}',
-    validation_status: "FINALIZED",
-    created_by: "admin-console",
-    created_at: "2026-07-01T10:00:00Z",
-    updated_at: "2026-07-01T10:00:00Z",
-  },
-  {
-    draft_id: "draft-irs-1120",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "us-fed-01",
-    filing_type: "FORM_1120",
-    period_key: "2025-FY",
-    due_date: "2026-09-15",
-    payload_data: '{"line1":5000000}',
-    validation_status: "PREPARED",
-    created_by: "admin-console",
-    created_at: "2026-06-01T10:00:00Z",
-    updated_at: "2026-06-01T10:00:00Z",
-  },
-];
-
-export const MOCK_AUTHORITIES: TaxAuthorityInterface[] = [
-  {
-    interface_id: "if-hmrc-mtd",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "uk-gov-01",
-    authority_code: "HMRC_MTD",
-    authority_name: "HM Revenue & Customs (Making Tax Digital)",
-    api_endpoint: "https://api.service.hmrc.gov.uk",
-    auth_type: "OAUTH2",
-    protocol: "REST_JSON",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    interface_id: "if-irs-meff",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "us-fed-01",
-    authority_code: "IRS_MEF",
-    authority_name: "IRS Modernized e-File",
-    api_endpoint: "https://mef.irs.gov",
-    auth_type: "MUTUAL_TLS",
-    protocol: "SOAP_XML",
-    status: "ACTIVE",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
 
 async function fetchDomainService<TRaw, TOut>(
   urlStr: string,
@@ -839,7 +548,6 @@ async function fetchDomainService<TRaw, TOut>(
   serviceName: string,
   identity: Identity | undefined,
   transform: (raw: TRaw) => TOut,
-  fallbackData?: TOut,
 ): Promise<ApiResult<TOut>> {
   const correlationId = crypto.randomUUID();
   const headers: Record<string, string> = {
@@ -854,9 +562,6 @@ async function fetchDomainService<TRaw, TOut>(
   try {
     res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
   } catch (cause) {
-    if (fallbackData !== undefined) {
-      return { ok: true, data: fallbackData };
-    }
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     return {
       ok: false,
@@ -870,9 +575,6 @@ async function fetchDomainService<TRaw, TOut>(
   }
 
   if (!res.ok) {
-    if (fallbackData !== undefined) {
-      return { ok: true, data: fallbackData };
-    }
     return {
       ok: false,
       error: {
@@ -885,15 +587,8 @@ async function fetchDomainService<TRaw, TOut>(
 
   try {
     const parsed = (await res.json()) as TRaw;
-    const data = transform(parsed);
-    if (Array.isArray(data) && data.length === 0 && fallbackData !== undefined) {
-      return { ok: true, data: fallbackData };
-    }
-    return { ok: true, data };
+    return { ok: true, data: transform(parsed) };
   } catch {
-    if (fallbackData !== undefined) {
-      return { ok: true, data: fallbackData };
-    }
     return {
       ok: false,
       error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
