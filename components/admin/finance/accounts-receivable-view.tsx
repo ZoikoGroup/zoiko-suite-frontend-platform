@@ -38,7 +38,12 @@ export function AccountsReceivableView() {
 
     const res = await listInvoices(tenantID);
     if (res.data) {
-      setInvoices(res.data);
+      const list = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray((res.data as any)?.invoices)
+        ? (res.data as any).invoices
+        : [];
+      setInvoices(list);
     }
     setStatusMessage(res.error || (healthy ? "Connected to local Go microservice (http://localhost:8101)" : "Local microservice offline. Using mock fallback."));
     setIsLoading(false);
@@ -261,7 +266,7 @@ export function AccountsReceivableView() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 text-xs">
-              {invoices.length === 0 ? (
+              {!Array.isArray(invoices) || invoices.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-8 text-center text-zinc-500">
                     No invoices found for tenant {tenantID}.

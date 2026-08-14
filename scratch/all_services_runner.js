@@ -13,7 +13,7 @@ const http = require("http");
 // ── Seed data ─────────────────────────────────────────────────────────────────
 const GL_ENTRIES=[{entry_id:"gle-001",posting_date:"2026-07-31",account_code:"1001",account_name:"Cash & Bank",debit:1500000,credit:0,currency:"GBP",status:"POSTED",reference:"INV-2026-0891",period:"2026-07"},{entry_id:"gle-002",posting_date:"2026-07-31",account_code:"4001",account_name:"Revenue – Software Licensing",debit:0,credit:920000,currency:"GBP",status:"POSTED",reference:"INV-2026-0891",period:"2026-07"}];
 const AP_INVOICES=[{invoice_id:"ap-inv-001",vendor_id:"vnd-acme",amount:75000,currency:"GBP",status:"APPROVED",due_date:"2026-08-30",created_at:"2026-08-01T00:00:00Z"},{invoice_id:"ap-inv-002",vendor_id:"vnd-cloud",amount:12400,currency:"USD",status:"PENDING",due_date:"2026-09-15",created_at:"2026-08-10T00:00:00Z"}];
-const AR_INVOICES=[{invoice_id:"ar-inv-001",customer_id:"cust-enterprise-a",amount:180000,currency:"GBP",status:"OUTSTANDING",due_date:"2026-09-01",created_at:"2026-08-01T00:00:00Z"},{invoice_id:"ar-inv-002",customer_id:"cust-global-b",amount:94000,currency:"USD",status:"PAID",due_date:"2026-08-15",paid_at:"2026-08-12T10:00:00Z",created_at:"2026-07-15T00:00:00Z"}];
+const AR_INVOICES=[{invoice_id:"ar-inv-001",invoice_number:"INV-2026-0891",customer_id:"cust-enterprise-a",amount:180000,currency_code:"GBP",currency:"GBP",status:"OUTSTANDING",due_date:"2026-09-01",created_at:"2026-08-01T00:00:00Z"},{invoice_id:"ar-inv-002",invoice_number:"INV-2026-0892",customer_id:"cust-global-b",amount:94000,currency_code:"USD",currency:"USD",status:"PAID",due_date:"2026-08-15",paid_at:"2026-08-12T10:00:00Z",created_at:"2026-07-15T00:00:00Z"}];
 const RECONS=[{recon_id:"recon-2026-07",period:"2026-07",status:"MATCHED",matched_count:148,unmatched_count:2,created_at:"2026-08-01T00:00:00Z"}];
 const CASH_POS=[{account_id:"acc-gbp-main",bank_name:"Barclays Commercial UK",currency:"GBP",available_balance:4250000,balance:4250000,swept_balance:5000000,status:"ACTIVE"},{account_id:"acc-usd-ops",bank_name:"JPMorgan Chase",currency:"USD",available_balance:820000,balance:820000,swept_balance:1000000,status:"ACTIVE"}];
 const CLOSE_PERIODS=[{period_id:"close-2026-07",period:"2026-07",status:"CLOSED",closed_at:"2026-08-05T18:00:00Z",approved_by:"cfo-controller"},{period_id:"close-2026-08",period:"2026-08",status:"OPEN",closed_at:null,approved_by:null}];
@@ -70,7 +70,10 @@ serve(8099,"accounts-payable-svc",(m,p,q,b,send)=>{
   return send(201,{invoice_id:"ap-"+Date.now(),status:"PENDING",...b});
 });
 serve(8101,"accounts-receivable-svc",(m,p,q,b,send)=>{
-  if(m==="GET") return send(200,{invoices:AR_INVOICES,total_receivable:180000,total:AR_INVOICES.length});
+  if(m==="GET") {
+    if(p==="/v1/invoices") return send(200, AR_INVOICES);
+    return send(200,{invoices:AR_INVOICES,total_receivable:180000,total:AR_INVOICES.length});
+  }
   return send(201,{invoice_id:"ar-"+Date.now(),status:"OUTSTANDING",...b});
 });
 serve(8102,"bank-reconciliation-svc",(m,p,q,b,send)=>{
