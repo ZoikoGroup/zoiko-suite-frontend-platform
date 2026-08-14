@@ -13,7 +13,7 @@ export async function EmployeeMasterPanel() {
   const res = await listEmployees(identity);
   if (!res.ok && res.error.kind === "unreachable") return <PanelEmptyState icon={CloudOff} tone="warning" label="employee-master-svc unavailable" hint={res.error.message} />;
 
-  const employees: Employee[] = res.ok ? res.data : [];
+  const employees: Employee[] = res.ok && Array.isArray(res.data) ? res.data : [];
 
   return (
     <div className="space-y-4">
@@ -57,8 +57,8 @@ export async function LeaveAndOrgPanel() {
 
   if (!leaveRes.ok && leaveRes.error.kind === "unreachable") return <PanelEmptyState icon={CloudOff} tone="warning" label="leave-absence-svc unavailable" hint={leaveRes.error.message} />;
 
-  const leaveRequests: LeaveRequest[] = leaveRes.ok ? leaveRes.data : [];
-  const departments: Department[] = deptRes.ok ? deptRes.data : [];
+  const leaveRequests: LeaveRequest[] = leaveRes.ok && Array.isArray(leaveRes.data) ? leaveRes.data : [];
+  const departments: Department[] = deptRes.ok && Array.isArray(deptRes.data) ? deptRes.data : [];
 
   return (
     <div className="space-y-6">
