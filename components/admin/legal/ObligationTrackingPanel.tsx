@@ -111,11 +111,16 @@ export async function ObligationTrackingPanel() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      {(o.obligation_type || (o as any).category || "CONTRACTUAL").replace(/_/g, " ")}
+                      {(() => {
+                        const rawObj = o as unknown as Record<string, unknown>;
+                        const typeStr = o.obligation_type || (typeof rawObj.category === "string" ? rawObj.category : "CONTRACTUAL");
+                        return typeStr.replace(/_/g, " ");
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       {(() => {
-                        const risk = o.risk_level || (o as any).priority || "MEDIUM";
+                        const rawObj = o as unknown as Record<string, unknown>;
+                        const risk = o.risk_level || (typeof rawObj.priority === "string" ? rawObj.priority : "MEDIUM");
                         return (
                           <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${RISK_COLORS[risk as keyof typeof RISK_COLORS] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`}>
                             {risk}

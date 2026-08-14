@@ -38,10 +38,11 @@ export function AccountsReceivableView() {
 
     const res = await listInvoices(tenantID);
     if (res.data) {
+      const rawObj = res.data as unknown as Record<string, unknown>;
       const list = Array.isArray(res.data)
         ? res.data
-        : Array.isArray((res.data as any)?.invoices)
-        ? (res.data as any).invoices
+        : Array.isArray(rawObj?.invoices)
+        ? (rawObj.invoices as CustomerInvoice[])
         : [];
       setInvoices(list);
     }
