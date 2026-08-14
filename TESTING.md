@@ -878,6 +878,62 @@ SoD check working, not a setup omission.
 
 ---
 
+## 15. Notifications - `notification-svc` (:8133)
+
+**What it is.** Governed delivery of notifications for workflows, deadlines,
+escalations, approvals, and status changes. Idempotent on
+`(tenant_id, correlation_id)`: a retry replays the original delivery outcome
+instead of sending a second time.
+
+**The distinction being tested:** a notification can be recorded but NOT
+delivered, and the service reports that as a normal 201 with `status: FAILED`
+rather than an error. Its own critical constraint (03-microservices.md §9.7) is
+that notification failure must never collapse the source workflow — a caller
+that failed to notify someone sees a normal success so it does not treat its
+own, otherwise-successful operation as failed too.
+
+**The stub is the whole story.** No email/SMS/webhook provider is wired up. The
+delivery adapter logs and always succeeds for EMAIL, SMS, IN_APP, WEBHOOK; an
+unsupported channel is the ONLY way to reach FAILED today. SENT therefore means
+"recorded, stub-delivered" — not "actually received".
+
+### Test it
+
+1. Go to **Notifications** in the sidebar. Fill recipient, channel **EMAIL**,
+   subject, body. Send.
+   → **Expect success banner:** "recorded and stub-delivered". The row appears
+   in the delivery register as SENT. This is the real 201 path.
+2. **Send again with the same correlation** — the console generates a fresh
+   correlation per submission, so from the UI a repeat send is a new
+   notification; the 200-replay path is exercised by the API smoke, not the UI.
+3. **Resolve one notification** — click its id; the register renders it. The
+   get route authorizes per legal entity: a principal without NOTIFICATION_VIEW
+   on the queried entity gets 403, not an empty list.
+4. **List without a tenant filter** — the register is scoped by X-Tenant-Id;
+   another tenant's notifications are invisible (row-level security hides them
+   the same way as a not-found).
+
+### The failure path — the interesting part
+
+5. Send with channel **PIGEON** (not in the supported set).
+   → **Expect a warning banner, not an error:** "recorded but delivery
+   FAILED". The row shows FAILED with `unsupported channel: PIGEON`.
+   The 201 status is the point: the workflow that raised the notice is not
+   told it failed, so it does not roll back on a delivery problem.
+
+### Watch for
+
+- **FAILED is a finding, not a cosmetic state.** It is recorded proof the
+  notice did not go out. The register renders it in danger tone with the
+  reason — and the form banner reports it as `failed`, distinct from `sent`.
+- **SENT must never be read as delivered.** No provider exists; the stub
+  adapter accepted the record. The page copy says so rather than implying a
+  real-world delivery.
+- **A 200 replay is not a second send.** The service answers 200 with the
+  stored notification for a seen correlation_id; nothing is sent twice.
+
+---
+
 ## Known-stale claims in this document
 
 Sections 1–6 were written from the Go source before any of it had been run. Most

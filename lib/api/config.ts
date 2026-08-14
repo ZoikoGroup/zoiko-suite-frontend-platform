@@ -52,6 +52,10 @@ const DEFAULTS = {
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
   financialClose: "http://localhost:8104",
+  // 8133, per compose. notification-svc delivers governed notifications via a
+  // documented stub adapter (see lib/api/notifications.ts) — no provider is
+  // wired up on the platform yet.
+  notification: "http://localhost:8133",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -92,6 +96,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   tenantRegistry: "/tenant-entity-registry-svc",
   schemaRegistry: "/schema-registry-svc",
   financialClose: "/financial-close-svc",
+  notification: "/notification-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
