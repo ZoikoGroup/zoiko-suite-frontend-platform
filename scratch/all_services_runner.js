@@ -591,8 +591,83 @@ serve(8084, "audit-event-store-svc", (m, p, q, b, send) => {
 });
 
 // ── 8. Governance, Registry & Supporting Services ───────────────────────────────
+const TENANT_DATA = {
+  tenant_id: "11111111-1111-1111-1111-111111111111",
+  tenant_code: "ZOIKO-GLOBAL",
+  legal_name: "Zoiko Group Holdings Ltd",
+  trading_name: "Zoiko Suite",
+  status: "ACTIVE",
+  default_currency_code: "GBP",
+  primary_timezone: "Europe/London",
+  primary_locale: "en-GB",
+  default_data_residency_policy_id: "pol-dr-001",
+  lifecycle_state: "ACTIVE",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-08-01T00:00:00Z",
+  created_by_principal_id: "33333333-3333-3333-3333-333333333333",
+  updated_by_principal_id: "33333333-3333-3333-3333-333333333333"
+};
+
+const LEGAL_ENTITIES_DATA = [
+  {
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    entity_code: "ZOIKO-UK",
+    legal_name: "Zoiko UK Operating Ltd",
+    trading_name: "Zoiko UK",
+    registration_number: "UK-12948102",
+    tax_identity_bundle_id: "tib-uk-001",
+    entity_type: "OPERATING",
+    incorporation_date: "2021-04-01T00:00:00Z",
+    default_currency_code: "GBP",
+    fiscal_calendar_id: "fisc-uk-std",
+    parent_legal_entity_id: null,
+    entity_status: "ACTIVE",
+    primary_jurisdiction_id: "jur-uk-gb",
+    data_residency_policy_id: "pol-dr-001",
+    created_at: "2021-04-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    created_by_principal_id: "33333333-3333-3333-3333-333333333333",
+    updated_by_principal_id: "33333333-3333-3333-3333-333333333333"
+  },
+  {
+    legal_entity_id: "33333333-2222-2222-2222-222222222222",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    entity_code: "ZOIKO-US",
+    legal_name: "Zoiko Americas Inc",
+    trading_name: "Zoiko US",
+    registration_number: "DE-7788192",
+    tax_identity_bundle_id: "tib-us-001",
+    entity_type: "SUBSIDIARY",
+    incorporation_date: "2022-06-15T00:00:00Z",
+    default_currency_code: "USD",
+    fiscal_calendar_id: "fisc-us-std",
+    parent_legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    entity_status: "ACTIVE",
+    primary_jurisdiction_id: "jur-us-fed",
+    data_residency_policy_id: "pol-dr-002",
+    created_at: "2022-06-15T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    created_by_principal_id: "33333333-3333-3333-3333-333333333333",
+    updated_by_principal_id: "33333333-3333-3333-3333-333333333333"
+  }
+];
+
+const RESIDENCY_REGIONS_DATA = [
+  { residency_region_id: "reg-uk", region_code: "UK-SOUTH", display_name: "UK South (London)", jurisdiction_id: "jur-uk-gb", is_active: true },
+  { residency_region_id: "reg-eu", region_code: "EU-WEST", display_name: "EU West (Frankfurt)", jurisdiction_id: "jur-de-fed", is_active: true },
+  { residency_region_id: "reg-us", region_code: "US-EAST", display_name: "US East (N. Virginia)", jurisdiction_id: "jur-us-fed", is_active: true }
+];
+
 serve(8081, "tenant-entity-registry-svc", (m, p, q, b, send) => {
-  return send(200, { tenants: [{ tenant_id: "11111111-1111-1111-1111-111111111111", name: "Zoiko Group" }] });
+  if (p === "/v1/residency-regions") return send(200, RESIDENCY_REGIONS_DATA);
+  if (p.includes("/entities")) return send(200, LEGAL_ENTITIES_DATA);
+  if (p.includes("/residency-region")) return send(200, { tenant_id: "11111111-1111-1111-1111-111111111111", residency_region_id: "reg-uk", region_code: "UK-SOUTH", display_name: "UK South (London)" });
+  if (p.includes("/status")) return send(200, { entity_id: "22222222-2222-2222-2222-222222222222", status: "ACTIVE", can_transact: true });
+  if (p.includes("/jurisdictions")) return send(200, [{ assignment_id: "asg-001", tenant_id: "11111111-1111-1111-1111-111111111111", legal_entity_id: "22222222-2222-2222-2222-222222222222", jurisdiction_id: "jur-uk-gb", assignment_type: "PRIMARY", effective_from: "2021-04-01T00:00:00Z", effective_to: null, source_basis: "INCORPORATION", created_at: "2021-04-01T00:00:00Z", created_by_principal_id: "33333333-3333-3333-3333-333333333333" }]);
+  if (p.startsWith("/v1/tenants/")) return send(200, TENANT_DATA);
+  if (p.startsWith("/v1/entities/")) return send(200, LEGAL_ENTITIES_DATA[0]);
+  return send(200, { tenants: [TENANT_DATA], entities: LEGAL_ENTITIES_DATA });
 });
 
 serve(8082, "jurisdiction-rules-svc", (m, p, q, b, send) => {
