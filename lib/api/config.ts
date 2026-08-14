@@ -56,6 +56,12 @@ const DEFAULTS = {
   // documented stub adapter (see lib/api/notifications.ts) — no provider is
   // wired up on the platform yet.
   notification: "http://localhost:8133",
+  // 8122, per compose. board-resolutions-svc owns board meetings and their
+  // resolutions; the write path authorizes MEETING_CREATE / RESOLUTION_CREATE /
+  // RESOLUTION_VOTE / RESOLUTION_PASS against the legal entity and enforces
+  // segregation of duties on the pass (the drafter may not pass their own
+  // resolution).
+  boardResolutions: "http://localhost:8122",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -97,6 +103,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   schemaRegistry: "/schema-registry-svc",
   financialClose: "/financial-close-svc",
   notification: "/notification-svc",
+  boardResolutions: "/board-resolutions-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";

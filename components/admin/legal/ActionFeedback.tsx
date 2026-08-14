@@ -3,7 +3,9 @@
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BANNER_ERROR, BANNER_SUCCESS } from "./field-styles";
-import type { ContractActionState } from "@/app/admin/legal/state";
+import type { BoardActionState, ContractActionState } from "@/app/admin/legal/state";
+
+type FeedbackState = ContractActionState | BoardActionState;
 
 /**
  * Result banner for a lifecycle action.
@@ -11,12 +13,16 @@ import type { ContractActionState } from "@/app/admin/legal/state";
  * Renders nothing while idle, so a form that has not been submitted leaves no
  * empty container behind. `aria-live` is on the wrapper rather than the message
  * so a screen reader announces the outcome when the action resolves.
+ *
+ * Accepts either action state — the contract console and the board write path
+ * both report status + message, and a divergence between them would read as a
+ * rendering bug rather than a choice.
  */
 export function ActionFeedback({
   state,
   className,
 }: {
-  state: ContractActionState;
+  state: FeedbackState;
   className?: string;
 }) {
   if (state.status === "idle") return null;

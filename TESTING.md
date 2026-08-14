@@ -934,6 +934,64 @@ unsupported channel is the ONLY way to reach FAILED today. SENT therefore means
 
 ---
 
+## 16. Board Resolutions - `board-resolutions-svc` (:8122)
+
+**What it is.** Board meetings and their resolutions: schedule a meeting,
+propose a resolution (always PROPOSED), tally votes, then pass it into force.
+Every write is authorized against the legal entity (MEETING_CREATE /
+RESOLUTION_CREATE / RESOLUTION_VOTE / RESOLUTION_PASS) and refuses a request
+without a principal; the pass additionally enforces segregation of duties (the
+proposer may not pass their own resolution) and verifies evidence sufficiency
+against evidence-requirements-svc, failing closed.
+
+**The distinction being tested:** voting only tallies — it never finalizes
+status. A resolution stays PROPOSED until the separate closing action (pass)
+finalizes it, and only a *different* principal can perform that closing action.
+
+### Test it
+
+1. Go to **Legal & Contracts** → the **Board Governance & Resolutions** card.
+   Schedule a meeting (title, datetime, location, effective-from).
+   → **Expect success banner** and the meeting row appearing as SCHEDULED.
+2. **Propose a resolution** (optional meeting link, category, number, content,
+   effective-from). → **Expect success banner**; the resolution row appears
+   PROPOSED. The service ignores any caller-supplied status — you cannot create
+   a resolution that is already passed.
+3. **Tally votes** on the row (for / against / abstentions).
+   → **Expect** "Tally recorded: N for, M against…" and the row's vote counts
+   updating — still PROPOSED.
+4. **Pass it from the same session that proposed it.**
+   → **Expect the SoD refusal banner up front:** "the principal who proposed a
+   resolution may not pass it". The console refuses before the service is
+   called, and the service would enforce it again anyway. This is the
+   segregation-of-duties doctrine (§12.3 of the original spec).
+5. **Pass with a different principal** (another grant holder, as the smoke
+   script's passer) → **Expect 200**, status PASSED, `passed_by` and `passed_at`
+   recorded. The evidence gate (evidence-requirements-svc) must be satisfied
+   before finalizing — currently `NO_REQUIREMENTS_DEFINED`, so the pass
+   succeeds; a defined unmet requirement would answer 422 `required evidence is
+   missing`.
+6. **Vote or pass again after finalizing.** → **Expect 409** `resolution is
+   already finalized` — a second closing action is refused, not ignored.
+7. **Fetch the register with no principal.** → **Expect 401.** Reads are
+   RLS-scoped to the tenant but require an identified caller; an unidentified
+   caller is refused before any row is considered.
+
+### Watch for
+
+- **A pass is the only closing action.** Voting returns 200 with the tally and
+  leaves the status PROPOSED; only `POST /{id}/pass` finalizes. A reader who
+  sees a 9-1 tally and a PROPOSED badge is seeing the correct, unfinished
+  state.
+- **SoD is enforced on the pass, not the vote.** The vote handler never checks
+  the creator; the pass handler does, because it is the distinct closing action
+  that changes status.
+- **The evidence gate fails closed.** If evidence-requirements-svc is
+  unreachable the pass is refused (503), not risked; that refusal reads
+  differently from an authorization denial (403).
+
+---
+
 ## Known-stale claims in this document
 
 Sections 1–6 were written from the Go source before any of it had been run. Most
@@ -984,6 +1042,9 @@ would be a governance failure rather than a bug:
 | 25 | A rejection without a reason is refused at the door | Purchase requests step 8 |
 | 26 | A decision's response echoes who decided and when — no record-shaped lies | Purchase requests step 6 |
 | 27 | An idempotent replay resolves to the original request, never a duplicate | Purchase requests step 2 |
+| 28 | A pass is the only closing action — votes tally, they never finalize | Board resolutions steps 3–4 |
+| 29 | The proposer cannot pass their own resolution — SoD on the pass, not the vote | Board resolutions step 4 |
+| 30 | An unidentified caller is refused on reads too — 401, not 200 | Board resolutions step 7 |
 
 Report back anything where the console's claim and the service's behaviour
 disagree — those are the interesting failures.
