@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listTaxRules, listTaxDeterminations, listVATReturns, listCorporateTaxReturns, listWithholdingObligations, listFilingDrafts, listTaxAuthorityInterfaces } from "@/lib/api/tax";
+import {
+  listTaxRules,
+  listTaxDeterminations,
+  listVATReturns,
+  listCorporateTaxReturns,
+  listWithholdingObligations,
+  listFilingDrafts,
+  listTaxAuthorityInterfaces,
+  getTaxSummaryStats,
+  listUpcomingTaxDeadlines,
+} from "@/lib/api/tax";
 import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties } from "@/lib/api/legal";
 import { listJournalEntries, listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
@@ -11,9 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   const { path } = await params;
   const endpoint = path.join("/");
 
-  const tenantId = req.headers.get("X-Tenant-Id") ?? "11111111-1111-1111-1111-111111111111";
-  const principalId = req.headers.get("X-Principal-Id") ?? "33333333-3333-3333-3333-333333333333";
-  const identity = { tenantId, principalId };
+  const identity = callerIdentity(req);
 
   // Tax Domain
   if (endpoint === "tax-rules") {
@@ -44,6 +52,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     const res = await listTaxAuthorityInterfaces(identity);
     return NextResponse.json({ interfaces: res.ok ? res.data : [] });
   }
+  if (endpoint === "tax/summary") {
+    const res = await getTaxSummaryStats(identity);
+    return NextResponse.json({ summary: res.ok ? res.data : {} });
+  }
+  if (endpoint === "tax/deadlines") {
+    const res = await listUpcomingTaxDeadlines(identity);
+    return NextResponse.json({ deadlines: res.ok ? res.data : [] });
+  }
 
   // Legal Domain
   if (endpoint === "contracts") {
@@ -73,15 +89,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
 
   // Finance Domain
   if (endpoint === "journal-entries") {
-    const res = await listJournalEntries(identity);
+    const res = await listJournalEntries();
     return NextResponse.json({ journal_entries: res.ok ? res.data : [] });
   }
   if (endpoint === "cash-positions") {
-    const res = await listCashPositions(identity);
+    const res = await listCashPositions();
     return NextResponse.json({ cash_positions: res.ok ? res.data : [] });
   }
   if (endpoint === "finance/summary") {
-    const res = await getFinanceSummaryStats(identity);
+    const res = await getFinanceSummaryStats();
     return NextResponse.json({ summary: res.ok ? res.data : {} });
   }
 
@@ -164,3 +180,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     timestamp: new Date().toISOString(),
   }, { status: 201 });
 }
+
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  const endpoint = path.join("/");
+  const body = await req.json().catch(() => ({}));
+
+  return NextResponse.json({
+    message: `Resource updated at /v1/${endpoint}`,
+    received_payload: body,
+    status: "UPDATED",
+    timestamp: new Date().toISOString(),
+  }, { status: 200 });
+}
+
+/** Caller identity from the X-* headers, with the console demo defaults. */
+function callerIdentity(req: NextRequest) {
+  const tenantId = req.headers.get("X-Tenant-Id") ?? "11111111-1111-1111-1111-111111111111";
+  const principalId = req.headers.get("X-Principal-Id") ?? "33333333-3333-3333-3333-333333333333";
+  return { tenantId, principalId };
+}
+

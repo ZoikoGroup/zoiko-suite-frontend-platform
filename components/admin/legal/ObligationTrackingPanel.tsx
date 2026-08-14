@@ -111,22 +111,32 @@ export async function ObligationTrackingPanel() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      {o.obligation_type.replace(/_/g, " ")}
+                      {(() => {
+                        const rawObj = o as unknown as Record<string, unknown>;
+                        const typeStr = o.obligation_type || (typeof rawObj.category === "string" ? rawObj.category : "CONTRACTUAL");
+                        return typeStr.replace(/_/g, " ");
+                      })()}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${RISK_COLORS[o.risk_level] ?? ""}`}>
-                        {o.risk_level}
-                      </span>
+                      {(() => {
+                        const rawObj = o as unknown as Record<string, unknown>;
+                        const risk = o.risk_level || (typeof rawObj.priority === "string" ? rawObj.priority : "MEDIUM");
+                        return (
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${RISK_COLORS[risk as keyof typeof RISK_COLORS] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`}>
+                            {risk}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`text-xs font-medium ${over ? "text-red-500 dark:text-red-400" : "text-slate-500 dark:text-slate-400"}`}>
-                        {new Date(o.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        {o.due_date ? new Date(o.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                         {over && " ⚠"}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[o.status] ?? ""}`}>
-                        {o.status.replace(/_/g, " ")}
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[o.status] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`}>
+                        {(o.status || "PENDING").replace(/_/g, " ")}
                       </span>
                     </td>
                   </tr>
