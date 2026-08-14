@@ -7,18 +7,21 @@ import { DOMAINS } from "@/lib/constants";
 import {
   AccountsPayablePanel,
   AccountsReceivableView,
+  BankReconciliationPanel,
   FinanceActionHeader,
   FinanceSummaryBar,
   FinanceProcessTimeline,
   FinancialClosePanel,
   GeneralLedgerPanel,
+  IngestStatementLineForm,
   RecordInvoiceForm,
   RecordJournalForm,
   RegisterPeriodForm,
 } from "@/components/admin/finance";
 import type { InvoiceStatus } from "@/lib/api/accounts-payable";
+import type { StatementLineStatus } from "@/lib/api/bank-reconciliation";
 import type { JournalStatus } from "@/lib/api/general-ledger";
-import { lookupVendorInvoice, lookupJournal } from "./actions";
+import { lookupJournal, lookupStatementLine, lookupVendorInvoice } from "./actions";
 
 export const metadata: Metadata = { title: "Finance, Payables & Receivables | Zoiko Suite" };
 
@@ -54,6 +57,7 @@ const CHIP_IDLE =
  *  data is worse than showing no dot at all. */
 const WIRED_SERVICES = new Set([
   "General Ledger Service",
+  "Bank Reconciliation Service",
   "Accounts Payable Service",
   "Financial Close Service",
 ]);
@@ -94,6 +98,22 @@ function isJournalStatus(value: string): value is JournalStatus {
     value === "REVERSED"
   );
 }
+
+const RECONCILIATION_STATUS_FILTERS: { label: string; value?: StatementLineStatus }[] = [
+  { label: "All" },
+  { label: "Unmatched", value: "UNMATCHED" },
+  { label: "Matched", value: "MATCHED" },
+  { label: "Exception", value: "EXCEPTION" },
+];
+
+function isStatementLineStatus(value: string): value is StatementLineStatus {
+  return value === "UNMATCHED" || value === "MATCHED" || value === "EXCEPTION";
+}
+
+/** The service compares statement_date against a DATE column as an exact day,
+ *  so a half-typed date matches nothing rather than narrowing — checked here
+ *  and dropped, with the register saying it was ignored. */
+const STATEMENT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** "2026-07". The service compares fiscal_period as an exact string, so a
  *  half-typed period matches nothing rather than narrowing — an empty register
@@ -166,6 +186,28 @@ export default async function FinancePage({ searchParams }: PageProps) {
     journalEntityRaw && isUuid(journalEntityRaw) ? journalEntityRaw : undefined;
   const journalEntityRejected = Boolean(journalEntityRaw) && !journalEntity;
 
+  // ── bank-reconciliation-svc filters ────────────────────────────────────
+  // Namespaced (rstatus, rbank, rdate) so the three registers on this page
+  // filter independently — a shared `stage` key would mean narrowing one
+  // register silently emptied the others.
+  const reconciliationStatusRaw = one(params.rstatus);
+  const reconciliationStatus =
+    reconciliationStatusRaw && isStatementLineStatus(reconciliationStatusRaw)
+      ? reconciliationStatusRaw
+      : undefined;
+
+  const reconciliationBankRaw = one(params.rbank);
+  const reconciliationBank =
+    reconciliationBankRaw && isUuid(reconciliationBankRaw) ? reconciliationBankRaw : undefined;
+  const reconciliationBankRejected = Boolean(reconciliationBankRaw) && !reconciliationBank;
+
+  const reconciliationDateRaw = one(params.rdate);
+  const reconciliationDate =
+    reconciliationDateRaw && STATEMENT_DATE_RE.test(reconciliationDateRaw)
+      ? reconciliationDateRaw
+      : undefined;
+  const reconciliationDateRejected = Boolean(reconciliationDateRaw) && !reconciliationDate;
+
   /** The current query string with some keys overridden, so a stage chip does not
    *  silently drop the vendor or entity filter. */
   const hrefWith = (overrides: Record<string, string | undefined>) => {
@@ -197,7 +239,7 @@ export default async function FinancePage({ searchParams }: PageProps) {
           authority: treasury, financial close, bank reconciliation,
           intercompany and consolidation all read this register, and bank
           reconciliation will only match against a journal it reports
-          FINALIZED. Everything below the two live registers is either a
+          FINALIZED. Everything below the live registers is either a
           read-only summary or indicative sample data. */}
       <Card>
         <CardHeader>
@@ -325,6 +367,144 @@ export default async function FinancePage({ searchParams }: PageProps) {
               label="Read one journal"
               placeholder="Must be a UUID"
               hint="The full record including every line: each actor and timestamp along the lifecycle, the reversal link if this journal is one, and the Atomic Linking references tying the posting to the upstream event or governance decision that caused it. An unknown id, another tenant's journal, and a malformed one all read as absent — the service deliberately does not distinguish them."
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── bank-reconciliation-svc (:8102) ─────────────────────────────────
+          Live and writable. The register below is the BANK's claim about what
+          happened; the journal register above it is the BUSINESS's claim.
+          Reconciling is proving the two agree, and the service only matches a
+          line against a journal it verifies as FINALIZED, on the same legal
+          entity, moving the same amount through this bank account's ledger
+          account in the same direction. */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Ingest a statement line</CardTitle>
+            <CardDescription>
+              Live, writable. Backed by bank-reconciliation-svc — it records what the bank says
+              happened and asserts nothing about the ledger yet. The line lands UNMATCHED; matching
+              it to a FINALIZED journal above, or flagging it as an exception when nothing accounts
+              for it, are the two honest answers. The ledger account code for this bank account is
+              required at ingest, because it is what lets the service verify the DIRECTION of a
+              future match — a journal of exactly the right size that moved money the other way is
+              refused.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <IngestStatementLineForm />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Reconciliation register</CardTitle>
+            <CardDescription>
+              Every statement line for this tenant, newest first. Each row offers only the actions
+              that are legal from where it stands — the service refuses the rest atomically, and
+              MATCHED is terminal. A statement is declared reconciled per bank account and date,
+              below, once every line is either matched or recorded as an exception.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="flex flex-wrap items-center gap-2">
+            {RECONCILIATION_STATUS_FILTERS.map((filter) => {
+              const active = reconciliationStatus === filter.value;
+              return (
+                <Link
+                  key={filter.label}
+                  href={hrefWith({ rstatus: filter.value })}
+                  className={active ? CHIP_ACTIVE : CHIP_IDLE}
+                  aria-current={active ? "page" : undefined}
+                >
+                  {filter.label}
+                </Link>
+              );
+            })}
+          </div>
+
+          <form className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <input type="hidden" name="rstatus" value={reconciliationStatus ?? ""} />
+            {/* The other registers' filters share this query string — replayed
+                for the same reason the stage chip is, so filtering
+                reconciliation does not silently clear the journal or payables
+                registers above. */}
+            <input type="hidden" name="stage" value={stage ?? ""} />
+            <input type="hidden" name="vendor" value={vendor ?? ""} />
+            <input type="hidden" name="entity" value={entityRaw ?? ""} />
+            <input type="hidden" name="jstage" value={journalStage ?? ""} />
+            <input type="hidden" name="jperiod" value={journalPeriodRaw ?? ""} />
+            <input type="hidden" name="jentity" value={journalEntityRaw ?? ""} />
+            <div className="flex-1">
+              <label htmlFor="rbank" className={FILTER_LABEL}>
+                Bank account{" "}
+                <span className="font-normal text-slate-400">(UUID, blank = all accounts)</span>
+              </label>
+              <input
+                id="rbank"
+                name="rbank"
+                defaultValue={reconciliationBankRaw ?? ""}
+                placeholder="00000000-0000-0000-0000-000000000000"
+                className={`${FILTER_FIELD} font-mono text-xs`}
+                autoComplete="off"
+              />
+            </div>
+            <div className="flex-1">
+              <label htmlFor="rdate" className={FILTER_LABEL}>
+                Statement date{" "}
+                <span className="font-normal text-slate-400">(YYYY-MM-DD, blank = all dates)</span>
+              </label>
+              <input
+                id="rdate"
+                name="rdate"
+                type="date"
+                defaultValue={reconciliationDateRaw ?? ""}
+                className={FILTER_FIELD}
+              />
+            </div>
+            <button type="submit" className={FILTER_SUBMIT}>
+              Filter statement lines
+            </button>
+          </form>
+          {reconciliationBankRejected && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              That bank account filter was ignored — it must be a UUID, so it was not sent. The
+              service compares it as text rather than casting it, so a malformed value would not
+              have errored: it would have matched nothing and shown an empty register, which reads
+              as &ldquo;this account has no lines&rdquo;.
+            </p>
+          )}
+          {reconciliationDateRejected && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              That statement date filter was ignored — it must be YYYY-MM-DD, so it was not sent.
+              The service compares the date as an exact day, so a half-typed value would have
+              matched nothing rather than erroring.
+            </p>
+          )}
+
+          <Suspense
+            key={`${reconciliationStatus ?? "all"}:${reconciliationBank ?? "all"}:${reconciliationDate ?? "all"}`}
+            fallback={<RegisterSkeleton />}
+          >
+            <BankReconciliationPanel
+              status={reconciliationStatus}
+              bankAccountId={reconciliationBank}
+              statementDate={reconciliationDate}
+            />
+          </Suspense>
+
+          <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
+            <LookupById
+              action={lookupStatementLine}
+              inputName="lookup_statement_line_id"
+              label="Read one statement line"
+              placeholder="Must be a UUID"
+              hint="The full record: the signed amount and the ledger account code that makes its direction verifiable, plus every actor and timestamp along the reconciliation lifecycle. An unknown id, another tenant's line, and a malformed one all read as absent — the service deliberately does not distinguish them."
             />
           </div>
         </CardContent>
@@ -514,9 +694,9 @@ export default async function FinancePage({ searchParams }: PageProps) {
           Domain overview
         </h2>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          Indicative figures for the wider Finance domain. Only the journal, payables and period
-          close registers above read live services — treat the panels below as the domain&apos;s
-          shape, not its contents.
+          Indicative figures for the wider Finance domain. Only the journal, reconciliation,
+          payables and period close registers above read live services — treat the panels below as
+          the domain&apos;s shape, not its contents.
         </p>
       </div>
 

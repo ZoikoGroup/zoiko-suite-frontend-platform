@@ -39,6 +39,16 @@ import {
   type JournalAction,
 } from "@/lib/api/general-ledger";
 import {
+  ingestStatementLine,
+  matchStatementLine,
+  flagException,
+  completeStatement,
+  getStatementLine,
+  explainReconciliationError,
+  formatSignedAmount,
+  directionLabel,
+} from "@/lib/api/bank-reconciliation";
+import {
   createFiscalPeriod,
   checkPeriodReadiness,
   lockFiscalPeriod,
@@ -48,7 +58,12 @@ import {
 } from "@/lib/api/financial-close";
 import { formatMoney } from "@/lib/format";
 import type { LookupState } from "@/components/admin/shared/lookup";
-import type { CloseActionState, LedgerActionState, PayableActionState } from "./state";
+import type {
+  CloseActionState,
+  LedgerActionState,
+  PayableActionState,
+  ReconciliationActionState,
+} from "./state";
 
 // Writes end in refresh(), not revalidatePath. Nothing on this route is cached
 // — cacheComponents is off and every panel reads cookies() for the session — so
@@ -769,6 +784,323 @@ export async function closeFiscalPeriod(
     status: "closed",
     periodId: locked.fiscal_period_id,
     message: `Period ${locked.period_name} is closed and sealed. The trial balance was compiled from every posted journal in the period — including reversed entries and the journals that reversed them, which cancel — filed in the document vault as ${locked.evidence_document_id}, and its hash ${locked.verification_hash.slice(0, 16)}… signed and recorded. There is no unlock: corrections are posted as reversing journals in a period that is still open.`,
+  };
+}
+
+// ─── bank-reconciliation-svc ─────────────────────────────────────────────────
+
+const RECONCILIATION_EXPIRED: ReconciliationActionState = {
+  status: "error",
+  message: "Your session has expired — sign in again.",
+};
+
+/**
+ * Ingest one bank statement line. It lands UNMATCHED and asserts nothing about
+ * the ledger — it is only the bank's claim that a transaction happened.
+ *
+ * `gl_cash_account_code` is required here rather than optional, because a line
+ * without it can never be matched: the service refuses to verify a match whose
+ * direction it cannot check, and it is far better to refuse the ingest — where
+ * the operator still has the information — than at match time, where they no
+ * longer do.
+ */
+export async function ingestBankStatementLine(
+  _previous: ReconciliationActionState,
+  formData: FormData,
+): Promise<ReconciliationActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return RECONCILIATION_EXPIRED;
+  }
+
+  const bankAccountId = String(formData.get("bank_account_id") ?? "").trim();
+  const statementDate = String(formData.get("statement_date") ?? "").trim();
+  const rawAmount = String(formData.get("amount") ?? "").trim();
+  const currencyCode = String(formData.get("currency_code") ?? "").trim().toUpperCase();
+  const bankReference = String(formData.get("bank_reference") ?? "").trim();
+  const glCashAccountCode = String(formData.get("gl_cash_account_code") ?? "").trim();
+
+  if (!bankAccountId) return { status: "error", message: "Enter the bank account ID." };
+  if (!isUuid(bankAccountId)) {
+    return {
+      status: "error",
+      message:
+        "A bank account ID must be a UUID. No bank-account registry exists in this platform to look one up from, so the value is whatever your statement import uses — but it has to be a UUID, because the column is one.",
+    };
+  }
+  if (!statementDate) return { status: "error", message: "Enter the statement date." };
+  if (!bankReference) return { status: "error", message: "Enter the bank reference." };
+  if (!glCashAccountCode) {
+    return {
+      status: "error",
+      message:
+        "Enter the ledger account code for this bank account. Without it the direction of any future match cannot be verified, and the service will refuse to match this line at all.",
+    };
+  }
+
+  const amount = Number(rawAmount);
+  if (!rawAmount || Number.isNaN(amount)) {
+    return { status: "error", message: "Enter the amount as a number." };
+  }
+  if (amount === 0) {
+    return {
+      status: "error",
+      message:
+        "An amount of zero has no direction and reconciles against nothing, so the service refuses it. Money in is positive, money out is negative.",
+    };
+  }
+
+  const result = await ingestStatementLine({
+    identity,
+    bankAccountId,
+    statementDate,
+    amount,
+    currencyCode: currencyCode || "USD",
+    bankReference,
+    glCashAccountCode,
+  });
+
+  if (!result.ok) {
+    return { status: "error", message: explainReconciliationError(result.error.message) };
+  }
+
+  refresh();
+
+  const line = result.data;
+  const direction = directionLabel(line.amount).toLowerCase();
+
+  // 200 is a replay, not a second line. Reporting it as a fresh ingest would
+  // show one bank transaction as two in a register whose whole job is agreeing
+  // with the bank.
+  if (result.status === 200) {
+    return {
+      status: "replayed",
+      statementLineId: line.statement_line_id,
+      stage: line.status,
+      message: `This statement line had already been ingested — it resolved to the original ${line.statement_line_id}, which is ${line.status}. Nothing was written and no duplicate was created.`,
+    };
+  }
+
+  return {
+    status: "ingested",
+    statementLineId: line.statement_line_id,
+    stage: line.status,
+    message: `Statement line ${line.statement_line_id} ingested as UNMATCHED — ${formatSignedAmount(line.amount, line.currency_code)}, ${direction}. It records what the bank says happened and asserts nothing about the ledger yet. Match it to a FINALIZED journal, or flag it as an exception if nothing accounts for it.`,
+  };
+}
+
+/**
+ * Match a statement line to a ledger journal.
+ *
+ * The refusal is the point of this action, not a failure of it. The service
+ * fetches the journal from general-ledger-svc and requires that it be FINALIZED,
+ * belong to the same legal entity, and move this exact amount through this bank
+ * account's ledger account IN THE SAME DIRECTION — so a journal of precisely the
+ * right size that moved money the other way is rejected, which is the error a
+ * reconciliation exists to surface.
+ */
+export async function matchBankStatementLine(
+  _previous: ReconciliationActionState,
+  formData: FormData,
+): Promise<ReconciliationActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return RECONCILIATION_EXPIRED;
+  }
+
+  const statementLineId = String(formData.get("statement_line_id") ?? "").trim();
+  const journalId = String(formData.get("journal_id") ?? "").trim();
+
+  if (!statementLineId) return { status: "error", message: "Missing statement line ID." };
+  if (!journalId) return { status: "error", message: "Enter the journal ID to match against." };
+  if (!isUuid(journalId)) {
+    return { status: "error", message: "A journal ID must be a UUID." };
+  }
+
+  const result = await matchStatementLine(statementLineId, journalId, identity);
+
+  if (!result.ok) {
+    // 400 is the ledger check refusing the proposed match — the service is
+    // working exactly as intended. 422 means this line can never be matched
+    // (no cash account) or is already MATCHED. Three different remedies, so
+    // three different states rather than one red banner.
+    if (result.error.status === 400) {
+      return {
+        status: "unverified",
+        statementLineId,
+        message: explainReconciliationError(result.error.message),
+      };
+    }
+    if (result.error.status === 422) {
+      const unverifiable = result.error.message.includes("cash_account_unknown");
+      return {
+        status: unverifiable ? "unverifiable" : "out-of-sequence",
+        statementLineId,
+        message: explainReconciliationError(result.error.message),
+      };
+    }
+    return { status: "error", message: explainReconciliationError(result.error.message) };
+  }
+
+  refresh();
+
+  const line = result.data;
+  return {
+    status: "matched",
+    statementLineId: line.statement_line_id,
+    stage: line.status,
+    message: `Statement line ${line.statement_line_id} is MATCHED to journal ${journalId}, attributed to you. The journal was verified as FINALIZED, on the same legal entity, and moving exactly ${formatSignedAmount(line.amount, line.currency_code)} through account ${line.gl_cash_account_code} in the same direction. MATCHED is terminal.`,
+  };
+}
+
+/**
+ * Flag a statement line as an exception — the bank says this happened and
+ * nothing in the ledger accounts for it.
+ *
+ * This is not a failure state. It is a queue item for whoever investigates, and
+ * it can still be resolved to MATCHED later if the right journal turns up, which
+ * is why it demands a reason: an exception nobody can interpret is worse than an
+ * unmatched line, because it looks handled.
+ */
+export async function flagBankStatementException(
+  _previous: ReconciliationActionState,
+  formData: FormData,
+): Promise<ReconciliationActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return RECONCILIATION_EXPIRED;
+  }
+
+  const statementLineId = String(formData.get("statement_line_id") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  if (!statementLineId) return { status: "error", message: "Missing statement line ID." };
+  if (!reason) return { status: "error", message: "Enter why nothing accounts for this line." };
+  if (reason.length > 500) {
+    return { status: "error", message: "The reason must be 500 characters or fewer." };
+  }
+
+  const result = await flagException(statementLineId, reason, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 422) {
+      return {
+        status: "out-of-sequence",
+        statementLineId,
+        message: explainReconciliationError(result.error.message),
+      };
+    }
+    return { status: "error", message: explainReconciliationError(result.error.message) };
+  }
+
+  refresh();
+
+  const line = result.data;
+  return {
+    status: "flagged",
+    statementLineId: line.statement_line_id,
+    stage: line.status,
+    message: `Statement line ${line.statement_line_id} is flagged as an EXCEPTION, attributed to you. It counts as resolved for the purpose of completing this statement — it has been looked at and recorded as unexplained — and it can still be matched later if the journal that accounts for it turns up.`,
+  };
+}
+
+/**
+ * Read one statement line by id.
+ *
+ * The full record, which the register's table cannot show: the signed amount,
+ * the cash account code that makes its direction verifiable, and every actor
+ * and timestamp along the reconciliation lifecycle.
+ */
+export async function lookupStatementLine(
+  _previous: LookupState,
+  formData: FormData,
+): Promise<LookupState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const statementLineId = String(formData.get("lookup_statement_line_id") ?? "").trim();
+  if (!statementLineId) return { status: "error", message: "Enter a statement line ID." };
+  if (!isUuid(statementLineId)) {
+    return { status: "error", message: "A statement line ID must be a UUID." };
+  }
+
+  const result = await getStatementLine(statementLineId, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 401) {
+      return {
+        status: "missing",
+        message:
+          "No verified tenant scope reached the service, so it failed closed. Sign in again and retry.",
+      };
+    }
+    if (result.error.status === 404) {
+      return {
+        status: "missing",
+        message:
+          "No statement line with that id exists for this tenant. A line belonging to another tenant reads as absent in exactly the same way — the store resolves tenant from the X-Tenant-Id header and returns nothing otherwise.",
+      };
+    }
+    return { status: "error", message: explainReconciliationError(result.error.message) };
+  }
+
+  return { status: "found", record: result.data, message: "" };
+}
+
+/**
+ * Declare one bank account's statement reconciled for a date.
+ *
+ * Publishes reconciliation.completed and stores nothing: completion is a derived
+ * signal, not a record, and there is no reopen. Refused while any line is still
+ * UNMATCHED — an EXCEPTION counts as resolved, an untouched line does not.
+ */
+export async function completeBankStatement(
+  _previous: ReconciliationActionState,
+  formData: FormData,
+): Promise<ReconciliationActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return RECONCILIATION_EXPIRED;
+  }
+
+  const bankAccountId = String(formData.get("bank_account_id") ?? "").trim();
+  const statementDate = String(formData.get("statement_date") ?? "").trim();
+
+  if (!bankAccountId) return { status: "error", message: "Missing bank account ID." };
+  if (!isUuid(bankAccountId)) {
+    return { status: "error", message: "A bank account ID must be a UUID." };
+  }
+  if (!statementDate) return { status: "error", message: "Missing statement date." };
+
+  const result = await completeStatement(bankAccountId, statementDate, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 422) {
+      return {
+        status: "incomplete",
+        message: explainReconciliationError(result.error.message),
+      };
+    }
+    return { status: "error", message: explainReconciliationError(result.error.message) };
+  }
+
+  refresh();
+
+  return {
+    status: "completed",
+    message: `Statement for bank account ${bankAccountId} on ${statementDate} is reconciled, and reconciliation.completed has been published. Every line is either matched to a posted journal or recorded as an exception. Nothing is stored by this step and there is no reopen — it is a signal that the work was finished, not a lock on the data.`,
   };
 }
 

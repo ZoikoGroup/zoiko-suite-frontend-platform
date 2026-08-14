@@ -10,6 +10,8 @@ export const FIELD =
 
 export const LABEL = "mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400";
 
+export const HINT = "mt-1.5 text-xs text-slate-400 dark:text-slate-500";
+
 export const OPTIONAL = "font-normal text-slate-400";
 
 export const BANNER_SUCCESS =

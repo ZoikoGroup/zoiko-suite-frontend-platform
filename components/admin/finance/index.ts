@@ -19,3 +19,10 @@ export { RecordJournalForm } from "./RecordJournalForm";
 export { FinancialClosePanel } from "./FinancialClosePanel";
 export { FiscalPeriodTable } from "./FiscalPeriodTable";
 export { RegisterPeriodForm } from "./RegisterPeriodForm";
+// bank-reconciliation-svc (:8102) — live and writable. Reconciles the BANK's
+// claim (each statement line) against the BUSINESS's claim (FINALIZED ledger
+// journals), so it reads the journal register rather than owning postings.
+export { BankReconciliationPanel } from "./BankReconciliationPanel";
+export { StatementLineTable } from "./StatementLineTable";
+export { IngestStatementLineForm } from "./IngestStatementLineForm";
+export { CompleteStatementForm } from "./CompleteStatementForm";

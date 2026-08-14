@@ -663,6 +663,144 @@ What separates them is the decision body, and the console renders each different
 
 ---
 
+## 9. Bank reconciliation — `bank-reconciliation-svc` (:8102)
+
+Lives on **`/admin/finance`**, directly below the journal register it reconciles
+against. Like sections 7 and 8, this was written after the fact: the backend's
+handler and store suites (including the `integration`-tagged cross-tenant tests,
+which run against an embedded Postgres with all three migrations applied) are
+green, the console compiles, and the steps below assert the behaviours those
+suites prove.
+
+**What it is.** The register of what the **bank** says happened, reconciled
+against what the **business** says happened (the journal register above). A
+match is never taken on faith: the service fetches the named journal from
+general-ledger-svc and requires all four of —
+
+- it exists and is **FINALIZED** (a draft has not hit the books),
+- it belongs to the **same legal entity** as the line,
+- it moves **exactly this line's amount** through this bank account's ledger
+  account (compared in exact cents, not within a tolerance), and
+- it moves it **in the same direction** — a debit to the cash account is money
+  in, a credit is money out.
+
+The direction half is new. Until migration `000003` the check compared
+magnitudes, so a 500.00 payment OUT reconciled cleanly against a journal
+recording 500.00 IN — the exact error, or concealment, reconciling exists to
+surface. That is why `gl_cash_account_code` is **required at ingest**: a line
+without one can never be matched (422 `cash_account_unknown`), and it is far
+better to refuse the ingest, where the operator still has the statement, than
+at match time.
+
+### Bring it up
+
+```powershell
+docker compose -f deployments/docker-compose.yml up -d bank-reconciliation-svc
+./deployments/scripts/seed-demo-rbac.ps1 -AuthzUrl http://localhost:8089
+```
+
+Deps are postgres + kafka + authorization-svc + **general-ledger-svc** (the
+match check reads it and fails closed). The `statement_lines` table gains
+`gl_cash_account_code` in migration `000003`; on a pre-existing volume apply it
+by hand (gotcha in section 0). The RBAC seed now grants `BANKREC_FULL` — the
+four write actions separately (`BANKREC_STATEMENT_INGEST`, `BANKREC_MATCH`,
+`BANKREC_FLAG_EXCEPTION`, `BANKREC_COMPLETE_STATEMENT`), so holding one does
+not imply the others.
+
+### Test the ingest form
+
+1. **Post a journal the line can match.** On the ledger register above: record
+   a journal, validate it, post it FINALIZED, with a line *debiting* the cash
+   account `1000` for `1250.00` and crediting contra account `4000`. Copy its
+   ID — the match form takes it by hand.
+2. **Ingest a statement line.** Bank reference `ACH-2026-08-0041`, bank account
+   `00000000-0000-0000-0000-000000000000`, amount **`1250.00`**, currency `USD`,
+   ledger account `1000`. → **Expect 201**, status `UNMATCHED`, and the line ID
+   in the banner as a copy control. The form shows "Money INTO the account" as
+   you type.
+3. **Submit the exact same form again.** → **Expect an amber replay banner**
+   resolving to the ORIGINAL line. The service is idempotent on
+   `(tenant_id, correlation_id)`; reporting a retry as a second line would
+   double a bank transaction in a register whose whole job is agreeing with the
+   bank.
+4. **Amount `0`.** → **Expect 400**, refused by the console before it is sent:
+   zero has no direction and reconciles against nothing.
+5. **Leave `gl_cash_account_code` blank.** → **Expect the console to refuse**,
+   naming the account code as required, with the reason stated in the hint.
+
+### Test the direction check — the whole point of this service
+
+6. **Match the line to the journal from step 1.** → **Expect green
+   MATCHED**, with the banner stating the journal was verified FINALIZED, same
+   legal entity, moving exactly +1,250.00 USD through account `1000` in the
+   same direction.
+7. **Prove a same-size, wrong-direction journal is refused.** On the ledger:
+   post a *second* journal of exactly `1250.00` that **credits** `1000` (money
+   OUT). Ingest a matching line with amount **`-1250.00`** and match it to the
+   *first* journal (money IN).
+   → **Expect 400 `ledger_verification_failed`**, rendered as an amber
+   "unverified" banner — not a failure banner. The refusal *is* the service
+   working: a journal of precisely the right size that moved the other way is
+   the error a reconciliation exists to surface. Nothing was written.
+8. **Match against a PENDING or non-existent journal.** → **Expect the same
+   400.** The journal must be FINALIZED; a draft has not hit the books.
+9. **A line with no cash account cannot be matched at all.** → **Expect the
+   row to say so** and to offer no match form (the service would refuse with
+   422 anyway). The remedy is re-ingesting the line, not retrying.
+
+### Test exceptions and completion
+
+10. **Flag an unmatched line as an exception** with a reason.
+    → **Expect 201, EXCEPTION**, and the row turning rose — a different outcome
+    from "not done yet", not a further stage of it. It counts as resolved for
+    completion, and can still be matched later.
+11. **Complete the statement** via the form at the bottom of the register,
+    selecting the (bank account, date) group.
+    → **Expect green** "reconciled", with `reconciliation.completed` published
+    and **nothing stored** — completion is a derived signal, and there is no
+    reopen.
+12. **Complete a group that still has an UNMATCHED line.**
+    → **Expect 422 `statement_incomplete`**, naming how many lines are still
+    unmatched — an exception counts as resolved, an untouched line does not.
+13. **Complete a (bank account, date) with no lines at all.** → **Expect 404
+    `statement_not_found`** — announcing that a statement nobody ingested has
+    been reconciled is worse than saying nothing. The form only offers groups
+    present on this page of the register, so this is a direct-API case.
+14. **Authorize against one entity, complete another's bank account.**
+    → **Expect 403 `legal_entity_mismatch`** — the permission is real; it just
+    does not cover that bank account. The service binds the authorization to
+    the resource by reading the lines' legal entities, rather than trusting
+    that the caller's entity and the account agree.
+
+### Test the reads and the absence cases
+
+15. **Filter by status chip, bank account, and statement date.**
+    → **Expect** all three applied *by the service*, composing with AND, and
+    the tiles stating they describe the filtered set. The register's reads are
+    scoped by the verified `X-Tenant-Id` header alone — a `tenant_id` query
+    parameter is no longer read, and the console never sends one.
+16. **Read one line via the lookup box.** Paste the ID from step 2.
+    → **Expect the full record as JSON**: signed amount, cash account code,
+    and every actor and timestamp along the lifecycle. `not-a-uuid` is refused
+    by the console; another tenant's line reads as absent.
+17. **Send a match without a verified tenant scope** (drop `X-Tenant-Id`).
+    → **Expect 401 `tenant_scope_missing`**, not a 404 — failing closed, and
+    saying so rather than reassuringly reporting the row absent.
+
+### Watch for
+
+- **A malformed UUID or date answers 400, not 503.** The store maps
+  SQLSTATE 22P02/22007/22001 to `invalid_identifier`; a mistyped id used to
+  read as a database outage to the caller *and* to anything watching the error
+  rate.
+- **`currency_code` is recorded, never verified.** general-ledger journals
+  carry no currency at all, so a USD line and a EUR journal of the same
+  magnitude are indistinguishable to the check. The panel says so out loud.
+- **`bank_account_id` is a free UUID.** No bank-account registry exists
+  anywhere in the platform; nothing validates the account is real.
+
+---
+
 ## Known-stale claims in this document
 
 Sections 1–6 were written from the Go source before any of it had been run. Most
@@ -703,6 +841,11 @@ would be a governance failure rather than a bug:
 | 15 | A BLOCKED spend reads as a refusal, not a failure, and consumes no budget | Spend controls steps 3–4 |
 | 16 | A threshold cannot be overspent by simultaneous checks | Spend controls step 8 |
 | 17 | A limit in one currency never judges an amount in another | Spend controls step 6 |
+| 18 | A same-size, wrong-direction journal is refused, and reads as a refusal not a failure | Bank reconciliation step 7 |
+| 19 | A line without a ledger account can never be matched — refused at ingest, not discovered later | Bank reconciliation steps 5 and 9 |
+| 20 | An exception counts as resolved for completion; an untouched line does not | Bank reconciliation steps 11–12 |
+| 21 | An empty statement is a 404, not a success — nothing ingested, nothing reconciled | Bank reconciliation step 13 |
+| 22 | Authorization is bound to the bank account's actual legal entity, not the caller's claim | Bank reconciliation step 14 |
 
 Report back anything where the console's claim and the service's behaviour
 disagree — those are the interesting failures.

@@ -5,6 +5,7 @@
 // async functions, so the initial-state constant cannot live there.
 
 import type { InvoiceStatus } from "@/lib/api/accounts-payable";
+import type { StatementLineStatus } from "@/lib/api/bank-reconciliation";
 import type { JournalStatus } from "@/lib/api/general-ledger";
 
 /**
@@ -126,6 +127,52 @@ export type CloseActionState = {
 };
 
 export const IDLE_CLOSE_STATE: CloseActionState = { status: "idle", message: "" };
+
+// ─── bank-reconciliation-svc ─────────────────────────────────────────────────
+
+/**
+ * Outcomes of a bank reconciliation write.
+ *
+ * Four of these are deliberately not `error`, because each is a true statement
+ * about the reconciliation rather than a failure of the service:
+ *
+ *  - `unverified` — the named journal does not account for this line. The most
+ *    important case by far is a DIRECTION mismatch: a journal of exactly the
+ *    right size that moved money the other way. It is separated from `error`
+ *    because the service worked perfectly; it is the proposed match that is
+ *    wrong, and that refusal is the entire value of reconciling.
+ *  - `unverifiable` — the line has no ledger account recorded for its bank
+ *    account, so direction cannot be checked at all. Distinct from `unverified`
+ *    because nothing about the journal is wrong: the line itself is missing the
+ *    information, and no journal would satisfy it.
+ *  - `incomplete` — the statement still has UNMATCHED lines, so it cannot be
+ *    declared reconciled. That is the check doing its job.
+ *  - `replayed` — the service is idempotent on (tenant_id, correlation_id) and
+ *    resolved a retry to the ORIGINAL line. Reporting it as a second ingest
+ *    would double a bank transaction in the register, which is precisely what
+ *    the idempotency key prevents.
+ */
+export type ReconciliationActionState = {
+  status:
+    | "idle"
+    | "ingested"
+    | "replayed"
+    | "matched"
+    | "flagged"
+    | "completed"
+    | "unverified"
+    | "unverifiable"
+    | "incomplete"
+    | "out-of-sequence"
+    | "error";
+  message: string;
+  /** Echoed back so the operator has the id without hunting the register for
+   *  the row they just created. */
+  statementLineId?: string;
+  stage?: StatementLineStatus;
+};
+
+export const IDLE_RECONCILIATION_STATE: ReconciliationActionState = { status: "idle", message: "" };
 
 /** How many line rows the record-journal form starts with and allows.
  *

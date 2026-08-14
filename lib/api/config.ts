@@ -32,6 +32,9 @@ const DEFAULTS = {
   // bank-reconciliation, intercompany and consolidation all read it — and the
   // service behind the journal register on /admin/finance.
   generalLedger: "http://localhost:8098",
+  // 8102. Reconciles bank statement lines against general-ledger journals, so
+  // it reads the ledger above rather than owning any postings of its own.
+  bankReconciliation: "http://localhost:8102",
   // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is
   // in the compose file and in health.ts; the stale comment was the only place
   // that disagreed, and nothing called it, so nothing caught it.
@@ -81,6 +84,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   evidence: "/evidence-requirements-svc",
   accountsReceivable: "/accounts-receivable-svc",
   generalLedger: "/general-ledger-svc",
+  bankReconciliation: "/bank-reconciliation-svc",
   accountsPayable: "/accounts-payable-svc",
   spendControls: "/spend-controls-svc",
   vendorDueDiligence: "/vendor-due-diligence-svc",
