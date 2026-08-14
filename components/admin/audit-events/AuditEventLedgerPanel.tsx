@@ -44,12 +44,13 @@ export function AuditEventLedgerPanel({
 
   const filteredEvents = useMemo(() => {
     return events.filter((evt) => {
+      const searchLower = searchTerm.toLowerCase();
       const matchesSearch =
-        evt.correlation_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        evt.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        evt.resource.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        evt.principal_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        evt.resource_id.toLowerCase().includes(searchTerm.toLowerCase());
+        (evt.correlation_id?.toLowerCase() ?? "").includes(searchLower) ||
+        (evt.action?.toLowerCase() ?? "").includes(searchLower) ||
+        (evt.resource?.toLowerCase() ?? "").includes(searchLower) ||
+        (evt.principal_name?.toLowerCase() ?? "").includes(searchLower) ||
+        (evt.resource_id?.toLowerCase() ?? "").includes(searchLower);
 
       const matchesDomain = selectedDomain === "all" || evt.domain === selectedDomain;
       const matchesStatus = selectedStatus === "all" || evt.status === selectedStatus;
