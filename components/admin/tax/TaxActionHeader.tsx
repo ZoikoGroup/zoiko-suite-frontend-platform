@@ -664,7 +664,7 @@ export function TaxActionHeader() {
       {modal === "determination" && <DeterminationWizard onClose={() => setModal(null)} />}
       {modal === "filing" && <FilingAssemblyPanel onClose={() => setModal(null)} />}
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         {/* Top toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <div className="flex items-center gap-3 flex-wrap">

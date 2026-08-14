@@ -4,15 +4,14 @@ import { useState } from "react";
 import { Plus, Scale, CalendarCheck, CheckCircle2, X, Server, Zap, Loader2, AlertCircle } from "lucide-react";
 
 const SERVICES = [
-  { name: "general-ledger-svc",         port: "8100", color: "bg-emerald-500" },
-  { name: "accounts-receivable-svc",    port: "8101", color: "bg-emerald-500" },
-  { name: "accounts-payable-svc",       port: "8102", color: "bg-emerald-500" },
-  { name: "bank-reconciliation-svc",    port: "8103", color: "bg-emerald-500" },
-  { name: "financial-close-svc",       port: "8104", color: "bg-emerald-500" },
-  { name: "treasury-svc",               port: "8105", color: "bg-emerald-500" },
-  { name: "intercompany-accounting-svc",port: "8106", color: "bg-emerald-500" },
-  { name: "consolidation-svc",          port: "8107", color: "bg-emerald-500" },
-  { name: "chart-of-accounts-svc",      port: "8108", color: "bg-emerald-500" },
+  { name: "general-ledger-svc",          port: "8098", color: "bg-emerald-500" },
+  { name: "accounts-payable-svc",        port: "8099", color: "bg-emerald-500" },
+  { name: "accounts-receivable-svc",     port: "8101", color: "bg-emerald-500" },
+  { name: "bank-reconciliation-svc",     port: "8102", color: "bg-emerald-500" },
+  { name: "treasury-svc",                port: "8103", color: "bg-emerald-500" },
+  { name: "financial-close-svc",        port: "8104", color: "bg-emerald-500" },
+  { name: "intercompany-accounting-svc", port: "8105", color: "bg-emerald-500" },
+  { name: "consolidation-svc",           port: "8106", color: "bg-emerald-500" },
 ];
 
 function NewJournalModal({ onClose }: { onClose: () => void }) {
@@ -242,12 +241,12 @@ export function FinanceActionHeader() {
       {modal === "bank-rec" && <BankRecModal onClose={() => setModal(null)} />}
       {modal === "financial-close" && <FinancialCloseModal onClose={() => setModal(null)} />}
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              9 Microservices Active
+              8 Microservices Active
             </span>
           </div>
 
