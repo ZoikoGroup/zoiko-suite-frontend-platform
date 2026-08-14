@@ -74,8 +74,22 @@ type AuditEventActionHeaderProps = {
   activeServices?: string;
 };
 
-export function AuditEventActionHeader({ serviceStatus: _serviceStatus, activeServices: _activeServices }: AuditEventActionHeaderProps = {}) {
+export function AuditEventActionHeader({ serviceStatus = "operational", activeServices }: AuditEventActionHeaderProps = {}) {
   const [modal, setModal] = useState<string | null>(null);
+
+  const statusBadgeColor =
+    serviceStatus === "degraded"
+      ? "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300"
+      : serviceStatus === "attention"
+      ? "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
+      : "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300";
+
+  const statusDotColor =
+    serviceStatus === "degraded"
+      ? "bg-rose-500"
+      : serviceStatus === "attention"
+      ? "bg-amber-500"
+      : "bg-emerald-500";
 
   return (
     <>
@@ -84,9 +98,9 @@ export function AuditEventActionHeader({ serviceStatus: _serviceStatus, activeSe
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              4 Microservices Active
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeColor}`}>
+              <span className={`h-2 w-2 rounded-full ${statusDotColor} animate-pulse`} />
+              {activeServices ?? "4 Microservices Active"}
             </span>
           </div>
 

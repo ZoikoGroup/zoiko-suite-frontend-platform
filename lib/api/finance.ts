@@ -96,15 +96,18 @@ const MOCK_CASH_POSITIONS: CashPosition[] = [
   },
 ];
 
-export async function listJournalEntries(_identity?: Identity): Promise<ApiResult<JournalEntry[]>> {
+export async function listJournalEntries(identity?: Identity): Promise<ApiResult<JournalEntry[]>> {
+  void identity;
   return { ok: true, data: MOCK_JOURNAL_ENTRIES };
 }
 
-export async function listCashPositions(_identity?: Identity): Promise<ApiResult<CashPosition[]>> {
+export async function listCashPositions(identity?: Identity): Promise<ApiResult<CashPosition[]>> {
+  void identity;
   return { ok: true, data: MOCK_CASH_POSITIONS };
 }
 
-export async function getFinanceSummaryStats(_identity?: Identity): Promise<ApiResult<FinanceSummaryStats>> {
+export async function getFinanceSummaryStats(identity?: Identity): Promise<ApiResult<FinanceSummaryStats>> {
+  void identity;
   return {
     ok: true,
     data: {

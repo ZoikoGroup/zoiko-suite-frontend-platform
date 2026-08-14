@@ -89,15 +89,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
 
   // Finance Domain
   if (endpoint === "journal-entries") {
-    const res = await listJournalEntries(identity);
+    const res = await listJournalEntries();
     return NextResponse.json({ journal_entries: res.ok ? res.data : [] });
   }
   if (endpoint === "cash-positions") {
-    const res = await listCashPositions(identity);
+    const res = await listCashPositions();
     return NextResponse.json({ cash_positions: res.ok ? res.data : [] });
   }
   if (endpoint === "finance/summary") {
-    const res = await getFinanceSummaryStats(identity);
+    const res = await getFinanceSummaryStats();
     return NextResponse.json({ summary: res.ok ? res.data : {} });
   }
 
