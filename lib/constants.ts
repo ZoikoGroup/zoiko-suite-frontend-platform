@@ -27,6 +27,7 @@ export type DomainKey =
   | "tax"
   | "compliance"
   | "commercial-ops"
+  | "purchase-requests"
   | "audit-events";
 
 export type DomainStatus = "operational" | "attention" | "action-required";
@@ -172,6 +173,16 @@ export const DOMAINS: Domain[] = [
       "Vendor Due Diligence Service",
       "Spend Controls Service",
     ],
+  },
+  {
+    key: "purchase-requests",
+    label: "Purchase Requests",
+    href: "/admin/purchase-requests",
+    icon: ClipboardList,
+    purpose:
+      "Govern the requisition lifecycle — raise, approve and reject requests before any purchase order can be issued against them.",
+    status: "operational",
+    coreServices: ["Purchase Request Service"],
   },
   {
     key: "audit-events",

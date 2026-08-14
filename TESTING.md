@@ -801,6 +801,83 @@ not imply the others.
 
 ---
 
+## 10. Purchase requests — `purchase-request-svc` (:8100)
+
+Lives on **`/admin/purchase-requests`**, its own page in the left rail rather
+than a panel on an existing one. The backend service and its suites were green
+before the page was written; the steps below assert the behaviours they prove,
+and were verified end-to-end in a live smoke run.
+
+**What it is.** A request to spend money before any money moves. A request
+starts `PENDING` and is decided by someone who is **not** the requester —
+Segregation of Duties applies to both outcomes: a requester may not approve
+their own request *or* reject it. The response to a decision echoes who decided
+and when (`approved_by_principal_id` / `approved_at`), so a 200 that says
+`APPROVED` is never a record-shaped lie about what was written.
+
+### Bring it up
+
+```powershell
+docker compose -f deployments/docker-compose.yml up -d purchase-request-svc
+./deployments/scripts/seed-demo-rbac.ps1 -AuthzUrl http://localhost:8089
+```
+
+Deps are postgres + kafka + authorization-svc. The RBAC seed grants `PR_FULL`
+— the three actions separately (`PR_REQUEST_CREATE`, `PR_REQUEST_APPROVE`,
+`PR_REQUEST_REJECT`), so holding one does not imply the others. The live smoke
+run additionally granted a second principal the two decision actions, because
+the demo principal may not decide on requests it itself created — that is the
+SoD check working, not a setup omission.
+
+### Test the raise form
+
+1. **Raise a request.** Description `50 laptops for QA`, amount `4800.00`,
+   currency `GBP`. → **Expect 201**, status `PENDING`, and the request ID in
+   the banner as a copy control.
+2. **Submit the exact same form again.** → **Expect an amber replay banner**
+   resolving to the ORIGINAL request. The service is idempotent on
+   `(tenant_id, correlation_id)`; a retry must not raise a second request.
+3. **Submit with a zero amount.** → **Expect 400** at the service, surfaced as
+   a validation error, not an outage.
+
+### Test the register
+
+4. **The register shows the request** with `PENDING`, amount, currency,
+   requester and timestamps. Filter by status `PENDING` → it stays; filter by
+   `APPROVED` → it leaves.
+5. **Lookup by ID.** Paste the ID from step 1 → **Expect the full record as
+   JSON**, including the requester. `not-a-uuid` is refused by the console;
+   another tenant's request reads as absent (deny-by-absence, not denial).
+
+### Test decisions
+
+6. **Approve it as a second principal** (any principal holding
+   `PR_REQUEST_APPROVE`; the smoke run used `55555555-…`). → **Expect 200**,
+   status `APPROVED`, and `approved_by_principal_id` echoing that principal.
+7. **Approve it again.** → **Expect 422** `invalid_transition` — a decision
+   already made is terminal, not re-litigable.
+8. **Reject a fresh request without a reason.** → **Expect 400**. A rejection
+   with no reason would be a governance hole.
+9. **Reject it with a reason.** → **Expect 200**, status `REJECTED`, and the
+   reason echoed back in the response.
+10. **Approve your own request.** → **Expect 403** `self_approval_not_allowed`,
+    and the request still `PENDING`. This is the SoD check from the doctrine
+    (`A-12.3` in the original spec), enforced in the handler before the store
+    is ever touched.
+
+### Watch for
+
+- **A malformed UUID answers 404, not 503.** Malformed ids are deliberately
+  indistinguishable from absent ones — a mistyped id must never read as a
+  database outage to the caller *or* to anything watching the error rate.
+- **Reads are scoped by the `tenant_id` query param, not the header.** Listing
+  without it is a 400 (`missing_field`); writes without a verified tenant
+  scope are a 401. The page always sends both.
+- **Cross-tenant transitions are refused.** Deciding on another tenant's
+  request reads as 404/403 — the row is not yours to see as `PENDING`.
+
+---
+
 ## Known-stale claims in this document
 
 Sections 1–6 were written from the Go source before any of it had been run. Most
@@ -846,6 +923,11 @@ would be a governance failure rather than a bug:
 | 20 | An exception counts as resolved for completion; an untouched line does not | Bank reconciliation steps 11–12 |
 | 21 | An empty statement is a 404, not a success — nothing ingested, nothing reconciled | Bank reconciliation step 13 |
 | 22 | Authorization is bound to the bank account's actual legal entity, not the caller's claim | Bank reconciliation step 14 |
+| 23 | A requester cannot decide on their own request — SoD on both approve and reject | Purchase requests steps 6 and 10 |
+| 24 | A decision is terminal: a second decision on the same request is 422, not a fresh outcome | Purchase requests step 7 |
+| 25 | A rejection without a reason is refused at the door | Purchase requests step 8 |
+| 26 | A decision's response echoes who decided and when — no record-shaped lies | Purchase requests step 6 |
+| 27 | An idempotent replay resolves to the original request, never a duplicate | Purchase requests step 2 |
 
 Report back anything where the console's claim and the service's behaviour
 disagree — those are the interesting failures.
