@@ -64,7 +64,7 @@ export async function ObligationTrackingPanel() {
     );
   }
 
-  const obligations: Obligation[] = result.ok ? result.data : [];
+  const obligations: Obligation[] = result.ok && Array.isArray(result.data) ? result.data : [];
 
   const breached = obligations.filter((o) => o.status === "BREACHED");
   const pending = obligations.filter((o) => o.status === "PENDING" || o.status === "IN_PROGRESS");

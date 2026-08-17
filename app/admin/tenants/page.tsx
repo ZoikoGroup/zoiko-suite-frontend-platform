@@ -127,15 +127,27 @@ async function EntityPanel() {
     listResidencyRegions(identity),
   ]);
 
-  const entities: LegalEntity[] = entitiesResult.ok ? entitiesResult.data : [];
-  const regions: ResidencyRegion[] = regionsResult.ok ? regionsResult.data : [];
+  const entities: LegalEntity[] =
+    entitiesResult.ok && Array.isArray(entitiesResult.data)
+      ? entitiesResult.data
+      : entitiesResult.ok && Array.isArray((entitiesResult.data as unknown as Record<string, unknown>)?.entities)
+      ? ((entitiesResult.data as unknown as Record<string, unknown>).entities as LegalEntity[])
+      : [];
+  const regions: ResidencyRegion[] =
+    regionsResult.ok && Array.isArray(regionsResult.data)
+      ? regionsResult.data
+      : regionsResult.ok && Array.isArray((regionsResult.data as unknown as Record<string, unknown>)?.regions)
+      ? ((regionsResult.data as unknown as Record<string, unknown>).regions as ResidencyRegion[])
+      : [];
   const residencyPolicyId = tenantResult.ok ? tenantResult.data.default_data_residency_policy_id : "";
 
-  const options = entities.map((e) => ({
-    id: e.legal_entity_id,
-    label: `${e.entity_code} — ${e.legal_name}`,
-    status: e.entity_status,
-  }));
+  const options = Array.isArray(entities)
+    ? entities.map((e) => ({
+        id: e.legal_entity_id,
+        label: `${e.entity_code} — ${e.legal_name}`,
+        status: e.entity_status,
+      }))
+    : [];
 
   return (
     <div className="space-y-6">

@@ -176,7 +176,15 @@ export async function getAuditEvents(): Promise<{
     };
   }
 
-  const events = res.data;
+  const raw = res.data;
+  // audit-event-store-svc returns { events: [...], total, hash_chain_valid }
+  // apiGet<AuditEvent[]> passes the raw object through — extract the array safely.
+  const events: AuditEvent[] = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as unknown as Record<string, unknown>)?.events)
+    ? ((raw as unknown as Record<string, unknown>).events as AuditEvent[])
+    : [];
+
   return {
     data: events,
     summary: {

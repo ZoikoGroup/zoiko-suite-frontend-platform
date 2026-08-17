@@ -301,7 +301,9 @@ export function AccountsReceivableView() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-zinc-500 dark:text-zinc-400">
-                      {new Date(inv.due_date).toLocaleDateString()}
+                      {inv.due_date && !isNaN(Date.parse(inv.due_date))
+                        ? new Date(inv.due_date).toLocaleDateString()
+                        : "—"}
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex justify-end gap-1.5">

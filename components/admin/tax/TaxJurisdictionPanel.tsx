@@ -67,10 +67,10 @@ export async function TaxJurisdictionPanel() {
     listTaxAuthorityInterfaces(identity),
   ]);
 
-  const rules = rulesRes.ok ? rulesRes.data : [];
-  const vatReturns = vatRes.ok ? vatRes.data : [];
-  const drafts = draftsRes.ok ? draftsRes.data : [];
-  const authorities = authorityRes.ok ? authorityRes.data : [];
+  const rules = rulesRes.ok && Array.isArray(rulesRes.data) ? rulesRes.data : [];
+  const vatReturns = vatRes.ok && Array.isArray(vatRes.data) ? vatRes.data : [];
+  const drafts = draftsRes.ok && Array.isArray(draftsRes.data) ? draftsRes.data : [];
+  const authorities = authorityRes.ok && Array.isArray(authorityRes.data) ? authorityRes.data : [];
 
   const JURISDICTIONS: { id: string; flag: string; name: string; shortName: string; authority: string; taxTypes: string[] }[] = [
     { id: "uk-gov-01",  flag: "🇬🇧", name: "United Kingdom", shortName: "UK",  authority: "HMRC",    taxTypes: ["VAT", "WHT"] },

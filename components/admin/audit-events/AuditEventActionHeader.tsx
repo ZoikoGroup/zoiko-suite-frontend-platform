@@ -95,7 +95,7 @@ export function AuditEventActionHeader({ serviceStatus = "operational", activeSe
     <>
       {modal === "ingest" && <IngestEventModal onClose={() => setModal(null)} />}
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <div className="flex items-center gap-3">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeColor}`}>

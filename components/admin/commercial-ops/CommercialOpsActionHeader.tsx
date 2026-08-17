@@ -35,7 +35,7 @@ const SERVICES = [
 
 export function CommercialOpsActionHeader() {
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
         <div>
           <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
