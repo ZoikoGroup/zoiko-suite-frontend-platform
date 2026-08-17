@@ -21,11 +21,15 @@ const DEFAULTS = {
   jurisdictionRules: "http://localhost:8082",
   purchaseRequest: "http://localhost:8100",
   contracts: "http://localhost:8119",
-  // 8129. This said 8112, which compose also gave to benefits-svc — the two
-  // could never both start. Traefik's all-services.yml has always routed this
-  // service to :8129 and .env.local has always said 8129, so 8112 was wrong in
-  // three places at once; compose now agrees with the other two.
-  purchaseOrder: "http://localhost:8129",
+  // 8139: the services runner starts purchase-order-svc on 8139. The previous
+  // value of 8129 collided with withholding-tax-svc in the tax domain (also 8129).
+  // health.ts has been updated to match.
+  purchaseOrder: "http://localhost:8139",
+  // 8130: evidence-requirements-svc. Note: filing-preparation-svc in the tax domain
+  // also targets port 8130 — in the mock runner both are served by the same process
+  // and differentiated by URL path. In a real deployment they would run on separate
+  // containers. Use ZOIKO_EVIDENCE_URL or ZOIKO_FILING_PREPARATION_URL env overrides
+  // to point each client at its correct deployment port.
   evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
   // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is

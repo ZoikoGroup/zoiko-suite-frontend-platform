@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
-  createDemoSession,
+  createSessionForUser,
   encodeSession,
-  verifyCredentials,
+  findUserByCredentials,
 } from "@/lib/auth";
 
 export async function POST(request: Request) {
@@ -12,15 +12,25 @@ export async function POST(request: Request) {
   const email = typeof body?.email === "string" ? body.email : "";
   const password = typeof body?.password === "string" ? body.password : "";
 
-  if (!verifyCredentials(email, password)) {
+  const user = findUserByCredentials(email, password);
+  if (!user) {
     return NextResponse.json(
       { error: "Invalid email or password." },
       { status: 401 },
     );
   }
 
-  const response = NextResponse.json({ success: true });
-  response.cookies.set(SESSION_COOKIE, encodeSession(createDemoSession()), {
+  const response = NextResponse.json({
+    success: true,
+    user: {
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      domain: user.domain,
+    }
+  });
+
+  response.cookies.set(SESSION_COOKIE, encodeSession(createSessionForUser(user)), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

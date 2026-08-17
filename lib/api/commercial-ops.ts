@@ -1,10 +1,9 @@
 // Server-side API clients for Commercial Ops domain microservices:
-// - procurement-workflow-svc (8109)
-// - purchase-request-svc (8110)
-// - purchase-order-svc (8112)
-// - invoice-approval-svc (8134)
-// - vendor-due-diligence-svc (8135)
-// - spend-controls-svc (8131)
+// - purchase-request-svc     (:8100)
+// - purchase-order-svc       (:8139) — was documented as 8112/8129; corrected to match runner
+// - invoice-approval-svc     (:8107)
+// - spend-controls-svc       (:8131)
+// - vendor-due-diligence-svc (:8135)
 
 import { type ApiResult, type Identity } from "./client";
 import {

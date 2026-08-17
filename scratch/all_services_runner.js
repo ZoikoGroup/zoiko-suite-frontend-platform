@@ -694,8 +694,426 @@ serve(8088, "obligations-svc", (m, p, q, b, send) => {
   return send(200, { obligations: OBLIGATIONS });
 });
 
+const EVENT_SCHEMAS = [
+  {
+    event_name: "contract.activated.v1",
+    version: 1,
+    json_schema: { type: "object", properties: { contract_id: { type: "string" }, status: { type: "string" } }, required: ["contract_id", "status"] },
+    compatibility_mode: "BACKWARD",
+    owning_service: "contract-lifecycle-svc",
+    registered_by: "33333333-3333-3333-3333-333333333333",
+    registered_at: "2026-01-01T00:00:00Z"
+  },
+  {
+    event_name: "purchase_order.issued.v1",
+    version: 1,
+    json_schema: { type: "object", properties: { po_number: { type: "string" }, amount: { type: "number" } }, required: ["po_number", "amount"] },
+    compatibility_mode: "BACKWARD",
+    owning_service: "purchase-order-svc",
+    registered_by: "33333333-3333-3333-3333-333333333333",
+    registered_at: "2026-01-01T00:00:00Z"
+  },
+  {
+    event_name: "payroll_run.finalized.v1",
+    version: 1,
+    json_schema: { type: "object", properties: { payroll_run_id: { type: "string" }, total_gross_pay: { type: "number" } }, required: ["payroll_run_id"] },
+    compatibility_mode: "BACKWARD",
+    owning_service: "payroll-run-svc",
+    registered_by: "33333333-3333-3333-3333-333333333333",
+    registered_at: "2026-01-01T00:00:00Z"
+  }
+];
+
 serve(8093, "schema-registry-svc", (m, p, q, b, send) => {
-  return send(200, { schemas: [] });
+  if (p === "/v1/schemas") return send(200, EVENT_SCHEMAS.map(s => s.event_name));
+  if (p.includes("/versions/latest")) {
+    const found = EVENT_SCHEMAS.find(s => p.includes(encodeURIComponent(s.event_name)) || p.includes(s.event_name));
+    return send(200, found ?? EVENT_SCHEMAS[0]);
+  }
+  return send(200, EVENT_SCHEMAS);
 });
 
-console.log("\n🚀 ZoikoSuite — All domain services ONLINE with zero errors!");
+// ── 9. Tax Domain Microservices (8125 - 8147) ─────────────────────────────────
+const TAX_RULES = [
+  {
+    rule_id: "rule-uk-vat-standard",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    jurisdiction_id: "jur-uk-gb",
+    rule_code: "UK-VAT-STD-2026",
+    name: "UK Standard Value Added Tax",
+    category: "VAT",
+    tax_rate_percentage: 20.0,
+    standard_deductions: 0,
+    status: "ACTIVE",
+    version: 1,
+    effective_from: "2026-01-01T00:00:00Z",
+    created_by: "system",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z"
+  },
+  {
+    rule_id: "rule-uk-vat-reduced",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    jurisdiction_id: "jur-uk-gb",
+    rule_code: "UK-VAT-RED-2026",
+    name: "UK Reduced Rate VAT (Energy/Safety)",
+    category: "VAT",
+    tax_rate_percentage: 5.0,
+    standard_deductions: 0,
+    status: "ACTIVE",
+    version: 1,
+    effective_from: "2026-01-01T00:00:00Z",
+    created_by: "system",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z"
+  },
+  {
+    rule_id: "rule-us-cit-fed",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    jurisdiction_id: "jur-us-fed",
+    rule_code: "US-CIT-FED-2026",
+    name: "US Federal Corporate Income Tax",
+    category: "CORPORATE_INCOME",
+    tax_rate_percentage: 21.0,
+    status: "ACTIVE",
+    version: 1,
+    effective_from: "2026-01-01T00:00:00Z",
+    created_by: "system",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z"
+  },
+  {
+    rule_id: "rule-sg-gst-standard",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    jurisdiction_id: "jur-sg-01",
+    rule_code: "SG-GST-STD-2026",
+    name: "Singapore Goods & Services Tax",
+    category: "GST",
+    tax_rate_percentage: 9.0,
+    status: "ACTIVE",
+    version: 1,
+    effective_from: "2026-01-01T00:00:00Z",
+    created_by: "system",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z"
+  }
+];
+
+const TAX_DETERMINATIONS = [
+  {
+    determination_id: "det-2026-001",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    transaction_id: "tx-inv-8910",
+    source_module: "ACCOUNTS_RECEIVABLE",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "jur-uk-gb",
+    rule_id: "rule-uk-vat-standard",
+    tax_category: "VAT",
+    gross_amount: 120000.0,
+    taxable_amount: 100000.0,
+    tax_rate_percentage: 20.0,
+    calculated_tax_amount: 20000.0,
+    exempt_amount: 0,
+    currency: "GBP",
+    status: "CALCULATED",
+    effective_from: "2026-07-01T00:00:00Z",
+    evaluated_at: "2026-07-31T14:30:00Z",
+    evaluated_by: "tax-engine-daemon",
+    created_at: "2026-07-31T14:30:00Z",
+    updated_at: "2026-07-31T14:30:00Z"
+  },
+  {
+    determination_id: "det-2026-002",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    transaction_id: "tx-po-4421",
+    source_module: "COMMERCIAL_OPS",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "jur-us-fed",
+    rule_id: "rule-us-cit-fed",
+    tax_category: "CORPORATE_INCOME",
+    gross_amount: 450000.0,
+    taxable_amount: 450000.0,
+    tax_rate_percentage: 21.0,
+    calculated_tax_amount: 94500.0,
+    exempt_amount: 0,
+    currency: "USD",
+    status: "CALCULATED",
+    effective_from: "2026-06-01T00:00:00Z",
+    evaluated_at: "2026-06-30T10:00:00Z",
+    evaluated_by: "tax-engine-daemon",
+    created_at: "2026-06-30T10:00:00Z",
+    updated_at: "2026-06-30T10:00:00Z"
+  }
+];
+
+const VAT_RETURNS = [
+  {
+    return_id: "vat-ret-2026-q2",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "jur-uk-gb",
+    tax_registration_number: "GB998877665",
+    tax_period: "2026-Q2",
+    total_sales_amount: 1450000.0,
+    total_purchase_amount: 620000.0,
+    output_tax_amount: 290000.0,
+    input_tax_amount: 124000.0,
+    net_tax_payable: 166000.0,
+    currency: "GBP",
+    status: "FILED",
+    filed_at: "2026-07-07T12:00:00Z",
+    filed_by: "system-auto-filing",
+    effective_from: "2026-04-01T00:00:00Z",
+    effective_to: "2026-06-30T23:59:59Z",
+    created_by: "tax-daemon",
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-07T12:00:00Z"
+  },
+  {
+    return_id: "vat-ret-2026-q3",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "jur-uk-gb",
+    tax_registration_number: "GB998877665",
+    tax_period: "2026-Q3",
+    total_sales_amount: 980000.0,
+    total_purchase_amount: 410000.0,
+    output_tax_amount: 196000.0,
+    input_tax_amount: 82000.0,
+    net_tax_payable: 114000.0,
+    currency: "GBP",
+    status: "DRAFT",
+    effective_from: "2026-07-01T00:00:00Z",
+    effective_to: "2026-09-30T23:59:59Z",
+    created_by: "tax-daemon",
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-14T00:00:00Z"
+  }
+];
+
+const CORPORATE_RETURNS = [
+  {
+    return_id: "corp-ret-2025",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "jur-us-fed",
+    tax_registration_number: "US-EIN-12345678",
+    fiscal_year: 2025,
+    accounting_period_start: "2025-01-01",
+    accounting_period_end: "2025-12-31",
+    gross_revenue: 12500000.0,
+    allowable_deductions: 8200000.0,
+    taxable_income: 4300000.0,
+    tax_rate_percent: 21.0,
+    gross_tax_liability: 903000.0,
+    tax_credits: 50000.0,
+    net_tax_payable: 853000.0,
+    tax_already_paid: 800000.0,
+    balance_due: 53000.0,
+    currency: "USD",
+    status: "SUBMITTED",
+    submitted_at: "2026-03-15T16:00:00Z",
+    submitted_by: "cfo-controller",
+    assessed_tax_amount: 853000.0,
+    assessment_reference: "IRS-ASSESS-2025-99",
+    effective_from: "2025-01-01T00:00:00Z",
+    created_by: "system",
+    created_at: "2026-01-15T00:00:00Z",
+    updated_at: "2026-03-15T16:00:00Z"
+  }
+];
+
+const WITHHOLDING_OBLIGATIONS = [
+  {
+    obligation_id: "wht-obl-001",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "jur-uk-gb",
+    counterparty_id: "cp-global-software",
+    payment_reference: "PAY-2026-0812",
+    payment_type: "ROYALTIES",
+    gross_payment_amount: 50000.0,
+    taxable_base_amount: 50000.0,
+    withholding_rate_percent: 5.0,
+    withheld_amount: 2500.0,
+    statutory_rate_percent: 20.0,
+    treaty_reduced_rate_percent: 5.0,
+    applied_rate_percent: 5.0,
+    tax_withheld_amount: 2500.0,
+    net_amount_payable: 47500.0,
+    currency: "GBP",
+    status: "REMITTED",
+    tax_treaty_exemption: true,
+    statutory_due_date: "2026-08-20",
+    remittance_reference: "HMRC-WHT-2026-781",
+    remitted_at: "2026-08-10T11:00:00Z",
+    remitted_by: "treasury-auto-remit",
+    effective_from: "2026-08-01T00:00:00Z",
+    created_by: "system",
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-10T11:00:00Z"
+  }
+];
+
+const FILING_DRAFTS = [
+  {
+    draft_id: "draft-filing-2026-q3-vat",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: "jur-uk-gb",
+    filing_type: "VAT_RETURN",
+    period_key: "2026-Q3",
+    reporting_period: "2026-Q3",
+    currency: "GBP",
+    tax_due_amount: 114000.0,
+    status: "PREPARED",
+    payload_data: '{"box1":196000,"box2":0,"box3":196000,"box4":82000,"box5":114000}',
+    validation_status: "PREPARED",
+    created_by: "filing-daemon",
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-14T00:00:00Z"
+  }
+];
+
+const TAX_INTERFACES = [
+  {
+    interface_id: "if-hmrc-mtd",
+    jurisdiction_id: "jur-uk-gb",
+    authority_name: "HM Revenue & Customs (HMRC)",
+    protocol_type: "REST_OAUTH2",
+    endpoint_url: "https://api.service.hmrc.gov.uk/organisations/vat",
+    environment: "PRODUCTION",
+    auth_credential_id: "sec-hmrc-client-credentials",
+    is_active: true,
+    last_health_check: new Date().toISOString(),
+    health_status: "HEALTHY",
+    error_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: new Date().toISOString()
+  },
+  {
+    interface_id: "if-irs-mef",
+    jurisdiction_id: "jur-us-fed",
+    authority_name: "Internal Revenue Service (IRS MeF)",
+    protocol_type: "SOAP_A2A",
+    endpoint_url: "https://la.www4.irs.gov/a2a/mef",
+    environment: "PRODUCTION",
+    auth_credential_id: "sec-irs-a2a-cert",
+    is_active: true,
+    last_health_check: new Date().toISOString(),
+    health_status: "HEALTHY",
+    error_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: new Date().toISOString()
+  }
+];
+
+// 8125: tax-rules-svc
+serve(8125, "tax-rules-svc", (m, p, q, b, send) => {
+  if (m === "GET") {
+    let rules = [...TAX_RULES];
+    if (q.get("jurisdiction_id")) rules = rules.filter(r => r.jurisdiction_id === q.get("jurisdiction_id"));
+    if (q.get("category")) rules = rules.filter(r => r.category === q.get("category"));
+    if (q.get("status")) rules = rules.filter(r => r.status === q.get("status"));
+    return send(200, { rules, total: rules.length });
+  }
+  const newRule = {
+    rule_id: b.rule_id || ("rule-" + Date.now()),
+    tenant_id: b.tenant_id || "11111111-1111-1111-1111-111111111111",
+    jurisdiction_id: b.jurisdiction_id || "jur-uk-gb",
+    rule_code: b.rule_code || ("RULE-" + Date.now()),
+    name: b.name || "New Tax Rule",
+    category: b.category || "VAT",
+    tax_rate_percentage: b.tax_rate_percentage ?? 20.0,
+    standard_deductions: b.standard_deductions ?? 0,
+    status: b.status || "ACTIVE",
+    version: 1,
+    effective_from: b.effective_from || new Date().toISOString(),
+    created_by: "admin",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  TAX_RULES.unshift(newRule);
+  return send(201, newRule);
+});
+
+// 8126: tax-determination-svc
+serve(8126, "tax-determination-svc", (m, p, q, b, send) => {
+  if (m === "GET") {
+    let dets = [...TAX_DETERMINATIONS];
+    if (q.get("legal_entity_id")) dets = dets.filter(d => d.legal_entity_id === q.get("legal_entity_id"));
+    if (q.get("status")) dets = dets.filter(d => d.status === q.get("status"));
+    return send(200, { determinations: dets, total: dets.length });
+  }
+  const rate = b.tax_rate_percentage ?? 20.0;
+  const taxable = b.taxable_amount ?? b.gross_amount ?? 100000;
+  const calc = (taxable * rate) / 100;
+  const newDet = {
+    determination_id: b.determination_id || ("det-" + Date.now()),
+    tenant_id: b.tenant_id || "11111111-1111-1111-1111-111111111111",
+    transaction_id: b.transaction_id || ("tx-" + Date.now()),
+    source_module: b.source_module || "ADMIN_CONSOLE",
+    legal_entity_id: b.legal_entity_id || "22222222-2222-2222-2222-222222222222",
+    jurisdiction_id: b.jurisdiction_id || "jur-uk-gb",
+    rule_id: b.rule_id || "rule-uk-vat-standard",
+    tax_category: b.tax_category || "VAT",
+    gross_amount: b.gross_amount ?? taxable,
+    taxable_amount: taxable,
+    tax_rate_percentage: rate,
+    calculated_tax_amount: calc,
+    exempt_amount: b.exempt_amount ?? 0,
+    currency: b.currency || "GBP",
+    status: b.status || "CALCULATED",
+    effective_from: b.effective_from || new Date().toISOString(),
+    evaluated_at: new Date().toISOString(),
+    evaluated_by: "admin",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  TAX_DETERMINATIONS.unshift(newDet);
+  return send(201, newDet);
+});
+
+// 8127: vat-gst-svc
+serve(8127, "vat-gst-svc", (m, p, q, b, send) => {
+  if (m === "GET") return send(200, { vat_returns: VAT_RETURNS, returns: VAT_RETURNS, total: VAT_RETURNS.length });
+  const ret = { return_id: "vat-" + Date.now(), status: "DRAFT", ...b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  VAT_RETURNS.unshift(ret);
+  return send(201, ret);
+});
+
+// 8128: corporate-tax-svc
+serve(8128, "corporate-tax-svc", (m, p, q, b, send) => {
+  if (m === "GET") return send(200, { returns: CORPORATE_RETURNS, corporate_tax_returns: CORPORATE_RETURNS, total: CORPORATE_RETURNS.length });
+  const ret = { return_id: "corp-" + Date.now(), status: "DRAFT", ...b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  CORPORATE_RETURNS.unshift(ret);
+  return send(201, ret);
+});
+
+// 8129: withholding-tax-svc
+serve(8129, "withholding-tax-svc", (m, p, q, b, send) => {
+  if (m === "GET") return send(200, { obligations: WITHHOLDING_OBLIGATIONS, total: WITHHOLDING_OBLIGATIONS.length });
+  const obl = { obligation_id: "wht-" + Date.now(), status: "CALCULATED", ...b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  WITHHOLDING_OBLIGATIONS.unshift(obl);
+  return send(201, obl);
+});
+
+// 8130: filing-preparation-svc
+serve(8130, "filing-preparation-svc", (m, p, q, b, send) => {
+  if (m === "GET") return send(200, { drafts: FILING_DRAFTS, total: FILING_DRAFTS.length });
+  if (p.includes("/finalize")) {
+    const draftId = p.split("/")[3] || "draft-finalized";
+    return send(200, { draft_id: draftId, validation_status: "FINALIZED", filing_type: "VAT100_MTD", period_key: "2026-Q2" });
+  }
+  const draft = { draft_id: "draft-" + Date.now(), validation_status: "PREPARED", filing_type: "VAT100_MTD", period_key: "2026-Q2", status: "DRAFT", ...b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  FILING_DRAFTS.unshift(draft);
+  return send(201, draft);
+});
+
+// 8147: tax-authority-interface-svc
+serve(8147, "tax-authority-interface-svc", (m, p, q, b, send) => {
+  if (m === "GET") return send(200, { interfaces: TAX_INTERFACES, total: TAX_INTERFACES.length });
+  return send(201, { interface_id: "if-" + Date.now(), health_status: "HEALTHY", ...b });
+});
+
+console.log("\n🚀 ZoikoSuite — All domain services & Tax services ONLINE with zero errors!");

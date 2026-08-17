@@ -10,23 +10,90 @@ export const DEMO_CREDENTIALS = {
   password: "Zoiko@Governance1",
 };
 
-/**
- * Governed identity for the demo session.
- *
- * In a real deployment these come from the signed IdentityContextEnvelope that
- * gateway-auth-svc verifies, and Traefik forwards them to every backend as
- * X-Principal-Id / X-Tenant-Id / X-Legal-Entity-Id. The local single-port
- * gateway routes carry no ForwardAuth middleware, so the console has to supply
- * them itself — see lib/api/client.ts.
- *
- * They are UUIDs because the backend stores them in uuid columns: a
- * human-readable id like "demo-tenant" fails at the driver with
- * `invalid input syntax for type uuid` and surfaces as a 503, not a 400.
- *
- * This principal is granted PO_ISSUE / PO_AMEND / PO_CLOSE on this legal entity
- * by deployments/scripts/seed-demo-rbac.ps1 in the backend repo. Without that
- * seed authorization-svc answers DENIED / no_grant and every write is refused.
- */
+export type GovernedUserAccount = {
+  email: string;
+  password: string;
+  name: string;
+  role: string;
+  domain: string;
+  principalId: string;
+  tenantId: string;
+  legalEntityId: string;
+};
+
+export const GOVERNED_USER_ACCOUNTS: GovernedUserAccount[] = [
+  {
+    email: "admin@zoikosuite.com",
+    password: "Zoiko@Governance1",
+    name: "Lingaraj (Super Admin)",
+    role: "Platform Administrator",
+    domain: "Global Governance & Core Platform",
+    principalId: "33333333-3333-3333-3333-333333333333",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+  },
+  {
+    email: "tax.officer@zoikosuite.com",
+    password: "Zoiko@Tax2026!",
+    name: "Dr. Alistair Vance",
+    role: "Tax Governance Lead & MTD Officer",
+    domain: "Tax Engine & Authority Filing",
+    principalId: "44444444-4444-4444-4444-444444444444",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+  },
+  {
+    email: "cfo@zoikosuite.com",
+    password: "Zoiko@Finance2026!",
+    name: "Elena Rostova",
+    role: "Chief Financial Officer (CFO)",
+    domain: "Treasury, General Ledger & Financial Close",
+    principalId: "55555555-5555-5555-5555-555555555555",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+  },
+  {
+    email: "legal.counsel@zoikosuite.com",
+    password: "Zoiko@Legal2026!",
+    name: "James Okafor, Esq.",
+    role: "Head of Legal & Governance Counsel",
+    domain: "Contracts, Clauses & Board Resolutions",
+    principalId: "66666666-6666-6666-6666-666666666666",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+  },
+  {
+    email: "hr.director@zoikosuite.com",
+    password: "Zoiko@People2026!",
+    name: "Sophie Laurent",
+    role: "Director of People & Remuneration",
+    domain: "HR, Payroll Runs & Workforce Governance",
+    principalId: "77777777-7777-7777-7777-777777777777",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+  },
+  {
+    email: "procurement@zoikosuite.com",
+    password: "Zoiko@Commercial2026!",
+    name: "Marcus Sterling",
+    role: "Head of Procurement & Commercial Ops",
+    domain: "Purchase Orders, Spend Controls & Vendor KYC",
+    principalId: "88888888-8888-8888-8888-888888888888",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+  },
+  {
+    email: "security.audit@zoikosuite.com",
+    password: "Zoiko@Audit2026!",
+    name: "Dr. Maya Lin",
+    role: "Chief Information Security & Audit Officer",
+    domain: "Cryptographic Audit Log, Vault & Compliance",
+    principalId: "99999999-9999-9999-9999-999999999999",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+  }
+];
+
 export const DEMO_IDENTITY = {
   principalId: "33333333-3333-3333-3333-333333333333",
   tenantId: "11111111-1111-1111-1111-111111111111",
@@ -46,11 +113,15 @@ export type SessionPayload = {
   iat: number;
 } & SessionIdentity;
 
-export function verifyCredentials(email: string, password: string) {
-  return (
-    email.trim().toLowerCase() === DEMO_CREDENTIALS.email &&
-    password === DEMO_CREDENTIALS.password
-  );
+export function findUserByCredentials(email: string, password: string): GovernedUserAccount | null {
+  const normalizedEmail = email.trim().toLowerCase();
+  return GOVERNED_USER_ACCOUNTS.find(
+    (u) => u.email.toLowerCase() === normalizedEmail && u.password === password
+  ) ?? null;
+}
+
+export function verifyCredentials(email: string, password: string): boolean {
+  return findUserByCredentials(email, password) !== null;
 }
 
 export function encodeSession(payload: SessionPayload): string {
@@ -63,9 +134,6 @@ export function decodeSession(value: string | undefined | null): SessionPayload 
     const json = Buffer.from(value, "base64url").toString("utf-8");
     const parsed = JSON.parse(json) as Partial<SessionPayload>;
     if (!parsed?.email) return null;
-    // Backfill the identity claims: cookies issued before they existed are
-    // still valid sessions, and expiring everyone's session over an added
-    // field would be a worse trade than defaulting to the demo identity.
     return {
       ...DEMO_IDENTITY,
       ...parsed,
@@ -75,12 +143,18 @@ export function decodeSession(value: string | undefined | null): SessionPayload 
   }
 }
 
-export function createDemoSession(): SessionPayload {
+export function createSessionForUser(user: GovernedUserAccount): SessionPayload {
   return {
-    email: DEMO_CREDENTIALS.email,
-    name: "Lingaraj",
-    role: "Platform Administrator",
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    principalId: user.principalId,
+    tenantId: user.tenantId,
+    legalEntityId: user.legalEntityId,
     iat: Date.now(),
-    ...DEMO_IDENTITY,
   };
+}
+
+export function createDemoSession(): SessionPayload {
+  return createSessionForUser(GOVERNED_USER_ACCOUNTS[0]);
 }
