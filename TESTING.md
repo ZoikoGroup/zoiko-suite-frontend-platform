@@ -893,9 +893,11 @@ that failed to notify someone sees a normal success so it does not treat its
 own, otherwise-successful operation as failed too.
 
 **The stub is the whole story.** No email/SMS/webhook provider is wired up. The
-delivery adapter logs and always succeeds for EMAIL, SMS, IN_APP, WEBHOOK; an
-unsupported channel is the ONLY way to reach FAILED today. SENT therefore means
-"recorded, stub-delivered" — not "actually received".
+delivery adapter logs and always succeeds. SENT therefore means "recorded,
+stub-delivered" — not "actually received". FAILED is currently **unreachable**,
+and that is the honest state: with no provider behind it, nothing can refuse a
+delivery. An unrecognised channel is a 400 at the request boundary, not a FAILED
+record — see the failure path below for why that changed.
 
 ### Test it
 
@@ -906,31 +908,45 @@ unsupported channel is the ONLY way to reach FAILED today. SENT therefore means
 2. **Send again with the same correlation** — the console generates a fresh
    correlation per submission, so from the UI a repeat send is a new
    notification; the 200-replay path is exercised by the API smoke, not the UI.
-3. **Resolve one notification** — click its id; the register renders it. The
-   get route authorizes per legal entity: a principal without NOTIFICATION_VIEW
-   on the queried entity gets 403, not an empty list.
-4. **List without a tenant filter** — the register is scoped by X-Tenant-Id;
-   another tenant's notifications are invisible (row-level security hides them
-   the same way as a not-found).
+3. **Resolve one notification** — click its id; the register renders it.
+4. **Read the register.** The console sends the session's `legal_entity_id`, and
+   the service authorizes `NOTIFICATION_VIEW` against it — a principal without
+   that grant gets 403, not an empty list.
+5. **Read it WITHOUT a legal entity** (API only):
+   `GET /v1/notifications/` with just a principal and tenant.
+   → **Expect only notifications addressed to that principal.** An unscoped read
+   is your own inbox, not the tenant's. Ask for
+   `recipient_principal_id=<someone else>` without a legal entity and
+   → **expect 403.** This used to be the hole: authorization ran only when
+   `legal_entity_id` was supplied, so omitting it — the easier request —
+   returned every notification in the tenant, subjects and bodies included, to a
+   principal holding no grant at all.
+6. **Send with no `X-Tenant-Id`.** → **Expect 401**, not 503. A forgotten header
+   used to reach the store and come back as `store_unavailable`, sending whoever
+   is on call to look at Postgres.
 
 ### The failure path — the interesting part
 
-5. Send with channel **PIGEON** (not in the supported set).
-   → **Expect a warning banner, not an error:** "recorded but delivery
-   FAILED". The row shows FAILED with `unsupported channel: PIGEON`.
-   The 201 status is the point: the workflow that raised the notice is not
-   told it failed, so it does not roll back on a delivery problem.
+7. Send with channel **PIGEON** (not in the supported set).
+   → **Expect 400 `unsupported_channel`** and **no row in the register.**
+   It used to answer 201 with a stored FAILED record and a
+   `notification.failed` event on the bus — a permanent record that a delivery
+   was attempted and refused by a provider, for a channel no provider ever saw.
+   A caller's typo is a caller's typo; only a real delivery attempt can fail.
+   (The dev database still holds one such row from before the fix, and migration
+   000002 deliberately preserves it: see its comment on `NOT VALID`.)
 
 ### Watch for
 
 - **FAILED is a finding, not a cosmetic state.** It is recorded proof the
-  notice did not go out. The register renders it in danger tone with the
-  reason — and the form banner reports it as `failed`, distinct from `sent`.
+  notice did not go out, and it now means only that — a provider refused it.
 - **SENT must never be read as delivered.** No provider exists; the stub
   adapter accepted the record. The page copy says so rather than implying a
   real-world delivery.
 - **A 200 replay is not a second send.** The service answers 200 with the
   stored notification for a seen correlation_id; nothing is sent twice.
+- **The register is paged.** 100 rows by default, 500 max; `limit=abc` or
+  `offset=-1` answers 400 rather than silently defaulting.
 
 ---
 
@@ -972,10 +988,22 @@ finalizes it, and only a *different* principal can perform that closing action.
    succeeds; a defined unmet requirement would answer 422 `required evidence is
    missing`.
 6. **Vote or pass again after finalizing.** → **Expect 409** `resolution is
-   already finalized` — a second closing action is refused, not ignored.
-7. **Fetch the register with no principal.** → **Expect 401.** Reads are
-   RLS-scoped to the tenant but require an identified caller; an unidentified
+   already finalized` — a second closing action is refused, not ignored. This
+   now includes a REJECTED resolution: the closing action's finalized check
+   listed only PASSED and RESCINDED, so a resolution the board had rejected
+   could still be passed into force afterwards.
+7. **Fetch the register with no principal.** → **Expect 401.** An unidentified
    caller is refused before any row is considered.
+8. **Fetch it with no `X-Tenant-Id`.** → **Expect 401.** The middleware used to
+   substitute the literal tenant `"default"`, so every caller who forgot the
+   header shared one bucket — reading and writing each other's board minutes,
+   with row-level security dutifully isolating a tenant that identified nobody.
+9. **Send `created_by` or `passed_by` naming anyone but yourself** (API only).
+   → **Expect 400.** Both used to be taken verbatim from the request body, and
+   `created_by` is exactly what the SoD check compares against the passing
+   principal — so a drafter could file a resolution under someone else's name
+   and then pass their own work, with the two strings no longer matching. The
+   console sends its own principal, so this is invisible from the UI.
 
 ### Watch for
 
@@ -985,10 +1013,193 @@ finalizes it, and only a *different* principal can perform that closing action.
   state.
 - **SoD is enforced on the pass, not the vote.** The vote handler never checks
   the creator; the pass handler does, because it is the distinct closing action
-  that changes status.
+  that changes status — and the store re-checks it against the locked row,
+  because the handler's own check runs against a read that is stale by the time
+  the write happens.
 - **The evidence gate fails closed.** If evidence-requirements-svc is
   unreachable the pass is refused (503), not risked; that refusal reads
-  differently from an authorization denial (403).
+  differently from an authorization denial (403). The client now allows only
+  `SATISFIED` and `NO_REQUIREMENTS_DEFINED` — it used to refuse only the literal
+  string `MISSING` and allow everything else, so an outcome it did not recognise
+  (or an absent field) let the pass through with the gate unchecked.
+- **Attribution is taken from the header, never the body.** `created_by` and
+  `passed_by` on a stored record are the authenticated principal.
+- **Both registers are paged** (100 default, 500 max) and report their own
+  `limit`/`offset`. `total` is the size of the page, not a count of the
+  register.
+
+---
+
+## 17. Event Schemas - `schema-registry-svc` (:8093)
+
+**What it is.** The canonical registry of event payload contracts. Every event
+on the platform is meant to be registered here; each version declares the
+compatibility discipline it was accepted under; nothing is ever edited or
+deleted — evolution only appends.
+
+**The distinction being tested:** a 409 from this service is two completely
+different facts. Either the proposed schema breaks the current contract (the
+body carries `violations` naming each field that broke), or a concurrent
+registration claimed the version while yours was being checked. The reader's
+next step differs entirely — change the schema, or re-read and resubmit — so
+the console must never report one as the other.
+
+### Test it
+
+1. Go to **Event Schemas** in the sidebar. The **Contract register** lists every
+   event and its current version. → **Expect rows, not "Schema registry
+   unavailable".** Reaching this state proves the read carried an identified
+   caller: every read is 401 without one now.
+2. **Register a first version.** Event name `your.probe.event`, a schema with a
+   `properties` map and a `required` list, owning service, mode BACKWARD.
+   → **Expect a success banner** naming the event and `v1`. The version number
+   is assigned by the registry, never by the caller.
+3. **Register a compatible evolution** — same event, add an *optional* field.
+   → **Expect v2.** Adding an optional field is always safe.
+4. **Register a breaking change** — same event, remove a required field.
+   → **Expect an amber banner listing the violations**, each naming the field:
+   `field "tenant_id" was required and has been removed`. Amber, not red: the
+   checker refusing a breaking change is the control working.
+   → **It must NOT say "Another registration claimed this version".** That is
+   the race message, and reporting a breaking change as a race told the reader
+   to retry something that would fail identically forever. It happened because
+   the shared API client folded the error body into one string and dropped
+   `violations` — see `ApiError.body`.
+5. **Register the same breaking change under NONE.** → **Expect success**, and
+   the register shows that version badged NONE. The exemption is recorded on the
+   row, so a contract that evolved without a check is visible rather than
+   inferred from a schema that mysteriously changed shape.
+6. **Try an invalid event name** (`NotAValidName`, `nodots`).
+   → **Expect a refusal explaining the convention.** The service enforces this
+   now, not only the console: the name is the register's primary key, and it
+   used to accept any non-empty string.
+
+### The API-only checks
+
+7. `POST` with `json_schema: 123` (or `"a string"`, `null`, `[]`, `{}`).
+   → **Expect 400.** All are well-formed JSON and used to be stored as event
+   contracts. A first version stored as `123` could never be evolved: every
+   later version fails to parse the baseline and answers 400 forever, so the
+   registry accepted a value that permanently bricked the contract it recorded.
+8. `POST` with **no `X-Legal-Entity-Id`**. → **Expect 201.** An event contract
+   belongs to the platform, not a legal entity, so the service authorizes
+   against `AUTHZ_PLATFORM_SCOPE_ID`. Passing the empty header through got a 400
+   from authorization-svc, which surfaced as 503 "authorization service
+   unavailable" — infrastructure blamed for a scope the request never had.
+9. `GET` any route with **no `X-Principal-Id`**. → **Expect 401.** Every read
+   used to be open, so anything that could reach the port could enumerate the
+   whole catalogue: every event name, every payload field, and its owner.
+10. `GET /v1/schemas?limit=abc` (or `limit=0`, `limit=99999`, `offset=-1`).
+    → **Expect 400.** Both lists were unbounded and their paging unvalidated.
+11. `GET /v1/schemas/{event}/versions?offset=50` past the end.
+    → **Expect 200 and `[]`**, not 404 — an empty page is not a deleted contract.
+
+### Watch for
+
+- **A grant that exists only on one machine is not a feature.** `SCHEMA_PUBLISH`
+  was never in `seed-demo-rbac.ps1`; the console's register form worked on the
+  development machine because a hand-made bundle had been left in that database.
+  On a fresh volume every registration was 403. It is a seeded bundle now, and
+  the seed's "is there anything to do" probe checks the platform scope too —
+  it only looked at the legal entity, so a platform-scoped action added later
+  was never granted and the run still reported success.
+- **`init-db.sh` applied only migration 000001.** On a volume initialised from
+  that script the `compatibility_mode` column did not exist, and every read and
+  write of this service failed — it worked locally only because the migration
+  had been applied by hand. Same shape as the grant above.
+- **Registration is not enforcement.** Nothing validates a published event
+  against its registered schema at runtime.
+- **The compatibility check is top-level and latest-only.** It reads
+  `properties` and `required` and does not descend into nested objects, and it
+  compares against the current version only — not every version ever published.
+
+---
+
+## 18. Jurisdictions & Rules - `jurisdiction-rules-svc` (:8082)
+
+**What it is.** The register every other service defers to for "which law
+applies here". Jurisdictions nest (country → state → tax authority), their
+applicability rules are effective-dated, and a rule pack resolves both into the
+answer for one jurisdiction at one point in time.
+
+**Why it had no page until now.** It was wired into the console only as the
+read-only picker inside the obligations register — obligations-svc validates
+`jurisdiction_id` against it and fails closed, so the picker is what stops a
+free-text UUID field from 404ing on everything a human types. Everything else
+this service owns was reachable only by curl.
+
+**The distinction being tested:** legal drift is a separate axis from rule
+status. A rule can be ACTIVE and DRIFTED at the same time — still in force, and
+known to have diverged from the law it encodes. Neither field can be read as
+the other.
+
+### Test it
+
+1. Go to **Jurisdictions & Rules** in the sidebar. → **Expect the register**,
+   with codes (GB, US-CA) and a *Nested in* column showing a parent's code
+   rather than a UUID. A UUID here would hide the relationship the page exists
+   to show.
+2. **Register a jurisdiction** — code, name, type, authority, effective-from.
+   → **Expect a green banner.** This is the write that was 403 for everyone
+   until `JURISDICTION_FULL` was added to the seed: no bundle granted
+   JURISDICTION_CREATE, so the entire admin surface of this service was dead.
+3. **Submit that identical form again.** → **Expect a NEUTRAL banner**, not
+   green: "already registered with exactly these attributes, so nothing was
+   written". The registry answered 200. Colouring a replay as a fresh success
+   would tell you that you had just created something that already existed.
+4. **Register a second jurisdiction nested inside the first** (pick the first in
+   *Nested in*). Then **record a rule on each with the same rule code**, both
+   ACTIVE, the child's with a later effective-from.
+5. **Resolve a rule pack** for the child. → **Expect exactly one rule for that
+   code — the child's** — and a *Resolved from* chain reading child → parent.
+   That is the whole point of the endpoint: the most specific jurisdiction wins,
+   and the chain is what lets a governed decision explain its basis later.
+6. **Resolve the same pack with an as-at date before the child's rule began.**
+   → **Expect the parent's rule to win instead.** "The rules" is always "the
+   rules at a date"; a register that only answered for today could not explain a
+   decision taken last year.
+7. **Record a rule as DRAFT**, then resolve the pack again. → **Expect it absent.**
+   A DRAFT rule is registered and does not resolve until transitioned to ACTIVE.
+8. **Record drift** on an ACTIVE rule with a reason.
+   → **Expect the rule to show DRIFTED and remain ACTIVE.** It keeps resolving
+   into packs. Then **Drift history** → the append-only transitions with their
+   reasons. The console requires a reason even though the service accepts a null
+   one: a drift entry without its evidence records that a rule diverged and not
+   what diverged.
+9. **Transition a rule to SUPERSEDED with an end date.** → **Expect it end-dated.**
+   A SUPERSEDED rule left with a NULL `effective_to` keeps matching every
+   point-in-time query beside its own replacement, so the pack would resolve two
+   winners for one code.
+
+### The API-only checks
+
+10. `POST /v1/admin/jurisdictions` with **no `X-Principal-Id`** → **401**; with a
+    principal holding no grant → **403**. Both fail closed and write nothing.
+11. `GET /v1/jurisdictions` with **no credential at all** → **200**. That is
+    deliberate, not a gap: jurisdictions are PUBLIC-classified reference data
+    (data_classification_audit.md §2.11). Only the mutations are gated.
+12. Register with a `parent_jurisdiction_id` that does not exist → **404**, not a
+    silently rooted jurisdiction.
+13. Register with `effective_to` before `effective_from` → **400**.
+
+### Watch for
+
+- **Deactivation is consequential, not cosmetic.** It clears active_flag and
+  end-dates the row — nothing is deleted, and the row stays visible in the
+  register. But `GET /v1/jurisdictions/{id}` is an active-only lookup and
+  answers **404** afterwards, deliberately, so every service validating against
+  this register fails closed on it — **including for records already bound to
+  it**. The list and the lookup disagree on purpose.
+- **Applicability, never amounts.** A rule payload says who a rule applies to,
+  how often they file, and which authority. Thresholds and rates belong to the
+  Tax and Payroll services; a figure here would be a second copy of a number
+  this register does not own. The console refuses a payload that is not a JSON
+  object for the same reason.
+- **Drift is asserted, not detected.** Nothing watches legislation. CURRENT
+  means nobody has said otherwise — not that anything has been checked.
+- **The grant is on the PLATFORM scope.** A 403 here does not mean the principal
+  lacks a permission on your legal entity; jurisdictions have none. It means the
+  JURISDICTION_* grant is missing on `AUTHZ_PLATFORM_SCOPE_ID`.
 
 ---
 
