@@ -20,7 +20,7 @@
 // nonsensical date range without comment, and treats a zero as "field omitted".
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   draftContract as draftContractCall,
@@ -42,8 +42,6 @@ import {
 } from "@/lib/api/legal";
 import type { BoardActionState, ContractActionState } from "./state";
 
-const REGISTER_PATH = "/admin/legal";
-
 async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
@@ -60,11 +58,17 @@ const EXPIRED: ContractActionState = {
   message: "Your session has expired — sign in again.",
 };
 
-/** Refresh the register and the contract's own page. Both are revalidated on
- *  every write because a lifecycle action is initiated from either one. */
-function revalidateContract(contractId: string): void {
-  revalidatePath(REGISTER_PATH);
-  revalidatePath(`${REGISTER_PATH}/${contractId}`);
+/** Re-render this route after a write.
+ *
+ *  Writes end in refresh(), not revalidatePath. Nothing on this route is cached
+ *  — cacheComponents is off and every panel reads cookies() for the session — so
+ *  there was no cache for revalidatePath to invalidate, while in a Server
+ *  Function it additionally refreshes every previously visited page. refresh()
+ *  re-renders just this route, which is what these actions actually want. The
+ *  contract id is no longer needed: refresh() covers the register and the
+ *  contract's own page without naming either. */
+function revalidateContract(): void {
+  refresh();
 }
 
 /**
@@ -126,7 +130,7 @@ export async function draftContract(
 
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(result.data.contract_id);
+  revalidateContract();
 
   return {
     status: "drafted",
@@ -196,7 +200,7 @@ export async function reviseContract(
 
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "revised",
@@ -230,7 +234,7 @@ export async function submitContract(
   const result = await submitContractForApproval(contractId, identity);
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "submitted",
@@ -275,7 +279,7 @@ export async function activateContract(
 
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "activated",
@@ -313,7 +317,7 @@ export async function terminateContract(
   const result = await terminateContractCall({ contractId, identity, terminationNote });
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "terminated",
@@ -391,7 +395,7 @@ export async function scheduleBoardMeeting(
 
   if (!result.ok) return boardFail(explainBoardError(result.error.message));
 
-  revalidatePath(REGISTER_PATH);
+  refresh();
 
   const m = result.data;
   return {
@@ -441,7 +445,7 @@ export async function proposeBoardResolution(
 
   if (!result.ok) return boardFail(explainBoardError(result.error.message));
 
-  revalidatePath(REGISTER_PATH);
+  refresh();
 
   const r = result.data;
   return {
@@ -490,7 +494,7 @@ export async function tallyResolutionVotes(
 
   if (!result.ok) return boardFail(explainBoardError(result.error.message));
 
-  revalidatePath(REGISTER_PATH);
+  refresh();
 
   const r = result.data;
   return {
@@ -535,7 +539,7 @@ export async function passResolutionIntoForce(
 
   if (!result.ok) return boardFail(explainBoardError(result.error.message));
 
-  revalidatePath(REGISTER_PATH);
+  refresh();
 
   const r = result.data;
   return {
