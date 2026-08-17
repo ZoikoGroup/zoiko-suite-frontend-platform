@@ -4,9 +4,11 @@ import { useState } from "react";
 import { Plus, ShieldCheck, FileCheck, CheckCircle2, X, Server, Zap, Loader2 } from "lucide-react";
 
 const SERVICES = [
-  { name: "evidence-manifest-svc",    port: "8087", color: "bg-emerald-500" },
+  { name: "filing-tracker-svc",       port: "8136", color: "bg-emerald-500" },
+  { name: "compliance-status-svc",    port: "8137", color: "bg-emerald-500" },
+  { name: "exception-escalation-svc", port: "8138", color: "bg-emerald-500" },
+  { name: "evidence-manifest-svc",    port: "8095", color: "bg-emerald-500" },
   { name: "obligations-svc",          port: "8088", color: "bg-emerald-500" },
-  { name: "evidence-requirements-svc",port: "8089", color: "bg-emerald-500" },
 ];
 
 function NewRequirementModal({ onClose }: { onClose: () => void }) {
@@ -75,12 +77,12 @@ export function ComplianceActionHeader() {
     <>
       {modal === "create" && <NewRequirementModal onClose={() => setModal(null)} />}
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              3 Microservices Active
+              5 Microservices Active
             </span>
           </div>
 

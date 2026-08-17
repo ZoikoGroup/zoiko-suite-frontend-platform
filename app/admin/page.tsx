@@ -31,8 +31,8 @@ function KpiSkeleton() {
 /** Fallback while every domain's services are being probed. */
 function DomainGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {Array.from({ length: 7 }).map((_, i) => (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {Array.from({ length: 8 }).map((_, i) => (
         <Skeleton key={i} className="h-36 rounded-xl" />
       ))}
     </div>

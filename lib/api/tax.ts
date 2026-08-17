@@ -525,26 +525,23 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
   return { ok: true, data: deadlines };
 }
 
-// ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
-
+// ─── Shared Fetch Helper ──────────────────────────────────────────────────────
 
 /**
  * GET a JSON resource from a domain service and report what actually happened.
  *
- * This replaces `fetchServiceWithFallback`, which substituted hardcoded sample
- * data and reported it as `{ ok: true }`. It did so in three cases — a non-OK
- * status, a thrown request, AND **a successful response whose list was empty** —
- * and that last one is the dangerous one: a healthy service with no records
- * displayed invented rows indistinguishable from real ones. There was no way for a
- * caller, or a reader of the page, to tell.
+ * Design principles (matching the pattern established in PR #9):
+ * - An unreachable service returns `{ ok: false, error: { kind: "unreachable" } }`
+ * - A non-OK HTTP status returns `{ ok: false, error: { kind: "http" } }`
+ * - A malformed body returns `{ ok: false, error: { kind: "malformed" } }`
+ * - An **empty list** from a healthy service returns `{ ok: true, data: [] }` — it
+ *   is NOT substituted with mock data. A healthy service with no records is
+ *   genuinely empty; showing invented rows in its place is misleading.
  *
- * It also made the panels' own error handling unreachable. Every consumer of these
- * functions already branches on `!res.ok` to render a "service unavailable" state;
- * because the helper never returned `ok: false`, that branch was dead code. Failing
- * honestly is what makes it live again.
- *
- * An empty list is now an empty list. An unreachable service is an error.
+ * All MOCK_* arrays that used to be passed as `fallbackData` have been removed.
+ * Panels that previously relied on them now render an honest empty state.
  */
+
 async function fetchDomainService<TRaw, TOut>(
   urlStr: string,
   base: string,
@@ -589,7 +586,8 @@ async function fetchDomainService<TRaw, TOut>(
   }
 
   try {
-    return { ok: true, data: transform((await res.json()) as TRaw) };
+    const parsed = (await res.json()) as TRaw;
+    return { ok: true, data: transform(parsed) };
   } catch {
     return {
       ok: false,
@@ -597,3 +595,4 @@ async function fetchDomainService<TRaw, TOut>(
     };
   }
 }
+

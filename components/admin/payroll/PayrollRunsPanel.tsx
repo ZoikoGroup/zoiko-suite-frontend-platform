@@ -28,7 +28,7 @@ export async function PayrollRunsPanel() {
     return <PanelEmptyState icon={CloudOff} tone="warning" label="payroll-run-svc unavailable" hint={res.error.message} />;
   }
 
-  const runs: PayrollRun[] = res.ok ? res.data : [];
+  const runs: PayrollRun[] = res.ok && Array.isArray(res.data) ? res.data : [];
 
   return (
     <div className="space-y-4">

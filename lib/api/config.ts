@@ -62,6 +62,28 @@ const DEFAULTS = {
   // segregation of duties on the pass (the drafter may not pass their own
   // resolution).
   boardResolutions: "http://localhost:8122",
+  // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
+  //
+  // TWO OF THESE COLLIDE with entries above, and the collision is inherited
+  // from the backend rather than introduced here: withholding-tax-svc's config
+  // defaults to 8129, which is purchase-order-svc's port, and
+  // filing-preparation-svc's defaults to 8130, which is
+  // evidence-requirements-svc's. Neither tax service appears in the backend
+  // compose file, so neither has ever started and the clash has never bitten —
+  // but it means a call made here to withholdingTax or filingPreparation
+  // reaches purchase-order-svc or evidence-requirements-svc and gets a
+  // confusing answer instead of a connection refused.
+  //
+  // Left as-is deliberately. Reassigning a service's port is the backend's
+  // allocation to make, not a merge resolution's; the values here match what
+  // those services actually declare today.
+  taxRules: "http://localhost:8125",
+  taxDetermination: "http://localhost:8126",
+  vatGst: "http://localhost:8127",
+  corporateTax: "http://localhost:8128",
+  withholdingTax: "http://localhost:8129",
+  filingPreparation: "http://localhost:8130",
+  taxAuthorityInterface: "http://localhost:8147",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -104,6 +126,14 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   financialClose: "/financial-close-svc",
   notification: "/notification-svc",
   boardResolutions: "/board-resolutions-svc",
+  // Tax Domain
+  taxRules: "/tax-rules-svc",
+  taxDetermination: "/tax-determination-svc",
+  vatGst: "/vat-gst-svc",
+  corporateTax: "/corporate-tax-svc",
+  withholdingTax: "/withholding-tax-svc",
+  filingPreparation: "/filing-preparation-svc",
+  taxAuthorityInterface: "/tax-authority-interface-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
