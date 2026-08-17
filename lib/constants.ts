@@ -18,6 +18,7 @@ import {
   Building2,
   FileJson,
   Bell,
+  Globe2,
 } from "lucide-react";
 
 export type DomainKey =
@@ -27,6 +28,7 @@ export type DomainKey =
   | "legal"
   | "tax"
   | "compliance"
+  | "jurisdictions"
   | "commercial-ops"
   | "purchase-requests"
   | "audit-events";
@@ -157,6 +159,16 @@ export const DOMAINS: Domain[] = [
       "Evidence Sufficiency Service",
       "Exception & Escalation Service",
     ],
+  },
+  {
+    key: "jurisdictions",
+    label: "Jurisdictions & Rules",
+    href: "/admin/jurisdictions",
+    icon: Globe2,
+    purpose:
+      "Govern the jurisdiction register every other service defers to — nested jurisdictions, effective-dated applicability rules, resolved rule packs, and tracked legal drift.",
+    status: "operational",
+    coreServices: ["Jurisdiction Rules Service"],
   },
   {
     key: "commercial-ops",

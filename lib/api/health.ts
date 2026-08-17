@@ -93,6 +93,11 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "evidence-requirements-svc", port: 8130 },
     { name: "evidence-manifest-svc", port: 8095 },
   ],
+  // 8082, not 8081 — 8081 is tenant-entity-registry-svc. The wrong number has
+  // been written down for this service more than once, including in
+  // board-resolutions-svc's compose block, where it named a port belonging to a
+  // different service entirely.
+  jurisdictions: [{ name: "jurisdiction-rules-svc", port: 8082 }],
   "commercial-ops": [
     { name: "purchase-request-svc", port: 8100 },
     // 8129, not 8112: compose gave 8112 to benefits-svc as well, so the two could
