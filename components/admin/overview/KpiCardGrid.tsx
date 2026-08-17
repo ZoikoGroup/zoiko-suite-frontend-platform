@@ -10,7 +10,9 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Card } from "@/components/ui";
 import { getDecisionStats } from "@/lib/api/governance";
+import { cookies } from "next/headers";
 import { getObligationStats } from "@/lib/api/obligations";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 type Kpi = {
@@ -42,9 +44,17 @@ const TONE_STYLES = {
  * beats an invented one.
  */
 export async function KpiCardGrid() {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  const identity = {
+    principalId: session?.principalId,
+    tenantId: session?.tenantId,
+    legalEntityId: session?.legalEntityId,
+  };
+
   const [decisions, obligations] = await Promise.all([
     getDecisionStats(),
-    getObligationStats(),
+    getObligationStats(identity),
   ]);
 
   const kpis: Kpi[] = [

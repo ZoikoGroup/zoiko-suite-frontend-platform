@@ -135,6 +135,7 @@ export async function submitObligation(
   }
 
   const result = await raiseObligation({
+    identity,
     principalId: identity.principalId,
     legalEntityId: identity.legalEntityId,
     jurisdictionId,
@@ -215,8 +216,12 @@ export async function submitTransition(
   _previous: TransitionState,
   formData: FormData,
 ): Promise<TransitionState> {
+  // The session is needed for more than a liveness check now: every call to
+  // this service carries the tenant and principal as headers, and it answers
+  // 401 without them.
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return { status: "error", message: EXPIRED_MESSAGE };
   }
@@ -241,11 +246,12 @@ export async function submitTransition(
   // this.
   let priorStatus = currentStatus;
   if (!priorStatus) {
-    const before = await getObligation(obligationId);
+    const before = await getObligation(obligationId, identity);
     if (before.ok) priorStatus = before.data.obligation_status;
   }
 
   const result = await transitionObligation({
+    identity,
     obligationId,
     status,
     correlationId: crypto.randomUUID(),
@@ -305,8 +311,12 @@ export async function submitFilingRequirement(
   _previous: FilingWriteState,
   formData: FormData,
 ): Promise<FilingWriteState> {
+  // The session is needed for more than a liveness check now: every call to
+  // this service carries the tenant and principal as headers, and it answers
+  // 401 without them.
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return { status: "error", message: EXPIRED_MESSAGE };
   }
@@ -334,6 +344,7 @@ export async function submitFilingRequirement(
   }
 
   const result = await addFilingRequirement({
+    identity,
     obligationId,
     filingType,
     filingAuthority,
@@ -365,8 +376,12 @@ export async function lookupObligation(
   _previous: LookupState,
   formData: FormData,
 ): Promise<LookupState> {
+  // The session is needed for more than a liveness check now: every call to
+  // this service carries the tenant and principal as headers, and it answers
+  // 401 without them.
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return { status: "error", message: EXPIRED_MESSAGE };
   }
@@ -380,7 +395,7 @@ export async function lookupObligation(
     };
   }
 
-  const result = await getObligation(obligationId);
+  const result = await getObligation(obligationId, identity);
 
   if (!result.ok) {
     if (result.error.status === 404) {
@@ -406,8 +421,12 @@ export async function lookupFilingRequirements(
   _previous: LookupState,
   formData: FormData,
 ): Promise<LookupState> {
+  // The session is needed for more than a liveness check now: every call to
+  // this service carries the tenant and principal as headers, and it answers
+  // 401 without them.
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return { status: "error", message: EXPIRED_MESSAGE };
   }
@@ -421,7 +440,7 @@ export async function lookupFilingRequirements(
     };
   }
 
-  const result = await listFilingRequirements(obligationId);
+  const result = await listFilingRequirements(obligationId, identity);
 
   if (!result.ok) {
     if (result.error.status === 404) {

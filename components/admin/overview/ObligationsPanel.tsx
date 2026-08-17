@@ -1,7 +1,9 @@
+import { cookies } from "next/headers";
 import { CalendarClock, CalendarCheck, CloudOff } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { listUpcomingObligations } from "@/lib/api/obligations";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 
 function urgencyTone(days: number): "danger" | "warning" | "neutral" {
   if (days <= 5) return "danger";
@@ -11,7 +13,15 @@ function urgencyTone(days: number): "danger" | "warning" | "neutral" {
 
 /** Live statutory obligations from obligations-svc (:8088). */
 export async function ObligationsPanel() {
-  const result = await listUpcomingObligations(5);
+  // obligations-svc answers 401 without a tenant and a principal, so this
+  // panel carries the session like every other live read on the dashboard.
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  const result = await listUpcomingObligations(5, {
+    principalId: session?.principalId,
+    tenantId: session?.tenantId,
+    legalEntityId: session?.legalEntityId,
+  });
 
   if (!result.ok) {
     return (
