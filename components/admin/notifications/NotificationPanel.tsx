@@ -12,9 +12,13 @@ import { NotificationTable } from "./NotificationTable";
 /**
  * The delivery register.
  *
- * Session-scoped read: the service filters by the tenant carried on
- * X-Tenant-Id, and row-level security hides another tenant's rows the same way
- * as a not-found.
+ * Scoped to the session's legal entity, and that is load-bearing rather than
+ * cosmetic: notification-svc authorizes a list read against the legal entity
+ * it is given (403 without a NOTIFICATION_VIEW grant there). A request that
+ * omits it is treated as the caller asking for their OWN inbox and is filtered
+ * to notifications addressed to them — which is not what a register is. Sending
+ * the entity is what makes this the entity's register, and what makes the read
+ * authorized instead of merely tenant-filtered.
  */
 export async function NotificationPanel() {
   const store = await cookies();
@@ -36,6 +40,7 @@ export async function NotificationPanel() {
       tenantId: session.tenantId,
       legalEntityId: session.legalEntityId,
     },
+    legalEntityId: session.legalEntityId,
   });
 
   if (!result.ok) {

@@ -21,10 +21,10 @@ export default function NotificationsPage() {
             <CardDescription>
               Live, writable. Backed by notification-svc on :8133. Idempotent on a correlation id, so
               a retry replays the stored notification instead of sending a second one. The
-              platform ships no delivery provider — the stub adapter records the notice and
-              reports SENT for supported channels, and only an unsupported channel produces a
-              FAILED (which still answers 201, because a notification failure must never collapse
-              the workflow that raised it).
+              platform ships no delivery provider — the stub adapter records the notice and reports
+              SENT, so SENT means &ldquo;recorded and accepted by the stub&rdquo;, not that anyone
+              received anything. An unrecognised channel is refused with a 400 rather than stored as
+              a delivery that failed.
             </CardDescription>
           </div>
         </CardHeader>
@@ -38,8 +38,9 @@ export default function NotificationsPage() {
           <div>
             <CardTitle>Delivery register</CardTitle>
             <CardDescription>
-              Every notification sent from this console, newest first. FAILED rows are the ones
-              worth acting on — they are recorded proof the notice did not go out.
+              This legal entity&rsquo;s notifications, newest first. The read is authorized against
+              the entity (NOTIFICATION_VIEW), not merely filtered by tenant. FAILED rows are the
+              ones worth acting on — they are recorded proof the notice did not go out.
             </CardDescription>
           </div>
         </CardHeader>

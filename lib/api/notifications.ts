@@ -3,14 +3,19 @@
 // approvals, and status changes.
 //
 // THE STUB IS THE WHOLE STORY: there is no email/SMS/webhook provider wired up
-// on this platform. deliverStub in the service logs a "delivery" and always
-// succeeds for EMAIL, SMS, IN_APP, or WEBHOOK. So a SENT status means "the
-// service recorded it and its stub adapter accepted it", NOT "someone actually
-// received an email". The only way to exercise the FAILED path is an
-// unsupported channel, and that still answers 201 — the service's own critical
+// on this platform. The service's stub adapter logs a "delivery" and always
+// succeeds. So a SENT status means "the service recorded it and its stub
+// adapter accepted it", NOT "someone actually received an email".
+//
+// FAILED is therefore currently unreachable, and that is the honest state: with
+// no provider behind it, nothing can refuse a delivery. An unrecognised channel
+// is now a 400 at the request boundary rather than a FAILED record — it used to
+// reach the adapter and be reported as a delivery failure, so a caller's typo
+// left a stored FAILED row and a notification.failed event on the bus, evidence
+// of an attempt no provider ever saw. When a real provider is wired up, a
+// refusal from it will produce FAILED with a 201: the service's own critical
 // constraint (03-microservices.md §9.7) is that notification failure must not
-// collapse the source workflow, so the caller sees a normal 201 with
-// status: FAILED instead of an error.
+// collapse the source workflow, so a delivery failure is never an error status.
 //
 // The console therefore renders delivery status without implying real-world
 // delivery: SENT is "recorded, stub-delivered", FAILED is "recorded, delivery
@@ -50,14 +55,26 @@ export type ListNotificationsInput = {
 };
 
 /**
- * List the tenant's notifications.
+ * List notifications.
  *
- * All three filters are applied by the service. When `legal_entity_id` is
- * present the service authorizes the read against that entity (403 if this
- * principal has no NOTIFICATION_VIEW grant there); when it is absent the list
- * is scoped to the tenant from X-Tenant-Id.
+ * The service decides what you are entitled to read from WHO is asking, and
+ * `legal_entity_id` selects between two different reads:
  *
- * Returns a bare JSON array, not an envelope — checked rather than assumed.
+ * - supplied → the entity's register, authorized against it (403 without a
+ *   NOTIFICATION_VIEW grant there).
+ * - omitted → the caller's own inbox. The service forces the recipient filter
+ *   to the calling principal, and refuses a `recipient_principal_id` naming
+ *   anyone else with a 403.
+ *
+ * It used to authorize only when the filter was present, which meant omitting
+ * it — the easier request — returned every notification in the tenant, subjects
+ * and bodies included, to a principal holding no grant at all. Passing the
+ * entity is therefore not a nicety: it is what makes this an authorized read of
+ * the register rather than an unauthorized read of everything.
+ *
+ * Bounded by the service at 100 rows per page unless `limit` says otherwise
+ * (max 500). Returns a bare JSON array, not an envelope — checked rather than
+ * assumed.
  */
 export async function listNotifications(
   input: ListNotificationsInput,
@@ -192,7 +209,19 @@ export function explainNotificationError(message: string): string {
     return "Could not verify authorization, so the action was refused. authorization-svc is unreachable — this is a fail-closed refusal, not a denial.";
   }
   if (message.includes("identity_missing")) {
-    return "No caller identity or tenant scope reached the service, so it failed closed. Sign in again.";
+    return "No caller identity reached the service, so it failed closed. Sign in again.";
+  }
+  if (message.includes("tenant_missing")) {
+    return "The request carried no tenant scope (X-Tenant-Id), so the service refused it rather than reading across tenants. Sign in again.";
+  }
+  if (message.includes("unsupported_channel")) {
+    return "That delivery channel is not one the service supports. Choose EMAIL, SMS, IN_APP, or WEBHOOK — an unrecognised channel is refused up front rather than recorded as a delivery that failed.";
+  }
+  if (message.includes("invalid_limit") || message.includes("invalid_offset")) {
+    return "The register read asked for an out-of-range page. limit must be 1–500 and offset must not be negative.";
+  }
+  if (message.includes("request_too_large")) {
+    return "The notification body exceeded the service's 256 KiB request limit.";
   }
   if (message.includes("notification_not_found")) {
     return "No notification with that id exists for this tenant. Row-level security hides another tenant's notification the same way, so both read as not found.";
