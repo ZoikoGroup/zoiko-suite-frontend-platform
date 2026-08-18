@@ -53,7 +53,7 @@ export async function KpiCardGrid() {
   };
 
   const [decisions, obligations] = await Promise.all([
-    getDecisionStats(),
+    getDecisionStats(14, identity),
     getObligationStats(identity),
   ]);
 
