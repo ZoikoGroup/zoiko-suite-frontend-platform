@@ -19,6 +19,11 @@ const JURISDICTION_LABEL: Record<string, { flag: string; short: string }> = {
   "us-fed-01":  { flag: "🇺🇸", short: "US" },
   "sg-iras-01": { flag: "🇸🇬", short: "SG" },
   "de-bzst-01": { flag: "🇩🇪", short: "DE" },
+  "jur-uk-gb":  { flag: "🇬🇧", short: "UK" },
+  "jur-us-fed": { flag: "🇺🇸", short: "US" },
+  "jur-sg-01":  { flag: "🇸🇬", short: "SG" },
+  "jur-sg-sg":  { flag: "🇸🇬", short: "SG" },
+  "jur-de-fed": { flag: "🇩🇪", short: "DE" },
 };
 
 function formatCurrency(amount: number, currency: string) {
