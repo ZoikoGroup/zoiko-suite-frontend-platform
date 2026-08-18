@@ -14,17 +14,16 @@
 //    race — and they are reported apart because the reader's next step differs.
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   isValidEventName,
   parseViolations,
   registerVersion,
+  explainSchemaError,
   COMPATIBILITY_MODES,
 } from "@/lib/api/schemas";
 import { IDLE_REGISTER_SCHEMA, type RegisterSchemaState } from "./state";
-
-const PATH = "/admin/schemas";
 
 async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
@@ -53,7 +52,7 @@ export async function registerSchemaAction(
     return {
       status: "error",
       message:
-        "Event names are dotted lowercase tokens, like entity.status.changed. The registry itself accepts any string, but a name that does not match what publishers actually emit would create an entry nothing ever satisfies.",
+        "Event names are dotted lowercase tokens, like entity.status.changed. The registry enforces this too — it is the primary key of a canonical register, and a name that does not match what publishers actually emit would create an entry nothing ever satisfies.",
     };
   }
 
@@ -77,6 +76,16 @@ export async function registerSchemaAction(
       message: "A JSON Schema must be an object. The compatibility checker reads its `properties` and `required` keys.",
     };
   }
+  // `{}` parses, is an object, and constrains nothing. The registry refuses it
+  // too — a contract that permits every payload is not a contract, and one
+  // stored as the first version of an event cannot be usefully evolved.
+  if (Object.keys(parsedSchema as Record<string, unknown>).length === 0) {
+    return {
+      status: "error",
+      message:
+        "An empty object declares no contract at all. Give the schema at least a `properties` map, so there is something for the compatibility checker to hold future versions to.",
+    };
+  }
 
   const mode = String(formData.get("compatibility_mode") ?? "BACKWARD");
   if (!(COMPATIBILITY_MODES as readonly string[]).includes(mode)) {
@@ -95,6 +104,7 @@ export async function registerSchemaAction(
 
   if (!result.ok) {
     const { status, message } = result.error;
+    const error = result.error;
 
     if (status === 401) {
       return {
@@ -121,7 +131,7 @@ export async function registerSchemaAction(
       // Two different 409s. A race message tells the reader to retry; a
       // compatibility failure tells them to change the schema. Distinguished
       // on the violations the service returns rather than on wording alone.
-      const violations = parseViolations(message);
+      const violations = parseViolations(error);
       if (violations.length > 0) {
         return {
           status: "incompatible",
@@ -136,10 +146,15 @@ export async function registerSchemaAction(
           "Another registration claimed this version while yours was being checked. Nothing was written. Re-read the latest version and resubmit — your schema was validated against a version that is no longer current, so it needs checking again rather than simply retrying.",
       };
     }
-    return { status: "error", message };
+    return { status: "error", message: explainSchemaError(message) };
   }
 
-  revalidatePath(PATH);
+  // refresh(), not revalidatePath: nothing on this route is cached — every
+  // panel reads cookies() for the session — so there was no cache to
+  // invalidate, while in a Server Function revalidatePath additionally
+  // refreshes every previously visited page. Same migration as the other
+  // console routes.
+  refresh();
   return {
     status: "registered",
     schema: result.data,

@@ -31,6 +31,14 @@
 //  5. PUBLISHING IS AUTHORIZED AND FAILS CLOSED. A caller with no verified
 //     principal is 401; one without the SCHEMA_PUBLISH grant is 403; an
 //     unreachable authorization-svc is 503 and nothing is written.
+//
+//  6. READING REQUIRES AN IDENTIFIED CALLER. Every read used to be open, so
+//     anything that could reach the port could enumerate the platform's whole
+//     event-contract catalogue — every event name, every payload field, and
+//     which service owns each one. That is a map of the platform's internals.
+//     It is identity only, not a per-entity grant: an event contract is
+//     platform-wide reference data with no legal entity of its own, so a grant
+//     scoped to one entity would answer a question the data does not have.
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 
@@ -124,9 +132,14 @@ export function registerVersion(
 /**
  * An event name must be a dotted lowercase token, matching the convention
  * every publisher in the platform already follows (jurisdiction.rule.updated,
- * entity.status.changed). The service does not enforce this — it accepts any
- * non-empty string — so this is the console declining to create a registry
- * entry that would not match anything actually published.
+ * entity.status.changed).
+ *
+ * The service enforces this too, and the regex here is the same one. It used
+ * not to: this comment previously read "the service does not enforce this — it
+ * accepts any non-empty string", which meant the primary key of a canonical
+ * register was a free-text field defended only by whichever caller happened to
+ * be the console. Enforcement belongs in the registry; this copy is the
+ * console declining to make a round trip it knows will fail.
  */
 const EVENT_NAME_RE = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
 
@@ -135,15 +148,81 @@ export function isValidEventName(name: string): boolean {
 }
 
 /**
- * Pull the compatibility violations out of a 409 body.
+ * Human-readable reason for a refused registry call.
+ *
+ * The console validates the obvious things itself, so anything reaching here is
+ * a rule the service applied that the console did not — which is exactly the
+ * case where a bare error string leaves the reader with nothing to act on.
+ */
+export function explainSchemaError(message: string): string {
+  if (message.includes("event name must be dotted lowercase")) {
+    return "That event name is not one the registry will accept. Names are dotted lowercase tokens of at least two segments — entity.status.changed — because that is what publishers actually emit, and the name is this register's primary key.";
+  }
+  if (message.includes("must be a valid JSON object")) {
+    return "A schema must be a JSON object. A bare number, string, array or null is well-formed JSON but declares no contract, and storing one as an event's first version would leave that event unable to be evolved at all.";
+  }
+  if (message.includes("constrains nothing")) {
+    return "An empty object permits every payload, so it is not a contract. Declare at least a `properties` map for the compatibility checker to hold future versions to.";
+  }
+  if (message.includes("compatibility checker cannot read")) {
+    return "The `properties` or `required` member is not the shape the compatibility checker reads. This is refused now rather than at the next version, when every future evolution of this event would fail instead.";
+  }
+  if (message.includes("compatibility_mode must be")) {
+    return "That is not a compatibility mode this registry can enforce. Only BACKWARD and NONE are accepted — a mode the service cannot apply is refused rather than recorded, so the register never claims a discipline it is not enforcing.";
+  }
+  if (message.includes("owning_service must be at most")) {
+    return "The owning service name is longer than the registry's 255-character column.";
+  }
+  if (message.includes("too long for its column")) {
+    return "One of the submitted values is wider than its column in the registry.";
+  }
+  if (message.includes("caller identity missing")) {
+    return "The registry received no verified principal. Reads and writes both require one. Sign in again.";
+  }
+  if (message.includes("not authorized to publish")) {
+    return "authorization-svc refused this publication. The principal needs the SCHEMA_PUBLISH grant — event contracts are governed, not self-served.";
+  }
+  if (message.includes("limit must be") || message.includes("offset must be")) {
+    return "The register read asked for an out-of-range page. limit must be 1–500 and offset must not be negative.";
+  }
+  if (message.includes("version must be")) {
+    return "Versions are assigned by the registry and start at 1.";
+  }
+  if (message.includes("request body exceeds")) {
+    return "The schema exceeded the registry's 1 MiB request limit.";
+  }
+  if (message.includes("schema store unavailable")) {
+    return "The registry could not reach its store, so it refused rather than guessing. Nothing was written.";
+  }
+  return message;
+}
+
+/**
+ * Pull the compatibility violations out of a refused registration.
  *
  * The service answers a breaking change with `{error, violations: [...]}`, and
- * those strings name the exact field that broke. Discarding them leaves the
- * reader with "incompatible schema change" and no way to act on it.
+ * those strings name the exact field that broke. They are what distinguishes
+ * the two different 409s this endpoint returns — a breaking schema, or a lost
+ * version race — and the reader's next step is completely different for each:
+ * change the schema, or re-read and resubmit.
+ *
+ * This used to read the violations out of `error.message` with a regex, and it
+ * found nothing, because the shared client folds an error body into a single
+ * human string using only its `error`/`field`/`message`/`detail` keys —
+ * `violations` was dropped before this function ever saw it. Every breaking
+ * change was therefore reported to the user as a version race, telling them to
+ * retry something that would fail identically forever.
+ *
+ * It now reads the parsed body the client preserves (see ApiError.body), and
+ * keeps the string fallback only for a caller that has nothing else.
  */
-export function parseViolations(message: string): string[] {
+export function parseViolations(error: { message: string; body?: unknown }): string[] {
+  const body = error.body as { violations?: unknown } | undefined;
+  if (body && Array.isArray(body.violations)) {
+    return body.violations.map(String);
+  }
   // [\s\S] rather than the `s` dotAll flag — the tsconfig target predates it.
-  const match = message.match(/\[[\s\S]*\]/);
+  const match = error.message.match(/\[[\s\S]*\]/);
   if (!match) return [];
   try {
     const parsed = JSON.parse(match[0]) as unknown;

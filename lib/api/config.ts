@@ -28,6 +28,13 @@ const DEFAULTS = {
   purchaseOrder: "http://localhost:8129",
   evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
+  // 8098. The hub of the Finance domain — treasury, financial-close,
+  // bank-reconciliation, intercompany and consolidation all read it — and the
+  // service behind the journal register on /admin/finance.
+  generalLedger: "http://localhost:8098",
+  // 8102. Reconciles bank statement lines against general-ledger journals, so
+  // it reads the ledger above rather than owning any postings of its own.
+  bankReconciliation: "http://localhost:8102",
   // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is
   // in the compose file and in health.ts; the stale comment was the only place
   // that disagreed, and nothing called it, so nothing caught it.
@@ -45,7 +52,39 @@ const DEFAULTS = {
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
   financialClose: "http://localhost:8104",
+  // 8133, per compose. notification-svc delivers governed notifications via a
+  // documented stub adapter (see lib/api/notifications.ts) — no provider is
+  // wired up on the platform yet.
+  notification: "http://localhost:8133",
+  // 8122, per compose. board-resolutions-svc owns board meetings and their
+  // resolutions; the write path authorizes MEETING_CREATE / RESOLUTION_CREATE /
+  // RESOLUTION_VOTE / RESOLUTION_PASS against the legal entity and enforces
+  // segregation of duties on the pass (the drafter may not pass their own
+  // resolution).
+  boardResolutions: "http://localhost:8122",
+  // 8136, per compose. delegated-authority-svc holds the register of who may
+  // act for whom -- time-bound, entity-scoped grants of one principal's
+  // authority to another.
+  delegatedAuthority: "http://localhost:8136",
+  // 8094, per compose. document-vault-svc is the store of record for governed
+  // documents: append-only version lineage, a SHA-256 checksum re-verified on
+  // every read, and an append-only access log of who read what.
+  documentVault: "http://localhost:8094",
   // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
+  //
+  // TWO OF THESE COLLIDE with entries above, and the collision is inherited
+  // from the backend rather than introduced here: withholding-tax-svc's config
+  // defaults to 8129, which is purchase-order-svc's port, and
+  // filing-preparation-svc's defaults to 8130, which is
+  // evidence-requirements-svc's. Neither tax service appears in the backend
+  // compose file, so neither has ever started and the clash has never bitten —
+  // but it means a call made here to withholdingTax or filingPreparation
+  // reaches purchase-order-svc or evidence-requirements-svc and gets a
+  // confusing answer instead of a connection refused.
+  //
+  // Left as-is deliberately. Reassigning a service's port is the backend's
+  // allocation to make, not a merge resolution's; the values here match what
+  // those services actually declare today.
   taxRules: "http://localhost:8125",
   taxDetermination: "http://localhost:8126",
   vatGst: "http://localhost:8127",
@@ -84,6 +123,8 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   purchaseOrder: "/purchase-order-svc",
   evidence: "/evidence-requirements-svc",
   accountsReceivable: "/accounts-receivable-svc",
+  generalLedger: "/general-ledger-svc",
+  bankReconciliation: "/bank-reconciliation-svc",
   accountsPayable: "/accounts-payable-svc",
   spendControls: "/spend-controls-svc",
   vendorDueDiligence: "/vendor-due-diligence-svc",
@@ -91,6 +132,10 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   tenantRegistry: "/tenant-entity-registry-svc",
   schemaRegistry: "/schema-registry-svc",
   financialClose: "/financial-close-svc",
+  notification: "/notification-svc",
+  boardResolutions: "/board-resolutions-svc",
+  delegatedAuthority: "/delegated-authority-svc",
+  documentVault: "/document-vault-svc",
   // Tax Domain
   taxRules: "/tax-rules-svc",
   taxDetermination: "/tax-determination-svc",

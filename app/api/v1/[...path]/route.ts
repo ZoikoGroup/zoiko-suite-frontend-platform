@@ -11,7 +11,8 @@ import {
   listUpcomingTaxDeadlines,
 } from "@/lib/api/tax";
 import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties } from "@/lib/api/legal";
-import { listJournalEntries, listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
+import { listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
+import { listJournals } from "@/lib/api/general-ledger";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
 import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions } from "@/lib/api/payroll";
 import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts } from "@/lib/api/hr";
@@ -88,8 +89,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   }
 
   // Finance Domain
+  // journal-entries reads general-ledger-svc for real now. It used to serve two
+  // hardcoded rows, so a caller of this endpoint was handed sample data with
+  // nothing marking it as such — the one failure mode worse than an empty list.
   if (endpoint === "journal-entries") {
-    const res = await listJournalEntries();
+    const res = await listJournals({ identity });
     return NextResponse.json({ journal_entries: res.ok ? res.data : [] });
   }
   if (endpoint === "cash-positions") {

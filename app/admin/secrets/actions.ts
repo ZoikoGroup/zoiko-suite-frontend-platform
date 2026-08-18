@@ -19,7 +19,7 @@
 // the operator against the console.
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   createSecretPolicy,
@@ -38,7 +38,11 @@ import {
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type { BrokerState, RevokeState, RotateState, VaultWriteState } from "./state";
 
-const PATH = "/admin/secrets";
+// Writes end in refresh(), not revalidatePath. Nothing on this route is cached
+// — cacheComponents is off and every panel reads cookies() for the session — so
+// there was no cache for revalidatePath to invalidate, while in a Server
+// Function it additionally refreshes every previously visited page. refresh()
+// re-renders just this route, which is what these actions actually want.
 
 async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
@@ -102,7 +106,7 @@ export async function submitSecretPolicy(
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message);
 
-  revalidatePath(PATH);
+  refresh();
 
   return result.status === 201
     ? {
@@ -162,7 +166,7 @@ export async function submitSecretVersion(
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message);
 
-  revalidatePath(PATH);
+  refresh();
 
   const lockdown =
     allowedWorkloadIds.length === 0
@@ -208,7 +212,7 @@ export async function submitSecretActivation(
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message, "version");
 
-  revalidatePath(PATH);
+  refresh();
 
   // The service answers 200 whether it transitioned a DRAFT or short-circuited
   // on an already-ACTIVE version, so `transitioned` is what separates a real
@@ -299,7 +303,7 @@ export async function submitBrokerRequest(
     legalEntityId: scope === "entity" ? identity.legalEntityId : undefined,
   });
 
-  revalidatePath(PATH);
+  refresh();
 
   if (!result.ok) {
     const { status, message } = result.error;
@@ -363,7 +367,7 @@ export async function submitRevoke(
     return { status: "error", message: explainSecretVaultError(result.error.message, "lease") };
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   const lease = result.data;
   if (!lease.revoked_at) {
@@ -430,7 +434,7 @@ export async function submitRotation(
     return { status: "error", message: explainSecretVaultError(result.error.message) };
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   const rotated = result.data;
   if (replayIntended && rotated.revoked_lease_count === 0) {

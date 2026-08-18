@@ -95,6 +95,13 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "obligations-svc", port: 8088 },
     { name: "evidence-manifest-svc", port: 8095 },
   ],
+  // 8082, not 8081 — 8081 is tenant-entity-registry-svc. The wrong number has
+  // been written down for this service more than once, including in
+  // board-resolutions-svc's compose block, where it named a port belonging to a
+  // different service entirely.
+  jurisdictions: [{ name: "jurisdiction-rules-svc", port: 8082 }],
+  delegations: [{ name: "delegated-authority-svc", port: 8136 }],
+  documents: [{ name: "document-vault-svc", port: 8094 }],
   "commercial-ops": [
     { name: "purchase-request-svc", port: 8100 },
     // 8129, not 8112: compose gave 8112 to benefits-svc as well, so the two could
@@ -107,6 +114,7 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   // One service, not four. The other three were invented, and two of them probed
   // ports belonging to jurisdiction-svc and policy-svc — so they reported READY.
   "audit-events": [{ name: "audit-event-store-svc", port: 8084 }],
+  "purchase-requests": [{ name: "purchase-request-svc", port: 8100 }],
 };
 
 export type DomainHealth = {

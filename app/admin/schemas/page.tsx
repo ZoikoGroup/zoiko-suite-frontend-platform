@@ -120,6 +120,17 @@ export default function SchemasPage() {
                 records what a contract is meant to be; it does not stop a producer emitting something else.
               </span>
             </li>
+            <li className="flex gap-2.5">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+              <span>
+                <strong className="font-medium text-slate-800 dark:text-slate-100">
+                  Reads are identity-gated, not entity-gated.
+                </strong>{" "}
+                Any signed-in principal can read the whole catalogue. An event contract is platform-wide
+                reference data with no legal entity of its own, so there is no per-entity grant to scope a
+                read by — the bar is that the caller is identified at all.
+              </span>
+            </li>
           </ul>
         </CardContent>
       </Card>

@@ -18,7 +18,7 @@
 // tenant rather than anything from the form.
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   createEvidenceRequirement,
@@ -33,7 +33,11 @@ import {
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type { EvidenceEvaluateState, RequirementWriteState } from "./state";
 
-const PATH = "/admin/evidence";
+// Writes end in refresh(), not revalidatePath. Nothing on this route is cached
+// — cacheComponents is off and every panel reads cookies() for the session — so
+// there was no cache for revalidatePath to invalidate, while in a Server
+// Function it additionally refreshes every previously visited page. refresh()
+// re-renders just this route, which is what these actions actually want.
 
 async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
@@ -112,7 +116,7 @@ export async function submitRequirement(
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message);
 
-  revalidatePath(PATH);
+  refresh();
 
   const gate =
     scope === "entity"
@@ -170,7 +174,7 @@ export async function submitRetirement(
     return writeFailure(result.error.status, result.error.message);
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   return {
     status: "retired",

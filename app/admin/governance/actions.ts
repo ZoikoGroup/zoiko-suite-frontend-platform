@@ -12,7 +12,7 @@
 // can append a decision, and any caller can read any tenant's decisions.
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   recordDecision,
@@ -23,7 +23,11 @@ import {
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type { RecordDecisionState } from "./state";
 
-const PATH = "/admin/governance";
+// Writes end in refresh(), not revalidatePath. Nothing on this route is cached
+// — cacheComponents is off and every panel reads cookies() for the session — so
+// there was no cache for revalidatePath to invalidate, while in a Server
+// Function it additionally refreshes every previously visited page. refresh()
+// re-renders just this route, which is what these actions actually want.
 
 async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
@@ -119,7 +123,7 @@ export async function submitDecision(
     return { status: "error", message: explainDecisionError(result.error.message) };
   }
 
-  revalidatePath(PATH);
+  refresh();
 
   return result.status === 201
     ? {

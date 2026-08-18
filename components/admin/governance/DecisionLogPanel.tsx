@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { CloudOff, FilterX, ScrollText } from "lucide-react";
 import { PanelEmptyState, Pagination } from "@/components/admin/shared";
 import {
@@ -10,10 +12,12 @@ import { DecisionTable } from "./DecisionTable";
 /**
  * The evidence log, filtered.
  *
- * No session check here, unlike the other read panels in this console: this
- * service takes no identity header and applies no tenant filter, so a session
- * would not change what comes back. The page states that rather than implying a
- * scoping that does not exist.
+ * This comment used to read: "this service takes no identity header and applies
+ * no tenant filter, so a session would not change what comes back." That was
+ * false, and the panel was broken by believing it —
+ * governance-decision-log-svc reads the tenant from X-Tenant-Id and answers 400
+ * `missing_tenant_id` without one, so the log rendered "those filters were
+ * rejected" on a request that carried no filters at all.
  */
 export async function DecisionLogPanel({
   filters,
@@ -28,7 +32,18 @@ export async function DecisionLogPanel({
   // probe row is the only way to know a next page exists. Before this, the panel
   // guessed — "this is a full page, so there are probably more" — and offered no
   // way to reach them, because nothing wired up the offset the service accepts.
-  const result = await listDecisionRecords({ ...filters, limit: limit + 1, offset });
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  const result = await listDecisionRecords({
+    ...filters,
+    limit: limit + 1,
+    offset,
+    identity: {
+      principalId: session?.principalId,
+      tenantId: session?.tenantId,
+      legalEntityId: session?.legalEntityId,
+    },
+  });
 
   if (!result.ok) {
     // A 400 is a malformed filter — the service is healthy and rejected the

@@ -1,41 +1,52 @@
 // obligations-svc (:8088) — the statutory / regulatory obligation registry, and
 // the filing requirements scoped under each obligation.
 //
-// Six endpoints, all wired here and all verified live (e2e_obligations.sh, 69/69).
-// Five properties of this service shape the console and are easy to get wrong:
+// Six endpoints, all wired here and all verified live. Five properties of this
+// service shape the console and are easy to get wrong. Three of them USED to
+// read very differently, and the old text is kept alongside because it is the
+// clearest statement of what changed:
 //
-//  1. NO TENANT HEADER. This service reads no X-Tenant-Id and has no RLS. The
-//     only scoping that exists is the legal_entity_id filter, which is a filter
-//     and not an isolation boundary — an unfiltered list returns every entity's
-//     obligations. The register therefore always sends the session legal entity,
-//     and the page says what that does and does not guarantee.
+//  1. IDENTITY AND TENANT ARE BOTH REQUIRED. Every call sends X-Tenant-Id and
+//     X-Principal-Id; without either the service answers 401. This used to read
+//     "NO TENANT HEADER. This service reads no X-Tenant-Id and has no RLS…an
+//     unfiltered list returns every entity's obligations" — accurate then, and
+//     the reason the register had to send a legal-entity filter and hope. There
+//     is a tenant column and forced row-level security now.
 //
-//  2. DEDUP IS GLOBAL ON obligation_code, and it compares only FOUR attributes:
-//     legal_entity_id, jurisdiction_id, obligation_type, due_date. A repeat POST
-//     that differs in any of those is 409. A repeat that differs only in
-//     severity_level, responsible_function, source_reference, or the source
-//     pointers returns 200 with the ORIGINAL row and silently discards the new
-//     values. So a 200 is never "saved" — it is "an obligation with that code
-//     already exists, here it is, unchanged". Verified: posting CRITICAL over a
-//     HIGH row returns HIGH.
+//  2. DEDUP IS SCOPED TO THE TENANT. obligation_code is unique within a tenant,
+//     not globally. It used to be global, and creation is idempotent on it — so
+//     a second tenant posting an ordinary code was handed the FIRST tenant's
+//     obligation as a 200. Within one tenant the old behaviour still holds and
+//     still matters: a repeat differing in legal_entity_id, jurisdiction_id,
+//     obligation_type or due_date is 409, and a repeat differing only in
+//     severity_level, responsible_function or source_reference returns 200 with
+//     the ORIGINAL row and silently discards the new values. A 200 is never
+//     "saved" — it is "one with that code already exists, here it is, unchanged".
 //
 //  3. JURISDICTION VALIDATION FAILS CLOSED — 404 for an unknown id, 503 when
 //     jurisdiction-rules-svc cannot be reached. The second is an outage, not a
-//     bad input, and the two are reported apart.
+//     bad input, and the two are reported apart. Note a deactivated jurisdiction
+//     reads as 404 here: that lookup is active-only, by design.
 //
-//  4. A MALFORMED UUID IN THE PATH IS 503 `store_unavailable`, not 404 — it dies
-//     in the pg driver. Same trap as purchase-order-svc and document-vault-svc.
-//     The console pre-validates so a typo does not read as an outage.
+//  4. A MALFORMED UUID IN THE PATH IS 404, not 503. It used to die in the pg
+//     driver and surface as `store_unavailable` — an outage status for a typo.
+//     The console still pre-validates, which now saves a round trip rather than
+//     covering for the service.
 //
 //  5. AN UNKNOWN STATUS STRING IS 409 `invalid_transition`, not 400. The status
 //     field is not validated against a vocabulary; it simply fails to match any
 //     legal transition. Verified with "BANANA".
 //
-// One thing this service does NOT have, which the page must not imply: there is
-// no endpoint that advances filing_status. Every filing requirement is created
-// PENDING and stays PENDING forever. Create and read are the whole surface.
+// WRITES ARE AUTHORIZED. OBLIGATION_CREATE, OBLIGATION_STATUS_UPDATE and
+// FILING_REQUIREMENT_CREATE are checked against authorization-svc on the
+// obligation's own legal entity, and fail closed. There was no authorization of
+// any kind before: every write succeeded for any caller the gateway admitted.
+//
+// One thing this service still does NOT have, which the page must not imply:
+// there is no endpoint that advances filing_status. Every filing requirement is
+// created PENDING and stays PENDING. Create and read are the whole surface.
 
-import { apiGet, apiPost, type ApiResult, type ApiWriteResult } from "./client";
+import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 
 /** Wire shape from the backend. Field names match the Go json tags exactly. */
 export type Obligation = {
@@ -123,6 +134,10 @@ export function isTerminal(status: string): boolean {
 // ── Reads ───────────────────────────────────────────────────────────────────
 
 export type ListObligationsInput = {
+  /** Required in practice: the service answers 401 without both a tenant and
+   *  a principal. Optional in the type only so the overview panels can pass
+   *  their own session through without restating it. */
+  identity?: Identity;
   legalEntityId?: string;
   jurisdictionId?: string;
   obligationType?: string;
@@ -130,21 +145,32 @@ export type ListObligationsInput = {
   /** RFC3339. The service 400s on anything else and names the field. */
   dueBefore?: string;
   dueAfter?: string;
+  /** 1–500, default 100. */
+  limit?: number;
+  offset?: number;
 };
 
 /**
  * List obligations, soonest-due first.
  *
  * The service orders by created_at DESC and offers no sort parameter, but a
- * compliance register is read by deadline — so the ordering is applied here.
- * There is also no pagination anywhere on this service (no limit/offset), so a
- * long register renders in full rather than silently truncating.
+ * compliance register is read by deadline — so the ordering is applied here,
+ * over one page rather than over the whole register.
+ *
+ * Paging is real now. This comment used to read "there is also no pagination
+ * anywhere on this service (no limit/offset), so a long register renders in
+ * full rather than silently truncating" — true when written, and the reason the
+ * register was unbounded: every obligation a tenant had ever recorded, in one
+ * response, forever.
  */
 export async function listObligations(
   input: ListObligationsInput = {},
 ): Promise<ApiResult<Obligation[]>> {
   const result = await apiGet<Obligation[]>("obligations", "/v1/obligations", {
+    identity: input.identity,
     query: {
+      limit: input.limit,
+      offset: input.offset,
       legal_entity_id: input.legalEntityId,
       jurisdiction_id: input.jurisdictionId,
       obligation_type: input.obligationType,
@@ -171,10 +197,14 @@ export async function listObligations(
   };
 }
 
-export async function getObligation(obligationId: string): Promise<ApiResult<Obligation>> {
+export async function getObligation(
+  obligationId: string,
+  identity?: Identity,
+): Promise<ApiResult<Obligation>> {
   return apiGet<Obligation>(
     "obligations",
     `/v1/obligations/${encodeURIComponent(obligationId)}`,
+    { identity },
   );
 }
 
@@ -187,10 +217,12 @@ export async function getObligation(obligationId: string): Promise<ApiResult<Obl
  */
 export async function listFilingRequirements(
   obligationId: string,
+  identity?: Identity,
 ): Promise<ApiResult<FilingRequirement[]>> {
   const result = await apiGet<FilingRequirement[]>(
     "obligations",
     `/v1/obligations/${encodeURIComponent(obligationId)}/filing-requirements`,
+    { identity },
   );
 
   if (!result.ok) return result;
@@ -211,6 +243,10 @@ export async function listFilingRequirements(
 // ── Writes ──────────────────────────────────────────────────────────────────
 
 export type RaiseObligationInput = {
+  /** Sent as headers. The service authorizes the principal and scopes the row
+   *  to the tenant; created_by_principal_id below must match this principal or
+   *  the write is refused, so the two can never disagree. */
+  identity: Identity;
   principalId: string;
   legalEntityId: string;
   jurisdictionId: string;
@@ -256,7 +292,7 @@ export async function raiseObligation(
       source_reference: input.sourceReference,
       created_by_principal_id: input.principalId,
     },
-    { correlationId: input.correlationId },
+    { correlationId: input.correlationId, identity: input.identity },
   );
 }
 
@@ -272,13 +308,14 @@ export async function raiseObligation(
 export async function transitionObligation(input: {
   obligationId: string;
   status: string;
+  identity: Identity;
   correlationId?: string;
 }): Promise<ApiWriteResult<Obligation>> {
   return apiPost<Obligation>(
     "obligations",
     `/v1/obligations/${encodeURIComponent(input.obligationId)}/status`,
     { obligation_status: input.status },
-    { correlationId: input.correlationId },
+    { correlationId: input.correlationId, identity: input.identity },
   );
 }
 
@@ -287,6 +324,7 @@ export async function addFilingRequirement(input: {
   filingType: string;
   filingAuthority: string;
   submissionChannel: string;
+  identity: Identity;
   correlationId?: string;
 }): Promise<ApiWriteResult<FilingRequirement>> {
   return apiPost<FilingRequirement>(
@@ -297,7 +335,7 @@ export async function addFilingRequirement(input: {
       filing_authority: input.filingAuthority,
       submission_channel: input.submissionChannel,
     },
-    { correlationId: input.correlationId },
+    { correlationId: input.correlationId, identity: input.identity },
   );
 }
 
@@ -446,8 +484,9 @@ export type UpcomingObligation = {
  */
 export async function listUpcomingObligations(
   limit = 5,
+  identity?: Identity,
 ): Promise<ApiResult<UpcomingObligation[]>> {
-  const result = await apiGet<Obligation[]>("obligations", "/v1/obligations");
+  const result = await apiGet<Obligation[]>("obligations", "/v1/obligations", { identity });
 
   if (!result.ok) return result;
 
@@ -481,8 +520,10 @@ export type ObligationStats = {
  * obligations-svc has no count or aggregate endpoint, so this reads the list and
  * counts locally.
  */
-export async function getObligationStats(): Promise<ApiResult<ObligationStats>> {
-  const result = await apiGet<Obligation[]>("obligations", "/v1/obligations");
+export async function getObligationStats(
+  identity?: Identity,
+): Promise<ApiResult<ObligationStats>> {
+  const result = await apiGet<Obligation[]>("obligations", "/v1/obligations", { identity });
 
   if (!result.ok) return result;
   if (!Array.isArray(result.data)) {

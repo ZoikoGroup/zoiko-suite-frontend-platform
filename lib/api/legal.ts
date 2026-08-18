@@ -6,7 +6,7 @@
 // - corporate-actions-svc (8123)
 // - counterparty-management-svc (8124)
 
-import { type ApiResult, type Identity } from "./client";
+import { type ApiResult, type ApiWriteResult, type Identity, apiPost } from "./client";
 
 function contractLifecycleUrl(): string {
   return (process.env.ZOIKO_CONTRACT_LIFECYCLE_URL ?? "http://localhost:8119").replace(/\/$/, "");
@@ -268,6 +268,129 @@ export async function listBoardResolutions(
     identity,
     (d) => d.resolutions ?? [],
   );
+}
+
+export type CreateBoardMeetingInput = {
+  identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
+  title: string;
+  scheduledAt: string;
+  location?: string;
+  effectiveFrom: string;
+};
+
+/** Schedule a board meeting. Created as SCHEDULED for the tenant on the X
+ *  header; the service authorizes MEETING_CREATE against the meeting's legal
+ *  entity and refuses without a principal. */
+export async function createBoardMeeting(
+  input: CreateBoardMeetingInput,
+): Promise<ApiWriteResult<BoardMeeting>> {
+  return apiPost<BoardMeeting>("boardResolutions", "/v1/meetings", {
+    legal_entity_id: input.identity.legalEntityId,
+    title: input.title,
+    scheduled_at: input.scheduledAt,
+    ...(input.location ? { location: input.location } : {}),
+    effective_from: input.effectiveFrom,
+    created_by: input.identity.principalId,
+  }, { identity: input.identity });
+}
+
+export type CreateBoardResolutionInput = {
+  identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
+  meetingId?: string;
+  resolutionNumber?: string;
+  title: string;
+  content: string;
+  category: ResolutionCategory;
+  effectiveFrom: string;
+  effectiveTo?: string;
+};
+
+/** Propose a board resolution. Always lands in PROPOSED — the service ignores
+ *  any status supplied by the caller. */
+export async function createBoardResolution(
+  input: CreateBoardResolutionInput,
+): Promise<ApiWriteResult<BoardResolution>> {
+  return apiPost<BoardResolution>("boardResolutions", "/v1/resolutions", {
+    ...(input.meetingId ? { meeting_id: input.meetingId } : {}),
+    legal_entity_id: input.identity.legalEntityId,
+    ...(input.resolutionNumber ? { resolution_number: input.resolutionNumber } : {}),
+    title: input.title,
+    content: input.content,
+    category: input.category,
+    effective_from: input.effectiveFrom,
+    ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
+    created_by: input.identity.principalId,
+  }, { identity: input.identity });
+}
+
+export type RecordVotesInput = {
+  identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
+  resolutionId: string;
+  votesFor: number;
+  votesAgainst: number;
+  abstentions: number;
+};
+
+/** Tally a resolution's votes. 409 once the resolution is finalized — voting
+ *  only tallies, it does not change status. */
+export async function recordResolutionVotes(
+  input: RecordVotesInput,
+): Promise<ApiWriteResult<BoardResolution>> {
+  return apiPost<BoardResolution>("boardResolutions", `/v1/resolutions/${input.resolutionId}/vote`, {
+    votes_for: input.votesFor,
+    votes_against: input.votesAgainst,
+    abstentions: input.abstentions,
+  }, { identity: input.identity });
+}
+
+export type PassResolutionInput = {
+  identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
+  resolutionId: string;
+  /** The principal the pass is attributed to. */
+  passedBy: string;
+};
+
+/** Pass a resolution into force. The service enforces segregation of duties —
+ *  the resolution's creator may not be the principal who passes it — and
+ *  verifies evidence sufficiency (fail closed) before finalizing. */
+export async function passBoardResolution(
+  input: PassResolutionInput,
+): Promise<ApiWriteResult<BoardResolution>> {
+  return apiPost<BoardResolution>("boardResolutions", `/v1/resolutions/${input.resolutionId}/pass`, {
+    passed_by: input.passedBy,
+  }, { identity: input.identity });
+}
+
+/** Human-readable reason for a rejected board write. */
+export function explainBoardError(message: string): string {
+  if (message.includes("forbidden")) {
+    return "Authorization denied — this principal does not hold the required permission on this legal entity, or is the resolution's own creator trying to pass it (segregation of duties).";
+  }
+  if (message.includes("authorization service unavailable")) {
+    return "Could not verify authorization, so the write was refused. authorization-svc is unreachable — this is a fail-closed refusal, not a denial.";
+  }
+  if (message.includes("principal identity missing")) {
+    return "The service received no principal identity and refused the write. Sign in again.";
+  }
+  if (message.includes("already finalized")) {
+    return "This resolution is already passed, rejected, or rescinded — it can no longer be voted on or changed.";
+  }
+  if (message.includes("required evidence is missing")) {
+    return "The evidence-requirements catalog has a requirement this resolution does not yet satisfy. Attach the required evidence, then retry the pass.";
+  }
+  if (message.includes("evidence-requirements-svc unavailable")) {
+    return "Evidence sufficiency could not be verified, so the pass was refused (fail closed). evidence-requirements-svc is unreachable.";
+  }
+  if (message.includes("title and scheduled_at")) {
+    return "A meeting needs both a title and a scheduled date/time.";
+  }
+  if (message.includes("title, content, and category")) {
+    return "A resolution needs a title, content, and a category.";
+  }
+  if (message.includes("not found")) {
+    return "No such record exists for this tenant. Row-level security hides another tenant's record the same way, so both read as not found.";
+  }
+  return message;
 }
 
 // ─── 5. Corporate Actions ────────────────────────────────────────────────────

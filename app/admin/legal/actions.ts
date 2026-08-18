@@ -20,7 +20,7 @@
 // nonsensical date range without comment, and treats a zero as "field omitted".
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   draftContract as draftContractCall,
@@ -32,9 +32,15 @@ import {
   CONTRACT_TYPES,
   type ContractType,
 } from "@/lib/api/contracts";
-import type { ContractActionState } from "./state";
-
-const REGISTER_PATH = "/admin/legal";
+import {
+  createBoardMeeting as createBoardMeetingCall,
+  createBoardResolution as createBoardResolutionCall,
+  recordResolutionVotes as recordResolutionVotesCall,
+  passBoardResolution as passBoardResolutionCall,
+  explainBoardError,
+  type ResolutionCategory,
+} from "@/lib/api/legal";
+import type { BoardActionState, ContractActionState } from "./state";
 
 async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
@@ -52,11 +58,17 @@ const EXPIRED: ContractActionState = {
   message: "Your session has expired — sign in again.",
 };
 
-/** Refresh the register and the contract's own page. Both are revalidated on
- *  every write because a lifecycle action is initiated from either one. */
-function revalidateContract(contractId: string): void {
-  revalidatePath(REGISTER_PATH);
-  revalidatePath(`${REGISTER_PATH}/${contractId}`);
+/** Re-render this route after a write.
+ *
+ *  Writes end in refresh(), not revalidatePath. Nothing on this route is cached
+ *  — cacheComponents is off and every panel reads cookies() for the session — so
+ *  there was no cache for revalidatePath to invalidate, while in a Server
+ *  Function it additionally refreshes every previously visited page. refresh()
+ *  re-renders just this route, which is what these actions actually want. The
+ *  contract id is no longer needed: refresh() covers the register and the
+ *  contract's own page without naming either. */
+function revalidateContract(): void {
+  refresh();
 }
 
 /**
@@ -118,7 +130,7 @@ export async function draftContract(
 
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(result.data.contract_id);
+  revalidateContract();
 
   return {
     status: "drafted",
@@ -188,7 +200,7 @@ export async function reviseContract(
 
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "revised",
@@ -222,7 +234,7 @@ export async function submitContract(
   const result = await submitContractForApproval(contractId, identity);
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "submitted",
@@ -267,7 +279,7 @@ export async function activateContract(
 
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "activated",
@@ -305,7 +317,7 @@ export async function terminateContract(
   const result = await terminateContractCall({ contractId, identity, terminationNote });
   if (!result.ok) return fail(explainContractError(result.error.message));
 
-  revalidateContract(contractId);
+  revalidateContract();
 
   return {
     status: "terminated",
@@ -317,6 +329,226 @@ export async function terminateContract(
 
 function fail(message: string): ContractActionState {
   return { status: "error", message };
+}
+
+// ─── Board Resolutions & Meetings (board-resolutions-svc :8122) ──────────────
+
+const BOARD_EXPIRED: BoardActionState = {
+  status: "error",
+  message: "Your session has expired — sign in again.",
+};
+
+function boardFail(message: string): BoardActionState {
+  return { status: "error", message };
+}
+
+const CATEGORIES = new Set<ResolutionCategory>([
+  "GOVERNANCE",
+  "FINANCIAL",
+  "OPERATIONAL",
+  "EXECUTIVE",
+  "STATUTORY",
+]);
+
+function isCategory(value: string): value is ResolutionCategory {
+  return CATEGORIES.has(value as ResolutionCategory);
+}
+
+/** Schedule a board meeting. The service refuses a missing principal and
+ *  authorizes MEETING_CREATE against the meeting's legal entity. */
+export async function scheduleBoardMeeting(
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return BOARD_EXPIRED;
+  }
+
+  const title = String(formData.get("title") ?? "").trim();
+  const scheduledAtRaw = String(formData.get("scheduled_at") ?? "").trim();
+  const location = String(formData.get("location") ?? "").trim();
+  const effectiveFrom = String(formData.get("effective_from") ?? "").trim();
+
+  if (!title) return boardFail("A meeting title is required.");
+  if (!scheduledAtRaw) return boardFail("A scheduled date and time is required.");
+  if (!effectiveFrom) return boardFail("An effective-from date is required.");
+
+  // datetime-local sends "2026-10-05T14:00", which is not RFC3339 — Go's
+  // time.Time would reject the body with 400. Treat the input as local time
+  // and emit a full RFC3339 timestamp (with seconds) for the service.
+  const scheduled = new Date(scheduledAtRaw);
+  if (Number.isNaN(scheduled.getTime())) {
+    return boardFail("Scheduled time is not a valid date and time.");
+  }
+  const scheduledAt = scheduled.toISOString();
+
+  const result = await createBoardMeetingCall({
+    identity,
+    title,
+    scheduledAt,
+    ...(location ? { location } : {}),
+    effectiveFrom,
+  });
+
+  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+
+  refresh();
+
+  const m = result.data;
+  return {
+    status: "created",
+    title: m.title,
+    recordId: m.meeting_id,
+    message: `Board meeting "${m.title}" scheduled for ${new Date(m.scheduled_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}.`,
+  };
+}
+
+/** Propose a board resolution. Always lands in PROPOSED — the service ignores
+ *  any status supplied by the caller. */
+export async function proposeBoardResolution(
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return BOARD_EXPIRED;
+  }
+
+  const meetingId = String(formData.get("meeting_id") ?? "").trim();
+  const resolutionNumber = String(formData.get("resolution_number") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  const content = String(formData.get("content") ?? "").trim();
+  const category = String(formData.get("category") ?? "").trim();
+  const effectiveFrom = String(formData.get("effective_from") ?? "").trim();
+  const effectiveTo = String(formData.get("effective_to") ?? "").trim();
+
+  if (!title) return boardFail("A resolution title is required.");
+  if (!content) return boardFail("Resolution content is required — this is the record that survives.");
+  if (!isCategory(category)) return boardFail("Select a resolution category.");
+  if (!effectiveFrom) return boardFail("An effective-from date is required.");
+
+  const result = await createBoardResolutionCall({
+    identity,
+    ...(meetingId ? { meetingId } : {}),
+    ...(resolutionNumber ? { resolutionNumber } : {}),
+    title,
+    content,
+    category,
+    effectiveFrom,
+    ...(effectiveTo ? { effectiveTo } : {}),
+  });
+
+  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+
+  refresh();
+
+  const r = result.data;
+  return {
+    status: "created",
+    title: r.title,
+    recordId: r.resolution_id,
+    message: `Resolution "${r.title}" proposed as ${r.resolution_number || "unnumbered"} — still PROPOSED until it is voted on and passed.`,
+  };
+}
+
+/** Tally a resolution's votes. Voting only tallies — it does not finalize the
+ *  status; only a pass does. */
+export async function tallyResolutionVotes(
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return BOARD_EXPIRED;
+  }
+
+  const resolutionId = String(formData.get("resolution_id") ?? "").trim();
+  const title = String(formData.get("resolution_title") ?? "").trim();
+  const votesFor = Number(formData.get("votes_for") ?? "0");
+  const votesAgainst = Number(formData.get("votes_against") ?? "0");
+  const abstentions = Number(formData.get("abstentions") ?? "0");
+
+  if (!resolutionId) return boardFail("Missing resolution ID.");
+  if (
+    !Number.isInteger(votesFor) || votesFor < 0 ||
+    !Number.isInteger(votesAgainst) || votesAgainst < 0 ||
+    !Number.isInteger(abstentions) || abstentions < 0
+  ) {
+    return boardFail("Vote counts must be whole, non-negative numbers.");
+  }
+
+  const result = await recordResolutionVotesCall({
+    identity,
+    resolutionId,
+    votesFor,
+    votesAgainst,
+    abstentions,
+  });
+
+  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+
+  refresh();
+
+  const r = result.data;
+  return {
+    status: "voted",
+    title: title || r.title,
+    message: `Tally recorded: ${r.votes_for} for, ${r.votes_against} against, ${r.abstentions} abstained. The resolution is still ${r.status} — a pass finalizes it.`,
+  };
+}
+
+/** Pass a resolution into force. The service enforces segregation of duties —
+ *  the resolution's creator may not be the principal who passes it — so the
+ *  console hands the pass to the acting principal only when they are not the
+ *  creator, and surfaces the SoD refusal otherwise. */
+export async function passResolutionIntoForce(
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return BOARD_EXPIRED;
+  }
+
+  const resolutionId = String(formData.get("resolution_id") ?? "").trim();
+  const title = String(formData.get("resolution_title") ?? "").trim();
+  const createdBy = String(formData.get("resolution_created_by") ?? "").trim();
+
+  if (!resolutionId) return boardFail("Missing resolution ID.");
+
+  if (createdBy === identity.principalId) {
+    return boardFail(
+      "Segregation of duties: the principal who proposed a resolution may not pass it. Another principal with the RESOLUTION_PASS grant must close it.",
+    );
+  }
+
+  const result = await passBoardResolutionCall({
+    identity,
+    resolutionId,
+    passedBy: identity.principalId,
+  });
+
+  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+
+  refresh();
+
+  const r = result.data;
+  return {
+    status: "passed",
+    title: title || r.title,
+    recordId: r.resolution_id,
+    passedBy: r.passed_by,
+    message: `"${title || r.title}" passed into force${r.passed_by ? ` by ${r.passed_by}` : ""}${r.passed_at ? ` at ${new Date(r.passed_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}. The evidence gate (evidence-requirements-svc) was satisfied before finalizing.`,
+  };
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
