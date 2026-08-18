@@ -1203,6 +1203,158 @@ the other.
 
 ---
 
+## 19. Delegated Authority - `delegated-authority-svc` (:8136)
+
+`/admin/delegations`. The register of who may act for whom: one principal hands
+another a single action, on a single legal entity, between two timestamps.
+
+**Read this before testing.** Until 18 Aug this service had a general-purpose
+privilege escalation reachable through its documented happy path, and most of
+the steps below exist to demonstrate that it is closed.
+
+### The escalation, and why it was invisible
+
+CreateDelegation ran two authorization checks. It confirmed the CALLER held
+DELEGATION_CREATE, then confirmed the DELEGATOR held the action being delegated
+-- the platform's stated invariant, "delegated authority must never exceed the
+delegator's own authority". It never asked whether the caller had any
+relationship to the delegator. `delegator_principal_id` was a field in the body,
+and it was believed.
+
+So anyone with DELEGATION_CREATE could name a colleague as delegator, name
+themselves as delegate, and take that colleague's authority. Both checks pass.
+The invariant nobody had written down is that **you may only give away authority
+that is yours**.
+
+### Test it
+
+1. **Open /admin/delegations.** The register shows either the whole legal
+   entity's delegations (with DELEGATION_VIEW) or only the ones you are party
+   to. The line above the table says which — those answer different questions
+   and the page should never blur them.
+2. **Grant one with yourself as delegator.** Leave "Delegator" prefilled, set a
+   delegate and an action (PO_ISSUE works with the demo grants). → **Expect a
+   green banner and a new ACTIVE row.**
+3. **Submit the identical form again** (same idempotency key, shown under the
+   button). → **Expect a NEUTRAL banner, not green:** the service answered 200
+   and wrote nothing. Reporting a replay as a new grant would tell you you had
+   just handed out authority that was handed out days ago.
+4. **THE ESCALATION.** Set "Delegator" to any other principal id and the
+   delegate to your OWN principal id. → **Expect an amber refusal.** The console
+   refuses this one before the round trip because it can see the shape. By API:
+   `POST /v1/delegations/` with `delegator_principal_id` set to someone else and
+   `delegate_principal_id` set to you → **403 `self_dealing`**. Before the fix
+   this was **201, and the delegation was written**.
+5. **On behalf of someone else, to a third party.** Delegator = another
+   principal, delegate = a third. → **Expect 403 `delegator_mismatch`.** This is
+   legitimate for a delegation administrator and needs DELEGATION_ADMINISTER on
+   the entity, which the demo bundle deliberately does NOT grant — seeding it
+   would restore the escalation for the demo principal.
+6. **Delegate something you do not hold.** Action type `NUCLEAR_LAUNCH`.
+   → **Expect 403 `delegator_lacks_authority`.** A delegation cannot manufacture
+   authority that did not exist.
+7. **Read without a legal entity** (API only): `GET /v1/delegations/` with just
+   a principal and tenant. → **Expect only delegations you are party to.** Then
+   ask for someone else's — `?delegate_principal_id=<another>` with no
+   `legal_entity_id` → **expect 403.** This was the second hole: authorization
+   ran only when `legal_entity_id` was supplied, so omitting it returned the
+   tenant's entire map of who may act for whom to a principal with no grant.
+8. **Misspell the status filter:** `?status=ACTIVEE`. → **Expect 400
+   `unknown_status`**, not an empty list. On this register an empty list reads
+   as "nobody holds any delegated authority" — the most reassuring possible
+   answer, and a false one.
+9. **Revoke an ACTIVE row, then revoke it again.** → **200, then 409.** REVOKED
+   and EXPIRED are both terminal; nothing here is ever deleted.
+10. **Send no `X-Tenant-Id`.** → **Expect 401**, not 503. A forgotten header used
+    to reach the store and come back as `store_unavailable`.
+
+### What to watch for
+
+- **Expiry is observed, not scheduled.** No background job sweeps this table. A
+  delegation past its window flips to EXPIRED when the register is next read,
+  and `authority.expired` is published at that moment. A grant nobody looks at
+  stays ACTIVE in the row until someone does.
+- **Nothing consumes these grants yet.** authorization-svc does not read this
+  register; identity-context-svc has a URL for it and an invalidation reason,
+  but no call site. A delegation today is a governed RECORD that someone may act
+  for another, not the mechanism that lets them. That is exactly why the
+  escalation was worth closing now — before something starts honouring these
+  rows and turns a forged record into real authority retroactively.
+- **The service had never run on this machine.** Its database did not exist:
+  `init-db.sh` runs only on an empty Postgres volume, and `delegated_authority`
+  was added to the script after this volume was created. If it crash-loops with
+  `database "delegated_authority" does not exist`, create it and apply both
+  migrations by hand.
+
+---
+
+## 20. Document Vault - `document-vault-svc` (:8094)
+
+`/admin/documents`. The store of record for governed documents: append-only
+version lineage, a SHA-256 recomputed on every read, and an append-only log of
+every access.
+
+**Read this before testing.** Until 18 Aug this service had NO authorization on
+any route — including the one that returns document bytes — and its tenant
+filter switched itself off when the header was absent. A request with no headers
+at all could download any document belonging to any tenant.
+
+### Test it
+
+1. **Open /admin/documents.** The register lists documents filed against your
+   legal entity. There was no list endpoint before this pass: six routes, every
+   one needing a document_id you already had, which is why this page did not
+   exist.
+2. **File a document.** Pick a file, set a title, choose RESTRICTED. → **Expect
+   a green banner and a new row at v1.** The checksum is computed on write.
+3. **Read it back** (API): `GET /v1/documents/{id}` then
+   `GET /v1/documents/{id}/access-log`. → **Expect a METADATA row and, after a
+   content fetch, a DOWNLOAD row** — both attributed to your principal.
+4. **THE OPEN VAULT.** With a principal holding no DOCUMENT_* grant, try each of:
+   create, list, read metadata, `GET /{id}/content`, `GET /{id}/access-log`,
+   `POST /{id}/versions`. → **Expect 403 on all six.** Every one of them
+   answered 200 before this pass.
+5. **Download needs its own grant.** DOCUMENT_READ does not imply
+   DOCUMENT_DOWNLOAD. A principal with READ can list and open metadata and still
+   be refused the bytes — that is deliberate, and it mirrors the METADATA vs
+   DOWNLOAD split the access log has always recorded.
+6. **The access log needs a third grant.** DOCUMENT_ACCESS_LOG_READ. Being able
+   to read a document does not entitle you to the record of who else has.
+7. **Send no `X-Tenant-Id`** (API): `GET /v1/documents/{id}` with only a
+   principal. → **Expect 401.** It used to return the document — the store's
+   predicate read `($2::uuid IS NULL OR tenant_id = $2)`, and a NULL tenant made
+   that TRUE for every row in the table.
+8. **Cross-tenant reads:** fetch a known document id with another tenant's
+   header. → **Expect 404** on metadata, content, versions and access-log alike.
+9. **Forge the actor:** send `X-Actor-Principal-ID: someone-else` alongside your
+   real `X-Principal-Id` and download something. → **Expect the access log to
+   name YOU.** That header used to WIN, so a caller could attribute their own
+   download to a colleague.
+10. **File with a body naming another tenant** (`tenant_id` in the JSON).
+    → **Expect 400 `tenant_mismatch`**, not a document filed elsewhere.
+11. **Add a version, then fetch `?version=1`.** → **Expect the ORIGINAL bytes.**
+    Versions are append-only; a new one never rewrites its predecessor.
+
+### What to watch for
+
+- **There is no quiet read.** Opening metadata appends a METADATA row; fetching
+  content appends a DOWNLOAD row. A refused read appends nothing — a 403 is not
+  an access.
+- **A register read is NOT logged.** `GET /v1/documents` returns metadata for
+  many documents and records nothing. Left open deliberately: one row per
+  document per list call would make the log unusable, and a "LIST" access type
+  is a schema decision. So the log is a complete account of downloads and
+  single-document reads, and an incomplete account of metadata disclosure.
+- **Retention is a label, not an engine.** `retention_policy` is a string this
+  service stores. Nothing schedules a purge from it and nothing blocks one —
+  there is no delete route at all. A document marked for a seven-year hold is
+  not held by anything here.
+- **Integrity failure is the alarm.** A checksum mismatch is 409 and the content
+  is withheld. That is the one outcome on this page worth stopping for; it
+  should be investigated, not retried.
+
+---
+
 ## Known-stale claims in this document
 
 Sections 1–6 were written from the Go source before any of it had been run. Most
