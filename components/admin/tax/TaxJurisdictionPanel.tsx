@@ -90,14 +90,16 @@ export async function TaxJurisdictionPanel() {
 
     // Most recent VAT return for this jurisdiction
     const jVat = vatReturns.filter((v) => matches(v.jurisdiction_id, jur.aliases));
-    const latestVat = jVat.sort((a, b) => b.tax_period.localeCompare(a.tax_period))[0];
+    const latestVat = jVat.sort((a, b) => (b.tax_period ?? "").localeCompare(a.tax_period ?? ""))[0];
 
     // Most recent filing draft
     const jDraft = drafts.filter((d) => matches(d.jurisdiction_id, jur.aliases));
-    const latestDraft = jDraft.sort((a, b) => b.due_date.localeCompare(a.due_date))[0];
+    const latestDraft = jDraft.sort((a, b) => (b.due_date ?? "").localeCompare(a.due_date ?? ""))[0];
 
     // Authority connection
     const jAuth = authorities.find((a) => matches(a.jurisdiction_id, jur.aliases));
+
+    const authorityIsActive = jAuth ? (jAuth.status === "ACTIVE" || jAuth.is_active === true) : false;
 
     return {
       id: jur.id,
@@ -107,8 +109,8 @@ export async function TaxJurisdictionPanel() {
       authority: jur.authority,
       activeRules: jRules.length,
       vatGstStatus: latestVat?.status ?? (jur.shortName === "UK" ? "FILED" : null),
-      filingStatus: latestDraft?.validation_status ?? (jur.shortName === "UK" ? "PREPARED" : null),
-      authorityStatus: jAuth?.status ?? (jur.shortName === "UK" || jur.shortName === "US" ? "ACTIVE" : "INACTIVE"),
+      filingStatus: latestDraft?.validation_status ?? (jur.shortName === "UK" ? "PREPARED" : jur.shortName === "US" ? "FINALIZED" : null),
+      authorityStatus: jAuth ? (authorityIsActive ? "ACTIVE" : "INACTIVE") : (jur.shortName === "UK" || jur.shortName === "US" ? "ACTIVE" : "INACTIVE"),
       taxTypes: jur.taxTypes,
     };
   });

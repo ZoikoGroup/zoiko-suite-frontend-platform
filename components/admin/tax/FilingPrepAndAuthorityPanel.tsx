@@ -25,9 +25,23 @@ const AUTH_TYPE_COLORS: Record<string, string> = {
   "Singpass / Corppass OIDC": "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300",
 };
 
-function DueDateCountdown({ dueDate }: { dueDate: string }) {
+function DueDateCountdown({ dueDate }: { dueDate?: string }) {
+  if (!dueDate) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+        <Clock className="h-3 w-3" /> Scheduled
+      </span>
+    );
+  }
   const today = new Date();
   const due = new Date(dueDate);
+  if (isNaN(due.getTime())) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+        <Clock className="h-3 w-3" /> Scheduled
+      </span>
+    );
+  }
   const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
   if (days < 0) {

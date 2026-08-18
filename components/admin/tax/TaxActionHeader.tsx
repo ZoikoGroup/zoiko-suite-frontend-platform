@@ -703,9 +703,11 @@ export function TaxActionHeader() {
               id="tax-action-export-csv"
               onClick={() => {
                 exportToCSV("tax_governance_report.csv", [
-                  { rule_id: "TR-UK-VAT-01", category: "VAT / GST", jurisdiction: "UK-HMRC", status: "Active", rate: "20%" },
-                  { rule_id: "TR-US-CORP-02", category: "Corporate Tax", jurisdiction: "US-IRS", status: "Active", rate: "21%" },
-                  { rule_id: "TR-EU-WHT-03", category: "Withholding Tax", jurisdiction: "EU-DE", status: "Active", rate: "15%" },
+                  { rule_id: "UK-VAT-STD-2026", category: "VAT", jurisdiction: "UK (HMRC)", authority: "HMRC", status: "ACTIVE", rate: "20.0%", effective: "2026-01-01" },
+                  { rule_id: "UK-VAT-RED-2026", category: "VAT", jurisdiction: "UK (HMRC)", authority: "HMRC", status: "ACTIVE", rate: "5.0%", effective: "2026-01-01" },
+                  { rule_id: "US-CIT-FED-2026", category: "CORPORATE_INCOME", jurisdiction: "US (IRS)", authority: "IRS", status: "ACTIVE", rate: "21.0%", effective: "2026-01-01" },
+                  { rule_id: "SG-GST-STD-2026", category: "GST", jurisdiction: "SG (IRAS)", authority: "IRAS", status: "ACTIVE", rate: "9.0%", effective: "2026-01-01" },
+                  { rule_id: "DE-WHT-DIV-2026", category: "WITHHOLDING", jurisdiction: "DE (BZSt)", authority: "BZSt", status: "ACTIVE", rate: "15.0%", effective: "2026-01-01" },
                 ]);
               }}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"

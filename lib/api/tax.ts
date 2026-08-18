@@ -479,7 +479,12 @@ export async function getTaxSummaryStats(identity?: Identity): Promise<ApiResult
 
   const today = new Date();
   const upcomingFilingCount = drafts.length > 0 
-    ? drafts.filter((d) => d.validation_status !== "FINALIZED" || new Date(d.due_date) >= today).length || drafts.length
+    ? drafts.filter((d) => {
+        if (d.validation_status !== "FINALIZED") return true;
+        if (!d.due_date) return true;
+        const due = new Date(d.due_date);
+        return isNaN(due.getTime()) || due >= today;
+      }).length || drafts.length
     : 0;
 
   return {
@@ -531,13 +536,14 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
   const deadlines: TaxDeadline[] = [
     // From filing drafts
     ...drafts.map((d) => {
-      const due = new Date(d.due_date);
-      const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      const dueDateStr = d.due_date || new Date().toISOString().split("T")[0];
+      const due = new Date(dueDateStr);
+      const days = isNaN(due.getTime()) ? 30 : Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       return {
         id: d.draft_id,
         label: `${d.filing_type} — ${d.period_key}`,
         jurisdiction: d.jurisdiction_id,
-        dueDate: d.due_date,
+        dueDate: dueDateStr,
         daysUntilDue: days,
         type: "VAT_FILING" as const,
         urgency: urgency(days),
@@ -547,7 +553,11 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
     ...whtObligations
       .filter((w) => w.status === "PENDING_REMITTANCE" || w.status === "CALCULATED")
       .map((w) => {
-        const due = new Date(w.effective_from);
+        const rawDate = w.effective_from || new Date().toISOString();
+        const due = new Date(rawDate);
+        if (isNaN(due.getTime())) {
+          due.setTime(today.getTime());
+        }
         due.setDate(due.getDate() + 30); // 30-day remittance window
         const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         return {
