@@ -100,6 +100,8 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   // board-resolutions-svc's compose block, where it named a port belonging to a
   // different service entirely.
   jurisdictions: [{ name: "jurisdiction-rules-svc", port: 8082 }],
+  delegations: [{ name: "delegated-authority-svc", port: 8136 }],
+  documents: [{ name: "document-vault-svc", port: 8094 }],
   "commercial-ops": [
     { name: "purchase-request-svc", port: 8100 },
     // 8129, not 8112: compose gave 8112 to benefits-svc as well, so the two could

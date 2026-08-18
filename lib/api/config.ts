@@ -62,6 +62,14 @@ const DEFAULTS = {
   // segregation of duties on the pass (the drafter may not pass their own
   // resolution).
   boardResolutions: "http://localhost:8122",
+  // 8136, per compose. delegated-authority-svc holds the register of who may
+  // act for whom -- time-bound, entity-scoped grants of one principal's
+  // authority to another.
+  delegatedAuthority: "http://localhost:8136",
+  // 8094, per compose. document-vault-svc is the store of record for governed
+  // documents: append-only version lineage, a SHA-256 checksum re-verified on
+  // every read, and an append-only access log of who read what.
+  documentVault: "http://localhost:8094",
   // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
   //
   // TWO OF THESE COLLIDE with entries above, and the collision is inherited
@@ -126,6 +134,8 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   financialClose: "/financial-close-svc",
   notification: "/notification-svc",
   boardResolutions: "/board-resolutions-svc",
+  delegatedAuthority: "/delegated-authority-svc",
+  documentVault: "/document-vault-svc",
   // Tax Domain
   taxRules: "/tax-rules-svc",
   taxDetermination: "/tax-determination-svc",

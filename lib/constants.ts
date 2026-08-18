@@ -19,6 +19,7 @@ import {
   FileJson,
   Bell,
   Globe2,
+  FileText,
 } from "lucide-react";
 
 export type DomainKey =
@@ -29,6 +30,8 @@ export type DomainKey =
   | "tax"
   | "compliance"
   | "jurisdictions"
+  | "delegations"
+  | "documents"
   | "commercial-ops"
   | "purchase-requests"
   | "audit-events";
@@ -159,6 +162,26 @@ export const DOMAINS: Domain[] = [
       "Evidence Sufficiency Service",
       "Exception & Escalation Service",
     ],
+  },
+  {
+    key: "documents",
+    label: "Document Vault",
+    href: "/admin/documents",
+    icon: FileText,
+    purpose:
+      "The store of record for governed documents — append-only version lineage, checksum-verified content, and an access log of every read.",
+    status: "operational",
+    coreServices: ["Document Vault Service"],
+  },
+  {
+    key: "delegations",
+    label: "Delegated Authority",
+    href: "/admin/delegations",
+    icon: KeyRound,
+    purpose:
+      "The register of who may act for whom — time-bound, entity-scoped grants of one principal's authority to another, revocable and never deleted.",
+    status: "operational",
+    coreServices: ["Delegated Authority Service"],
   },
   {
     key: "jurisdictions",
