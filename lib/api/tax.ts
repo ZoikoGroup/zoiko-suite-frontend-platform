@@ -325,7 +325,16 @@ export async function listFilingDrafts(
     base,
     "filing-preparation-svc",
     identity,
-    (d) => d.drafts ?? [],
+    (d) => {
+      const raw = d.drafts ?? [];
+      // Deduplicate by draft_id — keeps the first occurrence
+      const seen = new Set<string>();
+      return raw.filter((draft) => {
+        if (seen.has(draft.draft_id)) return false;
+        seen.add(draft.draft_id);
+        return true;
+      });
+    },
   );
 }
 

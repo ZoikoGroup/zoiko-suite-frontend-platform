@@ -1201,13 +1201,25 @@ serve(8129, "withholding-tax-svc", (m, p, q, b, send) => {
 });
 
 // 8130: filing-preparation-svc
+let _draftSeq = 0;
 serve(8130, "filing-preparation-svc", (m, p, q, b, send) => {
-  if (m === "GET") return send(200, { drafts: FILING_DRAFTS, total: FILING_DRAFTS.length });
+  if (m === "GET") {
+    // Deduplicate in case of hot-reload or re-seed to prevent duplicate key issues in the UI
+    const seen = new Set();
+    const uniqueDrafts = FILING_DRAFTS.filter((d) => {
+      if (seen.has(d.draft_id)) return false;
+      seen.add(d.draft_id);
+      return true;
+    });
+    return send(200, { drafts: uniqueDrafts, total: uniqueDrafts.length });
+  }
   if (p.includes("/finalize")) {
     const draftId = p.split("/")[3] || "draft-finalized";
     return send(200, { draft_id: draftId, validation_status: "FINALIZED", filing_type: "VAT100_MTD", period_key: "2026-Q2" });
   }
-  const draft = { draft_id: "draft-" + Date.now(), validation_status: "PREPARED", filing_type: "VAT100_MTD", period_key: "2026-Q2", status: "DRAFT", ...b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  // Use a monotonic counter (+ timestamp prefix) to guarantee unique IDs even when called in the same millisecond
+  const uid = `draft-${Date.now()}-${++_draftSeq}`;
+  const draft = { draft_id: uid, validation_status: "PREPARED", filing_type: "VAT100_MTD", period_key: "2026-Q2", status: "DRAFT", ...b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
   FILING_DRAFTS.unshift(draft);
   return send(201, draft);
 });

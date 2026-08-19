@@ -171,9 +171,9 @@ export async function FilingPrepAndAuthorityPanel() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {drafts.map((d) => (
+                {drafts.map((d, idx) => (
                   <tr
-                    key={d.draft_id}
+                    key={d.draft_id ?? `draft-row-${idx}`}
                     className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                   >
                     <td className="px-4 py-3">
