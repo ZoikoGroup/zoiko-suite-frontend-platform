@@ -9,6 +9,13 @@ import {
   listTaxAuthorityInterfaces,
   getTaxSummaryStats,
   listUpcomingTaxDeadlines,
+  patchTaxRule,
+  patchTaxDetermination,
+  patchVATReturn,
+  patchCorporateTaxReturn,
+  patchWithholdingObligation,
+  patchFilingDraft,
+  patchTaxAuthorityInterface,
 } from "@/lib/api/tax";
 import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties, createClause, createResolution } from "@/lib/api/legal";
 import { listJournalEntries, listCashPositions, getFinanceSummaryStats, createJournalEntry, matchStatementLine, createStatementLine, createFiscalPeriod, lockFiscalPeriod } from "@/lib/api/finance";
@@ -400,6 +407,84 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
       : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
   }
 
+  // Tax Domain — additional POST handlers (corporate-tax-returns, withholding-tax, tax-authority)
+  if (endpoint === "corporate-tax-returns") {
+    const ret = {
+      return_id: `corp-ret-${Date.now()}`,
+      tenant_id: identity.tenantId,
+      legal_entity_id: body.legal_entity_id || "22222222-2222-2222-2222-222222222222",
+      jurisdiction_id: body.jurisdiction_id || "us-fed-01",
+      tax_registration_number: body.tax_registration_number || "US-EIN-00000000",
+      fiscal_year: body.fiscal_year || new Date().getFullYear(),
+      accounting_period_start: body.accounting_period_start || "",
+      accounting_period_end: body.accounting_period_end || "",
+      gross_revenue: Number(body.gross_revenue) || 0,
+      allowable_deductions: Number(body.allowable_deductions) || 0,
+      taxable_income: Number(body.taxable_income) || 0,
+      tax_rate_percent: Number(body.tax_rate_percent) || 21,
+      gross_tax_liability: Number(body.gross_tax_liability) || 0,
+      tax_credits: Number(body.tax_credits) || 0,
+      net_tax_payable: Number(body.net_tax_payable) || 0,
+      tax_already_paid: Number(body.tax_already_paid) || 0,
+      balance_due: Number(body.balance_due) || 0,
+      currency: body.currency || "USD",
+      status: "DRAFT",
+      created_by: identity.principalId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    return NextResponse.json(ret, { status: 201 });
+  }
+
+  if (endpoint === "withholding-tax") {
+    const obs = {
+      obligation_id: `wht-${Date.now()}`,
+      tenant_id: identity.tenantId,
+      legal_entity_id: body.legal_entity_id || "22222222-2222-2222-2222-222222222222",
+      jurisdiction_id: body.jurisdiction_id || "uk-gov-01",
+      counterparty_id: body.counterparty_id || "",
+      payment_reference: body.payment_reference || `PAY-${Date.now()}`,
+      payment_type: body.payment_type || "ROYALTIES",
+      gross_payment_amount: Number(body.gross_payment_amount) || 0,
+      taxable_base_amount: Number(body.taxable_base_amount) || Number(body.gross_payment_amount) || 0,
+      withholding_rate_percent: Number(body.withholding_rate_percent) || 0,
+      statutory_rate_percent: Number(body.statutory_rate_percent) || 0,
+      treaty_reduced_rate_percent: Number(body.treaty_reduced_rate_percent) || 0,
+      applied_rate_percent: Number(body.applied_rate_percent) || Number(body.withholding_rate_percent) || 0,
+      tax_withheld_amount: Number(body.tax_withheld_amount) || 0,
+      net_amount_payable: Number(body.net_amount_payable) || (Number(body.gross_payment_amount) - Number(body.tax_withheld_amount || 0)),
+      currency: body.currency || "GBP",
+      status: "PENDING_REMITTANCE",
+      statutory_due_date: body.statutory_due_date || "",
+      created_by: identity.principalId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    return NextResponse.json(obs, { status: 201 });
+  }
+
+  if (endpoint === "tax-authority/interfaces") {
+    const iface = {
+      interface_id: `if-${Date.now()}`,
+      tenant_id: identity.tenantId,
+      jurisdiction_id: body.jurisdiction_id || "uk-gov-01",
+      authority_code: (body.authority_name || "UNKNOWN").toUpperCase().replace(/\s+/g, "_"),
+      authority_name: body.authority_name || "Tax Authority",
+      api_endpoint: body.api_endpoint || "https://api.tax.gov",
+      endpoint_url: body.api_endpoint || body.sftp_host || "https://api.tax.gov",
+      auth_type: body.auth_type || "API Key",
+      auth_credential_id: body.api_key_vault_ref || "",
+      protocol: body.protocol || "REST_API_KEY",
+      protocol_type: body.protocol || "REST_API_KEY",
+      status: "ACTIVE",
+      health_status: "UNKNOWN",
+      is_active: true,
+      error_count: 0,
+      created_at: new Date().toISOString(),
+    };
+    return NextResponse.json(iface, { status: 201 });
+  }
+
   // Legal Domain POST handlers
   if (endpoint === "clauses") {
     const res = await createClause(body, identity);
@@ -444,6 +529,85 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   return NextResponse.json({
     message: `Resource ${id} at /v1/${endpoint} successfully deleted`,
     status: "DELETED",
+    timestamp: new Date().toISOString(),
+  }, { status: 200 });
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  const endpoint = path.join("/");
+  const body = await req.json().catch(() => ({}));
+  const identity = callerIdentity(req);
+
+  // Tax-rules PATCH — proxy to mock for real lifecycle transitions
+  if (endpoint.startsWith("tax-rules/")) {
+    const ruleId = endpoint.split("/").pop()!;
+    const res = await patchTaxRule(ruleId, body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
+  }
+
+  // Tax-determinations PATCH
+  if (endpoint.startsWith("tax-determinations/")) {
+    const detId = endpoint.split("/").pop()!;
+    const res = await patchTaxDetermination(detId, body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
+  }
+
+  // VAT-returns PATCH
+  if (endpoint.startsWith("vat-returns/")) {
+    const returnId = endpoint.split("/").pop()!;
+    const res = await patchVATReturn(returnId, body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
+  }
+
+  // Corporate-tax-returns PATCH
+  if (endpoint.startsWith("corporate-tax-returns/")) {
+    const returnId = endpoint.split("/").pop()!;
+    const res = await patchCorporateTaxReturn(returnId, body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
+  }
+
+  // Withholding-tax PATCH
+  if (endpoint.startsWith("withholding-tax/")) {
+    const obligationId = endpoint.split("/").pop()!;
+    const res = await patchWithholdingObligation(obligationId, body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
+  }
+
+  // Filing-preparation/drafts PATCH (includes /finalize nested path)
+  if (endpoint.startsWith("filing-preparation/drafts/")) {
+    const parts = endpoint.split("/");
+    const draftId = parts[2];
+    const res = await patchFilingDraft(draftId, body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
+  }
+
+  // Tax-authority/interfaces PATCH
+  if (endpoint.startsWith("tax-authority/interfaces/")) {
+    const interfaceId = endpoint.split("/").pop()!;
+    const res = await patchTaxAuthorityInterface(interfaceId, body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
+  }
+
+  // Generic PATCH fallback
+  return NextResponse.json({
+    message: `Resource at /v1/${endpoint} patched`,
+    received_payload: body,
+    status: "UPDATED",
     timestamp: new Date().toISOString(),
   }, { status: 200 });
 }

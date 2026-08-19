@@ -584,6 +584,82 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
   return { ok: true, data: deadlines };
 }
 
+// ─── PATCH helpers ─────────────────────────────────────────────────────────────
+
+export type PatchResult = { ok: true; data: Record<string, unknown> } | { ok: false; error: { kind: string; status?: number; message: string } };
+
+async function fetchDomainServicePatch(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  identity: Identity | undefined,
+  body: Record<string, unknown>,
+): Promise<PatchResult> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, { method: "PATCH", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return { ok: false, error: { kind: isTimeout ? "timeout" : "unreachable", message: `${serviceName} is unreachable` } };
+  }
+
+  if (!res.ok) {
+    return { ok: false, error: { kind: "http", status: res.status, message: `${serviceName} returned ${res.status}` } };
+  }
+
+  try {
+    const data = (await res.json()) as Record<string, unknown>;
+    return { ok: true, data };
+  } catch {
+    return { ok: false, error: { kind: "malformed", message: `${serviceName} returned non-JSON` } };
+  }
+}
+
+export async function patchTaxRule(ruleId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
+  const base = taxRulesUrl();
+  return fetchDomainServicePatch(`${base}/v1/tax-rules/${ruleId}`, base, "tax-rules-svc", identity, body);
+}
+
+export async function patchTaxDetermination(detId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
+  const base = taxDeterminationUrl();
+  return fetchDomainServicePatch(`${base}/v1/tax-determinations/${detId}`, base, "tax-determination-svc", identity, body);
+}
+
+export async function patchVATReturn(returnId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
+  const base = vatGstUrl();
+  return fetchDomainServicePatch(`${base}/v1/vat-returns/${returnId}`, base, "vat-gst-svc", identity, body);
+}
+
+export async function patchCorporateTaxReturn(returnId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
+  const base = corporateTaxUrl();
+  return fetchDomainServicePatch(`${base}/v1/corporate-tax-returns/${returnId}`, base, "corporate-tax-svc", identity, body);
+}
+
+export async function patchWithholdingObligation(obligationId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
+  const base = withholdingTaxUrl();
+  return fetchDomainServicePatch(`${base}/v1/withholding-tax/${obligationId}`, base, "withholding-tax-svc", identity, body);
+}
+
+export async function patchFilingDraft(draftId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
+  const base = filingPrepUrl();
+  return fetchDomainServicePatch(`${base}/v1/filing-preparation/drafts/${draftId}`, base, "filing-preparation-svc", identity, body);
+}
+
+export async function patchTaxAuthorityInterface(interfaceId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
+  const base = taxAuthorityUrl();
+  return fetchDomainServicePatch(`${base}/v1/tax-authority/interfaces/${interfaceId}`, base, "tax-authority-interface-svc", identity, body);
+}
+
 // ─── Shared Fetch Helper ──────────────────────────────────────────────────────
 
 /**
