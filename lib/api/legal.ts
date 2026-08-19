@@ -335,6 +335,52 @@ export async function listCounterparties(identity?: Identity): Promise<ApiResult
   );
 }
 
+// ─── POST Operations ─────────────────────────────────────────────────────────
+
+export async function createClause(
+  body: {
+    title: string;
+    category: string;
+    body: string;
+    jurisdiction_id?: string;
+    effective_from?: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<Clause>> {
+  const base = clauseTemplateUrl();
+  const url = `${base}/v1/clauses`;
+  return fetchDomainServicePost<{ clause: Clause }, Clause>(
+    url,
+    base,
+    "clause-template-svc",
+    body,
+    identity,
+    (d) => d.clause,
+  );
+}
+
+export async function createResolution(
+  body: {
+    meeting_id?: string;
+    title: string;
+    content: string;
+    category: string;
+    effective_from?: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<BoardResolution>> {
+  const base = boardResolutionsUrl();
+  const url = `${base}/v1/resolutions`;
+  return fetchDomainServicePost<{ resolution: BoardResolution }, BoardResolution>(
+    url,
+    base,
+    "board-resolutions-svc",
+    body,
+    identity,
+    (d) => d.resolution,
+  );
+}
+
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
 
 /**
@@ -373,6 +419,66 @@ async function fetchDomainService<TRaw, TOut>(
   let res: Response;
   try {
     res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
+  }
+}
+
+async function fetchDomainServicePost<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  body: unknown,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(3000),
+    });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     return {

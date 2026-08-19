@@ -10,12 +10,12 @@ import {
   getTaxSummaryStats,
   listUpcomingTaxDeadlines,
 } from "@/lib/api/tax";
-import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties } from "@/lib/api/legal";
-import { listJournalEntries, listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
+import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties, createClause, createResolution } from "@/lib/api/legal";
+import { listJournalEntries, listCashPositions, getFinanceSummaryStats, createJournalEntry, matchStatementLine, createStatementLine, createFiscalPeriod, lockFiscalPeriod } from "@/lib/api/finance";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
-import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions } from "@/lib/api/payroll";
-import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts } from "@/lib/api/hr";
-import { listFilingRequirements, listComplianceEvaluations, listEscalatedExceptions } from "@/lib/api/compliance";
+import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions, initiatePayrollRun, createCompensationStructure, raisePayrollException } from "@/lib/api/payroll";
+import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts, createEmployee, submitLeaveRequest, initiateTermination } from "@/lib/api/hr";
+import { listFilingRequirements, listComplianceEvaluations, listEscalatedExceptions, createFilingRequirement, evaluateCompliance, generateEvidenceManifest } from "@/lib/api/compliance";
 import { getAuditEvents } from "@/lib/api/audit-events";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
@@ -294,6 +294,125 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
       updated_at: new Date().toISOString(),
     };
     return NextResponse.json(vatReturn, { status: 201 });
+  }
+
+  // Finance Domain POST handlers
+  if (endpoint === "journal-entries") {
+    const res = await createJournalEntry(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "bank-reconciliation/match") {
+    const { statement_line_id, journal_id } = body;
+    const res = await matchStatementLine(statement_line_id, { journal_id }, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "bank-reconciliation/statement-lines") {
+    const res = await createStatementLine(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "financial-close/periods") {
+    const res = await createFiscalPeriod(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint.startsWith("financial-close/periods/") && endpoint.endsWith("/lock")) {
+    const periodId = endpoint.split("/")[2];
+    const res = await lockFiscalPeriod(periodId, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 200 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  // HR Domain POST handlers
+  if (endpoint === "employees") {
+    const res = await createEmployee(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "leave/requests") {
+    const res = await submitLeaveRequest(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "terminations") {
+    const res = await initiateTermination(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  // Payroll Domain POST handlers
+  if (endpoint === "payroll/runs") {
+    const res = await initiatePayrollRun(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "compensation/structures") {
+    const res = await createCompensationStructure(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "payroll-exceptions") {
+    const res = await raisePayrollException(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  // Compliance Domain POST handlers
+  if (endpoint === "filing-tracker/requirements") {
+    const res = await createFilingRequirement(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "compliance-status/evaluate") {
+    const res = await evaluateCompliance(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "evidence-manifests") {
+    const res = await generateEvidenceManifest(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  // Legal Domain POST handlers
+  if (endpoint === "clauses") {
+    const res = await createClause(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+  }
+
+  if (endpoint === "resolutions") {
+    const res = await createResolution(body, identity);
+    return res.ok
+      ? NextResponse.json(res.data, { status: 201 })
+      : NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
   }
 
   return NextResponse.json({

@@ -113,11 +113,11 @@ export async function TaxSummaryBar() {
       icon: Percent,
       label: "Active Tax Rules",
       value: String(stats.activeRules),
-      sub: `${stats.totalDeterminations} determination${stats.totalDeterminations !== 1 ? "s" : ""} evaluated · 4 jurisdictions`,
+      sub: `${stats.totalDeterminations} determination${stats.totalDeterminations !== 1 ? "s" : ""} evaluated`,
       accentClass: "text-emerald-600 dark:text-emerald-400",
       iconBgClass: "bg-emerald-100 dark:bg-emerald-500/20",
       trend: "neutral",
-      trendLabel: "All active",
+      trendLabel: stats.activeRules > 0 ? "All active" : "No active rules",
     },
     {
       icon: ShieldCheck,
@@ -126,8 +126,8 @@ export async function TaxSummaryBar() {
       sub: `Across all GBP VAT returns · ${stats.finalizedDraftCount} draft${stats.finalizedDraftCount !== 1 ? "s" : ""} finalized`,
       accentClass: "text-blue-600 dark:text-blue-400",
       iconBgClass: "bg-blue-100 dark:bg-blue-500/20",
-      trend: "up",
-      trendLabel: "+33% Q2 vs Q1",
+      trend: "neutral",
+      trendLabel: stats.netVatPayableGBP > 0 ? "Payable" : "Nil",
     },
     {
       icon: Landmark,
@@ -137,7 +137,7 @@ export async function TaxSummaryBar() {
       accentClass: "text-amber-600 dark:text-amber-400",
       iconBgClass: "bg-amber-100 dark:bg-amber-500/20",
       trend: "neutral",
-      trendLabel: "Submitted",
+      trendLabel: stats.corporateBalanceDueUSD > 0 ? "Due" : "Settled",
     },
     {
       icon: CalendarClock,

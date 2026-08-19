@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowRight, Zap, Key, ShieldCheck, Database, Lock, Search, X } from "lucide-react";
 
 type Step = {
@@ -15,77 +15,119 @@ type Step = {
   examples: string[];
 };
 
-const STEPS: Step[] = [
-  {
-    id: "action",
-    icon: Zap,
-    title: "Domain Action",
-    service: "domain-microservices",
-    port: "8080-8147",
-    count: 1248500,
-    status: "complete",
-    detail: "User or system action occurs in any of the 50 domain microservices.",
-    examples: ["PO Issued", "Tax Return Filed", "Payslip Generated"],
-  },
-  {
-    id: "identity",
-    icon: Key,
-    title: "Identity Enriched",
-    service: "tenant-entity-registry-svc",
-    port: ":8081",
-    count: 1248500,
-    status: "complete",
-    detail: "X-Tenant-Id, X-Principal-Id, and X-Correlation-ID attached.",
-    examples: ["Tenant 11111111-1111-1111 · Correlation e8912"],
-  },
-  {
-    id: "governance",
-    icon: ShieldCheck,
-    title: "Governance Evaluated",
-    service: "governance-decision-log-svc",
-    port: ":8083",
-    count: 42100,
-    status: "complete",
-    detail: "Action evaluated against security policies & logged to decision log.",
-    examples: ["Outcome: AUTHORIZED · Basis: Rule UK-VAT-STD"],
-  },
-  {
-    id: "ingestion",
-    icon: Database,
-    title: "Event Ingested",
-    service: "audit-event-store-svc",
-    port: ":8084",
-    count: 1248500,
-    status: "active",
-    detail: "Event payload written to append-only event store repository.",
-    examples: ["Event ID evt-2026-99182 · Status: INGESTED"],
-  },
-  {
-    id: "hashchain",
-    icon: Lock,
-    title: "SHA-256 Hash Chained",
-    service: "cryptographic-hashchain-svc",
-    port: ":8084",
-    count: 1248500,
-    status: "active",
-    detail: "SHA-256 hash calculated incorporating previous event hash.",
-    examples: ["PrevHash: a8f9c... ➔ CurrHash: e3b0c..."],
-  },
-  {
-    id: "audited",
-    icon: Search,
-    title: "Tamper Verified",
-    service: "event-provenance-auditor",
-    port: ":8084",
-    count: 1248500,
-    status: "pending",
-    detail: "Continuous provenance auditor verifies zero hash gaps across all events.",
-    examples: ["Verification Status: TAMPER_FREE"],
-  },
-];
+function useLiveStepCounts(): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCounts() {
+      const endpoints: [string, string][] = [
+        ["audit/events", "action"],
+        ["audit/events", "identity"],
+        ["audit/events", "governance"],
+        ["audit/events", "ingestion"],
+        ["audit/events", "hashchain"],
+        ["audit/events", "audited"],
+      ];
+      const results = await Promise.allSettled(
+        endpoints.map(async ([ep, stepId]) => {
+          const res = await fetch(`/api/v1/${ep}`, { signal: AbortSignal.timeout(5000) });
+          if (!res.ok) return [stepId, 0] as const;
+          const json = await res.json().catch(() => ({}));
+          const total = typeof json.total === "number" ? json.total : undefined;
+          const key = Object.keys(json).find((k) => Array.isArray(json[k]));
+          return [stepId, total ?? (key ? json[key].length : 0)] as const;
+        }),
+      );
+      if (cancelled) return;
+      const merged: Record<string, number> = {};
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const [stepId, count] = r.value;
+          merged[stepId] = count;
+        }
+      }
+      setCounts(merged);
+    }
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+  return counts;
+}
 
 export function AuditEventsProcessTimeline() {
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const liveCounts = useLiveStepCounts();
+
+  const STEPS: Step[] = [
+    {
+      id: "action",
+      icon: Zap,
+      title: "Domain Action",
+      service: "domain-microservices",
+      port: "8080-8147",
+      count: liveCounts["action"] ?? 0,
+      status: "complete",
+      detail: "User or system action occurs in any of the 50 domain microservices.",
+      examples: ["PO Issued", "Tax Return Filed", "Payslip Generated"],
+    },
+    {
+      id: "identity",
+      icon: Key,
+      title: "Identity Enriched",
+      service: "tenant-entity-registry-svc",
+      port: ":8081",
+      count: liveCounts["identity"] ?? 0,
+      status: "complete",
+      detail: "X-Tenant-Id, X-Principal-Id, and X-Correlation-ID attached.",
+      examples: ["Tenant 11111111-1111-1111 · Correlation e8912"],
+    },
+    {
+      id: "governance",
+      icon: ShieldCheck,
+      title: "Governance Evaluated",
+      service: "governance-decision-log-svc",
+      port: ":8083",
+      count: liveCounts["governance"] ?? 0,
+      status: "complete",
+      detail: "Action evaluated against security policies & logged to decision log.",
+      examples: ["Outcome: AUTHORIZED · Basis: Rule UK-VAT-STD"],
+    },
+    {
+      id: "ingestion",
+      icon: Database,
+      title: "Event Ingested",
+      service: "audit-event-store-svc",
+      port: ":8084",
+      count: liveCounts["ingestion"] ?? 0,
+      status: "active",
+      detail: "Event payload written to append-only event store repository.",
+      examples: ["Event ID evt-2026-99182 · Status: INGESTED"],
+    },
+    {
+      id: "hashchain",
+      icon: Lock,
+      title: "SHA-256 Hash Chained",
+      service: "cryptographic-hashchain-svc",
+      port: ":8084",
+      count: liveCounts["hashchain"] ?? 0,
+      status: "active",
+      detail: "SHA-256 hash calculated incorporating previous event hash.",
+      examples: ["PrevHash: a8f9c... ➔ CurrHash: e3b0c..."],
+    },
+    {
+      id: "audited",
+      icon: Search,
+      title: "Tamper Verified",
+      service: "event-provenance-auditor",
+      port: ":8084",
+      count: liveCounts["audited"] ?? 0,
+      status: "pending",
+      detail: "Continuous provenance auditor verifies zero hash gaps across all events.",
+      examples: ["Verification Status: TAMPER_FREE"],
+    },
+  ];
+
   const openStep = STEPS.find((s) => s.id === activeStep);
 
   return (

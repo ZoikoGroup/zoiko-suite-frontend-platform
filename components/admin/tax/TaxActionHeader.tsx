@@ -701,14 +701,36 @@ export function TaxActionHeader() {
             </button>
             <button
               id="tax-action-export-csv"
-              onClick={() => {
-                exportToCSV("tax_governance_report.csv", [
-                  { rule_id: "UK-VAT-STD-2026", category: "VAT", jurisdiction: "UK (HMRC)", authority: "HMRC", status: "ACTIVE", rate: "20.0%", effective: "2026-01-01" },
-                  { rule_id: "UK-VAT-RED-2026", category: "VAT", jurisdiction: "UK (HMRC)", authority: "HMRC", status: "ACTIVE", rate: "5.0%", effective: "2026-01-01" },
-                  { rule_id: "US-CIT-FED-2026", category: "CORPORATE_INCOME", jurisdiction: "US (IRS)", authority: "IRS", status: "ACTIVE", rate: "21.0%", effective: "2026-01-01" },
-                  { rule_id: "SG-GST-STD-2026", category: "GST", jurisdiction: "SG (IRAS)", authority: "IRAS", status: "ACTIVE", rate: "9.0%", effective: "2026-01-01" },
-                  { rule_id: "DE-WHT-DIV-2026", category: "WITHHOLDING", jurisdiction: "DE (BZSt)", authority: "BZSt", status: "ACTIVE", rate: "15.0%", effective: "2026-01-01" },
-                ]);
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/v1/tax-rules");
+                  const json = await res.json().catch(() => ({ tax_rules: [] }));
+                  const rules: Array<{ rule_id: string; category: string; jurisdiction_id: string; status: string; tax_rate_percentage: number; effective_from: string }> = json.tax_rules ?? [];
+                  const JUR_MAP: Record<string, string> = {
+                    "uk-gov-01": "UK (HMRC)", "us-fed-01": "US (IRS)",
+                    "sg-iras-01": "SG (IRAS)", "de-bzst-01": "DE (BZSt)",
+                  };
+                  const AUTH_MAP: Record<string, string> = {
+                    "uk-gov-01": "HMRC", "us-fed-01": "IRS",
+                    "sg-iras-01": "IRAS", "de-bzst-01": "BZSt",
+                  };
+                  const rows = rules.map((r) => ({
+                    rule_id: r.rule_id,
+                    category: r.category,
+                    jurisdiction: JUR_MAP[r.jurisdiction_id] ?? r.jurisdiction_id,
+                    authority: AUTH_MAP[r.jurisdiction_id] ?? r.jurisdiction_id,
+                    status: r.status,
+                    rate: `${r.tax_rate_percentage}%`,
+                    effective: r.effective_from?.split("T")[0] ?? "",
+                  }));
+                  exportToCSV("tax_governance_report.csv", rows.length > 0 ? rows : [
+                    { rule_id: "(no rules found)", category: "", jurisdiction: "", authority: "", status: "", rate: "", effective: "" },
+                  ]);
+                } catch {
+                  exportToCSV("tax_governance_report.csv", [
+                    { rule_id: "(export failed — service unreachable)", category: "", jurisdiction: "", authority: "", status: "", rate: "", effective: "" },
+                  ]);
+                }
               }}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"
             >

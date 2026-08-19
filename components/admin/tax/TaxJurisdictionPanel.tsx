@@ -108,9 +108,9 @@ export async function TaxJurisdictionPanel() {
       shortName: jur.shortName,
       authority: jur.authority,
       activeRules: jRules.length,
-      vatGstStatus: latestVat?.status ?? (jur.shortName === "UK" ? "FILED" : null),
-      filingStatus: latestDraft?.validation_status ?? (jur.shortName === "UK" ? "PREPARED" : jur.shortName === "US" ? "FINALIZED" : null),
-      authorityStatus: jAuth ? (authorityIsActive ? "ACTIVE" : "INACTIVE") : (jur.shortName === "UK" || jur.shortName === "US" ? "ACTIVE" : "INACTIVE"),
+      vatGstStatus: latestVat?.status ?? null,
+      filingStatus: latestDraft?.validation_status ?? null,
+      authorityStatus: jAuth ? (authorityIsActive ? "ACTIVE" : "INACTIVE") : "NONE",
       taxTypes: jur.taxTypes,
     };
   });

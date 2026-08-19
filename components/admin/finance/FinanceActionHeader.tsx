@@ -17,17 +17,32 @@ const SERVICES = [
 function NewJournalModal({ onClose }: { onClose: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [accountCode, setAccountCode] = useState("1100-AR");
+  const [debit, setDebit] = useState(50000);
+  const [credit, setCredit] = useState(0);
 
   async function handlePost() {
     setSubmitting(true);
+    setError(null);
     try {
-      await fetch("/api/v1/journal-entries", {
+      const res = await fetch("/api/v1/journal-entries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_code: "1100-AR", amount: 50000, status: "POSTED" }),
+        body: JSON.stringify({
+          account_code: accountCode,
+          amount: debit || credit,
+          status: "POSTED",
+          description: `Journal entry for ${accountCode}`,
+        }),
       });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Failed to post journal entry");
+      }
     } catch (err) {
       console.warn("API call degraded safely:", err);
+      setError("Network error - service may be unavailable");
     }
     setSubmitting(false);
     setDone(true);
@@ -57,22 +72,41 @@ function NewJournalModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="space-y-4">
+              {error && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 dark:bg-red-500/10 dark:border-red-500/20">
+                  <p className="text-xs text-red-700 dark:text-red-300">{error}</p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Account Code</label>
-                <select className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700">
-                  <option>1100-AR · Trade Accounts Receivable</option>
-                  <option>4000-REV · Software License Revenue</option>
-                  <option>2100-AP · Trade Accounts Payable</option>
+                <select
+                  value={accountCode}
+                  onChange={(e) => setAccountCode(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                >
+                  <option value="1100-AR">1100-AR · Trade Accounts Receivable</option>
+                  <option value="4000-REV">4000-REV · Software License Revenue</option>
+                  <option value="2100-AP">2100-AP · Trade Accounts Payable</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Debit ($)</label>
-                  <input type="number" defaultValue="50000" className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                  <input
+                    type="number"
+                    value={debit}
+                    onChange={(e) => setDebit(Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Credit ($)</label>
-                  <input type="number" defaultValue="0" className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                  <input
+                    type="number"
+                    value={credit}
+                    onChange={(e) => setCredit(Number(e.target.value))}
+                    className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                  />
                 </div>
               </div>
               <button
@@ -93,13 +127,35 @@ function NewJournalModal({ onClose }: { onClose: () => void }) {
 function BankRecModal({ onClose }: { onClose: () => void }) {
   const [matching, setMatching] = useState(false);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [bankAccount, setBankAccount] = useState("HSBC Corporate Current — ••4821");
+  const [statementPeriod, setStatementPeriod] = useState("July 2026 (2026-07-01 to 2026-07-31)");
 
-  function handleMatch() {
+  async function handleMatch() {
     setMatching(true);
-    setTimeout(() => {
-      setMatching(false);
-      setDone(true);
-    }, 1500);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/bank-reconciliation/statement-lines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bank_account_id: bankAccount.split("—")[1]?.trim() || "4821",
+          statement_date: statementPeriod.includes("July") ? "2026-07-31" : "2026-06-30",
+          amount: 0,
+          currency_code: "GBP",
+          bank_reference: `RECON-${Date.now()}`,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Failed to create statement line");
+      }
+    } catch (err) {
+      console.warn("API call degraded safely:", err);
+      setError("Network error - service may be unavailable");
+    }
+    setMatching(false);
+    setDone(true);
   }
 
   return (
@@ -129,9 +185,18 @@ function BankRecModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="space-y-4">
+              {error && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 dark:bg-red-500/10 dark:border-red-500/20">
+                  <p className="text-xs text-red-700 dark:text-red-300">{error}</p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Bank Account</label>
-                <select className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700">
+                <select
+                  value={bankAccount}
+                  onChange={(e) => setBankAccount(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                >
                   <option>HSBC Corporate Current — ••4821</option>
                   <option>Barclays Operating — ••9034</option>
                   <option>Silicon Valley Bank USD — ••1102</option>
@@ -139,13 +204,17 @@ function BankRecModal({ onClose }: { onClose: () => void }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Statement Period</label>
-                <select className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700">
+                <select
+                  value={statementPeriod}
+                  onChange={(e) => setStatementPeriod(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                >
                   <option>July 2026 (2026-07-01 to 2026-07-31)</option>
                   <option>June 2026 (2026-06-01 to 2026-06-30)</option>
                 </select>
               </div>
               <div className="rounded-lg bg-purple-50 border border-purple-100 p-2.5 dark:bg-purple-500/10 dark:border-purple-500/20">
-                <p className="text-xs text-purple-700 dark:text-purple-300">Auto-matching runs against bank-reconciliation-svc (:8103). Unmatched items are queued for manual review.</p>
+                <p className="text-xs text-purple-700 dark:text-purple-300">Auto-matching runs against bank-reconciliation-svc (:8102). Unmatched items are queued for manual review.</p>
               </div>
               <button
                 onClick={handleMatch}
@@ -165,13 +234,34 @@ function BankRecModal({ onClose }: { onClose: () => void }) {
 function FinancialCloseModal({ onClose }: { onClose: () => void }) {
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState("2026-M07");
+  const [authCode, setAuthCode] = useState("");
 
-  function handleInitiate() {
+  async function handleInitiate() {
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
-      setConfirmed(true);
-    }, 1200);
+    setError(null);
+    try {
+      const res = await fetch("/api/v1/financial-close/periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          legal_entity_id: "22222222-2222-2222-2222-222222222222",
+          period_name: period,
+          period_start: period === "2026-M07" ? "2026-07-01" : "2026-04-01",
+          period_end: period === "2026-M07" ? "2026-07-31" : "2026-06-30",
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || "Failed to initiate period close");
+      }
+    } catch (err) {
+      console.warn("API call degraded safely:", err);
+      setError("Network error - service may be unavailable");
+    }
+    setSubmitting(false);
+    setConfirmed(true);
   }
 
   return (
@@ -198,6 +288,11 @@ function FinancialCloseModal({ onClose }: { onClose: () => void }) {
             </div>
           ) : (
             <div className="space-y-4">
+              {error && (
+                <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 dark:bg-red-500/10 dark:border-red-500/20">
+                  <p className="text-xs text-red-700 dark:text-red-300">{error}</p>
+                </div>
+              )}
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 flex gap-2.5 dark:bg-amber-500/10 dark:border-amber-500/20">
                 <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                 <p className="text-xs text-amber-800 dark:text-amber-300">
@@ -206,14 +301,24 @@ function FinancialCloseModal({ onClose }: { onClose: () => void }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Period</label>
-                <select className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700">
-                  <option>July 2026 (2026-M07)</option>
-                  <option>Q2 2026 (2026-Q2)</option>
+                <select
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                >
+                  <option value="2026-M07">July 2026 (2026-M07)</option>
+                  <option value="2026-Q2">Q2 2026 (2026-Q2)</option>
                 </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">CFO Authorisation Code</label>
-                <input type="password" placeholder="Enter CFO one-time auth code" className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                <input
+                  type="password"
+                  placeholder="Enter CFO one-time auth code"
+                  value={authCode}
+                  onChange={(e) => setAuthCode(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                />
               </div>
               <button
                 onClick={handleInitiate}
@@ -246,7 +351,7 @@ export function FinanceActionHeader() {
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              8 Microservices Active
+              8 services in compose
             </span>
           </div>
 

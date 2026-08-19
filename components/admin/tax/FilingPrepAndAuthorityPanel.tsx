@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
-import { CloudOff, FileCheck, ShieldAlert, Link as LinkIcon, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { CloudOff, FileCheck, ShieldAlert, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listFilingDrafts, listTaxAuthorityInterfaces, type FilingDraft, type TaxAuthorityInterface } from "@/lib/api/tax";
+import { TestConnectionButton } from "./TestConnectionButton";
 
 const VALIDATION_STATUS_CONFIG: Record<
   string,
@@ -289,15 +290,10 @@ export async function FilingPrepAndAuthorityPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {/* Test connection stub — client actions not wired on SSR panel */}
-                      <button
-                        disabled
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 disabled:opacity-50 transition-colors cursor-not-allowed"
-                        title="Test connection (requires backend service running)"
-                      >
-                        <LinkIcon className="h-2.5 w-2.5" />
-                        Test
-                      </button>
+                      <TestConnectionButton
+                        interfaceId={iface.interface_id}
+                        authorityCode={iface.authority_code}
+                      />
                     </td>
                   </tr>
                 ))}

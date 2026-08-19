@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowRight, DollarSign, Gift, Percent, ShieldCheck, FileText, Send, X } from "lucide-react";
 
 type Step = {
@@ -15,14 +15,13 @@ type Step = {
   examples: string[];
 };
 
-const STEPS: Step[] = [
+const STEP_META: Omit<Step, "count">[] = [
   {
     id: "comp",
     icon: DollarSign,
     title: "Compensation Load",
     service: "compensation-svc",
     port: ":8091",
-    count: 240,
     status: "complete",
     detail: "Base salary rates, hourly timesheets, and bonus structures loaded.",
     examples: ["240 Employee Records Loaded"],
@@ -33,7 +32,6 @@ const STEPS: Step[] = [
     title: "Benefits Deduction",
     service: "benefits-svc & deductions-svc",
     port: ":8092 / :8097",
-    count: 240,
     status: "complete",
     detail: "Health insurance, pension pre-tax contributions, and garnishments computed.",
     examples: ["Pension Dr $24,000 · Health Dr $18,500"],
@@ -44,7 +42,6 @@ const STEPS: Step[] = [
     title: "Payroll Tax Calculated",
     service: "payroll-tax-svc & employer-contributions-svc",
     port: ":8093 / :8096",
-    count: 240,
     status: "complete",
     detail: "PAYE, Federal/State income tax, and National Insurance calculated.",
     examples: ["PAYE Tax $142,500 · Employer NI $68,200"],
@@ -55,7 +52,6 @@ const STEPS: Step[] = [
     title: "Exception Audit",
     service: "payroll-exceptions-svc",
     port: ":8094",
-    count: 0,
     status: "active",
     detail: "Automated anomaly checks (negative pay, massive overtime variance) run.",
     examples: ["0 Exceptions Flagged"],
@@ -66,7 +62,6 @@ const STEPS: Step[] = [
     title: "Payslip Generated",
     service: "payslip-svc",
     port: ":8095",
-    count: 240,
     status: "active",
     detail: "Encrypted digital payslips generated and stored in employee portal.",
     examples: ["240 PDF Payslips Issued"],
@@ -77,15 +72,55 @@ const STEPS: Step[] = [
     title: "Bank Disbursement",
     service: "payroll-run-svc",
     port: ":8090",
-    count: 1,
     status: "pending",
     detail: "Direct deposit ABA/BACS clearing file transmitted for treasury disbursement.",
     examples: ["BACS Batch PAY-2026-07 · $485,000"],
   },
 ];
 
+function useLiveStepCounts(): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCounts() {
+      const endpoints: [string, string][] = [
+        ["compensation/structures", "comp"],
+        ["benefits/plans", "benefits"],
+        ["payroll-tax/profiles", "tax"],
+        ["payroll-exceptions", "exception"],
+        ["payroll-runs", "payslip"],
+        ["payroll-runs", "disbursement"],
+      ];
+      const results = await Promise.allSettled(
+        endpoints.map(async ([ep, stepId]) => {
+          const res = await fetch(`/api/v1/${ep}`, { signal: AbortSignal.timeout(5000) });
+          if (!res.ok) return [stepId, 0] as const;
+          const json = await res.json().catch(() => ({}));
+          const key = Object.keys(json).find((k) => Array.isArray(json[k]));
+          return [stepId, key ? json[key].length : 0] as const;
+        }),
+      );
+      if (cancelled) return;
+      const merged: Record<string, number> = {};
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const [stepId, count] = r.value;
+          merged[stepId] = count;
+        }
+      }
+      setCounts(merged);
+    }
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+  return counts;
+}
+
 export function PayrollProcessTimeline() {
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const liveCounts = useLiveStepCounts();
+  const STEPS: Step[] = STEP_META.map((meta) => ({ ...meta, count: liveCounts[meta.id] ?? 0 }));
   const openStep = STEPS.find((s) => s.id === activeStep);
 
   return (

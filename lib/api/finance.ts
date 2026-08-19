@@ -91,6 +91,66 @@ export type FinanceSummaryStats = {
 
 // ── Fetch helper ──────────────────────────────────────────────────────────────
 
+async function fetchFinancePost<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  body: unknown,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
+  }
+}
+
 async function fetchFinanceSvc<TRaw, TOut>(
   urlStr: string,
   base: string,
@@ -159,6 +219,21 @@ export async function listJournalEntries(identity?: Identity): Promise<ApiResult
   );
 }
 
+export async function createJournalEntry(
+  body: { account_code: string; amount: number; status: string; description?: string },
+  identity?: Identity,
+): Promise<ApiResult<JournalEntry>> {
+  const base = glUrl();
+  return fetchFinancePost<{ entry: JournalEntry }, JournalEntry>(
+    `${base}/v1/journal-entries`,
+    base,
+    "general-ledger-svc",
+    body,
+    identity,
+    (d) => d.entry,
+  );
+}
+
 type ARResponse = { invoices: ARInvoice[]; total_receivable?: number; total: number };
 
 export async function listARInvoices(identity?: Identity): Promise<ApiResult<ARInvoice[]>> {
@@ -198,7 +273,74 @@ export async function listBankReconciliations(identity?: Identity): Promise<ApiR
   );
 }
 
+export async function matchStatementLine(
+  statementLineId: string,
+  body: { journal_id: string },
+  identity?: Identity,
+): Promise<ApiResult<unknown>> {
+  const base = bankReconUrl();
+  return fetchFinancePost<unknown, unknown>(
+    `${base}/v1/statement-lines/${statementLineId}/match`,
+    base,
+    "bank-reconciliation-svc",
+    body,
+    identity,
+    (d) => d,
+  );
+}
+
+export async function createStatementLine(
+  body: {
+    bank_account_id: string;
+    statement_date: string;
+    amount: number;
+    currency_code: string;
+    bank_reference: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<unknown>> {
+  const base = bankReconUrl();
+  return fetchFinancePost<unknown, unknown>(
+    `${base}/v1/statement-lines`,
+    base,
+    "bank-reconciliation-svc",
+    body,
+    identity,
+    (d) => d,
+  );
+}
+
 type CloseResponse = { close_periods: { period_id: string; period: string; status: string; closed_at?: string }[]; total: number };
+
+export async function createFiscalPeriod(
+  body: { legal_entity_id: string; period_name: string; period_start: string; period_end: string },
+  identity?: Identity,
+): Promise<ApiResult<unknown>> {
+  const base = finCloseUrl();
+  return fetchFinancePost<unknown, unknown>(
+    `${base}/v1/close/periods`,
+    base,
+    "financial-close-svc",
+    body,
+    identity,
+    (d) => d,
+  );
+}
+
+export async function lockFiscalPeriod(
+  periodId: string,
+  identity?: Identity,
+): Promise<ApiResult<unknown>> {
+  const base = finCloseUrl();
+  return fetchFinancePost<unknown, unknown>(
+    `${base}/v1/close/periods/${periodId}/lock`,
+    base,
+    "financial-close-svc",
+    {},
+    identity,
+    (d) => d,
+  );
+}
 
 export async function getFinanceSummaryStats(identity?: Identity): Promise<ApiResult<FinanceSummaryStats>> {
   // Fetch treasury + AR + close period concurrently for the summary bar
