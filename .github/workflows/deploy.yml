@@ -1,7 +1,21 @@
 name: Deploy to VM
 
 on:
+  # Deploy whatever is on main. A merged PR counts as a push to main, so the
+  # normal branch -> PR -> merge flow now reaches the VM without anyone having
+  # to remember the Actions tab. Feature branches deliberately do NOT deploy.
+  push:
+    branches: [main]
   workflow_dispatch:
+
+# The job builds in place on the VM (git pull, npm ci, npm run build, all in
+# /var/www/zoiko-suite/app). Two runs at once would interleave in that one
+# directory and leave a half-built tree, which manual dispatch made unlikely and
+# auto-deploy makes routine. Queue instead of cancelling: a cancelled run can
+# stop mid npm ci and strand the VM with no node_modules.
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
 
 jobs:
   deploy:
