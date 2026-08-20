@@ -108,8 +108,8 @@ export async function BoardResolutionsPanel() {
                   <tr key={m.meeting_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{m.title}</td>
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      {m.scheduled_at || m.meeting_date || m.date
-                        ? new Date(m.scheduled_at ?? m.meeting_date ?? m.date ?? "").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                      {m.scheduled_at
+                        ? new Date(m.scheduled_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
                         : "—"}
                     </td>
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{m.location ?? "—"}</td>
