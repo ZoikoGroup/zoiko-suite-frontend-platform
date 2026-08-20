@@ -46,6 +46,8 @@ export async function ApplicablePolicyPanel({
     policyType,
     tenantId: scope === "global" ? undefined : session.tenantId,
     legalEntityId: scope === "entity" ? session.legalEntityId : undefined,
+    // A global-only read still has to say who is asking.
+    callerTenantId: session.tenantId,
   });
 
   if (!result.ok) {

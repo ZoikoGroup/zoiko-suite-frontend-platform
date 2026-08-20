@@ -1,20 +1,36 @@
-import { CloudOff, SlidersHorizontal } from "lucide-react";
+import { CloudOff, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { PanelEmptyState, JsonBlock, CopyableId } from "@/components/admin/shared";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listConfigEntries } from "@/lib/api/configuration";
 import { formatDateTime } from "@/lib/format";
 
 /**
  * Currently-effective config entries from configuration-feature-flag-svc.
  *
- * No tenant filter is applied. On this route an omitted tenant_id means "no
- * filter", so this returns entries across every tenant AND the environment-wide
- * globals — which is the right view for an admin console, and the opposite of
- * what an omitted tenant_id means on the single-key lookup. The scope column
- * distinguishes them.
+ * Scoped to the caller's own tenant plus the environment-wide globals that apply
+ * to it. This table used to rely on an omitted tenant_id meaning "no filter" on
+ * that route, so it rendered every tenant's configuration — a cross-tenant read
+ * dressed as an admin view. The scope column still distinguishes a tenant row
+ * from a global one, which is now the only distinction left to make.
  */
 export async function ConfigEntryTable() {
-  const result = await listConfigEntries();
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+
+  if (!session) {
+    return (
+      <PanelEmptyState
+        icon={ShieldAlert}
+        tone="warning"
+        label="No active session"
+        hint="Sign in again to read the effective configuration."
+      />
+    );
+  }
+
+  const result = await listConfigEntries(session.tenantId);
 
   if (!result.ok) {
     return (

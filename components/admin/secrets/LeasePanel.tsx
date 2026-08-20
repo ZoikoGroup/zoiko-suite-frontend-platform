@@ -1,9 +1,11 @@
-import { CloudOff, KeyRound } from "lucide-react";
+import { cookies } from "next/headers";
+import { CloudOff, KeyRound, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { PanelEmptyState, CopyableId, Pagination } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listLeases,
   summariseLeases,
@@ -35,11 +37,32 @@ export async function LeasePanel({
   filters: LeaseFilters;
   params: Record<string, string | string[] | undefined>;
 }) {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+
+  if (!session) {
+    return (
+      <PanelEmptyState
+        icon={ShieldAlert}
+        tone="warning"
+        label="No active session"
+        hint="Sign in again to read issued leases."
+      />
+    );
+  }
+
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
   // One row beyond the page — see AuditPanel: the probe row is how a next page
   // is detected on a route that reports no total.
-  const result = await listLeases({ ...filters, limit: limit + 1, offset });
+  //
+  // Scoped to the caller's own tenant. The service treated its tenant filter as
+  // optional, so an unfiltered read listed every tenant's live leases.
+  const result = await listLeases(session.tenantId, {
+    ...filters,
+    limit: limit + 1,
+    offset,
+  });
 
   if (!result.ok) {
     return (

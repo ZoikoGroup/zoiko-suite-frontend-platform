@@ -5,6 +5,12 @@
 // async functions, so the initial-state constant cannot live there.
 
 import type { InvoiceStatus } from "@/lib/api/accounts-payable";
+// Aliased: accounts-payable-svc and accounts-receivable-svc both call their
+// lifecycle enum InvoiceStatus and they share no values at all — RECEIVED /
+// VALIDATED / APPROVED / PAYMENT_REQUESTED against ISSUED / SENT / OVERDUE /
+// PAID. Importing both under one name is how a payables stage would end up
+// annotating a receivable.
+import type { InvoiceStatus as CustomerInvoiceStatus } from "@/lib/api/accounts-receivable";
 import type { StatementLineStatus } from "@/lib/api/bank-reconciliation";
 import type { JournalStatus } from "@/lib/api/general-ledger";
 
@@ -173,6 +179,80 @@ export type ReconciliationActionState = {
 };
 
 export const IDLE_RECONCILIATION_STATE: ReconciliationActionState = { status: "idle", message: "" };
+
+// ─── accounts-receivable-svc ─────────────────────────────────────────────────
+
+/**
+ * Outcomes of a receivables write.
+ *
+ * Four of these are deliberately not `error`, because each is a true statement
+ * about the invoice rather than a failure of the request:
+ *
+ *  - `replayed` — the service is idempotent on (tenant_id, correlation_id) and
+ *    resolved a retry to the ORIGINAL invoice. Reporting it as a second issue
+ *    would overstate the receivable, which is what the key exists to prevent.
+ *  - `not-yet-due` — the invoice was marked overdue before its due date had
+ *    passed, and refused. That refusal is the control working: receivable.overdue
+ *    is what aging and impairment count, so an invoice that is merely unpaid must
+ *    not be able to present itself as delinquent early.
+ *  - `unledgered` — recording payment was refused because general-ledger-svc
+ *    holds no FINALIZED journal correlated to this invoice. Kept well apart from
+ *    `error` because nothing is broken: cash is only recognised against a
+ *    receivable the books already carry, and the remedy is to post the journal.
+ *    This is the outcome an operator will meet most often, so it has to read as
+ *    an instruction rather than as a fault.
+ *  - `out-of-sequence` — a 422 on a transition. The invoice was not in the status
+ *    that transition moves out of, usually because the register on screen is a
+ *    moment behind.
+ *  - `duplicate` — this customer already has an invoice under that number. A fact
+ *    about the register with a remedy the operator can act on, and only
+ *    expressible since the service stopped reporting the collision as a 503
+ *    store_unavailable that was indistinguishable from a dead database.
+ *  - `unbalanced` — the books hold a finalized journal for this invoice but for a
+ *    DIFFERENT amount. Kept apart from `unledgered` because the remedy is opposite:
+ *    there is nothing to post, there is something to correct. Until the amount was
+ *    checked at all, any finalized journal cleared any invoice whatever its size.
+ *  - `entity-refused` — the legal entity is not in the caller's tenant, or is not
+ *    ACTIVE. A governance answer about attribution, not a fault, and never rendered
+ *    red: the control is working.
+ */
+export type ReceivableActionState = {
+  status:
+    | "idle"
+    | "issued"
+    | "replayed"
+    | "advanced"
+    | "not-yet-due"
+    | "unledgered"
+    | "unbalanced"
+    | "entity-refused"
+    | "out-of-sequence"
+    | "duplicate"
+    | "error";
+  message: string;
+  /** Echoed back so the operator has the id without hunting the register for the
+   *  row they just created. */
+  invoiceId?: string;
+  stage?: CustomerInvoiceStatus;
+};
+
+export const IDLE_RECEIVABLE_STATE: ReceivableActionState = { status: "idle", message: "" };
+
+/**
+ * The three hops the register's row buttons can request.
+ *
+ * A closed set, re-checked inside the action, because a Server Action is
+ * reachable by direct POST and an arbitrary string must not become a URL path
+ * segment. The legacy client had no such set: it posted a from/to pair to
+ * `/v1/invoices/{id}/transition`, a route the service does not have, and its mock
+ * fallback then reported the resulting 404 as a successful status change.
+ */
+export const RECEIVABLE_HOPS = ["send", "overdue", "pay"] as const;
+export type ReceivableHop = (typeof RECEIVABLE_HOPS)[number];
+
+export function isReceivableHop(value: string): value is ReceivableHop {
+  return (RECEIVABLE_HOPS as readonly string[]).includes(value);
+}
 
 /** How many line rows the record-journal form starts with and allows.
  *

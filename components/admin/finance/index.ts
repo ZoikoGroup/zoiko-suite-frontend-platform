@@ -1,4 +1,3 @@
-export { AccountsReceivableView } from "./accounts-receivable-view";
 export { FinanceActionHeader } from "./FinanceActionHeader";
 export { FinanceSummaryBar } from "./FinanceSummaryBar";
 export { FinanceProcessTimeline } from "./FinanceProcessTimeline";
@@ -26,3 +25,12 @@ export { BankReconciliationPanel } from "./BankReconciliationPanel";
 export { StatementLineTable } from "./StatementLineTable";
 export { IngestStatementLineForm } from "./IngestStatementLineForm";
 export { CompleteStatementForm } from "./CompleteStatementForm";
+// accounts-receivable-svc (:8101) — live and writable, and the last service on
+// this console to leave the legacy lib/api-client.ts layer. AccountsReceivableView
+// stood here until 19 Aug: it read three hardcoded invoices whenever the service
+// refused (which was always, no bundle having granted AR_*), let the browser pick
+// its own tenant from a dropdown, and posted status changes to a /transition route
+// the service does not have.
+export { AccountsReceivablePanel } from "./AccountsReceivablePanel";
+export { ReceivablesTable } from "./ReceivablesTable";
+export { IssueInvoiceForm } from "./IssueInvoiceForm";

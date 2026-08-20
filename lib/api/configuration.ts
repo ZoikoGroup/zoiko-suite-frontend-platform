@@ -47,12 +47,27 @@ export type UpsertFlagInput = {
   principalId: string;
   /** Omit for the environment-wide global default. */
   tenantId?: string;
+  /** The caller's own verified tenant, forwarded as X-Tenant-Id. Distinct from
+   *  `tenantId`, which is the SCOPE being written and may be absent (global). */
+  callerTenantId: string;
 };
 
-/** Current version of every feature flag, newest-changed first. */
-export async function listFeatureFlags(environment?: string): Promise<ApiResult<FeatureFlag[]>> {
+/**
+ * Current version of every feature flag in the caller's tenant, plus the
+ * environment-wide globals that apply to it.
+ *
+ * `callerTenantId` is required. An omitted tenant filter used to mean "no
+ * filter" on this route — every tenant's flags — so the console was reading
+ * other tenants' feature state. The service now scopes the list to the verified
+ * header and includes the globals alongside it.
+ */
+export async function listFeatureFlags(
+  callerTenantId: string,
+  environment?: string,
+): Promise<ApiResult<FeatureFlag[]>> {
   const result = await apiGet<FeatureFlag[]>("configuration", "/v1/flags", {
     query: { environment },
+    identity: { tenantId: callerTenantId },
   });
 
   if (!result.ok) return result;
@@ -69,9 +84,13 @@ export async function listFeatureFlags(environment?: string): Promise<ApiResult<
   return { ok: true, data: flags };
 }
 
-export async function listConfigEntries(environment?: string): Promise<ApiResult<ConfigEntry[]>> {
+export async function listConfigEntries(
+  callerTenantId: string,
+  environment?: string,
+): Promise<ApiResult<ConfigEntry[]>> {
   const result = await apiGet<ConfigEntry[]>("configuration", "/v1/config", {
     query: { environment },
+    identity: { tenantId: callerTenantId },
   });
 
   if (!result.ok) return result;
@@ -94,16 +113,21 @@ export async function listConfigEntries(environment?: string): Promise<ApiResult
 export async function upsertFeatureFlag(
   input: UpsertFlagInput,
 ): Promise<ApiWriteResult<FeatureFlag>> {
-  return apiPost<FeatureFlag>("configuration", "/v1/flags", {
-    key: input.key,
-    enabled: input.enabled,
-    environment: input.environment,
-    created_by_principal_id: input.principalId,
-    ...(input.rolloutPercentage === undefined
-      ? {}
-      : { rollout_percentage: input.rolloutPercentage }),
-    ...(input.tenantId ? { tenant_id: input.tenantId } : {}),
-  });
+  return apiPost<FeatureFlag>(
+    "configuration",
+    "/v1/flags",
+    {
+      key: input.key,
+      enabled: input.enabled,
+      environment: input.environment,
+      created_by_principal_id: input.principalId,
+      ...(input.rolloutPercentage === undefined
+        ? {}
+        : { rollout_percentage: input.rolloutPercentage }),
+      ...(input.tenantId ? { tenant_id: input.tenantId } : {}),
+    },
+    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+  );
 }
 
 // ─── Config entries, and single-key lookups ──────────────────────────────────
@@ -114,11 +138,15 @@ export async function upsertFeatureFlag(
 // default. So a 404 from GET /v1/flags/{key}?environment=prod does not mean the
 // flag is unset; it means it is unset *at that exact scope*, and a global default
 // may well exist. The list endpoints behave differently again: omitting
-// tenant_id there means "no filter", returning entries across all tenants rather
-// than only the global ones.
+// tenant_id there is no longer a filter at all: the list is scoped to the
+// caller's verified tenant plus the globals that apply to it. It used to mean
+// "no filter", returning entries across ALL tenants, which is what made this
+// console's tables a cross-tenant read.
 //
-// Those two readings of an omitted tenant_id are opposite, which is exactly the
-// kind of thing a console should state rather than let a reader assume.
+// So an omitted tenant_id still means two different things on the two route
+// shapes — "exactly the global scope" on a single-key lookup, "my tenant and the
+// globals" on a list — which is worth stating rather than letting a reader
+// assume.
 
 export type UpsertConfigInput = {
   key: string;
@@ -129,6 +157,8 @@ export type UpsertConfigInput = {
   /** Omit for the environment-wide global default. */
   tenantId?: string;
   principalId: string;
+  /** The caller's own verified tenant, forwarded as X-Tenant-Id. */
+  callerTenantId: string;
 };
 
 /**
@@ -141,13 +171,18 @@ export type UpsertConfigInput = {
 export async function upsertConfigEntry(
   input: UpsertConfigInput,
 ): Promise<ApiWriteResult<ConfigEntry>> {
-  return apiPost<ConfigEntry>("configuration", "/v1/config", {
-    key: input.key,
-    value: input.value,
-    environment: input.environment,
-    created_by_principal_id: input.principalId,
-    ...(input.tenantId ? { tenant_id: input.tenantId } : {}),
-  });
+  return apiPost<ConfigEntry>(
+    "configuration",
+    "/v1/config",
+    {
+      key: input.key,
+      value: input.value,
+      environment: input.environment,
+      created_by_principal_id: input.principalId,
+      ...(input.tenantId ? { tenant_id: input.tenantId } : {}),
+    },
+    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+  );
 }
 
 /**
@@ -159,10 +194,12 @@ export async function upsertConfigEntry(
 export async function getConfigEntry(
   key: string,
   environment: string,
+  callerTenantId: string,
   tenantId?: string,
 ): Promise<ApiResult<ConfigEntry>> {
   return apiGet<ConfigEntry>("configuration", `/v1/config/${encodeURIComponent(key)}`, {
     query: { environment, tenant_id: tenantId },
+    identity: { tenantId: callerTenantId },
   });
 }
 
@@ -171,10 +208,12 @@ export async function getConfigEntry(
 export async function getFeatureFlag(
   key: string,
   environment: string,
+  callerTenantId: string,
   tenantId?: string,
 ): Promise<ApiResult<FeatureFlag>> {
   return apiGet<FeatureFlag>("configuration", `/v1/flags/${encodeURIComponent(key)}`, {
     query: { environment, tenant_id: tenantId },
+    identity: { tenantId: callerTenantId },
   });
 }
 

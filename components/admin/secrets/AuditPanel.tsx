@@ -1,9 +1,11 @@
-import { CloudOff, FileClock } from "lucide-react";
+import { cookies } from "next/headers";
+import { CloudOff, FileClock, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { PanelEmptyState, CopyableId, Pagination } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listSecretAudit, type AuditFilters } from "@/lib/api/secret-vault";
 
 const EVENT_TONE: Record<string, "success" | "warning" | "danger" | "neutral" | "info"> = {
@@ -32,11 +34,33 @@ export async function AuditPanel({
   filters: AuditFilters;
   params: Record<string, string | string[] | undefined>;
 }) {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+
+  if (!session) {
+    return (
+      <PanelEmptyState
+        icon={ShieldAlert}
+        tone="warning"
+        label="No active session"
+        hint="Sign in again to read the secret access log."
+      />
+    );
+  }
+
   const limit = filters.limit ?? 50;
   const offset = filters.offset ?? 0;
   // One row beyond the page: its presence is the only signal a next page exists,
   // since this route returns a bare array with no total.
-  const result = await listSecretAudit({ ...filters, limit: limit + 1, offset });
+  //
+  // The log is scoped to the caller's own tenant. The service's audit filter had
+  // no tenant field at all, so this panel used to render every tenant's
+  // secret-access history — principals and secret paths included.
+  const result = await listSecretAudit(session.tenantId, {
+    ...filters,
+    limit: limit + 1,
+    offset,
+  });
 
   if (!result.ok) {
     return (
