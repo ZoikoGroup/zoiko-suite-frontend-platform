@@ -41,6 +41,11 @@ export type ListDecisionsParams = {
   actor?: string;
   action?: string;
   limit?: number;
+  /** Required in practice. governance-decision-log-svc reads the tenant from
+   *  X-Tenant-Id and answers 400 `missing_tenant_id` without it — every read in
+   *  this client used to omit it, so the decision log rendered as "those
+   *  filters were rejected" on a request that carried no filters at all. */
+  identity?: Identity;
 };
 
 /**
@@ -52,6 +57,7 @@ export async function listDecisions(
   params: ListDecisionsParams = {},
 ): Promise<ApiResult<DecisionLogEntry[]>> {
   const result = await apiGet<GovernanceDecision[]>("governance", "/v1/decisions", {
+    identity: params.identity,
     query: {
       entity: params.entity,
       actor: params.actor,
@@ -98,8 +104,12 @@ export type DecisionStats = {
  * row cap is the backend's maximum page size; beyond that these counts would
  * need real server-side aggregation.
  */
-export async function getDecisionStats(trendDays = 14): Promise<ApiResult<DecisionStats>> {
+export async function getDecisionStats(
+  trendDays = 14,
+  identity?: Identity,
+): Promise<ApiResult<DecisionStats>> {
   const result = await apiGet<GovernanceDecision[]>("governance", "/v1/decisions", {
+    identity,
     query: { limit: 200 },
   });
 
@@ -278,6 +288,7 @@ export type DecisionFilters = {
   /** Service caps at 200 and defaults to 50. */
   limit?: number;
   offset?: number;
+  identity?: Identity;
 };
 
 /**
@@ -291,6 +302,7 @@ export async function listDecisionRecords(
   filters: DecisionFilters = {},
 ): Promise<ApiResult<GovernanceDecision[]>> {
   const result = await apiGet<GovernanceDecision[]>("governance", "/v1/decisions", {
+    identity: filters.identity,
     query: {
       actor: filters.actor,
       entity: filters.entity,
@@ -324,10 +336,12 @@ export async function listDecisionRecords(
  */
 export async function getDecision(
   decisionId: string,
+  identity?: Identity,
 ): Promise<ApiResult<GovernanceDecision>> {
   return apiGet<GovernanceDecision>(
     "governance",
     `/v1/decisions/${encodeURIComponent(decisionId)}`,
+    { identity },
   );
 }
 

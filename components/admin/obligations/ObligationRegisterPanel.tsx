@@ -53,6 +53,16 @@ export async function ObligationRegisterPanel({
 
   const [obligations, jurisdictions] = await Promise.all([
     listObligations({
+      // obligations-svc requires a verified principal and tenant on every read.
+      // This panel decoded the session to check it existed and then never sent
+      // it, so the register answered 401 identity_missing and rendered as
+      // "unavailable" — the one panel on the page that was missed when identity
+      // was threaded through this client.
+      identity: {
+        principalId: session.principalId,
+        tenantId: session.tenantId,
+        legalEntityId: session.legalEntityId,
+      },
       legalEntityId: allEntities ? undefined : session.legalEntityId,
       jurisdictionId,
       obligationType,

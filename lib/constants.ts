@@ -17,7 +17,9 @@ import {
   KeyRound,
   Building2,
   FileJson,
-  Bot,
+  Bell,
+  Globe2,
+  FileText,
 } from "lucide-react";
 
 export type DomainKey =
@@ -27,7 +29,11 @@ export type DomainKey =
   | "legal"
   | "tax"
   | "compliance"
+  | "jurisdictions"
+  | "delegations"
+  | "documents"
   | "commercial-ops"
+  | "purchase-requests"
   | "audit-events";
 
 export type DomainStatus = "operational" | "attention" | "action-required";
@@ -158,6 +164,36 @@ export const DOMAINS: Domain[] = [
     ],
   },
   {
+    key: "documents",
+    label: "Document Vault",
+    href: "/admin/documents",
+    icon: FileText,
+    purpose:
+      "The store of record for governed documents — append-only version lineage, checksum-verified content, and an access log of every read.",
+    status: "operational",
+    coreServices: ["Document Vault Service"],
+  },
+  {
+    key: "delegations",
+    label: "Delegated Authority",
+    href: "/admin/delegations",
+    icon: KeyRound,
+    purpose:
+      "The register of who may act for whom — time-bound, entity-scoped grants of one principal's authority to another, revocable and never deleted.",
+    status: "operational",
+    coreServices: ["Delegated Authority Service"],
+  },
+  {
+    key: "jurisdictions",
+    label: "Jurisdictions & Rules",
+    href: "/admin/jurisdictions",
+    icon: Globe2,
+    purpose:
+      "Govern the jurisdiction register every other service defers to — nested jurisdictions, effective-dated applicability rules, resolved rule packs, and tracked legal drift.",
+    status: "operational",
+    coreServices: ["Jurisdiction Rules Service"],
+  },
+  {
     key: "commercial-ops",
     label: "Commercial Ops",
     href: "/admin/commercial-ops",
@@ -173,6 +209,16 @@ export const DOMAINS: Domain[] = [
       "Vendor Due Diligence Service",
       "Spend Controls Service",
     ],
+  },
+  {
+    key: "purchase-requests",
+    label: "Purchase Requests",
+    href: "/admin/purchase-requests",
+    icon: ClipboardList,
+    purpose:
+      "Govern the requisition lifecycle — raise, approve and reject requests before any purchase order can be issued against them.",
+    status: "operational",
+    coreServices: ["Purchase Request Service"],
   },
   {
     key: "audit-events",
@@ -218,7 +264,7 @@ export const PLATFORM_NAV = [
   // Event contracts constrain every domain rather than belonging to one, so
   // this sits with the platform services and not under a business area.
   { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
-  { label: "AI Governance", href: "/admin/ai-governance", icon: Bot },
+  { label: "Notifications", href: "/admin/notifications", icon: Bell },
 ];
 
 export const SECONDARY_NAV = [

@@ -38,6 +38,14 @@ export function PanelEmptyState({
 
   return (
     <div
+      // Marks the degraded/empty state so it can be detected without reading
+      // prose. Every panel here falls back to this component when its service
+      // is unreachable, and that fallback renders perfectly — so "the page
+      // loaded" proves nothing on its own. Searching the page text for
+      // "unavailable" is the obvious alternative and it is wrong: several pages
+      // EXPLAIN unreachability in their own static copy, and a verification
+      // sweep matched that copy and reported a working page as broken.
+      data-empty-state={tone}
       className={cn(
         "flex flex-col items-center justify-center gap-3 px-4 py-10 text-center",
         className,

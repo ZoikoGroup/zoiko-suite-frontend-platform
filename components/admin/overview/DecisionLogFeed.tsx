@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { CheckCircle2, AlertCircle, XCircle, ScrollText, CloudOff } from "lucide-react";
 import { listDecisions, type DecisionOutcome } from "@/lib/api/governance";
 import { PanelEmptyState } from "@/components/admin/shared";
@@ -26,7 +28,14 @@ const OUTCOME_CONFIG: Record<
 
 /** Live governance decisions from governance-decision-log-svc (:8083). */
 export async function DecisionLogFeed() {
-  const result = await listDecisions({ limit: 8 });
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  const identity = {
+    principalId: session?.principalId,
+    tenantId: session?.tenantId,
+    legalEntityId: session?.legalEntityId,
+  };
+  const result = await listDecisions({ limit: 8, identity });
 
   if (!result.ok) {
     return (

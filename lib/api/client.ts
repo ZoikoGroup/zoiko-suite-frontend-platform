@@ -23,6 +23,24 @@ export type ApiError = {
   kind: "unreachable" | "timeout" | "http" | "malformed";
   status?: number;
   message: string;
+  /**
+   * The parsed error body, when the service sent one.
+   *
+   * `message` folds an error body into a single human string, which is right
+   * for the great majority of refusals and destructive for the few that carry
+   * STRUCTURED findings. schema-registry-svc answers a breaking change with
+   * `{error, violations: [...]}` — the violations name the exact field that
+   * broke, and folding kept only the word "incompatible schema change". The
+   * console then could not tell that 409 apart from the other 409 the same
+   * endpoint returns (a lost version race) and reported a breaking change as a
+   * race, telling the reader to retry when what they had to do was change the
+   * schema. Retrying produced the same message forever.
+   *
+   * Scraping the array back out of the folded string is the wrong fix — the
+   * same conclusion financial-close-svc's structured 422 reached. The body is
+   * kept intact here instead, and callers that need a field read it directly.
+   */
+  body?: unknown;
 };
 
 /**
@@ -113,7 +131,7 @@ export async function apiGet<T>(
     // usually a bad query parameter and the service says which one — answering
     // `invalid_from` or `missing_field: tenant_id`. Discarding that left the UI
     // with a bare status code and no way to explain a fixable mistake.
-    const detail = await readErrorDetail(response);
+    const { detail, body: errorBody } = await readErrorDetail(response);
     return {
       ok: false,
       error: {
@@ -122,6 +140,7 @@ export async function apiGet<T>(
         message: detail
           ? `${serviceLabel(service)} rejected the request (${response.status}) — ${detail}`
           : `${serviceLabel(service)} returned ${response.status} for ${path}`,
+        body: errorBody,
       },
     };
   }
@@ -145,13 +164,17 @@ export async function apiGet<T>(
  * back under `error`. Collect all of them rather than picking one and silently
  * losing the others.
  */
-async function readErrorDetail(response: Response): Promise<string> {
+async function readErrorDetail(response: Response): Promise<{ detail: string; body?: unknown }> {
   return response
     .json()
-    .then((body: { error?: string; field?: string; message?: string; detail?: string }) =>
-      [body.error, body.field, body.message, body.detail].filter(Boolean).join(": "),
-    )
-    .catch(() => "");
+    .then((body: { error?: string; field?: string; message?: string; detail?: string }) => ({
+      detail: [body.error, body.field, body.message, body.detail].filter(Boolean).join(": "),
+      // Returned alongside the folded string, not instead of it: a caller that
+      // needs a structured member (schema-registry-svc's `violations`) reads it
+      // here rather than trying to recover it from prose. See ApiError.body.
+      body: body as unknown,
+    }))
+    .catch(() => ({ detail: "" }));
 }
 
 /** Successful write, carrying the backend's status so callers can tell 201 from 200. */
@@ -259,7 +282,7 @@ async function apiWrite<T>(
   }
 
   if (!response.ok) {
-    const detail = await readErrorDetail(response);
+    const { detail, body: errorBody } = await readErrorDetail(response);
     return {
       ok: false,
       error: {
@@ -268,6 +291,7 @@ async function apiWrite<T>(
         message: detail
           ? `${serviceLabel(service)} rejected the write (${response.status}) — ${detail}`
           : `${serviceLabel(service)} returned ${response.status} for ${path}`,
+        body: errorBody,
       },
     };
   }

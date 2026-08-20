@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { LineChart } from "lucide-react";
 import { getDecisionStats } from "@/lib/api/governance";
 import { PanelEmptyState } from "@/components/admin/shared";
@@ -8,7 +10,14 @@ import { GovernedActionsChart } from "./GovernedActionsChart";
  * client-side chart.
  */
 export async function GovernedActionsPanel() {
-  const stats = await getDecisionStats(14);
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  const identity = {
+    principalId: session?.principalId,
+    tenantId: session?.tenantId,
+    legalEntityId: session?.legalEntityId,
+  };
+  const stats = await getDecisionStats(14, identity);
 
   if (!stats.ok) {
     return (

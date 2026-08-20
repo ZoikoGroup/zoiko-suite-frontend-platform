@@ -14,75 +14,84 @@ const DEFAULTS = {
   configuration: "http://localhost:8086",
   secretVault: "http://localhost:8087",
   obligations: "http://localhost:8088",
+  // Read-only here. obligations-svc validates every jurisdiction_id against this
+  // service on the write path and fails closed, so the console reads the same
+  // register to offer a picker — a free-text UUID field would produce
+  // jurisdiction_not_found for anything but a copy-paste.
   jurisdictionRules: "http://localhost:8082",
   purchaseRequest: "http://localhost:8100",
   contracts: "http://localhost:8119",
-  purchaseOrder: "http://localhost:8139",
+  // 8129. This said 8112, which compose also gave to benefits-svc — the two
+  // could never both start. Traefik's all-services.yml has always routed this
+  // service to :8129 and .env.local has always said 8129, so 8112 was wrong in
+  // three places at once; compose now agrees with the other two.
+  purchaseOrder: "http://localhost:8129",
   evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
+  // 8098. The hub of the Finance domain — treasury, financial-close,
+  // bank-reconciliation, intercompany and consolidation all read it — and the
+  // service behind the journal register on /admin/finance.
+  generalLedger: "http://localhost:8098",
+  // 8102. Reconciles bank statement lines against general-ledger journals, so
+  // it reads the ledger above rather than owning any postings of its own.
+  bankReconciliation: "http://localhost:8102",
+  // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is
+  // in the compose file and in health.ts; the stale comment was the only place
+  // that disagreed, and nothing called it, so nothing caught it.
   accountsPayable: "http://localhost:8099",
+  // 8131. CommercialOpsActionHeader had this as 8113 — transposed digits, the
+  // same class of error as accounts-payable-svc's 8102, and equally uncaught
+  // because the only code path that used a spend-controls URL pointed at a route
+  // the service does not have.
   spendControls: "http://localhost:8131",
+  // 8135, per compose. The service's own config.Load defaulted PORT to 8132 — a
+  // port nothing in this platform uses — so it was reachable only because compose
+  // overrides PORT. Fixed there too; this is the number both now agree on.
   vendorDueDiligence: "http://localhost:8135",
   auditEventStore: "http://localhost:8084",
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
   financialClose: "http://localhost:8104",
-
-  // ── Finance Domain ───────────────────────────────────────────────────────
-  generalLedger: "http://localhost:8098",
-  bankReconciliation: "http://localhost:8102",
-  treasury: "http://localhost:8103",
-  intercompanyAccounting: "http://localhost:8105",
-  consolidation: "http://localhost:8106",
-  invoiceApproval: "http://localhost:8107",
-
-  // ── HR & Workforce Domain ────────────────────────────────────────────────
-  employeeMaster: "http://localhost:8108",
-  employmentContracts: "http://localhost:8109",
-  payrollRun: "http://localhost:8110",
-  compensation: "http://localhost:8111",
-  benefits: "http://localhost:8112",
-  payrollTax: "http://localhost:8113",
-  payrollExceptions: "http://localhost:8114",
-  leaveAbsence: "http://localhost:8115",
-  orgStructure: "http://localhost:8116",
-  offboardingSeverance: "http://localhost:8117",
-  workforceCompliance: "http://localhost:8118",
-  performanceReview: "http://localhost:8139",
-
-  // ── Legal & Corporate Governance ─────────────────────────────────────────
-  clauseTemplate: "http://localhost:8120",
-  obligationTracking: "http://localhost:8121",
+  // 8133, per compose. notification-svc delivers governed notifications via a
+  // documented stub adapter (see lib/api/notifications.ts) — no provider is
+  // wired up on the platform yet.
+  notification: "http://localhost:8133",
+  // 8122, per compose. board-resolutions-svc owns board meetings and their
+  // resolutions; the write path authorizes MEETING_CREATE / RESOLUTION_CREATE /
+  // RESOLUTION_VOTE / RESOLUTION_PASS against the legal entity and enforces
+  // segregation of duties on the pass (the drafter may not pass their own
+  // resolution).
   boardResolutions: "http://localhost:8122",
-  corporateActions: "http://localhost:8123",
-  counterpartyManagement: "http://localhost:8124",
-  carta: "http://localhost:8142",
-
-  // ── Compliance & Risk Domain ─────────────────────────────────────────────
-  complianceStatus: "http://localhost:8132",
-  exceptionEscalation: "http://localhost:8133",
-  anomalyDetection: "http://localhost:8134",
-  complianceRiskScoring: "http://localhost:8136",
-  decisionSupport: "http://localhost:8138",
-
+  // 8136, per compose. delegated-authority-svc holds the register of who may
+  // act for whom -- time-bound, entity-scoped grants of one principal's
+  // authority to another.
+  delegatedAuthority: "http://localhost:8136",
+  // 8094, per compose. document-vault-svc is the store of record for governed
+  // documents: append-only version lineage, a SHA-256 checksum re-verified on
+  // every read, and an append-only access log of who read what.
+  documentVault: "http://localhost:8094",
   // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
+  //
+  // TWO OF THESE COLLIDE with entries above, and the collision is inherited
+  // from the backend rather than introduced here: withholding-tax-svc's config
+  // defaults to 8129, which is purchase-order-svc's port, and
+  // filing-preparation-svc's defaults to 8130, which is
+  // evidence-requirements-svc's. Neither tax service appears in the backend
+  // compose file, so neither has ever started and the clash has never bitten —
+  // but it means a call made here to withholdingTax or filingPreparation
+  // reaches purchase-order-svc or evidence-requirements-svc and gets a
+  // confusing answer instead of a connection refused.
+  //
+  // Left as-is deliberately. Reassigning a service's port is the backend's
+  // allocation to make, not a merge resolution's; the values here match what
+  // those services actually declare today.
   taxRules: "http://localhost:8125",
   taxDetermination: "http://localhost:8126",
   vatGst: "http://localhost:8127",
   corporateTax: "http://localhost:8128",
   withholdingTax: "http://localhost:8129",
   filingPreparation: "http://localhost:8130",
-  filingTracker: "http://localhost:8131",
   taxAuthorityInterface: "http://localhost:8147",
-
-  // ── AI Governance, Security & Access ─────────────────────────────────────
-  aiGovernance: "http://localhost:8146",
-  documentVault: "http://localhost:8094",
-  authorization: "http://localhost:8089",
-  accessControl: "http://localhost:8137",
-  procurementWorkflow: "http://localhost:8134",
-  notification: "http://localhost:8133",
-
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -105,12 +114,17 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   configuration: "/configuration-feature-flag-svc",
   secretVault: "/secret-vault-integration-svc",
   obligations: "/obligations-svc",
+  // The compose KEY is `jurisdiction-svc` but container_name — and therefore the
+  // generated Traefik prefix — is `jurisdiction-rules-svc`. Using the key here
+  // would 404 in a way that looks like a dead service.
   jurisdictionRules: "/jurisdiction-rules-svc",
   purchaseRequest: "/purchase-request-svc",
   contracts: "/contract-lifecycle-svc",
   purchaseOrder: "/purchase-order-svc",
   evidence: "/evidence-requirements-svc",
   accountsReceivable: "/accounts-receivable-svc",
+  generalLedger: "/general-ledger-svc",
+  bankReconciliation: "/bank-reconciliation-svc",
   accountsPayable: "/accounts-payable-svc",
   spendControls: "/spend-controls-svc",
   vendorDueDiligence: "/vendor-due-diligence-svc",
@@ -118,44 +132,10 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   tenantRegistry: "/tenant-entity-registry-svc",
   schemaRegistry: "/schema-registry-svc",
   financialClose: "/financial-close-svc",
-
-  // Finance Domain
-  generalLedger: "/general-ledger-svc",
-  bankReconciliation: "/bank-reconciliation-svc",
-  treasury: "/treasury-svc",
-  intercompanyAccounting: "/intercompany-accounting-svc",
-  consolidation: "/consolidation-svc",
-  invoiceApproval: "/invoice-approval-svc",
-
-  // HR & Workforce Domain
-  employeeMaster: "/employee-master-svc",
-  employmentContracts: "/employment-contracts-svc",
-  payrollRun: "/payroll-run-svc",
-  compensation: "/compensation-svc",
-  benefits: "/benefits-svc",
-  payrollTax: "/payroll-tax-svc",
-  payrollExceptions: "/payroll-exceptions-svc",
-  leaveAbsence: "/leave-absence-svc",
-  orgStructure: "/org-structure-svc",
-  offboardingSeverance: "/offboarding-severance-svc",
-  workforceCompliance: "/workforce-compliance-svc",
-  performanceReview: "/performance-review-svc",
-
-  // Legal Domain
-  clauseTemplate: "/clause-template-svc",
-  obligationTracking: "/obligation-tracking-svc",
+  notification: "/notification-svc",
   boardResolutions: "/board-resolutions-svc",
-  corporateActions: "/corporate-actions-svc",
-  counterpartyManagement: "/counterparty-management-svc",
-  carta: "/carta-svc",
-
-  // Compliance Domain
-  complianceStatus: "/compliance-status-svc",
-  exceptionEscalation: "/exception-escalation-svc",
-  anomalyDetection: "/anomaly-detection-svc",
-  complianceRiskScoring: "/compliance-risk-scoring-svc",
-  decisionSupport: "/decision-support-svc",
-
+  delegatedAuthority: "/delegated-authority-svc",
+  documentVault: "/document-vault-svc",
   // Tax Domain
   taxRules: "/tax-rules-svc",
   taxDetermination: "/tax-determination-svc",
@@ -163,16 +143,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   corporateTax: "/corporate-tax-svc",
   withholdingTax: "/withholding-tax-svc",
   filingPreparation: "/filing-preparation-svc",
-  filingTracker: "/filing-tracker-svc",
   taxAuthorityInterface: "/tax-authority-interface-svc",
-
-  // AI Governance, Security & Access
-  aiGovernance: "/ai-governance-svc",
-  documentVault: "/document-vault-svc",
-  authorization: "/authorization-svc",
-  accessControl: "/access-control-svc",
-  procurementWorkflow: "/procurement-workflow-svc",
-  notification: "/notification-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
