@@ -1200,11 +1200,139 @@ serve(8129, "withholding-tax-svc", (m, p, q, b, send) => {
   return send(201, obl);
 });
 
-// 8130: filing-preparation-svc
+// 8130: filing-preparation-svc + evidence-requirements-svc (shared port, path-routed)
 let _draftSeq = 0;
-serve(8130, "filing-preparation-svc", (m, p, q, b, send) => {
+
+const EVIDENCE_REQUIREMENTS = [
+  {
+    evidence_requirement_id: "er-001",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: "22222222-2222-2222-2222-222222222222",
+    domain_code: "finance",
+    action_type: "JOURNAL_ENTRY_POST",
+    evidence_type: "APPROVAL_RECORD",
+    requirement_payload: { minimum_count: 1, description: "Controller approval required before posting" },
+    effective_from: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    created_by_principal_id: "33333333-3333-3333-3333-333333333333",
+    correlation_id: "corr-er-001"
+  },
+  {
+    evidence_requirement_id: "er-002",
+    tenant_id: "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: null,
+    domain_code: "commercial-ops",
+    action_type: "PURCHASE_ORDER_ISSUE",
+    evidence_type: "RECONCILIATION_PROOF",
+    requirement_payload: { minimum_count: 1, description: "Spend-control clearance snapshot" },
+    effective_from: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    created_by_principal_id: "33333333-3333-3333-3333-333333333333",
+    correlation_id: "corr-er-002"
+  }
+];
+
+const EVIDENCE_EVALUATIONS = [];
+
+serve(8130, "filing-preparation-svc+evidence-requirements-svc", (m, p, q, b, send) => {
+  // ── Evidence-requirements-svc routes (prefix: /v1/evidence-requirements, /v1/admin/evidence-requirements, /v1/evidence) ──
+  if (p.startsWith("/v1/evidence-requirements")) {
+    if (m === "GET") {
+      const id = p.replace("/v1/evidence-requirements/", "").replace("/v1/evidence-requirements", "");
+      if (id) {
+        const found = EVIDENCE_REQUIREMENTS.find(r => r.evidence_requirement_id === id);
+        return found ? send(200, found) : send(404, { error: "requirement_not_found" });
+      }
+      let results = [...EVIDENCE_REQUIREMENTS];
+      const tenantId = q.get("tenant_id");
+      if (tenantId) results = results.filter(r => r.tenant_id === tenantId);
+      const domainCode = q.get("domain_code");
+      if (domainCode) results = results.filter(r => r.domain_code === domainCode);
+      const actionType = q.get("action_type");
+      if (actionType) results = results.filter(r => r.action_type === actionType);
+      return send(200, results);
+    }
+    if (m === "POST") {
+      const newReq = {
+        evidence_requirement_id: "er-" + Date.now(),
+        tenant_id: b.tenant_id || "11111111-1111-1111-1111-111111111111",
+        legal_entity_id: b.legal_entity_id || null,
+        domain_code: b.domain_code || "finance",
+        action_type: b.action_type || "GENERAL",
+        evidence_type: b.evidence_type || "APPROVAL_RECORD",
+        requirement_payload: b.requirement_payload || {},
+        effective_from: b.effective_from || new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        created_by_principal_id: b.created_by_principal_id || "33333333-3333-3333-3333-333333333333",
+        correlation_id: b.correlation_id || "corr-" + Date.now()
+      };
+      EVIDENCE_REQUIREMENTS.unshift(newReq);
+      return send(201, newReq);
+    }
+  }
+
+  if (p.startsWith("/v1/admin/evidence-requirements")) {
+    if (m === "POST") {
+      if (p.includes("/end-date")) {
+        const id = p.split("/admin/evidence-requirements/")[1]?.split("/end-date")[0];
+        const req = EVIDENCE_REQUIREMENTS.find(r => r.evidence_requirement_id === id);
+        if (!req) return send(404, { error: "requirement_not_found" });
+        if (req.effective_to) return send(422, { error: "already_retired" });
+        req.effective_to = b.effective_to || new Date().toISOString();
+        return send(200, req);
+      }
+      const newReq = {
+        evidence_requirement_id: "er-" + Date.now(),
+        tenant_id: b.tenant_id || "11111111-1111-1111-1111-111111111111",
+        legal_entity_id: b.legal_entity_id || null,
+        domain_code: b.domain_code || "finance",
+        action_type: b.action_type || "GENERAL",
+        evidence_type: b.evidence_type || "APPROVAL_RECORD",
+        requirement_payload: b.requirement_payload || {},
+        effective_from: b.effective_from || new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        created_by_principal_id: "33333333-3333-3333-3333-333333333333",
+        correlation_id: b.correlation_id || "corr-" + Date.now()
+      };
+      EVIDENCE_REQUIREMENTS.unshift(newReq);
+      return send(201, newReq);
+    }
+  }
+
+  if (p.startsWith("/v1/evidence/evaluate")) {
+    if (m === "POST") {
+      const evaluation = {
+        evaluation_id: "ev-eval-" + Date.now(),
+        outcome: "SATISFIED",
+        unmet: null,
+        evaluated_at: new Date().toISOString(),
+        correlation_id: b.correlation_id || "corr-" + Date.now()
+      };
+      return send(200, evaluation);
+    }
+  }
+
+  if (p.startsWith("/v1/evidence/evaluations/")) {
+    if (m === "GET") {
+      const id = p.split("/v1/evidence/evaluations/")[1];
+      return send(200, {
+        evaluation_id: id,
+        tenant_id: "11111111-1111-1111-1111-111111111111",
+        legal_entity_id: "22222222-2222-2222-2222-222222222222",
+        domain_code: "finance",
+        action_type: "JOURNAL_ENTRY_POST",
+        outcome: "SATISFIED",
+        unmet_payload: null,
+        present_artifacts_payload: [],
+        evaluated_at: new Date().toISOString(),
+        evaluated_for_principal_id: "33333333-3333-3333-3333-333333333333",
+        correlation_id: "corr-eval-" + id
+      });
+    }
+  }
+
+  // ── Filing-preparation-svc routes ─────────────────────────────────────────────
   if (m === "GET") {
-    // Deduplicate in case of hot-reload or re-seed to prevent duplicate key issues in the UI
     const seen = new Set();
     const uniqueDrafts = FILING_DRAFTS.filter((d) => {
       if (seen.has(d.draft_id)) return false;
@@ -1217,7 +1345,6 @@ serve(8130, "filing-preparation-svc", (m, p, q, b, send) => {
     const draftId = p.split("/")[3] || "draft-finalized";
     return send(200, { draft_id: draftId, validation_status: "FINALIZED", filing_type: "VAT100_MTD", period_key: "2026-Q2" });
   }
-  // Use a monotonic counter (+ timestamp prefix) to guarantee unique IDs even when called in the same millisecond
   const uid = `draft-${Date.now()}-${++_draftSeq}`;
   const draft = { draft_id: uid, validation_status: "PREPARED", filing_type: "VAT100_MTD", period_key: "2026-Q2", status: "DRAFT", ...b, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
   FILING_DRAFTS.unshift(draft);

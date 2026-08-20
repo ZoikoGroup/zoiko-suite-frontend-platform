@@ -7,3 +7,4 @@ export { FinanceProcessTimeline } from "./FinanceProcessTimeline";
 export { AccountsPayablePanel } from "./AccountsPayablePanel";
 export { AccountsPayableTable } from "./AccountsPayableTable";
 export { RecordInvoiceForm } from "./RecordInvoiceForm";
+export { GeneralLedgerAndTreasuryPanel } from "./GeneralLedgerAndTreasuryPanel";

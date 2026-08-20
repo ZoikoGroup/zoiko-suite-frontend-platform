@@ -14,13 +14,12 @@ import type { DomainKey } from "@/lib/constants";
  * directory under `services/` AND a block in `deployments/docker-compose.yml`,
  * and the port is the host port that block publishes.
  *
- * That was not true of this table. Across the eight domains, **fourteen entries
+ * That was not true of this table. Across the eight domains, **thirteen entries
  * named services that do not exist** — no directory, no compose block, nothing:
  *
  *   payroll         wage-garnishment-svc, direct-deposit-svc, year-end-filing-svc
  *   hr              talent-management-svc, onboarding-svc
  *   legal           legal-approvals-svc
- *   tax             tax-authority-interface-svc
  *   commercial-ops  supplier-intelligence-svc, catalog-governance-svc,
  *                   requisition-engine-svc, contract-match-svc,
  *                   procurement-workflow-svc
@@ -44,7 +43,9 @@ import type { DomainKey } from "@/lib/constants";
  * Two services are deliberately NOT listed even though their directories exist:
  * `withholding-tax-svc` and `filing-preparation-svc` have no compose block, so
  * they cannot be running and listing them would guarantee the tax domain never
- * reads operational. Add them here when they are added to compose.
+ * reads operational. `evidence-requirements-svc` shares port 8130 with
+ * filing-preparation-svc in the mock runner (path-routed) and also has no
+ * compose block. Add them here when they are added to compose.
  */
 const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   finance: [
@@ -94,6 +95,9 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   compliance: [
     { name: "obligations-svc", port: 8088 },
     { name: "evidence-manifest-svc", port: 8095 },
+    { name: "filing-tracker-svc", port: 8136 },
+    { name: "compliance-status-svc", port: 8137 },
+    { name: "exception-escalation-svc", port: 8138 },
   ],
   "commercial-ops": [
     { name: "purchase-request-svc", port: 8100 },

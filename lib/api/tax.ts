@@ -34,7 +34,7 @@ function filingPrepUrl(): string {
 }
 
 function taxAuthorityUrl(): string {
-  return (process.env.ZOIKO_TAX_AUTHORITY_URL ?? "http://localhost:8147").replace(/\/$/, "");
+  return (process.env.ZOIKO_TAX_AUTHORITY_INTERFACE_URL ?? "http://localhost:8147").replace(/\/$/, "");
 }
 
 // ─── 1. Tax Rules ────────────────────────────────────────────────────────────

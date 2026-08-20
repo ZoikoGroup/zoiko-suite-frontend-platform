@@ -14,41 +14,57 @@ const DEFAULTS = {
   configuration: "http://localhost:8086",
   secretVault: "http://localhost:8087",
   obligations: "http://localhost:8088",
-  // Read-only here. obligations-svc validates every jurisdiction_id against this
-  // service on the write path and fails closed, so the console reads the same
-  // register to offer a picker — a free-text UUID field would produce
-  // jurisdiction_not_found for anything but a copy-paste.
   jurisdictionRules: "http://localhost:8082",
   purchaseRequest: "http://localhost:8100",
   contracts: "http://localhost:8119",
-  // 8139: the services runner starts purchase-order-svc on 8139. The previous
-  // value of 8129 collided with withholding-tax-svc in the tax domain (also 8129).
-  // health.ts has been updated to match.
   purchaseOrder: "http://localhost:8139",
-  // 8130: evidence-requirements-svc. Note: filing-preparation-svc in the tax domain
-  // also targets port 8130 — in the mock runner both are served by the same process
-  // and differentiated by URL path. In a real deployment they would run on separate
-  // containers. Use ZOIKO_EVIDENCE_URL or ZOIKO_FILING_PREPARATION_URL env overrides
-  // to point each client at its correct deployment port.
   evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
-  // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is
-  // in the compose file and in health.ts; the stale comment was the only place
-  // that disagreed, and nothing called it, so nothing caught it.
   accountsPayable: "http://localhost:8099",
-  // 8131. CommercialOpsActionHeader had this as 8113 — transposed digits, the
-  // same class of error as accounts-payable-svc's 8102, and equally uncaught
-  // because the only code path that used a spend-controls URL pointed at a route
-  // the service does not have.
   spendControls: "http://localhost:8131",
-  // 8135, per compose. The service's own config.Load defaulted PORT to 8132 — a
-  // port nothing in this platform uses — so it was reachable only because compose
-  // overrides PORT. Fixed there too; this is the number both now agree on.
   vendorDueDiligence: "http://localhost:8135",
   auditEventStore: "http://localhost:8084",
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
   financialClose: "http://localhost:8104",
+
+  // ── Finance Domain ───────────────────────────────────────────────────────
+  generalLedger: "http://localhost:8098",
+  bankReconciliation: "http://localhost:8102",
+  treasury: "http://localhost:8103",
+  intercompanyAccounting: "http://localhost:8105",
+  consolidation: "http://localhost:8106",
+  invoiceApproval: "http://localhost:8107",
+
+  // ── HR & Workforce Domain ────────────────────────────────────────────────
+  employeeMaster: "http://localhost:8108",
+  employmentContracts: "http://localhost:8109",
+  payrollRun: "http://localhost:8110",
+  compensation: "http://localhost:8111",
+  benefits: "http://localhost:8112",
+  payrollTax: "http://localhost:8113",
+  payrollExceptions: "http://localhost:8114",
+  leaveAbsence: "http://localhost:8115",
+  orgStructure: "http://localhost:8116",
+  offboardingSeverance: "http://localhost:8117",
+  workforceCompliance: "http://localhost:8118",
+  performanceReview: "http://localhost:8139",
+
+  // ── Legal & Corporate Governance ─────────────────────────────────────────
+  clauseTemplate: "http://localhost:8120",
+  obligationTracking: "http://localhost:8121",
+  boardResolutions: "http://localhost:8122",
+  corporateActions: "http://localhost:8123",
+  counterpartyManagement: "http://localhost:8124",
+  carta: "http://localhost:8142",
+
+  // ── Compliance & Risk Domain ─────────────────────────────────────────────
+  complianceStatus: "http://localhost:8132",
+  exceptionEscalation: "http://localhost:8133",
+  anomalyDetection: "http://localhost:8134",
+  complianceRiskScoring: "http://localhost:8136",
+  decisionSupport: "http://localhost:8138",
+
   // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
   taxRules: "http://localhost:8125",
   taxDetermination: "http://localhost:8126",
@@ -56,7 +72,17 @@ const DEFAULTS = {
   corporateTax: "http://localhost:8128",
   withholdingTax: "http://localhost:8129",
   filingPreparation: "http://localhost:8130",
+  filingTracker: "http://localhost:8131",
   taxAuthorityInterface: "http://localhost:8147",
+
+  // ── AI Governance, Security & Access ─────────────────────────────────────
+  aiGovernance: "http://localhost:8146",
+  documentVault: "http://localhost:8094",
+  authorization: "http://localhost:8089",
+  accessControl: "http://localhost:8137",
+  procurementWorkflow: "http://localhost:8134",
+  notification: "http://localhost:8133",
+
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -79,9 +105,6 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   configuration: "/configuration-feature-flag-svc",
   secretVault: "/secret-vault-integration-svc",
   obligations: "/obligations-svc",
-  // The compose KEY is `jurisdiction-svc` but container_name — and therefore the
-  // generated Traefik prefix — is `jurisdiction-rules-svc`. Using the key here
-  // would 404 in a way that looks like a dead service.
   jurisdictionRules: "/jurisdiction-rules-svc",
   purchaseRequest: "/purchase-request-svc",
   contracts: "/contract-lifecycle-svc",
@@ -95,6 +118,44 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   tenantRegistry: "/tenant-entity-registry-svc",
   schemaRegistry: "/schema-registry-svc",
   financialClose: "/financial-close-svc",
+
+  // Finance Domain
+  generalLedger: "/general-ledger-svc",
+  bankReconciliation: "/bank-reconciliation-svc",
+  treasury: "/treasury-svc",
+  intercompanyAccounting: "/intercompany-accounting-svc",
+  consolidation: "/consolidation-svc",
+  invoiceApproval: "/invoice-approval-svc",
+
+  // HR & Workforce Domain
+  employeeMaster: "/employee-master-svc",
+  employmentContracts: "/employment-contracts-svc",
+  payrollRun: "/payroll-run-svc",
+  compensation: "/compensation-svc",
+  benefits: "/benefits-svc",
+  payrollTax: "/payroll-tax-svc",
+  payrollExceptions: "/payroll-exceptions-svc",
+  leaveAbsence: "/leave-absence-svc",
+  orgStructure: "/org-structure-svc",
+  offboardingSeverance: "/offboarding-severance-svc",
+  workforceCompliance: "/workforce-compliance-svc",
+  performanceReview: "/performance-review-svc",
+
+  // Legal Domain
+  clauseTemplate: "/clause-template-svc",
+  obligationTracking: "/obligation-tracking-svc",
+  boardResolutions: "/board-resolutions-svc",
+  corporateActions: "/corporate-actions-svc",
+  counterpartyManagement: "/counterparty-management-svc",
+  carta: "/carta-svc",
+
+  // Compliance Domain
+  complianceStatus: "/compliance-status-svc",
+  exceptionEscalation: "/exception-escalation-svc",
+  anomalyDetection: "/anomaly-detection-svc",
+  complianceRiskScoring: "/compliance-risk-scoring-svc",
+  decisionSupport: "/decision-support-svc",
+
   // Tax Domain
   taxRules: "/tax-rules-svc",
   taxDetermination: "/tax-determination-svc",
@@ -102,7 +163,16 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   corporateTax: "/corporate-tax-svc",
   withholdingTax: "/withholding-tax-svc",
   filingPreparation: "/filing-preparation-svc",
+  filingTracker: "/filing-tracker-svc",
   taxAuthorityInterface: "/tax-authority-interface-svc",
+
+  // AI Governance, Security & Access
+  aiGovernance: "/ai-governance-svc",
+  documentVault: "/document-vault-svc",
+  authorization: "/authorization-svc",
+  accessControl: "/access-control-svc",
+  procurementWorkflow: "/procurement-workflow-svc",
+  notification: "/notification-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";

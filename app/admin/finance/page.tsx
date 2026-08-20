@@ -11,6 +11,7 @@ import {
   FinanceSummaryBar,
   FinanceProcessTimeline,
   RecordInvoiceForm,
+  GeneralLedgerAndTreasuryPanel,
 } from "@/components/admin/finance";
 import type { InvoiceStatus } from "@/lib/api/accounts-payable";
 import { lookupVendorInvoice } from "./actions";
@@ -316,7 +317,14 @@ export default async function FinancePage({ searchParams }: PageProps) {
 
       <hr className="border-slate-200 dark:border-slate-800" />
 
-      {/* Accounts Receivable & General Ledger Widget */}
+      {/* Live General Ledger & Treasury Services */}
+      <Suspense fallback={<KpiSkeleton />}>
+        <GeneralLedgerAndTreasuryPanel />
+      </Suspense>
+
+      <hr className="border-slate-200 dark:border-slate-800" />
+
+      {/* Accounts Receivable & Live Invoicing */}
       <AccountsReceivableView />
     </div>
   );

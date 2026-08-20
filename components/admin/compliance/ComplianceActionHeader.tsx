@@ -203,7 +203,7 @@ function EvaluateComplianceModal({ onClose }: { onClose: () => void }) {
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <CheckCircle2 className="h-10 w-10 text-emerald-500" />
               <p className="font-semibold text-slate-800 dark:text-slate-200">Compliance Evaluated</p>
-              <p className="text-xs text-slate-500">Evaluation recorded in compliance-status-svc (:8132).</p>
+              <p className="text-xs text-slate-500">Evaluation recorded in compliance-status-svc (:8137).</p>
               <button onClick={onClose} className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white">Done</button>
             </div>
           ) : (

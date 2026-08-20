@@ -354,7 +354,7 @@ function OffboardingModal({ onClose }: { onClose: () => void }) {
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <CheckCircle2 className="h-10 w-10 text-emerald-500" />
               <p className="font-semibold text-slate-800 dark:text-slate-200">Offboarding Initiated</p>
-              <p className="text-xs text-slate-500">Termination request submitted to offboarding-severance-svc (:8132).</p>
+              <p className="text-xs text-slate-500">Termination request submitted to offboarding-severance-svc (:8117).</p>
               <button onClick={onClose} className="mt-2 rounded-lg bg-rose-600 px-4 py-2 text-xs font-medium text-white">Done</button>
             </div>
           ) : (

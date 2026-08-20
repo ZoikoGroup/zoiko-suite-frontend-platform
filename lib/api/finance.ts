@@ -1,39 +1,4 @@
-// Live API clients for the Finance domain microservices.
-//
-// All functions call real backend services instead of returning hardcoded
-// mock data. When a service is unreachable they return { ok: false } so the
-// dashboard panels degrade gracefully to an empty/error state rather than
-// displaying invented numbers.
-//
-// Ports from deployments/docker-compose.yml:
-//   general-ledger-svc          (8098)
-//   accounts-payable-svc        (8099)  — also see lib/api/accounts-payable.ts
-//   accounts-receivable-svc     (8101)
-//   bank-reconciliation-svc     (8102)
-//   treasury-svc                (8103)
-//   financial-close-svc         (8104)
-//   intercompany-accounting-svc (8105)
-//   consolidation-svc           (8106)
-
-import { type ApiResult, type Identity } from "./client";
-
-// ── URL helpers ──────────────────────────────────────────────────────────────
-
-function glUrl(): string {
-  return (process.env.ZOIKO_GENERAL_LEDGER_URL ?? "http://localhost:8098").replace(/\/$/, "");
-}
-function arUrl(): string {
-  return (process.env.ZOIKO_ACCOUNTS_RECEIVABLE_URL ?? "http://localhost:8101").replace(/\/$/, "");
-}
-function bankReconUrl(): string {
-  return (process.env.ZOIKO_BANK_RECONCILIATION_URL ?? "http://localhost:8102").replace(/\/$/, "");
-}
-function treasuryUrl(): string {
-  return (process.env.ZOIKO_TREASURY_URL ?? "http://localhost:8103").replace(/\/$/, "");
-}
-function finCloseUrl(): string {
-  return (process.env.ZOIKO_FINANCIAL_CLOSE_URL ?? "http://localhost:8104").replace(/\/$/, "");
-}
+import { apiGet, apiPost, type ApiResult, type Identity } from "./client";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,13 +27,17 @@ export type CashPosition = {
 
 export type ARInvoice = {
   invoice_id: string;
+  tenant_id?: string;
+  legal_entity_id?: string;
   customer_id: string;
+  invoice_number?: string;
   amount: number;
-  currency: string;
-  status: "OUTSTANDING" | "PAID" | "OVERDUE" | "DISPUTED";
+  currency?: string;
+  currency_code?: string;
+  status: "ISSUED" | "SENT" | "OVERDUE" | "PAID" | "OUTSTANDING" | "DISPUTED";
   due_date: string;
   paid_at?: string;
-  created_at: string;
+  created_at?: string;
 };
 
 export type BankReconciliation = {
@@ -89,188 +58,76 @@ export type FinanceSummaryStats = {
   activeAccountsCount: number;
 };
 
-// ── Fetch helper ──────────────────────────────────────────────────────────────
-
-async function fetchFinancePost<TRaw, TOut>(
-  urlStr: string,
-  base: string,
-  serviceName: string,
-  body: unknown,
-  identity: Identity | undefined,
-  transform: (raw: TRaw) => TOut,
-): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    "X-Correlation-ID": correlationId,
-  };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
-
-  let res: Response;
-  try {
-    res = await fetch(urlStr, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(3000),
-    });
-  } catch (cause) {
-    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
-    return {
-      ok: false,
-      error: {
-        kind: isTimeout ? "timeout" : "unreachable",
-        message: isTimeout
-          ? `${serviceName} did not respond within 3000ms`
-          : `${serviceName} is unreachable at ${base}`,
-      },
-    };
-  }
-
-  if (!res.ok) {
-    return {
-      ok: false,
-      error: {
-        kind: "http",
-        status: res.status,
-        message: `${serviceName} returned ${res.status}`,
-      },
-    };
-  }
-
-  try {
-    return { ok: true, data: transform((await res.json()) as TRaw) };
-  } catch {
-    return {
-      ok: false,
-      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
-    };
-  }
-}
-
-async function fetchFinanceSvc<TRaw, TOut>(
-  urlStr: string,
-  base: string,
-  serviceName: string,
-  identity: Identity | undefined,
-  transform: (raw: TRaw) => TOut,
-): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "X-Correlation-ID": correlationId,
-  };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
-
-  let res: Response;
-  try {
-    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
-  } catch (cause) {
-    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
-    return {
-      ok: false,
-      error: {
-        kind: isTimeout ? "timeout" : "unreachable",
-        message: isTimeout
-          ? `${serviceName} did not respond within 3000ms`
-          : `${serviceName} is unreachable at ${base}`,
-      },
-    };
-  }
-
-  if (!res.ok) {
-    return {
-      ok: false,
-      error: {
-        kind: "http",
-        status: res.status,
-        message: `${serviceName} returned ${res.status}`,
-      },
-    };
-  }
-
-  try {
-    return { ok: true, data: transform((await res.json()) as TRaw) };
-  } catch {
-    return {
-      ok: false,
-      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
-    };
-  }
-}
-
 // ── Live API calls ────────────────────────────────────────────────────────────
 
 type GLResponse = { entries: JournalEntry[]; total: number };
 
 export async function listJournalEntries(identity?: Identity): Promise<ApiResult<JournalEntry[]>> {
-  const base = glUrl();
-  return fetchFinanceSvc<GLResponse, JournalEntry[]>(
-    `${base}/v1/journal-entries`,
-    base,
-    "general-ledger-svc",
-    identity,
-    (d) => d.entries ?? [],
-  );
+  const res = await apiGet<GLResponse>("generalLedger", "/v1/journal-entries", { identity });
+  if (!res.ok) return res;
+  return { ok: true, data: res.data.entries ?? [] };
 }
 
 export async function createJournalEntry(
   body: { account_code: string; amount: number; status: string; description?: string },
   identity?: Identity,
 ): Promise<ApiResult<JournalEntry>> {
-  const base = glUrl();
-  return fetchFinancePost<{ entry: JournalEntry }, JournalEntry>(
-    `${base}/v1/journal-entries`,
-    base,
-    "general-ledger-svc",
-    body,
-    identity,
-    (d) => d.entry,
-  );
+  const res = await apiPost<{ entry: JournalEntry }>("generalLedger", "/v1/journal-entries", body, { identity });
+  if (!res.ok) return res;
+  return { ok: true, data: res.data.entry };
 }
 
-type ARResponse = { invoices: ARInvoice[]; total_receivable?: number; total: number };
+type ARResponse = { invoices: ARInvoice[]; total_receivable?: number; total?: number };
 
 export async function listARInvoices(identity?: Identity): Promise<ApiResult<ARInvoice[]>> {
-  const base = arUrl();
-  return fetchFinanceSvc<ARResponse, ARInvoice[]>(
-    `${base}/v1/ar-invoices`,
-    base,
-    "accounts-receivable-svc",
-    identity,
-    (d) => d.invoices ?? [],
+  const res = await apiGet<ARResponse | ARInvoice[]>("accountsReceivable", "/v1/invoices", { identity });
+  if (!res.ok) return res;
+  const invoices = Array.isArray(res.data) ? res.data : res.data.invoices ?? [];
+  return { ok: true, data: invoices };
+}
+
+export async function createARInvoice(
+  body: Partial<ARInvoice>,
+  identity?: Identity,
+): Promise<ApiResult<ARInvoice>> {
+  const res = await apiPost<{ invoice?: ARInvoice } | ARInvoice>("accountsReceivable", "/v1/invoices", body, { identity });
+  if (!res.ok) return res;
+  const inv = (res.data as { invoice?: ARInvoice }).invoice ?? (res.data as ARInvoice);
+  return { ok: true, data: inv };
+}
+
+export async function transitionARInvoice(
+  invoiceId: string,
+  fromStatus: string,
+  toStatus: string,
+  identity?: Identity,
+): Promise<ApiResult<{ success: boolean; invoice_id: string; new_status: string }>> {
+  const res = await apiPost<{ success: boolean; invoice_id: string; new_status: string }>(
+    "accountsReceivable",
+    `/v1/invoices/${invoiceId}/transition`,
+    { from_status: fromStatus, to_status: toStatus },
+    { identity },
   );
+  if (!res.ok) return res;
+  return { ok: true, data: res.data };
 }
 
 type TreasuryResponse = { cash_positions: CashPosition[]; total_liquidity_gbp?: number };
 
 export async function listCashPositions(identity?: Identity): Promise<ApiResult<CashPosition[]>> {
-  const base = treasuryUrl();
-  return fetchFinanceSvc<TreasuryResponse, CashPosition[]>(
-    `${base}/v1/cash-positions`,
-    base,
-    "treasury-svc",
-    identity,
-    (d) => d.cash_positions ?? [],
-  );
+  const res = await apiGet<TreasuryResponse | CashPosition[]>("treasury", "/v1/cash-positions", { identity });
+  if (!res.ok) return res;
+  const positions = Array.isArray(res.data) ? res.data : res.data.cash_positions ?? [];
+  return { ok: true, data: positions };
 }
 
-type ReconResponse = { reconciliations: BankReconciliation[]; total: number };
+type ReconResponse = { reconciliations: BankReconciliation[]; total?: number };
 
 export async function listBankReconciliations(identity?: Identity): Promise<ApiResult<BankReconciliation[]>> {
-  const base = bankReconUrl();
-  return fetchFinanceSvc<ReconResponse, BankReconciliation[]>(
-    `${base}/v1/reconciliations`,
-    base,
-    "bank-reconciliation-svc",
-    identity,
-    (d) => d.reconciliations ?? [],
-  );
+  const res = await apiGet<ReconResponse | BankReconciliation[]>("bankReconciliation", "/v1/reconciliations", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : res.data.reconciliations ?? [];
+  return { ok: true, data: list };
 }
 
 export async function matchStatementLine(
@@ -278,15 +135,7 @@ export async function matchStatementLine(
   body: { journal_id: string },
   identity?: Identity,
 ): Promise<ApiResult<unknown>> {
-  const base = bankReconUrl();
-  return fetchFinancePost<unknown, unknown>(
-    `${base}/v1/statement-lines/${statementLineId}/match`,
-    base,
-    "bank-reconciliation-svc",
-    body,
-    identity,
-    (d) => d,
-  );
+  return apiPost<unknown>("bankReconciliation", `/v1/statement-lines/${statementLineId}/match`, body, { identity });
 }
 
 export async function createStatementLine(
@@ -299,61 +148,32 @@ export async function createStatementLine(
   },
   identity?: Identity,
 ): Promise<ApiResult<unknown>> {
-  const base = bankReconUrl();
-  return fetchFinancePost<unknown, unknown>(
-    `${base}/v1/statement-lines`,
-    base,
-    "bank-reconciliation-svc",
-    body,
-    identity,
-    (d) => d,
-  );
+  return apiPost<unknown>("bankReconciliation", "/v1/statement-lines", body, { identity });
 }
 
-type CloseResponse = { close_periods: { period_id: string; period: string; status: string; closed_at?: string }[]; total: number };
+type CloseResponse = { close_periods?: { period_id: string; period: string; status: string; closed_at?: string }[]; total?: number };
 
 export async function createFiscalPeriod(
   body: { legal_entity_id: string; period_name: string; period_start: string; period_end: string },
   identity?: Identity,
 ): Promise<ApiResult<unknown>> {
-  const base = finCloseUrl();
-  return fetchFinancePost<unknown, unknown>(
-    `${base}/v1/close/periods`,
-    base,
-    "financial-close-svc",
-    body,
-    identity,
-    (d) => d,
-  );
+  return apiPost<unknown>("financialClose", "/v1/close/periods", body, { identity });
 }
 
 export async function lockFiscalPeriod(
   periodId: string,
   identity?: Identity,
 ): Promise<ApiResult<unknown>> {
-  const base = finCloseUrl();
-  return fetchFinancePost<unknown, unknown>(
-    `${base}/v1/close/periods/${periodId}/lock`,
-    base,
-    "financial-close-svc",
-    {},
-    identity,
-    (d) => d,
-  );
+  return apiPost<unknown>("financialClose", `/v1/close/periods/${periodId}/lock`, {}, { identity });
 }
 
 export async function getFinanceSummaryStats(identity?: Identity): Promise<ApiResult<FinanceSummaryStats>> {
-  // Fetch treasury + AR + close period concurrently for the summary bar
-  const [treasuryRes, arRes, closeRes] = await Promise.all([
+  const [treasuryRes, arRes, closeRes, glRes, reconRes] = await Promise.all([
     listCashPositions(identity),
     listARInvoices(identity),
-    fetchFinanceSvc<CloseResponse, CloseResponse["close_periods"]>(
-      `${finCloseUrl()}/v1/close-periods`,
-      finCloseUrl(),
-      "financial-close-svc",
-      identity,
-      (d) => d.close_periods ?? [],
-    ),
+    apiGet<CloseResponse | { period_id: string; period: string; status: string }[]>("financialClose", "/v1/close-periods", { identity }),
+    listJournalEntries(identity),
+    listBankReconciliations(identity),
   ]);
 
   const cashTotal = treasuryRes.ok
@@ -361,24 +181,31 @@ export async function getFinanceSummaryStats(identity?: Identity): Promise<ApiRe
     : 0;
 
   const arBalance = arRes.ok
-    ? arRes.data.filter((i) => i.status === "OUTSTANDING" || i.status === "OVERDUE")
-        .reduce((sum, i) => sum + i.amount, 0)
+    ? arRes.data.filter((i) => i.status === "OUTSTANDING" || i.status === "OVERDUE" || i.status === "ISSUED" || i.status === "SENT")
+        .reduce((sum, i) => sum + (i.amount || 0), 0)
     : 0;
 
-  const latestClose = closeRes.ok && closeRes.data.length > 0 ? closeRes.data[0] : null;
+  const closeData = closeRes.ok
+    ? (Array.isArray(closeRes.data) ? closeRes.data : closeRes.data.close_periods ?? [])
+    : [];
+  const latestClose = closeData.length > 0 ? closeData[0] : null;
   const closePeriodStatus = latestClose
     ? `${latestClose.status} (${latestClose.period})`
     : treasuryRes.ok ? "OPEN" : "general-ledger unreachable";
+
+  const unreconciled = reconRes.ok
+    ? reconRes.data.reduce((sum, r) => sum + (r.unmatched_count || 0), 0)
+    : 0;
 
   return {
     ok: true,
     data: {
       totalArBalanceUSD: arBalance,
-      journalEntryCount: 0,
+      journalEntryCount: glRes.ok ? glRes.data.length : 0,
       totalCashAvailableUSD: cashTotal,
       closePeriodStatus,
-      unreconciledBankCount: 0,
-      activeAccountsCount: 0,
+      unreconciledBankCount: unreconciled,
+      activeAccountsCount: treasuryRes.ok ? treasuryRes.data.length : 0,
     },
   };
 }

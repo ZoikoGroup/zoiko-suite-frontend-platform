@@ -240,6 +240,97 @@ export async function lookupVendorInvoice(
   return { status: "found", record: result.data, message: "" };
 }
 
+export async function createCustomerInvoiceAction(
+  formData: FormData,
+): Promise<{ ok: boolean; message: string }> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ok: false, message: "Unauthorized / Session expired" };
+  }
+
+  const customerId = String(formData.get("customer_id") ?? "").trim();
+  const amount = Number(formData.get("amount") ?? 0);
+  const currency = String(formData.get("currency_code") ?? "USD").trim();
+  const dueDate = String(formData.get("due_date") ?? "").trim() || new Date(Date.now() + 14 * 86400000).toISOString();
+
+  if (!customerId) return { ok: false, message: "Customer ID is required." };
+  if (!amount || amount <= 0) return { ok: false, message: "Valid amount is required." };
+
+  const { createARInvoice } = await import("@/lib/api/finance");
+  const res = await createARInvoice({
+    customer_id: customerId,
+    amount,
+    currency_code: currency,
+    currency,
+    due_date: dueDate,
+    status: "ISSUED",
+  }, identity);
+
+  if (!res.ok) {
+    return { ok: false, message: res.error.message };
+  }
+
+  revalidatePath(PATH);
+  return { ok: true, message: `Customer invoice created for ${customerId} ($${amount} ${currency})` };
+}
+
+export async function transitionCustomerInvoiceAction(
+  invoiceId: string,
+  fromStatus: string,
+  toStatus: string,
+): Promise<{ ok: boolean; message: string }> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ok: false, message: "Unauthorized / Session expired" };
+  }
+
+  const { transitionARInvoice } = await import("@/lib/api/finance");
+  const res = await transitionARInvoice(invoiceId, fromStatus, toStatus, identity);
+  if (!res.ok) {
+    return { ok: false, message: res.error.message };
+  }
+
+  revalidatePath(PATH);
+  return { ok: true, message: `Invoice transitioned to ${toStatus}` };
+}
+
+export async function createJournalEntryAction(
+  formData: FormData,
+): Promise<{ ok: boolean; message: string }> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ok: false, message: "Unauthorized / Session expired" };
+  }
+
+  const accountCode = String(formData.get("account_code") ?? "").trim();
+  const amount = Number(formData.get("amount") ?? 0);
+  const description = String(formData.get("description") ?? "").trim();
+
+  if (!accountCode) return { ok: false, message: "Account code is required." };
+  if (!amount) return { ok: false, message: "Valid amount is required." };
+
+  const { createJournalEntry } = await import("@/lib/api/finance");
+  const res = await createJournalEntry({
+    account_code: accountCode,
+    amount,
+    status: "POSTED",
+    description,
+  }, identity);
+
+  if (!res.ok) {
+    return { ok: false, message: res.error.message };
+  }
+
+  revalidatePath(PATH);
+  return { ok: true, message: `Journal entry posted to account ${accountCode}` };
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUuid(value: string): boolean {

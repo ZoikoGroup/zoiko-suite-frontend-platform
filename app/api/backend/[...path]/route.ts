@@ -3,9 +3,28 @@ import { serviceUrl, type ServiceName } from "@/lib/api/config";
 
 const SERVICE_MAP: Record<string, ServiceName | "gateway"> = {
   ar: "accountsReceivable",
+  ap: "accountsPayable",
   audit: "auditEventStore",
   registry: "tenantRegistry",
   close: "financialClose",
+  gl: "generalLedger",
+  treasury: "treasury",
+  recon: "bankReconciliation",
+  governance: "governance",
+  policy: "policy",
+  config: "configuration",
+  secrets: "secretVault",
+  obligations: "obligations",
+  contracts: "contracts",
+  hr: "employeeMaster",
+  org: "orgStructure",
+  perf: "performanceReview",
+  offboarding: "offboardingSeverance",
+  tax: "taxDetermination",
+  compliance: "complianceStatus",
+  ai: "aiGovernance",
+  vault: "documentVault",
+  authz: "authorization",
   gateway: "gateway",
 };
 

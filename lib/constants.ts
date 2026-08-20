@@ -17,6 +17,7 @@ import {
   KeyRound,
   Building2,
   FileJson,
+  Bot,
 } from "lucide-react";
 
 export type DomainKey =
@@ -217,6 +218,7 @@ export const PLATFORM_NAV = [
   // Event contracts constrain every domain rather than belonging to one, so
   // this sits with the platform services and not under a business area.
   { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
+  { label: "AI Governance", href: "/admin/ai-governance", icon: Bot },
 ];
 
 export const SECONDARY_NAV = [
