@@ -1,18 +1,10 @@
 name: Deploy to VM
 
 on:
-  # Deploy whatever is on main. A merged PR counts as a push to main, so the
-  # normal branch -> PR -> merge flow now reaches the VM without anyone having
-  # to remember the Actions tab. Feature branches deliberately do NOT deploy.
   push:
     branches: [main]
   workflow_dispatch:
 
-# The job builds in place on the VM (git pull, npm ci, npm run build, all in
-# /var/www/zoiko-suite/app). Two runs at once would interleave in that one
-# directory and leave a half-built tree, which manual dispatch made unlikely and
-# auto-deploy makes routine. Queue instead of cancelling: a cancelled run can
-# stop mid npm ci and strand the VM with no node_modules.
 concurrency:
   group: deploy-vm
   cancel-in-progress: false
@@ -21,52 +13,36 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
         with:
-          host: ${{ secrets.GCP_SSH_HOST }}
-          username: ${{ secrets.GCP_SSH_USER }}
-          key: ${{ secrets.GCP_SSH_KEY }}
-          # Without this the action keeps going after a failed command and
-          # reports the exit code of the LAST one only -- so a build that died
-          # followed by a pm2 restart that worked was a green tick over a VM
-          # still serving the old bundle. Stop at the first failure instead, so
-          # the last PHASE line printed below is the step that actually broke.
-          script_stop: true
-          script: |
-            echo "===== VM ENVIRONMENT ====="
-            echo "user:   $(whoami)"
-            echo "node:   $(node -v 2>&1 || echo 'MISSING')"
-            echo "npm:    $(npm -v 2>&1 || echo 'MISSING')"
-            echo "pm2:    $(command -v pm2 || echo 'NOT ON PATH')"
-            echo "--- disk (build needs room for .next) ---"
-            df -h /var/www 2>&1 || df -h
-            echo "--- memory (build asks for a 4GB heap) ---"
-            free -m 2>&1 || echo 'free unavailable'
-            echo "--- pm2 processes (is zoiko-suite registered?) ---"
-            pm2 list 2>&1 || echo 'pm2 list failed'
-            echo "=========================="
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-            echo "##### PHASE 1: cd to app dir #####"
-            cd /var/www/zoiko-suite/app
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-            echo "##### PHASE 2: reset working tree #####"
-            git reset --hard HEAD
-            git clean -fd
+      - name: Write SSH private key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GCP_SSH_PRIVATE_KEY }}" > ~/.ssh/gha_deploy_key
+          chmod 600 ~/.ssh/gha_deploy_key
 
-            echo "##### PHASE 3: pull main #####"
-            git pull origin main
-            echo "deploying commit: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
-
-            echo "##### PHASE 4: npm ci #####"
-            npm ci
-
-            echo "##### PHASE 5: next build #####"
-            export NODE_OPTIONS="--max-old-space-size=4096"
-            npm run build
-
-            echo "##### PHASE 6: pm2 restart #####"
-            pm2 restart zoiko-suite
-
-            echo "##### DEPLOY OK #####"
-            pm2 list
+      - name: Deploy via IAP tunnel
+        run: |
+          gcloud compute ssh lennox@zoiko-suite-platform-frontend \
+            --zone=europe-north1-a \
+            --tunnel-through-iap \
+            --ssh-key-file=~/.ssh/gha_deploy_key \
+            --command='
+              set -e
+              cd /var/www/zoiko-suite/app
+              git reset --hard HEAD
+              git clean -fd
+              git pull origin main
+              echo "deploying commit: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
+              npm ci
+              export NODE_OPTIONS="--max-old-space-size=4096"
+              npm run build
+              pm2 restart zoiko-suite
+              pm2 list
+            '
