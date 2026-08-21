@@ -123,6 +123,16 @@ const DEFAULTS = {
   withholdingTax: "http://localhost:8129",
   filingPreparation: "http://localhost:8130",
   taxAuthorityInterface: "http://localhost:8147",
+  // 8148, per compose. retention-registry-svc answers "is it safe to delete,
+  // export or migrate this record yet" for every service that owns deletable
+  // data. Two independent findings, never collapsed: an ACTIVE legal hold blocks
+  // regardless of what any retention policy permits, and the policy separately
+  // says how long the record must be kept. It never deletes anything itself.
+  //
+  // Its gateway route did not exist until deployments/traefik-dynamic was
+  // regenerated — the checked-in file was stale and this service was one of
+  // seven with no prefix at all, so ZOIKO_USE_GATEWAY=true would have 404'd.
+  retentionRegistry: "http://localhost:8148",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -175,6 +185,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   withholdingTax: "/withholding-tax-svc",
   filingPreparation: "/filing-preparation-svc",
   taxAuthorityInterface: "/tax-authority-interface-svc",
+  retentionRegistry: "/retention-registry-svc",
   // Finance Domain extras
   treasury: "/treasury-svc",
   intercompanyAccounting: "/intercompany-accounting-svc",

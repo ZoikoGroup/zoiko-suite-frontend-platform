@@ -16,6 +16,7 @@ import {
   ClipboardList,
   KeyRound,
   KeySquare,
+  Snowflake,
   Building2,
   FileJson,
   Bell,
@@ -270,6 +271,10 @@ export const PLATFORM_NAV = [
   // this sits with the platform services and not under a business area.
   { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
+  // Last, and in the platform plane rather than a domain, because it constrains
+  // every service that owns deletable data rather than belonging to one: an
+  // active legal hold here blocks deletion in Finance, HR, Legal and Tax alike.
+  { label: "Retention & Holds", href: "/admin/retention", icon: Snowflake },
 ];
 
 export const SECONDARY_NAV = [
