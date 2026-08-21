@@ -1,12 +1,34 @@
-import { ToggleLeft, ToggleRight, Flag, CloudOff } from "lucide-react";
+import { ToggleLeft, ToggleRight, Flag, CloudOff, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { listFeatureFlags } from "@/lib/api/configuration";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { toggleFlag } from "@/app/admin/settings/actions";
 
-/** Live feature flags from configuration-feature-flag-svc (:8086), with toggles. */
+/**
+ * Live feature flags from configuration-feature-flag-svc (:8086), with toggles.
+ *
+ * Scoped to the caller's own tenant plus the globals. An omitted tenant filter
+ * used to mean "no filter" on this route, so this table showed other tenants'
+ * feature state — and offered a toggle next to it.
+ */
 export async function FeatureFlagTable() {
-  const result = await listFeatureFlags();
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+
+  if (!session) {
+    return (
+      <PanelEmptyState
+        icon={ShieldAlert}
+        tone="warning"
+        label="No active session"
+        hint="Sign in again to read live feature flags."
+      />
+    );
+  }
+
+  const result = await listFeatureFlags(session.tenantId);
 
   if (!result.ok) {
     return (

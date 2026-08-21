@@ -26,7 +26,22 @@
 // makes step 3 easy to skip and hard to diagnose, so the console surfaces the
 // distinction between "policy said no" (403) and "no policy at all" (404).
 
-import { apiGet, apiPost, type ApiResult, type ApiWriteResult } from "./client";
+import {
+  apiGet,
+  apiPost,
+  type ApiResult,
+  type ApiWriteResult,
+  type Identity,
+} from "./client";
+
+// Every call here forwards the caller's identity as headers, not only as body
+// fields. This client used to send NO headers at all: the principal went in the
+// body while the service reads X-Principal-Id, so every write answered 401, and
+// the tenant went nowhere at all — which the service did not notice either,
+// because until the scope was closed it read no tenant header. `callerTenantId`
+// is the caller's OWN tenant and is distinct from a `tenantId` scope field,
+// which names the scope a policy binds and may legitimately be absent (global).
+type CallerIdentity = Identity & { principalId: string; tenantId: string };
 
 /** Secret classes the console offers. Data-driven in the service; new classes
  *  need no code change there, so this list constrains only our own forms. */
@@ -134,6 +149,8 @@ export type CreateSecretPolicyInput = {
   /** The idempotency key. Reusing a path with a different class is a 409. */
   secretPath: string;
   principalId: string;
+  /** The caller's own verified tenant, forwarded as X-Tenant-Id. */
+  callerTenantId: string;
   dataClassification?: string;
   secretPolicyID?: string;
 };
@@ -142,13 +159,18 @@ export type CreateSecretPolicyInput = {
 export async function createSecretPolicy(
   input: CreateSecretPolicyInput,
 ): Promise<ApiWriteResult<SecretPolicy>> {
-  return apiPost<SecretPolicy>("secretVault", "/v1/secret-policies", {
-    ...(input.secretPolicyID ? { secret_policy_id: input.secretPolicyID } : {}),
-    secret_class: input.secretClass,
-    secret_path: input.secretPath,
-    created_by_principal_id: input.principalId,
-    ...(input.dataClassification ? { data_classification: input.dataClassification } : {}),
-  });
+  return apiPost<SecretPolicy>(
+    "secretVault",
+    "/v1/secret-policies",
+    {
+      ...(input.secretPolicyID ? { secret_policy_id: input.secretPolicyID } : {}),
+      secret_class: input.secretClass,
+      secret_path: input.secretPath,
+      created_by_principal_id: input.principalId,
+      ...(input.dataClassification ? { data_classification: input.dataClassification } : {}),
+    },
+    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+  );
 }
 
 /**
@@ -162,6 +184,8 @@ export async function listApplicableSecretPolicyVersions(scope: {
   secretClass: string;
   tenantId?: string;
   legalEntityId?: string;
+  /** The caller's own verified tenant. A global-only read still has a caller. */
+  callerTenantId: string;
 }): Promise<ApiResult<ApplicableSecretPolicyVersion[]>> {
   const result = await apiGet<ApplicableSecretPolicyVersion[]>(
     "secretVault",
@@ -172,6 +196,7 @@ export async function listApplicableSecretPolicyVersions(scope: {
         tenant_id: scope.tenantId,
         legal_entity_id: scope.legalEntityId,
       },
+      identity: { tenantId: scope.callerTenantId },
     },
   );
 
@@ -191,10 +216,12 @@ export async function listApplicableSecretPolicyVersions(scope: {
 /** Every version of one secret policy, whatever its status. */
 export async function listSecretPolicyVersions(
   secretPolicyId: string,
+  callerTenantId: string,
 ): Promise<ApiResult<SecretPolicyVersion[]>> {
   const result = await apiGet<SecretPolicyVersion[]>(
     "secretVault",
     `/v1/secret-policies/${encodeURIComponent(secretPolicyId)}/versions`,
+    { identity: { tenantId: callerTenantId } },
   );
 
   if (!result.ok) return result;
@@ -226,6 +253,9 @@ export type CreateSecretPolicyVersionInput = {
   tenantId?: string;
   legalEntityId?: string;
   principalId: string;
+  /** The caller's own verified tenant. The scope a version binds can be global;
+   *  who published it cannot. */
+  callerTenantId: string;
 };
 
 /** Add a DRAFT access rule to a secret policy. Has no effect until activated. */
@@ -244,6 +274,7 @@ export async function createSecretPolicyVersion(
       ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
       created_by_principal_id: input.principalId,
     },
+    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
   );
 }
 
@@ -257,6 +288,7 @@ export async function activateSecretPolicyVersion(input: {
   secretPolicyId: string;
   versionId: string;
   principalId: string;
+  callerTenantId: string;
 }): Promise<ApiWriteResult<ActivatedVersion>> {
   return apiPost<ActivatedVersion>(
     "secretVault",
@@ -264,6 +296,7 @@ export async function activateSecretPolicyVersion(input: {
       input.secretPolicyId,
     )}/versions/${encodeURIComponent(input.versionId)}/activate`,
     { activated_by_principal_id: input.principalId },
+    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
   );
 }
 
@@ -286,11 +319,14 @@ export type PutMaterialResult = {
 export async function putSecretMaterial(input: {
   secretPolicyId: string;
   materialBase64: string;
+  principalId: string;
+  callerTenantId: string;
 }): Promise<ApiWriteResult<PutMaterialResult>> {
   return apiPost<PutMaterialResult>(
     "secretVault",
     `/v1/secret-policies/${encodeURIComponent(input.secretPolicyId)}/material`,
     { material_base64: input.materialBase64 },
+    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
   );
 }
 
@@ -317,12 +353,16 @@ export async function rotateSecret(input: {
   secretPolicyId: string;
   requestId: string;
   principalId: string;
+  callerTenantId: string;
 }): Promise<ApiWriteResult<RotateResult>> {
   return apiPost<RotateResult>(
     "secretVault",
     `/v1/secret-policies/${encodeURIComponent(input.secretPolicyId)}/rotate`,
     { request_id: input.requestId, rotated_by_principal_id: input.principalId },
-    { correlationId: input.requestId },
+    {
+      correlationId: input.requestId,
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+    },
   );
 }
 
@@ -352,6 +392,8 @@ export async function brokerSecret(input: {
   tenantId?: string;
   legalEntityId?: string;
   correlationId?: string;
+  /** The caller's own verified tenant. */
+  callerTenantId: string;
 }): Promise<ApiWriteResult<BrokerResult>> {
   return apiPost<BrokerResult>(
     "secretVault",
@@ -364,7 +406,13 @@ export async function brokerSecret(input: {
       ...(input.legalEntityId ? { legal_entity_id: input.legalEntityId } : {}),
       correlation_id: input.correlationId ?? input.requestId,
     },
-    { correlationId: input.correlationId ?? input.requestId },
+    {
+      correlationId: input.correlationId ?? input.requestId,
+      // The broker used to take its whole tenant scope from the body, so the
+      // policy that decided the request, the lease it minted and the audit entry
+      // it wrote could all belong to a tenant the caller merely named.
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+    },
   );
 }
 
@@ -380,6 +428,7 @@ export type LeaseFilters = {
 
 /** Lease records matching the filters. */
 export async function listLeases(
+  callerTenantId: string,
   filters: LeaseFilters = {},
 ): Promise<ApiResult<SecretLease[]>> {
   const result = await apiGet<SecretLease[]>("secretVault", "/v1/secrets/leases", {
@@ -392,6 +441,10 @@ export async function listLeases(
       limit: filters.limit,
       offset: filters.offset,
     },
+    // The tenant filter used to be optional on the service side, so omitting it
+    // listed every tenant's live leases. It is now the verified scope, and a
+    // tenant_id naming a different one is refused.
+    identity: { tenantId: callerTenantId },
   });
 
   if (!result.ok) return result;
@@ -407,10 +460,14 @@ export async function listLeases(
   return { ok: true, data: result.data };
 }
 
-export async function getLease(leaseId: string): Promise<ApiResult<SecretLease>> {
+export async function getLease(
+  leaseId: string,
+  callerTenantId: string,
+): Promise<ApiResult<SecretLease>> {
   return apiGet<SecretLease>(
     "secretVault",
     `/v1/secrets/leases/${encodeURIComponent(leaseId)}`,
+    { identity: { tenantId: callerTenantId } },
   );
 }
 
@@ -426,11 +483,15 @@ export async function getLease(leaseId: string): Promise<ApiResult<SecretLease>>
  *  cannot answer that — it is already set on a repeat. */
 export type RevokedLease = SecretLease & { transitioned: boolean };
 
-export async function revokeLease(leaseId: string): Promise<ApiWriteResult<RevokedLease>> {
+export async function revokeLease(
+  leaseId: string,
+  identity: CallerIdentity,
+): Promise<ApiWriteResult<RevokedLease>> {
   return apiPost<RevokedLease>(
     "secretVault",
     `/v1/secrets/leases/${encodeURIComponent(leaseId)}/revoke`,
     {},
+    { identity },
   );
 }
 
@@ -447,6 +508,7 @@ export type AuditFilters = {
 /** The append-only access audit log. Every request, grant, denial, revocation,
  *  and rotation — denials included, which is what makes it evidence. */
 export async function listSecretAudit(
+  callerTenantId: string,
   filters: AuditFilters = {},
 ): Promise<ApiResult<SecretAuditEntry[]>> {
   const result = await apiGet<SecretAuditEntry[]>("secretVault", "/v1/secrets/audit", {
@@ -459,6 +521,9 @@ export async function listSecretAudit(
       limit: filters.limit,
       offset: filters.offset,
     },
+    // The service's audit filter had no tenant field at all, so this log was
+    // readable across every tenant. It is now scoped to the verified header.
+    identity: { tenantId: callerTenantId },
   });
 
   if (!result.ok) return result;

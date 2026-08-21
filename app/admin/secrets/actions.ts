@@ -101,6 +101,7 @@ export async function submitSecretPolicy(
     secretClass,
     secretPath,
     principalId: identity.principalId,
+    callerTenantId: identity.tenantId,
     dataClassification: dataClassification || undefined,
   });
 
@@ -162,6 +163,8 @@ export async function submitSecretVersion(
     tenantId: scope === "global" ? undefined : identity.tenantId,
     legalEntityId: scope === "entity" ? identity.legalEntityId : undefined,
     principalId: identity.principalId,
+    // The scope a version binds can be global; who published it cannot.
+    callerTenantId: identity.tenantId,
   });
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message);
@@ -208,6 +211,7 @@ export async function submitSecretActivation(
     secretPolicyId,
     versionId,
     principalId: identity.principalId,
+    callerTenantId: identity.tenantId,
   });
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message, "version");
@@ -244,8 +248,9 @@ export async function submitSecretMaterial(
   _previous: VaultWriteState,
   formData: FormData,
 ): Promise<VaultWriteState> {
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return EXPIRED;
   }
@@ -259,6 +264,10 @@ export async function submitSecretMaterial(
   const result = await putSecretMaterial({
     secretPolicyId,
     materialBase64: Buffer.from(material, "utf-8").toString("base64"),
+    // This write reached the service with no identity headers at all, so it
+    // answered 401 every time — the material was never stored.
+    principalId: identity.principalId,
+    callerTenantId: identity.tenantId,
   });
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message);
@@ -301,6 +310,8 @@ export async function submitBrokerRequest(
     principalId: principal,
     tenantId: scope === "global" ? undefined : identity.tenantId,
     legalEntityId: scope === "entity" ? identity.legalEntityId : undefined,
+    // The scope being brokered against may be global; the caller is not.
+    callerTenantId: identity.tenantId,
   });
 
   refresh();
@@ -346,8 +357,9 @@ export async function submitRevoke(
   _previous: RevokeState,
   formData: FormData,
 ): Promise<RevokeState> {
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return { status: "error", message: "Your session has expired — sign in again." };
   }
@@ -355,7 +367,10 @@ export async function submitRevoke(
   const leaseId = String(formData.get("lease_id") ?? "").trim();
   if (!leaseId) return { status: "error", message: "A lease ID is required." };
 
-  const result = await revokeLease(leaseId);
+  const result = await revokeLease(leaseId, {
+    principalId: identity.principalId,
+    tenantId: identity.tenantId,
+  });
 
   if (!result.ok) {
     if (result.error.status === 409) {
@@ -428,6 +443,7 @@ export async function submitRotation(
     secretPolicyId,
     requestId,
     principalId: identity.principalId,
+    callerTenantId: identity.tenantId,
   });
 
   if (!result.ok) {
@@ -457,8 +473,9 @@ export async function lookupLease(
   _previous: LookupState,
   formData: FormData,
 ): Promise<LookupState> {
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return { status: "error", message: "Your session has expired — sign in again." };
   }
@@ -466,7 +483,7 @@ export async function lookupLease(
   const leaseId = String(formData.get("lease_id") ?? "").trim();
   if (!leaseId) return { status: "error", message: "Enter a lease ID." };
 
-  const result = await getLease(leaseId);
+  const result = await getLease(leaseId, identity.tenantId);
 
   if (!result.ok) {
     if (result.error.status === 404) {

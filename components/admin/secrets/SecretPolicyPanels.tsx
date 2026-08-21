@@ -81,6 +81,8 @@ export async function ApplicableSecretPolicyPanel({
     secretClass,
     tenantId: scope === "global" ? undefined : session.tenantId,
     legalEntityId: scope === "entity" ? session.legalEntityId : undefined,
+    // A global-only read still has to say who is asking.
+    callerTenantId: session.tenantId,
   });
 
   if (!result.ok) {
@@ -172,6 +174,20 @@ export async function SecretVersionHistoryPanel({
 }: {
   secretPolicyId?: string;
 }) {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+
+  if (!session) {
+    return (
+      <PanelEmptyState
+        icon={ShieldAlert}
+        tone="warning"
+        label="No active session"
+        hint="Sign in again to read a policy's version history."
+      />
+    );
+  }
+
   if (!secretPolicyId) {
     return (
       <PanelEmptyState
@@ -182,7 +198,7 @@ export async function SecretVersionHistoryPanel({
     );
   }
 
-  const result = await listSecretPolicyVersions(secretPolicyId);
+  const result = await listSecretPolicyVersions(secretPolicyId, session.tenantId);
 
   if (!result.ok) {
     if (result.error.status === 404) {

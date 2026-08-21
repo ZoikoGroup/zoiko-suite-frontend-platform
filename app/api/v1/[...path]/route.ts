@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listTaxRules,
   listTaxDeterminations,
@@ -18,11 +20,29 @@ import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayr
 import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts } from "@/lib/api/hr";
 import { listFilingRequirements, listComplianceEvaluations, listEscalatedExceptions } from "@/lib/api/compliance";
 
+/**
+ * Read-through for the client components that refresh a domain panel.
+ *
+ * THIS ROUTE HAD NO SESSION CHECK AND TOOK ITS TENANT FROM A REQUEST HEADER.
+ * `callerIdentity` read X-Tenant-Id straight off the incoming browser request
+ * and fell back to a hardcoded demo tenant — so anything that could reach the
+ * console's port could read any tenant's tax rules, contracts, obligations,
+ * payroll, workforce, compliance and finance data by setting one header, and
+ * every read ran as a hardcoded principal regardless of who was signed in.
+ *
+ * This is the same defect, in a second file, as the /api/backend/[...path] proxy
+ * deleted during the receivables pass. This one has live consumers, so it is
+ * fixed rather than removed: the session is verified here, and the identity
+ * forwarded downstream comes from that session and nowhere else.
+ */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const endpoint = path.join("/");
 
-  const identity = callerIdentity(req);
+  const identity = await sessionIdentity();
+  if (!identity) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
   // Tax Domain
   if (endpoint === "tax-rules") {
@@ -172,36 +192,62 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   return NextResponse.json({ message: `Endpoint /v1/${endpoint} handled by Zoiko Suite Next.js API Gateway`, status: "ACTIVE" });
 }
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
-  const { path } = await params;
-  const endpoint = path.join("/");
-  const body = await req.json().catch(() => ({}));
-
-  return NextResponse.json({
-    message: `Resource created/processed successfully at /v1/${endpoint}`,
-    received_payload: body,
-    status: "CREATED",
-    timestamp: new Date().toISOString(),
-  }, { status: 201 });
+/**
+ * WRITES ARE NOT IMPLEMENTED HERE, and they never were.
+ *
+ * POST used to answer 201 with `{"status": "CREATED", "message": "Resource
+ * created/processed successfully"}` and PUT 200 "UPDATED" — after writing
+ * NOTHING. No backend call, no store, nothing. Every caller that trusted the
+ * status code reported a successful write to the user for an operation that had
+ * not happened: the Finance console's "Post Journal Entry" showed an invented
+ * journal id, and the Tax console's rule form showed a created rule whose
+ * `rule_id` was undefined because no such field ever came back.
+ *
+ * A 501 is the truthful answer, and it is deliberately not a 200: a caller
+ * cannot distinguish a write it must retry from one that succeeded if the
+ * failure is dressed as success. Writes belong in Server Actions, which verify
+ * the session and call the owning service's typed client — see
+ * app/admin/finance/actions.ts for the pattern.
+ */
+function notImplemented(endpoint: string, verb: string) {
+  return NextResponse.json(
+    {
+      error: "not_implemented",
+      message:
+        `${verb} /v1/${endpoint} does not write anything. This console route is read-only; ` +
+        "it used to answer as though the write had succeeded. Use the domain's Server Action instead.",
+    },
+    { status: 501 },
+  );
 }
 
-export async function PUT(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
-  const endpoint = path.join("/");
-  const body = await req.json().catch(() => ({}));
-
-  return NextResponse.json({
-    message: `Resource updated at /v1/${endpoint}`,
-    received_payload: body,
-    status: "UPDATED",
-    timestamp: new Date().toISOString(),
-  }, { status: 200 });
+  return notImplemented(path.join("/"), "POST");
 }
 
-/** Caller identity from the X-* headers, with the console demo defaults. */
-function callerIdentity(req: NextRequest) {
-  const tenantId = req.headers.get("X-Tenant-Id") ?? "11111111-1111-1111-1111-111111111111";
-  const principalId = req.headers.get("X-Principal-Id") ?? "33333333-3333-3333-3333-333333333333";
-  return { tenantId, principalId };
+export async function PUT(_req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  return notImplemented(path.join("/"), "PUT");
+}
+
+/**
+ * The caller's identity, from the verified session cookie.
+ *
+ * This replaced a function that read X-Tenant-Id and X-Principal-Id off the
+ * incoming request and defaulted them to hardcoded demo values. A browser can
+ * set any header it likes, so that made the tenant scope of every read below a
+ * caller-chosen value — and the default meant an unauthenticated request was
+ * served as the demo tenant rather than refused.
+ */
+async function sessionIdentity() {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.email) return null;
+  return {
+    tenantId: session.tenantId,
+    principalId: session.principalId,
+    legalEntityId: session.legalEntityId,
+  };
 }
 

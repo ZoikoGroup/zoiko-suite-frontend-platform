@@ -40,6 +40,22 @@ async function requirePrincipal(): Promise<string> {
   return session.principalId;
 }
 
+/**
+ * The caller's own verified tenant, sent as X-Tenant-Id on every call.
+ *
+ * Distinct from sessionTenant() below, which answers "which SCOPE is this write
+ * for" and is legitimately undefined for a global default. This one is the
+ * caller's identity and is never optional: the service refuses a request with no
+ * verified scope, because a tenant_id in a body used to be the only thing saying
+ * whose configuration was being changed.
+ */
+async function requireTenantScope(): Promise<string> {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.email) throw new Error("Unauthorized");
+  return session.tenantId;
+}
+
 /** The session's tenant, for scoping a write to this tenant rather than the
  *  environment-wide global default. The column is UUID, so a readable id would
  *  fail inside the driver and surface as a 503 rather than a 400. */
@@ -90,6 +106,7 @@ export async function submitFlag(
     environment,
     rolloutPercentage,
     principalId,
+    callerTenantId: await requireTenantScope(),
   });
 
   if (!result.ok) {
@@ -129,6 +146,7 @@ export async function toggleFlag(formData: FormData): Promise<void> {
     environment,
     rolloutPercentage: rolloutRaw === "" ? undefined : Number(rolloutRaw),
     principalId,
+    callerTenantId: await requireTenantScope(),
   });
 
   refresh();
@@ -179,6 +197,8 @@ export async function submitConfigEntry(
     environment,
     principalId,
     tenantId: scope === "tenant" ? await sessionTenant() : undefined,
+    // The scope being written can be global; the caller writing it cannot.
+    callerTenantId: await requireTenantScope(),
   });
 
   if (!result.ok) {
@@ -223,6 +243,7 @@ export async function lookupConfigEntry(
   const result = await getConfigEntry(
     name,
     environment,
+    await requireTenantScope(),
     scope === "tenant" ? await sessionTenant() : undefined,
   );
 
@@ -251,6 +272,7 @@ export async function lookupFeatureFlag(
   const result = await getFeatureFlag(
     name,
     environment,
+    await requireTenantScope(),
     scope === "tenant" ? await sessionTenant() : undefined,
   );
 
