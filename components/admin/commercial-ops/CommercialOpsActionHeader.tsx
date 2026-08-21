@@ -25,9 +25,9 @@ import { Server, Zap } from "lucide-react";
  */
 const SERVICES = [
   { name: "purchase-request-svc", port: "8100" },
-  // 8129, not 8112. compose gave 8112 to benefits-svc as well, so the two could
-  // never both start; Traefik and .env.local both already routed here to 8129.
-  { name: "purchase-order-svc", port: "8129" },
+  // 8139: the runner serves purchase-order-svc on 8139, not 8129. Port 8129 is
+  // already taken by withholding-tax-svc in the tax domain.
+  { name: "purchase-order-svc", port: "8139" },
   { name: "invoice-approval-svc", port: "8107" },
   { name: "spend-controls-svc", port: "8131" },
   { name: "vendor-due-diligence-svc", port: "8135" },

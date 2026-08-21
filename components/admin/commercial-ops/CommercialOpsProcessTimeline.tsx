@@ -72,7 +72,7 @@ const STEPS: Step[] = [
     icon: ShoppingCart,
     title: "PO Issued",
     service: "purchase-order-svc",
-    port: ":8129",
+    port: ":8139",
     wired: true,
     detail:
       "The binding commitment, issued only against an APPROVED requisition owned by the same tenant and legal entity. Amending restates the total and appends an immutable amendment record; closing is terminal.",

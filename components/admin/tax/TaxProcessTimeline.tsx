@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowRight,
   Calculator,
   CheckCircle2,
   FileText,
-  Globe,
   Receipt,
   Send,
   ShieldCheck,
@@ -25,38 +24,55 @@ type Step = {
   examples: string[];
 };
 
-const PROCESS_STEPS: Step[] = [
-  {
-    id: "transaction",
-    icon: Globe,
-    title: "Transaction Event",
-    service: "source-module",
-    port: "various",
-    count: 2,
-    status: "complete",
-    detail:
-      "A taxable event originates from AR, AP, Payroll, or a Purchase Order — any module that generates a monetary transaction sends it to the Tax Determination engine.",
-    examples: ["AR Invoice inv-2026-0891 (GBP 120K)", "PO po-2026-0412 (USD 450K)"],
-  },
-  {
-    id: "determination",
-    icon: Calculator,
-    title: "Tax Determination",
-    service: "tax-determination-svc",
-    port: ":8126",
-    count: 2,
-    status: "complete",
-    detail:
-      "The determination engine matches the transaction against jurisdiction rules and computes the applicable tax type, rate, taxable base, and calculated tax amount. Results are stored as determination records.",
-    examples: ["det-001 · UK VAT 20% · £20,000 calculated", "det-002 · US CIT 21% · $94,500 calculated"],
-  },
+function useLiveStepCounts(): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCounts() {
+      const endpoints: [string, string][] = [
+        ["tax-rules", "rules"],
+        ["tax-determinations", "determination"],
+        ["vat-returns", "returns"],
+        ["corporate-tax-returns", "returns"],
+        ["withholding-tax", "settled"],
+        ["filing-preparation/drafts", "filing"],
+        ["tax-authority/interfaces", "authority"],
+      ];
+      const results = await Promise.allSettled(
+        endpoints.map(async ([ep, stepId]) => {
+          const res = await fetch(`/api/v1/${ep}`, { signal: AbortSignal.timeout(5000) });
+          if (!res.ok) return [stepId, 0] as const;
+          const json = await res.json().catch(() => ({}));
+          const key = Object.keys(json).find((k) => Array.isArray(json[k]));
+          return [stepId, key ? json[key].length : 0] as const;
+        }),
+      );
+      if (cancelled) return;
+      const merged: Record<string, number> = {};
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const [stepId, count] = r.value;
+          merged[stepId] = count;
+        }
+      }
+      setCounts(merged);
+    }
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  return counts;
+}
+
+const STEP_META: Omit<Step, "count">[] = [
   {
     id: "rules",
     icon: ShieldCheck,
     title: "Tax Rule Applied",
     service: "tax-rules-svc",
     port: ":8125",
-    count: 4,
     status: "complete",
     detail:
       "Each determination references a governing tax rule that specifies the rate, category, jurisdiction, and effective date range. Rules are versioned — a determination always points to the exact rule version in effect at evaluation time.",
@@ -68,12 +84,22 @@ const PROCESS_STEPS: Step[] = [
     ],
   },
   {
+    id: "determination",
+    icon: Calculator,
+    title: "Tax Determination",
+    service: "tax-determination-svc",
+    port: ":8126",
+    status: "complete",
+    detail:
+      "The determination engine matches the transaction against jurisdiction rules and computes the applicable tax type, rate, taxable base, and calculated tax amount. Results are stored as determination records.",
+    examples: ["det-001 · UK VAT 20% · £20,000 calculated", "det-002 · US CIT 21% · $94,500 calculated"],
+  },
+  {
     id: "returns",
     icon: Receipt,
     title: "Return Assembled",
     service: "vat-gst-svc / corporate-tax-svc",
     port: ":8127 / :8128",
-    count: 3,
     status: "active",
     detail:
       "Periodic returns (VAT, GST, Corporate Income Tax) are assembled from the determination ledger. The engine aggregates output tax, input tax, deductions, and credits into a structured return for the relevant authority.",
@@ -89,7 +115,6 @@ const PROCESS_STEPS: Step[] = [
     title: "Filing Prepared",
     service: "filing-preparation-svc",
     port: ":8130",
-    count: 2,
     status: "active",
     detail:
       "The filing preparation service validates all evidence manifests against the return data, assembles the authority-specific payload (JSON for HMRC MTD, XML for IRS MeF), and marks the draft FINALIZED or flags BLOCKED with reasons.",
@@ -101,7 +126,6 @@ const PROCESS_STEPS: Step[] = [
     title: "Filed with Authority",
     service: "tax-authority-interface-svc",
     port: ":8147",
-    count: 3,
     status: "pending",
     detail:
       "The tax authority interface service transmits the finalized payload to the relevant authority gateway (HMRC MTD API, IRS MeF, IRAS e-File) using the appropriate authentication and protocol. Status is updated to ACCEPTED or REJECTED based on the authority response.",
@@ -117,7 +141,6 @@ const PROCESS_STEPS: Step[] = [
     title: "Tax Settled",
     service: "withholding-tax-svc / treasury",
     port: ":8129",
-    count: 1,
     status: "pending",
     detail:
       "Final settlement: withholding tax is remitted to the authority, corporate tax balance due is paid via treasury, and VAT returns move to ACCEPTED state. The obligation is closed in the compliance registry.",
@@ -158,6 +181,12 @@ const STATUS_CONFIG = {
 
 export function TaxProcessTimeline() {
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const liveCounts = useLiveStepCounts();
+
+  const PROCESS_STEPS: Step[] = STEP_META.map((meta) => ({
+    ...meta,
+    count: liveCounts[meta.id] ?? 0,
+  }));
 
   const openStep = PROCESS_STEPS.find((s) => s.id === activeStep);
 

@@ -281,7 +281,7 @@ const TAX_INTERFACES = [
   }
 ];
 
-function createService(port, name, getHandler, postHandler) {
+function createService(port, name, getHandler, postHandler, putHandler, deleteHandler) {
   const server = http.createServer((req, res) => {
     const send = (code, data) => {
       res.writeHead(code, {
@@ -301,19 +301,36 @@ function createService(port, name, getHandler, postHandler) {
     }
 
     if (req.method === "GET") {
-      return getHandler(pathname, url.searchParams, send);
+      return getHandler(pathname, url.searchParams, req.headers, send);
     }
 
-    if (req.method === "POST" || req.method === "PUT") {
+    if (req.method === "POST") {
       let body = "";
       req.on("data", c => body += c);
       req.on("end", () => {
         let json = {};
         try { json = JSON.parse(body); } catch {}
-        if (postHandler) return postHandler(pathname, json, send);
-        return send(201, { message: "Resource processed successfully", status: "CREATED", data: json });
+        if (postHandler) return postHandler(pathname, json, req.headers, send);
+        return send(201, { message: "Resource created successfully", status: "CREATED", data: json });
       });
       return;
+    }
+
+    if (req.method === "PUT" || req.method === "PATCH") {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        let json = {};
+        try { json = JSON.parse(body); } catch {}
+        if (putHandler) return putHandler(pathname, json, req.headers, send);
+        return send(200, { message: "Resource updated successfully", status: "UPDATED", data: json });
+      });
+      return;
+    }
+
+    if (req.method === "DELETE") {
+      if (deleteHandler) return deleteHandler(pathname, req.headers, send);
+      return send(200, { message: "Resource deleted successfully", status: "DELETED" });
     }
 
     return send(405, { error: "Method not allowed" });
@@ -327,64 +344,170 @@ function createService(port, name, getHandler, postHandler) {
 }
 
 // 1. tax-rules-svc (8125)
-createService(8125, "tax-rules-svc", (path, params, send) => {
-  return send(200, { rules: TAX_RULES, total: TAX_RULES.length });
-}, (path, body, send) => {
-  const newRule = { rule_id: "rule-" + Date.now(), ...body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-  TAX_RULES.push(newRule);
-  return send(201, newRule);
-});
+createService(
+  8125,
+  "tax-rules-svc",
+  (path, params, headers, send) => {
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length === 3 && parts[0] === "v1" && parts[1] === "tax-rules") {
+      const id = parts[2];
+      const rule = TAX_RULES.find(r => r.rule_id === id);
+      if (rule) return send(200, { rule });
+      return send(404, { error: `Tax rule not found with ID: ${id}` });
+    }
+
+    let rules = [...TAX_RULES];
+    if (params.get("jurisdiction_id")) {
+      rules = rules.filter(r => r.jurisdiction_id === params.get("jurisdiction_id"));
+    }
+    if (params.get("category")) {
+      rules = rules.filter(r => r.category === params.get("category"));
+    }
+    if (params.get("status")) {
+      rules = rules.filter(r => r.status === params.get("status"));
+    }
+    return send(200, { rules, total: rules.length });
+  },
+  (path, body, headers, send) => {
+    const newRule = {
+      rule_id: body.rule_id || ("rule-" + Date.now()),
+      tenant_id: headers["x-tenant-id"] || body.tenant_id || "11111111-1111-1111-1111-111111111111",
+      jurisdiction_id: body.jurisdiction_id || "jur-default",
+      rule_code: body.rule_code || "RULE-GENERIC",
+      name: body.name || "Custom Tax Rule",
+      category: body.category || "VAT",
+      tax_rate_percentage: body.tax_rate_percentage ?? 20.0,
+      standard_deductions: body.standard_deductions ?? 0,
+      status: body.status || "ACTIVE",
+      version: 1,
+      effective_from: body.effective_from || new Date().toISOString(),
+      created_by: headers["x-principal-id"] || "manual-test-agent",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    TAX_RULES.push(newRule);
+    return send(201, { message: "Tax rule created successfully", rule: newRule });
+  },
+  (path, body, headers, send) => {
+    const parts = path.split("/").filter(Boolean);
+    const id = parts[2];
+    const index = TAX_RULES.findIndex(r => r.rule_id === id);
+    if (index === -1) return send(404, { error: `Tax rule not found: ${id}` });
+    TAX_RULES[index] = { ...TAX_RULES[index], ...body, updated_at: new Date().toISOString() };
+    return send(200, { message: "Tax rule updated successfully", rule: TAX_RULES[index] });
+  },
+  (path, headers, send) => {
+    const parts = path.split("/").filter(Boolean);
+    const id = parts[2];
+    const index = TAX_RULES.findIndex(r => r.rule_id === id);
+    if (index === -1) return send(404, { error: `Tax rule not found: ${id}` });
+    const deleted = TAX_RULES.splice(index, 1)[0];
+    return send(200, { message: `Tax rule ${id} deleted successfully`, rule: deleted });
+  }
+);
 
 // 2. tax-determination-svc (8126)
-createService(8126, "tax-determination-svc", (path, params, send) => {
-  return send(200, { determinations: TAX_DETERMINATIONS, total: TAX_DETERMINATIONS.length });
-}, (path, body, send) => {
-  const rate = body.tax_rate_percentage || 20;
-  const taxable = body.taxable_amount || body.gross_amount || 0;
-  const calc = (taxable * rate) / 100;
-  const newDet = {
-    determination_id: "det-" + Date.now(),
-    status: "CALCULATED",
-    calculated_tax_amount: calc,
-    ...body,
-    evaluated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  };
-  TAX_DETERMINATIONS.unshift(newDet);
-  return send(201, newDet);
-});
+createService(
+  8126,
+  "tax-determination-svc",
+  (path, params, headers, send) => {
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length === 3 && parts[0] === "v1" && parts[1] === "tax-determinations") {
+      const id = parts[2];
+      const det = TAX_DETERMINATIONS.find(d => d.determination_id === id);
+      if (det) return send(200, { determination: det });
+      return send(404, { error: `Tax determination not found with ID: ${id}` });
+    }
+
+    let dets = [...TAX_DETERMINATIONS];
+    if (params.get("legal_entity_id")) {
+      dets = dets.filter(d => d.legal_entity_id === params.get("legal_entity_id"));
+    }
+    if (params.get("transaction_id")) {
+      dets = dets.filter(d => d.transaction_id === params.get("transaction_id"));
+    }
+    if (params.get("status")) {
+      dets = dets.filter(d => d.status === params.get("status"));
+    }
+    return send(200, { determinations: dets, total: dets.length });
+  },
+  (path, body, headers, send) => {
+    const rate = body.tax_rate_percentage ?? 20.0;
+    const taxable = body.taxable_amount ?? body.gross_amount ?? 0;
+    const calc = (taxable * rate) / 100;
+    const newDet = {
+      determination_id: body.determination_id || ("det-" + Date.now()),
+      tenant_id: headers["x-tenant-id"] || body.tenant_id || "11111111-1111-1111-1111-111111111111",
+      transaction_id: body.transaction_id || ("tx-" + Date.now()),
+      source_module: body.source_module || "MANUAL_TESTING",
+      legal_entity_id: headers["x-legal-entity-id"] || body.legal_entity_id || "22222222-2222-2222-2222-222222222222",
+      jurisdiction_id: body.jurisdiction_id || "jur-uk-gb",
+      rule_id: body.rule_id || "rule-uk-vat-standard",
+      tax_category: body.tax_category || "VAT",
+      gross_amount: body.gross_amount ?? taxable,
+      taxable_amount: taxable,
+      tax_rate_percentage: rate,
+      calculated_tax_amount: calc,
+      exempt_amount: body.exempt_amount ?? 0,
+      currency: body.currency || "GBP",
+      status: body.status || "CALCULATED",
+      effective_from: body.effective_from || new Date().toISOString(),
+      evaluated_at: new Date().toISOString(),
+      evaluated_by: headers["x-principal-id"] || "manual-test-runner",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    TAX_DETERMINATIONS.unshift(newDet);
+    return send(201, { message: "Tax determination evaluated and created successfully", determination: newDet });
+  },
+  (path, body, headers, send) => {
+    const parts = path.split("/").filter(Boolean);
+    const id = parts[2];
+    const index = TAX_DETERMINATIONS.findIndex(d => d.determination_id === id);
+    if (index === -1) return send(404, { error: `Tax determination not found: ${id}` });
+    TAX_DETERMINATIONS[index] = { ...TAX_DETERMINATIONS[index], ...body, updated_at: new Date().toISOString() };
+    return send(200, { message: "Tax determination updated successfully", determination: TAX_DETERMINATIONS[index] });
+  },
+  (path, headers, send) => {
+    const parts = path.split("/").filter(Boolean);
+    const id = parts[2];
+    const index = TAX_DETERMINATIONS.findIndex(d => d.determination_id === id);
+    if (index === -1) return send(404, { error: `Tax determination not found: ${id}` });
+    const deleted = TAX_DETERMINATIONS.splice(index, 1)[0];
+    return send(200, { message: `Tax determination ${id} deleted successfully`, determination: deleted });
+  }
+);
 
 // 3. vat-gst-svc (8127)
-createService(8127, "vat-gst-svc", (path, params, send) => {
+createService(8127, "vat-gst-svc", (path, params, headers, send) => {
   return send(200, { vat_returns: VAT_RETURNS, returns: VAT_RETURNS, total: VAT_RETURNS.length });
-}, (path, body, send) => {
+}, (path, body, headers, send) => {
   const newRet = { return_id: "vat-" + Date.now(), status: "DRAFT", ...body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
   VAT_RETURNS.unshift(newRet);
-  return send(201, newRet);
+  return send(201, { vat_return: newRet });
 });
 
 // 4. corporate-tax-svc (8128)
-createService(8128, "corporate-tax-svc", (path, params, send) => {
+createService(8128, "corporate-tax-svc", (path, params, headers, send) => {
   return send(200, { returns: CORPORATE_RETURNS, corporate_tax_returns: CORPORATE_RETURNS, total: CORPORATE_RETURNS.length });
-}, (path, body, send) => {
+}, (path, body, headers, send) => {
   const newRet = { return_id: "corp-" + Date.now(), status: "DRAFT", ...body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
   CORPORATE_RETURNS.unshift(newRet);
-  return send(201, newRet);
+  return send(201, { return: newRet });
 });
 
 // 5. withholding-tax-svc (8129)
-createService(8129, "withholding-tax-svc", (path, params, send) => {
+createService(8129, "withholding-tax-svc", (path, params, headers, send) => {
   return send(200, { obligations: WITHHOLDING_OBLIGATIONS, total: WITHHOLDING_OBLIGATIONS.length });
 });
 
 // 6. filing-preparation-svc (8130)
-createService(8130, "filing-preparation-svc", (path, params, send) => {
+createService(8130, "filing-preparation-svc", (path, params, headers, send) => {
   return send(200, { drafts: FILING_DRAFTS, total: FILING_DRAFTS.length });
 });
 
 // 7. tax-authority-interface-svc (8147)
-createService(8147, "tax-authority-interface-svc", (path, params, send) => {
+createService(8147, "tax-authority-interface-svc", (path, params, headers, send) => {
   return send(200, { interfaces: TAX_INTERFACES, total: TAX_INTERFACES.length });
 });
 

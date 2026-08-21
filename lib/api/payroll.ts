@@ -184,6 +184,73 @@ export async function listPayrollExceptions(identity?: Identity): Promise<ApiRes
   );
 }
 
+// ─── POST Operations ─────────────────────────────────────────────────────────
+
+export async function initiatePayrollRun(
+  body: {
+    pay_period_start: string;
+    pay_period_end: string;
+    pay_date: string;
+    is_shadow_run?: boolean;
+  },
+  identity?: Identity,
+): Promise<ApiResult<PayrollRun>> {
+  const base = payrollRunUrl();
+  const url = `${base}/v1/payroll/runs`;
+  return fetchDomainServicePost<{ payroll_run: PayrollRun }, PayrollRun>(
+    url,
+    base,
+    "payroll-run-svc",
+    body,
+    identity,
+    (d) => d.payroll_run,
+  );
+}
+
+export async function createCompensationStructure(
+  body: {
+    name: string;
+    pay_type: string;
+    min_amount: number;
+    max_amount: number;
+    currency: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<CompensationStructure>> {
+  const base = compensationUrl();
+  const url = `${base}/v1/compensation/structures`;
+  return fetchDomainServicePost<{ structure: CompensationStructure }, CompensationStructure>(
+    url,
+    base,
+    "compensation-svc",
+    body,
+    identity,
+    (d) => d.structure,
+  );
+}
+
+export async function raisePayrollException(
+  body: {
+    payroll_run_id: string;
+    exception_code: string;
+    severity: string;
+    description: string;
+    employee_id?: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<PayrollException>> {
+  const base = payrollExceptionsUrl();
+  const url = `${base}/v1/payroll-exceptions`;
+  return fetchDomainServicePost<{ exception: PayrollException }, PayrollException>(
+    url,
+    base,
+    "payroll-exceptions-svc",
+    body,
+    identity,
+    (d) => d.exception,
+  );
+}
+
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
 
 /**
@@ -222,6 +289,66 @@ async function fetchDomainService<TRaw, TOut>(
   let res: Response;
   try {
     res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
+  }
+}
+
+async function fetchDomainServicePost<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  body: unknown,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(3000),
+    });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     return {

@@ -52,6 +52,37 @@ const DEFAULTS = {
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
   financialClose: "http://localhost:8104",
+  // ── Finance Domain extras ────────────────────────────────────────────────
+  treasury: "http://localhost:8103",
+  intercompanyAccounting: "http://localhost:8105",
+  consolidation: "http://localhost:8106",
+  invoiceApproval: "http://localhost:8107",
+  // ── HR & Workforce Domain ────────────────────────────────────────────────
+  employeeMaster: "http://localhost:8108",
+  employmentContracts: "http://localhost:8109",
+  payrollRun: "http://localhost:8110",
+  compensation: "http://localhost:8111",
+  benefits: "http://localhost:8112",
+  payrollTax: "http://localhost:8113",
+  payrollExceptions: "http://localhost:8114",
+  leaveAbsence: "http://localhost:8115",
+  orgStructure: "http://localhost:8116",
+  offboardingSeverance: "http://localhost:8117",
+  workforceCompliance: "http://localhost:8118",
+  performanceReview: "http://localhost:8139",
+  // ── Compliance & Risk Domain ─────────────────────────────────────────────
+  complianceStatus: "http://localhost:8132",
+  exceptionEscalation: "http://localhost:8133",
+  anomalyDetection: "http://localhost:8134",
+  complianceRiskScoring: "http://localhost:8136",
+  decisionSupport: "http://localhost:8138",
+  // ── AI Governance, Security & Access ─────────────────────────────────────
+  aiGovernance: "http://localhost:8146",
+  authorization: "http://localhost:8089",
+  accessControl: "http://localhost:8137",
+  procurementWorkflow: "http://localhost:8140",
+  // ── Filing Tracker ────────────────────────────────────────────────────────
+  filingTracker: "http://localhost:8141",
   // 8133, per compose. notification-svc delivers governed notifications via a
   // documented stub adapter (see lib/api/notifications.ts) — no provider is
   // wired up on the platform yet.
@@ -144,6 +175,37 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   withholdingTax: "/withholding-tax-svc",
   filingPreparation: "/filing-preparation-svc",
   taxAuthorityInterface: "/tax-authority-interface-svc",
+  // Finance Domain extras
+  treasury: "/treasury-svc",
+  intercompanyAccounting: "/intercompany-accounting-svc",
+  consolidation: "/consolidation-svc",
+  invoiceApproval: "/invoice-approval-svc",
+  // HR & Workforce Domain
+  employeeMaster: "/employee-master-svc",
+  employmentContracts: "/employment-contracts-svc",
+  payrollRun: "/payroll-run-svc",
+  compensation: "/compensation-svc",
+  benefits: "/benefits-svc",
+  payrollTax: "/payroll-tax-svc",
+  payrollExceptions: "/payroll-exceptions-svc",
+  leaveAbsence: "/leave-absence-svc",
+  orgStructure: "/org-structure-svc",
+  offboardingSeverance: "/offboarding-severance-svc",
+  workforceCompliance: "/workforce-compliance-svc",
+  performanceReview: "/performance-review-svc",
+  // Compliance & Risk Domain
+  complianceStatus: "/compliance-status-svc",
+  exceptionEscalation: "/exception-escalation-svc",
+  anomalyDetection: "/anomaly-detection-svc",
+  complianceRiskScoring: "/compliance-risk-scoring-svc",
+  decisionSupport: "/decision-support-svc",
+  // AI Governance, Security & Access
+  aiGovernance: "/ai-governance-svc",
+  authorization: "/authorization-svc",
+  accessControl: "/access-control-svc",
+  procurementWorkflow: "/procurement-workflow-svc",
+  // Filing Tracker
+  filingTracker: "/filing-tracker-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";

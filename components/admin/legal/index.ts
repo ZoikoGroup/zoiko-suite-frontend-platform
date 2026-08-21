@@ -23,3 +23,4 @@ export { CorporateActionsAndCounterpartiesPanel } from "./CorporateActionsAndCou
 export { LegalActionHeader } from "./LegalActionHeader";
 export { LegalSummaryBar } from "./LegalSummaryBar";
 export { LegalProcessTimeline } from "./LegalProcessTimeline";
+export { ClauseAndResolutionPanels } from "./ClauseAndResolutionPanels";

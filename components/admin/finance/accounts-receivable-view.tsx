@@ -1,20 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useTransition, useCallback } from "react";
-import {
-  listInvoices,
-  createInvoice,
-  transitionInvoice,
-  CustomerInvoice,
-  InvoiceStatus,
-} from "@/lib/services/accounts-receivable";
-import { checkServiceHealth } from "@/lib/api-client";
-import {
-  RefreshCw,
-  Plus,
-  Server,
-  Building2,
-} from "lucide-react";
+import { RefreshCw, Plus, Server, Building2 } from "lucide-react";
+import type { ARInvoice } from "@/lib/api/finance";
+
+export type InvoiceStatus = "ISSUED" | "SENT" | "OVERDUE" | "PAID";
+
+export type CustomerInvoice = ARInvoice;
 
 export function AccountsReceivableView() {
   const [tenantID, setTenantID] = useState<string>("tenant-zoiko-dev-01");
@@ -32,28 +24,31 @@ export function AccountsReceivableView() {
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
-    // Check if backend service is reachable locally via proxy (to avoid CORS browser blocks)
-    const healthy = await checkServiceHealth("/api/backend/ar");
-    setIsLiveBackend(healthy);
-
-    const res = await listInvoices(tenantID);
-    if (res.data) {
-      const rawObj = res.data as unknown as Record<string, unknown>;
-      const list = Array.isArray(res.data)
-        ? res.data
-        : Array.isArray(rawObj?.invoices)
-        ? (rawObj.invoices as CustomerInvoice[])
-        : [];
-      setInvoices(list);
+    try {
+      const res = await fetch("/api/backend/ar/v1/invoices", {
+        headers: { "X-Tenant-Id": tenantID },
+      });
+      if (res.ok) {
+        setIsLiveBackend(true);
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : data?.invoices ?? [];
+        setInvoices(list);
+        setStatusMessage("Connected to live accounts-receivable-svc (:8101)");
+      } else {
+        setIsLiveBackend(false);
+        setStatusMessage(`Service returned ${res.status}: accounts-receivable-svc`);
+      }
+    } catch {
+      setIsLiveBackend(false);
+      setStatusMessage("accounts-receivable-svc is offline or unreachable at port 8101");
+    } finally {
+      setIsLoading(false);
     }
-    setStatusMessage(res.error || (healthy ? "Connected to local Go microservice (http://localhost:8101)" : "Local microservice offline. Using mock fallback."));
-    setIsLoading(false);
   }, [tenantID]);
 
   useEffect(() => {
     let active = true;
     const fetch = async () => {
-      // Yield to let the render cycle complete and avoid synchronous state updates in the effect path
       await Promise.resolve();
       if (!active) return;
       await loadData();
@@ -67,36 +62,56 @@ export function AccountsReceivableView() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    const res = await createInvoice(
-      {
+    try {
+      const payload = {
         customer_id: customerID,
         amount: Number(amount),
         currency_code: currency,
         legal_entity_id: "le-singapore-01",
-      },
-      tenantID
-    );
+        status: "ISSUED",
+      };
+      const res = await fetch("/api/backend/ar/v1/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Tenant-Id": tenantID },
+        body: JSON.stringify(payload),
+      });
 
-    if (res.data) {
-      setInvoices((prev) => [res.data!, ...prev]);
-      setStatusMessage(
-        res.isMock
-          ? "Invoice generated in mock store (start backend service to save to Postgres)."
-          : `Invoice ${res.data.invoice_number} created in Postgres via accounts-receivable-svc!`
-      );
-      setIsCreating(false);
+      if (res.ok) {
+        const data = await res.json();
+        const created = data?.invoice ?? data;
+        setInvoices((prev) => [created, ...prev]);
+        setStatusMessage(`Customer invoice ${created.invoice_number || created.invoice_id} created in accounts-receivable-svc!`);
+        setIsCreating(false);
+      } else {
+        const err = await res.text();
+        setStatusMessage(`Failed to create invoice: ${err}`);
+      }
+    } catch (err) {
+      setStatusMessage(`Error creating invoice: ${String(err)}`);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleTransition = async (inv: CustomerInvoice, nextStatus: InvoiceStatus) => {
     startTransition(async () => {
-      const res = await transitionInvoice(inv.invoice_id, inv.status, nextStatus, tenantID);
-      if (res.data?.success) {
-        setInvoices((prev) =>
-          prev.map((i) => (i.invoice_id === inv.invoice_id ? { ...i, status: nextStatus } : i))
-        );
-        setStatusMessage(`Invoice ${inv.invoice_number} transitioned to ${nextStatus}.`);
+      try {
+        const res = await fetch(`/api/backend/ar/v1/invoices/${inv.invoice_id}/transition`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Tenant-Id": tenantID },
+          body: JSON.stringify({ from_status: inv.status, to_status: nextStatus }),
+        });
+        if (res.ok) {
+          setInvoices((prev) =>
+            prev.map((i) => (i.invoice_id === inv.invoice_id ? { ...i, status: nextStatus } : i))
+          );
+          setStatusMessage(`Invoice ${inv.invoice_number || inv.invoice_id} transitioned to ${nextStatus}.`);
+        } else {
+          const err = await res.text();
+          setStatusMessage(`Transition failed: ${err}`);
+        }
+      } catch (err) {
+        setStatusMessage(`Transition error: ${String(err)}`);
       }
     });
   };

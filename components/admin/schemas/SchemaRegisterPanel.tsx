@@ -61,7 +61,13 @@ export async function SchemaRegisterPanel() {
     );
   }
 
-  if (namesResult.data.length === 0) {
+  const eventNames = Array.isArray(namesResult.data)
+    ? namesResult.data
+    : Array.isArray((namesResult.data as unknown as Record<string, unknown>)?.schemas)
+    ? ((namesResult.data as unknown as Record<string, unknown>).schemas as string[])
+    : [];
+
+  if (eventNames.length === 0) {
     return (
       <PanelEmptyState
         icon={FileJson}
@@ -75,7 +81,7 @@ export async function SchemaRegisterPanel() {
   // small by nature (one row per event type on the platform), so this is a
   // handful of requests rather than an N+1 over unbounded data.
   const latest = await Promise.all(
-    namesResult.data.map(async (name) => {
+    eventNames.map(async (name) => {
       const result = await getLatest(name, identity);
       return { name, schema: result.ok ? result.data : null };
     }),

@@ -8,6 +8,7 @@ import {
   ComplianceActionHeader,
   ComplianceSummaryBar,
   ComplianceProcessTimeline,
+  ExceptionAndAnomalyPanels,
 } from "@/components/admin/compliance";
 
 export const metadata: Metadata = { title: "Compliance Governance & Evidence | Zoiko Suite" };
@@ -112,6 +113,11 @@ export default async function CompliancePage() {
             <StatusAndEscalationPanel />
           </Suspense>
         </SectionCard>
+
+        {/* Live Anomaly Detection, Exception Queues & Decision Support */}
+        <Suspense fallback={<PanelSkeleton rows={4} />}>
+          <ExceptionAndAnomalyPanels />
+        </Suspense>
       </div>
     </div>
   );
