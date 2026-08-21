@@ -219,6 +219,25 @@ export async function apiPut<T>(
 }
 
 /**
+ * PATCH a JSON body to a backend service.
+ *
+ * Distinct from apiPut because the semantics the services attach to it differ:
+ * a PUT here restates a whole resource, while access-control-svc's
+ * PATCH /v1/role-definitions/{id} is a partial update where an omitted field
+ * means "leave it alone" — sending an empty role_name would not blank the name,
+ * it would keep the current one. A caller must be able to express "change only
+ * the status" without also having to resend every other field correctly.
+ */
+export async function apiPatch<T>(
+  service: ServiceName,
+  path: string,
+  body: unknown,
+  options: { correlationId?: string; identity?: Identity } = {},
+): Promise<ApiWriteResult<T>> {
+  return apiWrite<T>("PATCH", service, path, body, options);
+}
+
+/**
  * DELETE a resource.
  *
  * tenant-entity-registry-svc uses DELETE for its two end-dating operations
@@ -245,7 +264,7 @@ export async function apiDelete<T>(
 }
 
 async function apiWrite<T>(
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   service: ServiceName,
   path: string,
   body: unknown,
