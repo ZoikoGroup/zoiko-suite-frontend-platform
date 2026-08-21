@@ -96,7 +96,7 @@ export default async function PayrollPage() {
           icon={Wallet}
           title="Payroll Run Orchestration"
           subtitle="payroll-run-svc & payslip-svc — pay period execution, gross-to-net calculation, and payslip issuance"
-          ports="8090, 8095"
+          ports="8110, 8095"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <PayrollRunsPanel />
@@ -107,7 +107,7 @@ export default async function PayrollPage() {
           icon={Gift}
           title="Compensation & Benefit Schemes"
           subtitle="compensation-svc, benefits-svc & deductions-svc — salary grades, health plans, and pre-tax deductions"
-          ports="8091, 8092, 8097"
+          ports="8111, 8112"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <CompensationAndBenefitsPanel />
@@ -118,7 +118,7 @@ export default async function PayrollPage() {
           icon={Percent}
           title="Payroll Tax & Exception Auditing"
           subtitle="payroll-tax-svc, employer-contributions-svc & payroll-exceptions-svc — PAYE tax, NI, and anomaly audits"
-          ports="8093, 8094, 8096"
+          ports="8113, 8114"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <PayrollTaxAndExceptionsPanel />
