@@ -19,6 +19,16 @@ const JURISDICTION_LABEL: Record<string, { flag: string; short: string }> = {
   "us-fed-01":  { flag: "🇺🇸", short: "US" },
   "sg-iras-01": { flag: "🇸🇬", short: "SG" },
   "de-bzst-01": { flag: "🇩🇪", short: "DE" },
+  "jur-uk-gb":  { flag: "🇬🇧", short: "UK" },
+  "jur-us-fed": { flag: "🇺🇸", short: "US" },
+  "jur-sg-01":  { flag: "🇸🇬", short: "SG" },
+  "jur-sg-sg":  { flag: "🇸🇬", short: "SG" },
+  "jur-de-fed": { flag: "🇩🇪", short: "DE" },
+  "uk":         { flag: "🇬🇧", short: "UK" },
+  "gb":         { flag: "🇬🇧", short: "UK" },
+  "us":         { flag: "🇺🇸", short: "US" },
+  "sg":         { flag: "🇸🇬", short: "SG" },
+  "de":         { flag: "🇩🇪", short: "DE" },
 };
 
 function formatCurrency(amount: number, currency: string) {
@@ -52,8 +62,9 @@ function RateBar({ rate }: { rate: number }) {
 }
 
 function JurisdictionPill({ jurisdictionId }: { jurisdictionId: string }) {
-  const j = JURISDICTION_LABEL[jurisdictionId];
-  if (!j) return <span className="text-xs text-slate-400">{jurisdictionId}</span>;
+  const key = jurisdictionId?.toLowerCase();
+  const j = JURISDICTION_LABEL[key] || Object.entries(JURISDICTION_LABEL).find(([k]) => key?.includes(k))?.[1];
+  if (!j) return <span className="text-xs text-slate-400 font-mono">{jurisdictionId}</span>;
   return (
     <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
       <span>{j.flag}</span> {j.short}
@@ -153,8 +164,8 @@ export async function TaxRulesAndDeterminationPanel() {
                       <RateBar rate={r.tax_rate_percentage} />
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      {r.effective_from}
-                      {r.effective_to && <span className="text-slate-300"> → {r.effective_to}</span>}
+                      {r.effective_from ? r.effective_from.split("T")[0] : "—"}
+                      {r.effective_to && <span className="text-slate-300"> → {r.effective_to.split("T")[0]}</span>}
                     </td>
                     <td className="px-4 py-3">
                       <span

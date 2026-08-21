@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowRight, FileCode, Edit3, ShieldCheck, UserCheck, CheckSquare, Vote, X } from "lucide-react";
 
 type Step = {
@@ -15,77 +15,118 @@ type Step = {
   examples: string[];
 };
 
-const STEPS: Step[] = [
-  {
-    id: "template",
-    icon: FileCode,
-    title: "Template Drafted",
-    service: "clause-template-svc",
-    port: ":8119",
-    count: 142,
-    status: "complete",
-    detail: "Master agreement template selected from legal clause library.",
-    examples: ["MSA-CLOUD-V4 · Cloud Infrastructure MSA"],
-  },
-  {
-    id: "negotiation",
-    icon: Edit3,
-    title: "Clause Redline",
-    service: "contract-lifecycle-svc",
-    port: ":8118",
-    count: 28,
-    status: "complete",
-    detail: "Custom term adjustments, liability caps, and counterparty redlines.",
-    examples: ["cnt-2026-001 · $2.5M Global Infrastructure"],
-  },
-  {
-    id: "approval",
-    icon: ShieldCheck,
-    title: "Legal Approval",
-    service: "legal-approvals-svc",
-    port: ":8123",
-    count: 15,
-    status: "active",
-    detail: "General Counsel and Finance approval sign-off.",
-    examples: ["Approval Appr-8812 · Granted by GC"],
-  },
-  {
-    id: "counterparty",
-    icon: UserCheck,
-    title: "Counterparty Screen",
-    service: "counterparty-management-svc",
-    port: ":8124",
-    count: 64,
-    status: "active",
-    detail: "UBO verification, corporate registry check, and sanction screening.",
-    examples: ["Acme Cloud Inc. · Verified UBO"],
-  },
-  {
-    id: "obligation",
-    icon: CheckSquare,
-    title: "Obligation Tracked",
-    service: "obligation-tracking-svc",
-    port: ":8120",
-    count: 18,
-    status: "pending",
-    detail: "Contractual obligations registered into deadline tracking engine.",
-    examples: ["GDPR Data Privacy Audit · Annual"],
-  },
-  {
-    id: "resolution",
-    icon: Vote,
-    title: "Board Resolution",
-    service: "board-resolutions-svc",
-    port: ":8121",
-    count: 12,
-    status: "pending",
-    detail: "Formal board approval and corporate action filing.",
-    examples: ["BR-2026-08 · Unanimous Consent"],
-  },
-];
+function useLiveStepCounts(): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCounts() {
+      const endpoints: [string, string][] = [
+        ["clauses", "template"],
+        ["contracts", "negotiation"],
+        ["meetings", "approval"],
+        ["counterparties", "counterparty"],
+        ["obligations", "obligation"],
+        ["resolutions", "resolution"],
+      ];
+      const results = await Promise.allSettled(
+        endpoints.map(async ([ep, stepId]) => {
+          const res = await fetch(`/api/v1/${ep}`, { signal: AbortSignal.timeout(5000) });
+          if (!res.ok) return [stepId, 0] as const;
+          const json = await res.json().catch(() => ({}));
+          const key = Object.keys(json).find((k) => Array.isArray(json[k]));
+          return [stepId, key ? json[key].length : 0] as const;
+        }),
+      );
+      if (cancelled) return;
+      const merged: Record<string, number> = {};
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const [stepId, count] = r.value;
+          merged[stepId] = count;
+        }
+      }
+      setCounts(merged);
+    }
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+  return counts;
+}
 
 export function LegalProcessTimeline() {
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const liveCounts = useLiveStepCounts();
+
+  const STEPS: Step[] = [
+    {
+      id: "template",
+      icon: FileCode,
+      title: "Template Drafted",
+      service: "clause-template-svc",
+      port: ":8119",
+      count: liveCounts.template ?? 142,
+      status: "complete",
+      detail: "Master agreement template selected from legal clause library.",
+      examples: ["MSA-CLOUD-V4 · Cloud Infrastructure MSA"],
+    },
+    {
+      id: "negotiation",
+      icon: Edit3,
+      title: "Clause Redline",
+      service: "contract-lifecycle-svc",
+      port: ":8118",
+      count: liveCounts.negotiation ?? 28,
+      status: "complete",
+      detail: "Custom term adjustments, liability caps, and counterparty redlines.",
+      examples: ["cnt-2026-001 · $2.5M Global Infrastructure"],
+    },
+    {
+      id: "approval",
+      icon: ShieldCheck,
+      title: "Legal Approval",
+      service: "legal-approvals-svc",
+      port: ":8123",
+      count: liveCounts.approval ?? 15,
+      status: "active",
+      detail: "General Counsel and Finance approval sign-off.",
+      examples: ["Approval Appr-8812 · Granted by GC"],
+    },
+    {
+      id: "counterparty",
+      icon: UserCheck,
+      title: "Counterparty Screen",
+      service: "counterparty-management-svc",
+      port: ":8124",
+      count: liveCounts.counterparty ?? 64,
+      status: "active",
+      detail: "UBO verification, corporate registry check, and sanction screening.",
+      examples: ["Acme Cloud Inc. · Verified UBO"],
+    },
+    {
+      id: "obligation",
+      icon: CheckSquare,
+      title: "Obligation Tracked",
+      service: "obligation-tracking-svc",
+      port: ":8120",
+      count: liveCounts.obligation ?? 18,
+      status: "pending",
+      detail: "Contractual obligations registered into deadline tracking engine.",
+      examples: ["GDPR Data Privacy Audit · Annual"],
+    },
+    {
+      id: "resolution",
+      icon: Vote,
+      title: "Board Resolution",
+      service: "board-resolutions-svc",
+      port: ":8121",
+      count: liveCounts.resolution ?? 12,
+      status: "pending",
+      detail: "Formal board approval and corporate action filing.",
+      examples: ["BR-2026-08 · Unanimous Consent"],
+    },
+  ];
+
   const openStep = STEPS.find((s) => s.id === activeStep);
 
   return (

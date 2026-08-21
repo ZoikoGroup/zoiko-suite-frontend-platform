@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowRight, BookOpen, FileCheck, ShieldAlert, CalendarClock, Send, AlertTriangle, X } from "lucide-react";
 
 type Step = {
@@ -15,77 +15,118 @@ type Step = {
   examples: string[];
 };
 
-const STEPS: Step[] = [
-  {
-    id: "obligation",
-    icon: BookOpen,
-    title: "Obligation Cataloged",
-    service: "obligations-svc",
-    port: ":8088",
-    count: 14,
-    status: "complete",
-    detail: "Statutory filing requirement registered in central compliance ledger.",
-    examples: ["Companies House Annual Confirmation Statement"],
-  },
-  {
-    id: "req",
-    icon: FileCheck,
-    title: "Evidence Standard Defined",
-    service: "evidence-requirements-svc",
-    port: ":8089",
-    count: 38,
-    status: "complete",
-    detail: "Sufficiency rules and required documentation types established.",
-    examples: ["Board Minutes + Certified Financial Audit"],
-  },
-  {
-    id: "manifest",
-    icon: ShieldAlert,
-    title: "Manifest Verified",
-    service: "evidence-manifest-svc",
-    port: ":8087",
-    count: 38,
-    status: "complete",
-    detail: "Evidentiary file pack assembled and SHA-256 hash verified.",
-    examples: ["Manifest MAN-2026-0891 · Valid Hash"],
-  },
-  {
-    id: "deadline",
-    icon: CalendarClock,
-    title: "Deadline Checked",
-    service: "deadline-engine",
-    port: ":8088",
-    count: 14,
-    status: "active",
-    detail: "Statutory cutoff date monitored with countdown alerts.",
-    examples: ["Due in 14 days · Sept 30 2026"],
-  },
-  {
-    id: "filing",
-    icon: Send,
-    title: "Filing Submitted",
-    service: "filing-tracker",
-    port: ":8088",
-    count: 12,
-    status: "active",
-    detail: "Report submitted to statutory registry authority.",
-    examples: ["Filing Status: ACCEPTED"],
-  },
-  {
-    id: "audit",
-    icon: AlertTriangle,
-    title: "Exception Audited",
-    service: "exception-escalation-svc",
-    port: ":8088",
-    count: 1,
-    status: "pending",
-    detail: "Compliance breach or deadline exception evaluated and resolved.",
-    examples: ["Level 1 Warning · Resolved"],
-  },
-];
+function useLiveStepCounts(): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCounts() {
+      const endpoints: [string, string][] = [
+        ["filing-tracker/requirements", "obligation"],
+        ["compliance-status", "req"],
+        ["compliance-status", "manifest"],
+        ["filing-tracker/requirements", "deadline"],
+        ["filing-tracker/requirements", "filing"],
+        ["exception-escalation/exceptions", "audit"],
+      ];
+      const results = await Promise.allSettled(
+        endpoints.map(async ([ep, stepId]) => {
+          const res = await fetch(`/api/v1/${ep}`, { signal: AbortSignal.timeout(5000) });
+          if (!res.ok) return [stepId, 0] as const;
+          const json = await res.json().catch(() => ({}));
+          const key = Object.keys(json).find((k) => Array.isArray(json[k]));
+          return [stepId, key ? json[key].length : 0] as const;
+        }),
+      );
+      if (cancelled) return;
+      const merged: Record<string, number> = {};
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const [stepId, count] = r.value;
+          merged[stepId] = count;
+        }
+      }
+      setCounts(merged);
+    }
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+  return counts;
+}
 
 export function ComplianceProcessTimeline() {
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const liveCounts = useLiveStepCounts();
+
+  const STEPS: Step[] = [
+    {
+      id: "obligation",
+      icon: BookOpen,
+      title: "Obligation Cataloged",
+      service: "obligations-svc",
+      port: ":8088",
+      count: liveCounts.obligation ?? 14,
+      status: "complete",
+      detail: "Statutory filing requirement registered in central compliance ledger.",
+      examples: ["Companies House Annual Confirmation Statement"],
+    },
+    {
+      id: "req",
+      icon: FileCheck,
+      title: "Evidence Standard Defined",
+      service: "evidence-requirements-svc",
+      port: ":8089",
+      count: liveCounts.req ?? 38,
+      status: "complete",
+      detail: "Sufficiency rules and required documentation types established.",
+      examples: ["Board Minutes + Certified Financial Audit"],
+    },
+    {
+      id: "manifest",
+      icon: ShieldAlert,
+      title: "Manifest Verified",
+      service: "evidence-manifest-svc",
+      port: ":8087",
+      count: liveCounts.manifest ?? 38,
+      status: "complete",
+      detail: "Evidentiary file pack assembled and SHA-256 hash verified.",
+      examples: ["Manifest MAN-2026-0891 · Valid Hash"],
+    },
+    {
+      id: "deadline",
+      icon: CalendarClock,
+      title: "Deadline Checked",
+      service: "deadline-engine",
+      port: ":8088",
+      count: liveCounts.deadline ?? 14,
+      status: "active",
+      detail: "Statutory cutoff date monitored with countdown alerts.",
+      examples: ["Due in 14 days · Sept 30 2026"],
+    },
+    {
+      id: "filing",
+      icon: Send,
+      title: "Filing Submitted",
+      service: "filing-tracker",
+      port: ":8088",
+      count: liveCounts.filing ?? 12,
+      status: "active",
+      detail: "Report submitted to statutory registry authority.",
+      examples: ["Filing Status: ACCEPTED"],
+    },
+    {
+      id: "audit",
+      icon: AlertTriangle,
+      title: "Exception Audited",
+      service: "exception-escalation-svc",
+      port: ":8088",
+      count: liveCounts.audit ?? 1,
+      status: "pending",
+      detail: "Compliance breach or deadline exception evaluated and resolved.",
+      examples: ["Level 1 Warning · Resolved"],
+    },
+  ];
+
   const openStep = STEPS.find((s) => s.id === activeStep);
 
   return (

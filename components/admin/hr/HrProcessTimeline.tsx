@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowRight, UserPlus, FileCheck, Users, Calendar, ShieldCheck, UserMinus, X } from "lucide-react";
 
 type Step = {
@@ -15,14 +15,13 @@ type Step = {
   examples: string[];
 };
 
-const STEPS: Step[] = [
+const STEP_META: Omit<Step, "count">[] = [
   {
     id: "org",
     icon: UserPlus,
     title: "Position Created",
     service: "org-structure-svc",
     port: ":8131",
-    count: 8,
     status: "complete",
     detail: "Job position and cost center created in org structure tree.",
     examples: ["Senior Backend Engineer · Node-8812"],
@@ -33,7 +32,6 @@ const STEPS: Step[] = [
     title: "Contract Issued",
     service: "employment-contracts-svc",
     port: ":8110",
-    count: 240,
     status: "complete",
     detail: "Employment agreement issued with salary grade and probation period.",
     examples: ["EMP-2026-0891 · Full Time Permanent"],
@@ -44,7 +42,6 @@ const STEPS: Step[] = [
     title: "Workforce Active",
     service: "employee-master-svc",
     port: ":8109",
-    count: 240,
     status: "complete",
     detail: "Employee master profile active in department hierarchy.",
     examples: ["Engineering (120) · Product (40) · Sales (80)"],
@@ -55,7 +52,6 @@ const STEPS: Step[] = [
     title: "Leave Managed",
     service: "leave-absence-svc",
     port: ":8111",
-    count: 4,
     status: "active",
     detail: "Annual leave balances and absence requests tracked.",
     examples: ["Annual Leave · 4 Pending Requests"],
@@ -65,8 +61,7 @@ const STEPS: Step[] = [
     icon: ShieldCheck,
     title: "Compliance Audited",
     service: "workforce-compliance-svc",
-    port: ":8133",
-    count: 240,
+    port: ":8118",
     status: "active",
     detail: "Right-to-Work, visa expiry, and mandatory training compliance checked.",
     examples: ["100% Right-to-Work Verified"],
@@ -76,16 +71,56 @@ const STEPS: Step[] = [
     icon: UserMinus,
     title: "Offboarding Closed",
     service: "offboarding-severance-svc",
-    port: ":8132",
-    count: 2,
+    port: ":8117",
     status: "pending",
     detail: "Exit checklist, asset return, and severance pay calculation completed.",
     examples: ["Offboarding Case OFF-2026-04 · Completed"],
   },
 ];
 
+function useLiveStepCounts(): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCounts() {
+      const endpoints: [string, string][] = [
+        ["employees", "master"],
+        ["employees", "contract"],
+        ["employees", "compliance"],
+        ["leave/requests", "leave"],
+        ["org/departments", "org"],
+        ["employees", "offboard"],
+      ];
+      const results = await Promise.allSettled(
+        endpoints.map(async ([ep, stepId]) => {
+          const res = await fetch(`/api/v1/${ep}`, { signal: AbortSignal.timeout(5000) });
+          if (!res.ok) return [stepId, 0] as const;
+          const json = await res.json().catch(() => ({}));
+          const key = Object.keys(json).find((k) => Array.isArray(json[k]));
+          return [stepId, key ? json[key].length : 0] as const;
+        }),
+      );
+      if (cancelled) return;
+      const merged: Record<string, number> = {};
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const [stepId, count] = r.value;
+          merged[stepId] = count;
+        }
+      }
+      setCounts(merged);
+    }
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+  return counts;
+}
+
 export function HrProcessTimeline() {
   const [activeStep, setActiveStep] = useState<string | null>(null);
+  const liveCounts = useLiveStepCounts();
+  const STEPS: Step[] = STEP_META.map((meta) => ({ ...meta, count: liveCounts[meta.id] ?? 0 }));
   const openStep = STEPS.find((s) => s.id === activeStep);
 
   return (

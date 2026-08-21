@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
-import { CloudOff, FileCheck, ShieldAlert, Link as LinkIcon, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { CloudOff, FileCheck, ShieldAlert, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listFilingDrafts, listTaxAuthorityInterfaces, type FilingDraft, type TaxAuthorityInterface } from "@/lib/api/tax";
+import { TestConnectionButton } from "./TestConnectionButton";
 
 const VALIDATION_STATUS_CONFIG: Record<
   string,
@@ -25,9 +26,23 @@ const AUTH_TYPE_COLORS: Record<string, string> = {
   "Singpass / Corppass OIDC": "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300",
 };
 
-function DueDateCountdown({ dueDate }: { dueDate: string }) {
+function DueDateCountdown({ dueDate }: { dueDate?: string }) {
+  if (!dueDate) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+        <Clock className="h-3 w-3" /> Scheduled
+      </span>
+    );
+  }
   const today = new Date();
   const due = new Date(dueDate);
+  if (isNaN(due.getTime())) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+        <Clock className="h-3 w-3" /> Scheduled
+      </span>
+    );
+  }
   const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
   if (days < 0) {
@@ -157,9 +172,9 @@ export async function FilingPrepAndAuthorityPanel() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {drafts.map((d) => (
+                {drafts.map((d, idx) => (
                   <tr
-                    key={d.draft_id}
+                    key={d.draft_id ?? `draft-row-${idx}`}
                     className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                   >
                     <td className="px-4 py-3">
@@ -275,15 +290,10 @@ export async function FilingPrepAndAuthorityPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {/* Test connection stub — client actions not wired on SSR panel */}
-                      <button
-                        disabled
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 disabled:opacity-50 transition-colors cursor-not-allowed"
-                        title="Test connection (requires backend service running)"
-                      >
-                        <LinkIcon className="h-2.5 w-2.5" />
-                        Test
-                      </button>
+                      <TestConnectionButton
+                        interfaceId={iface.interface_id}
+                        authorityCode={iface.authority_code}
+                      />
                     </td>
                   </tr>
                 ))}

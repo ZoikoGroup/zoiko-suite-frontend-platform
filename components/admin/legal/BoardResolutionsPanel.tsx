@@ -108,7 +108,9 @@ export async function BoardResolutionsPanel() {
                   <tr key={m.meeting_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{m.title}</td>
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      {new Date(m.scheduled_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                      {m.scheduled_at
+                        ? new Date(m.scheduled_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                        : "—"}
                     </td>
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{m.location ?? "—"}</td>
                     <td className="px-4 py-3">
@@ -154,10 +156,10 @@ export async function BoardResolutionsPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      <span className="text-emerald-600 dark:text-emerald-400 font-medium">{r.votes_for}✓</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-medium">{r.votes_for ?? 0}✓</span>
                       {" · "}
-                      <span className="text-red-500 dark:text-red-400">{r.votes_against}✗</span>
-                      {r.abstentions > 0 && <span className="ml-1 text-slate-400">+{r.abstentions} abs.</span>}
+                      <span className="text-red-500 dark:text-red-400">{r.votes_against ?? 0}✗</span>
+                      {Boolean(r.abstentions && r.abstentions > 0) && <span className="ml-1 text-slate-400">+{r.abstentions} abs.</span>}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[r.status] ?? "bg-slate-100 text-slate-600"}`}>

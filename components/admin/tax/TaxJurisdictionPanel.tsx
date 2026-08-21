@@ -72,26 +72,34 @@ export async function TaxJurisdictionPanel() {
   const drafts = draftsRes.ok && Array.isArray(draftsRes.data) ? draftsRes.data : [];
   const authorities = authorityRes.ok && Array.isArray(authorityRes.data) ? authorityRes.data : [];
 
-  const JURISDICTIONS: { id: string; flag: string; name: string; shortName: string; authority: string; taxTypes: string[] }[] = [
-    { id: "uk-gov-01",  flag: "🇬🇧", name: "United Kingdom", shortName: "UK",  authority: "HMRC",    taxTypes: ["VAT", "WHT"] },
-    { id: "us-fed-01",  flag: "🇺🇸", name: "United States",  shortName: "US",  authority: "IRS",     taxTypes: ["CORPORATE_INCOME"] },
-    { id: "sg-iras-01", flag: "🇸🇬", name: "Singapore",      shortName: "SG",  authority: "IRAS",    taxTypes: ["GST", "WHT"] },
-    { id: "de-bzst-01", flag: "🇩🇪", name: "Germany",        shortName: "DE",  authority: "BZSt",    taxTypes: ["WHT"] },
+  const JURISDICTIONS: { id: string; aliases: string[]; flag: string; name: string; shortName: string; authority: string; taxTypes: string[] }[] = [
+    { id: "uk-gov-01",  aliases: ["uk-gov-01", "jur-uk-gb", "uk", "gb"],  flag: "🇬🇧", name: "United Kingdom", shortName: "UK",  authority: "HMRC",    taxTypes: ["VAT", "WHT"] },
+    { id: "us-fed-01",  aliases: ["us-fed-01", "jur-us-fed", "us", "usa"], flag: "🇺🇸", name: "United States",  shortName: "US",  authority: "IRS",     taxTypes: ["CORPORATE_INCOME"] },
+    { id: "sg-iras-01", aliases: ["sg-iras-01", "jur-sg-01", "jur-sg-sg", "sg"], flag: "🇸🇬", name: "Singapore",      shortName: "SG",  authority: "IRAS",    taxTypes: ["GST", "WHT"] },
+    { id: "de-bzst-01", aliases: ["de-bzst-01", "jur-de-fed", "de", "deu"], flag: "🇩🇪", name: "Germany",        shortName: "DE",  authority: "BZSt",    taxTypes: ["WHT"] },
   ];
 
+  function matches(jurId: string | undefined, aliases: string[]) {
+    if (!jurId) return false;
+    const lower = jurId.toLowerCase();
+    return aliases.some((a) => lower === a.toLowerCase() || lower.includes(a.toLowerCase()));
+  }
+
   const cards: JurisdictionCard[] = JURISDICTIONS.map((jur) => {
-    const jRules = rules.filter((r) => r.jurisdiction_id === jur.id && r.status === "ACTIVE");
+    const jRules = rules.filter((r) => matches(r.jurisdiction_id, jur.aliases) && r.status === "ACTIVE");
 
     // Most recent VAT return for this jurisdiction
-    const jVat = vatReturns.filter((v) => v.jurisdiction_id === jur.id);
-    const latestVat = jVat.sort((a, b) => b.tax_period.localeCompare(a.tax_period))[0];
+    const jVat = vatReturns.filter((v) => matches(v.jurisdiction_id, jur.aliases));
+    const latestVat = jVat.sort((a, b) => (b.tax_period ?? "").localeCompare(a.tax_period ?? ""))[0];
 
     // Most recent filing draft
-    const jDraft = drafts.filter((d) => d.jurisdiction_id === jur.id);
-    const latestDraft = jDraft.sort((a, b) => b.due_date.localeCompare(a.due_date))[0];
+    const jDraft = drafts.filter((d) => matches(d.jurisdiction_id, jur.aliases));
+    const latestDraft = jDraft.sort((a, b) => (b.due_date ?? "").localeCompare(a.due_date ?? ""))[0];
 
     // Authority connection
-    const jAuth = authorities.find((a) => a.jurisdiction_id === jur.id);
+    const jAuth = authorities.find((a) => matches(a.jurisdiction_id, jur.aliases));
+
+    const authorityIsActive = jAuth ? (jAuth.status === "ACTIVE" || jAuth.is_active === true) : false;
 
     return {
       id: jur.id,
@@ -102,7 +110,7 @@ export async function TaxJurisdictionPanel() {
       activeRules: jRules.length,
       vatGstStatus: latestVat?.status ?? null,
       filingStatus: latestDraft?.validation_status ?? null,
-      authorityStatus: jAuth?.status ?? "INACTIVE",
+      authorityStatus: jAuth ? (authorityIsActive ? "ACTIVE" : "INACTIVE") : "NONE",
       taxTypes: jur.taxTypes,
     };
   });

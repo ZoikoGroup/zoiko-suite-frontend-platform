@@ -2,171 +2,188 @@
 // - filing-tracker-svc (8131)
 // - compliance-status-svc (8132)
 // - exception-escalation-svc (8133)
+// - anomaly-detection-svc (8134)
+// - compliance-risk-scoring-svc (8136)
+// - decision-support-svc (8138)
+// - evidence-manifest-svc (8095)
 
-import { type ApiResult, type Identity } from "./client";
-
-function filingTrackerUrl(): string {
-  return (process.env.ZOIKO_FILING_TRACKER_URL ?? "http://localhost:8131").replace(/\/$/, "");
-}
-
-function complianceStatusUrl(): string {
-  return (process.env.ZOIKO_COMPLIANCE_STATUS_URL ?? "http://localhost:8132").replace(/\/$/, "");
-}
-
-function exceptionEscalationUrl(): string {
-  return (process.env.ZOIKO_EXCEPTION_ESCALATION_URL ?? "http://localhost:8133").replace(/\/$/, "");
-}
+import { apiGet, apiPost, type ApiResult, type Identity } from "./client";
 
 // ─── 1. Filing Tracker ───────────────────────────────────────────────────────
 
 export type FilingRequirement = {
   requirement_id: string;
-  tenant_id: string;
-  legal_entity_id: string;
-  jurisdiction_id: string;
+  tenant_id?: string;
+  legal_entity_id?: string;
+  jurisdiction_id?: string;
   filing_name: string;
   authority_name: string;
   due_date: string;
-  frequency: string;
+  frequency?: string;
   status: string;
-  created_at: string;
+  created_at?: string;
 };
 
-type FilingRequirementsResponse = { requirements: FilingRequirement[]; total: number };
+type FilingRequirementsResponse = { requirements?: FilingRequirement[]; total?: number };
 
 export async function listFilingRequirements(identity?: Identity): Promise<ApiResult<FilingRequirement[]>> {
-  const base = filingTrackerUrl();
-  const url = `${base}/v1/filing-tracker/requirements`;
-  return fetchDomainService<FilingRequirementsResponse, FilingRequirement[]>(
-    url,
-    base,
-    "filing-tracker-svc",
-    identity,
-    (d) => d.requirements ?? [],
-  );
+  const res = await apiGet<FilingRequirementsResponse | FilingRequirement[]>("filingTracker", "/v1/filings", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : res.data.requirements ?? [];
+  return { ok: true, data: list };
 }
 
-// ─── 2. Compliance Status ─────────────────────────────────────────────────────
+export async function createFilingRequirement(
+  body: Partial<FilingRequirement>,
+  identity?: Identity
+): Promise<ApiResult<FilingRequirement>> {
+  const res = await apiPost<{ requirement?: FilingRequirement } | FilingRequirement>(
+    "filingTracker",
+    "/v1/filings",
+    body,
+    { identity }
+  );
+  if (!res.ok) return res;
+  const r = (res.data as { requirement?: FilingRequirement }).requirement ?? (res.data as FilingRequirement);
+  return { ok: true, data: r };
+}
+
+// ─── 2. Compliance Status & Risk Scoring ──────────────────────────────────────
 
 export type ComplianceEvaluation = {
   evaluation_id: string;
-  tenant_id: string;
-  legal_entity_id: string;
-  jurisdiction_id: string;
+  tenant_id?: string;
+  legal_entity_id?: string;
+  jurisdiction_id?: string;
   overall_status: string;
   score_percentage: number;
-  evaluated_at: string;
+  evaluated_at?: string;
 };
 
-type ComplianceStatusResponse = { evaluations: ComplianceEvaluation[]; total: number };
+type ComplianceStatusResponse = { evaluations?: ComplianceEvaluation[]; total?: number };
 
 export async function listComplianceEvaluations(identity?: Identity): Promise<ApiResult<ComplianceEvaluation[]>> {
-  const base = complianceStatusUrl();
-  const url = `${base}/v1/compliance-status`;
-  return fetchDomainService<ComplianceStatusResponse, ComplianceEvaluation[]>(
-    url,
-    base,
-    "compliance-status-svc",
-    identity,
-    (d) => d.evaluations ?? [],
+  const res = await apiGet<ComplianceStatusResponse | ComplianceEvaluation[]>("complianceStatus", "/v1/evaluations", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : res.data.evaluations ?? [];
+  return { ok: true, data: list };
+}
+
+export async function evaluateCompliance(
+  body: { legal_entity_id?: string; jurisdiction_id?: string },
+  identity?: Identity
+): Promise<ApiResult<ComplianceEvaluation>> {
+  const res = await apiPost<{ evaluation?: ComplianceEvaluation } | ComplianceEvaluation>(
+    "complianceStatus",
+    "/v1/evaluate",
+    body,
+    { identity }
   );
+  if (!res.ok) return res;
+  const r = (res.data as { evaluation?: ComplianceEvaluation }).evaluation ?? (res.data as ComplianceEvaluation);
+  return { ok: true, data: r };
+}
+
+export type RiskScore = {
+  score_id: string;
+  category: string;
+  score: number;
+  risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  last_evaluated: string;
+};
+
+export async function getRiskScoringSummary(identity?: Identity): Promise<ApiResult<RiskScore[]>> {
+  const res = await apiGet<{ scores?: RiskScore[] } | RiskScore[]>("complianceRiskScoring", "/v1/scores", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : res.data.scores ?? [];
+  return { ok: true, data: list };
 }
 
 // ─── 3. Exception Escalation ──────────────────────────────────────────────────
 
 export type EscalatedException = {
   exception_id: string;
-  tenant_id: string;
+  tenant_id?: string;
   title: string;
   source_service: string;
-  severity: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   escalation_level: number;
-  status: string;
-  created_at: string;
+  status: "OPEN" | "INVESTIGATING" | "RESOLVED" | "WAIVED";
+  created_at?: string;
 };
 
-type EscalationsResponse = { exceptions: EscalatedException[]; total: number };
+type EscalationsResponse = { exceptions?: EscalatedException[]; total?: number };
 
 export async function listEscalatedExceptions(identity?: Identity): Promise<ApiResult<EscalatedException[]>> {
-  const base = exceptionEscalationUrl();
-  const url = `${base}/v1/exception-escalation/exceptions`;
-  return fetchDomainService<EscalationsResponse, EscalatedException[]>(
-    url,
-    base,
-    "exception-escalation-svc",
-    identity,
-    (d) => d.exceptions ?? [],
-  );
+  const res = await apiGet<EscalationsResponse | EscalatedException[]>("exceptionEscalation", "/v1/exceptions", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : res.data.exceptions ?? [];
+  return { ok: true, data: list };
 }
 
-// ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
+export async function resolveException(
+  exceptionId: string,
+  resolutionNote: string,
+  identity?: Identity,
+): Promise<ApiResult<EscalatedException>> {
+  const res = await apiPost<{ exception?: EscalatedException } | EscalatedException>(
+    "exceptionEscalation",
+    `/v1/exceptions/${exceptionId}/resolve`,
+    { resolution_note: resolutionNote },
+    { identity }
+  );
+  if (!res.ok) return res;
+  const exc = (res.data as { exception?: EscalatedException }).exception ?? (res.data as EscalatedException);
+  return { ok: true, data: exc };
+}
 
-/**
- * GET a JSON resource from a domain service and report what actually happened.
- *
- * This replaces `fetchServiceWithFallback`, which substituted hardcoded sample
- * data and reported it as `{ ok: true }`. It did so in three cases — a non-OK
- * status, a thrown request, AND **a successful response whose list was empty** —
- * and that last one is the dangerous one: a healthy service with no records
- * displayed invented rows indistinguishable from real ones. There was no way for a
- * caller, or a reader of the page, to tell.
- *
- * It also made the panels' own error handling unreachable. Every consumer of these
- * functions already branches on `!res.ok` to render a "service unavailable" state;
- * because the helper never returned `ok: false`, that branch was dead code. Failing
- * honestly is what makes it live again.
- *
- * An empty list is now an empty list. An unreachable service is an error.
- */
-async function fetchDomainService<TRaw, TOut>(
-  urlStr: string,
-  base: string,
-  serviceName: string,
-  identity: Identity | undefined,
-  transform: (raw: TRaw) => TOut,
-): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "X-Correlation-ID": correlationId,
-  };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+// ─── 4. Anomaly Detection ─────────────────────────────────────────────────────
 
-  let res: Response;
-  try {
-    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
-  } catch (cause) {
-    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
-    return {
-      ok: false,
-      error: {
-        kind: isTimeout ? "timeout" : "unreachable",
-        message: isTimeout
-          ? `${serviceName} did not respond within 3000ms`
-          : `${serviceName} is unreachable at ${base}`,
-      },
-    };
-  }
+export type ComplianceAnomaly = {
+  anomaly_id: string;
+  domain: string;
+  description: string;
+  confidence_score: number;
+  detected_at: string;
+  status: "NEW" | "ACKNOWLEDGED" | "DISMISSED";
+};
 
-  if (!res.ok) {
-    return {
-      ok: false,
-      error: {
-        kind: "http",
-        status: res.status,
-        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
-      },
-    };
-  }
+export async function listAnomalies(identity?: Identity): Promise<ApiResult<ComplianceAnomaly[]>> {
+  const res = await apiGet<{ anomalies?: ComplianceAnomaly[] } | ComplianceAnomaly[]>("anomalyDetection", "/v1/anomalies", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : res.data.anomalies ?? [];
+  return { ok: true, data: list };
+}
 
-  try {
-    return { ok: true, data: transform((await res.json()) as TRaw) };
-  } catch {
-    return {
-      ok: false,
-      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
-    };
-  }
+// ─── 5. Decision Support & Readiness ──────────────────────────────────────────
+
+export type DecisionSupportItem = {
+  item_id: string;
+  category: string;
+  recommendation: string;
+  impact_level: "HIGH" | "MEDIUM" | "LOW";
+  is_completed: boolean;
+};
+
+export async function getDecisionSupportChecklist(identity?: Identity): Promise<ApiResult<DecisionSupportItem[]>> {
+  const res = await apiGet<{ items?: DecisionSupportItem[] } | DecisionSupportItem[]>("decisionSupport", "/v1/recommendations", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : res.data.items ?? [];
+  return { ok: true, data: list };
+}
+
+// ─── 6. Evidence Manifest ────────────────────────────────────────────────────
+
+export async function generateEvidenceManifest(
+  body: { obligation_id?: string; legal_entity_id?: string },
+  identity?: Identity
+): Promise<ApiResult<{ manifest_id: string; checksum: string }>> {
+  const res = await apiPost<{ manifest_id: string; checksum: string }>(
+    "evidence",
+    "/v1/manifests",
+    body,
+    { identity }
+  );
+  if (!res.ok) return res;
+  return { ok: true, data: res.data };
 }

@@ -6,6 +6,7 @@ import {
   HrActionHeader,
   HrSummaryBar,
   HrProcessTimeline,
+  OrgAndPerformancePanels,
 } from "@/components/admin/hr";
 
 export const metadata: Metadata = { title: "HR & Workforce Governance | Zoiko Suite" };
@@ -54,8 +55,16 @@ export default async function HrPage() {
 
       <hr className="border-slate-200 dark:border-slate-800" />
 
+      {/* Employee Master Panel */}
       <Suspense fallback={<PanelSkeleton rows={4} />}>
         <EmployeeMasterPanel />
+      </Suspense>
+
+      <hr className="border-slate-200 dark:border-slate-800" />
+
+      {/* Department Structure & Performance Review Management */}
+      <Suspense fallback={<PanelSkeleton rows={4} />}>
+        <OrgAndPerformancePanels />
       </Suspense>
     </div>
   );
