@@ -13,36 +13,36 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Write SSH private key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.GCP_SSH_PRIVATE_KEY }}" > ~/.ssh/gha_deploy_key
-          chmod 600 ~/.ssh/gha_deploy_key
-
-      - name: Deploy via IAP tunnel
-        run: |
-          gcloud compute ssh lennox@zoiko-suite-platform-frontend \
-            --zone=europe-north1-a \
-            --tunnel-through-iap \
-            --ssh-key-file=~/.ssh/gha_deploy_key \
-            --command='
-              set -e
-              cd /var/www/zoiko-suite/app
-              git reset --hard HEAD
-              git clean -fd
-              git pull origin main
-              echo "deploying commit: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
-              npm ci
-              export NODE_OPTIONS="--max-old-space-size=4096"
-              npm run build
-              pm2 restart zoiko-suite
-              pm2 list
-            '
+          host: ${{ secrets.GCP_SSH_HOST }}
+          username: ${{ secrets.GCP_SSH_USER }}
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script_stop: true
+          script: |
+            echo "===== VM ENVIRONMENT ====="
+            echo "user:   $(whoami)"
+            echo "node:   $(node -v 2>&1 || echo 'MISSING')"
+            echo "npm:    $(npm -v 2>&1 || echo 'MISSING')"
+            echo "pm2:    $(command -v pm2 || echo 'NOT ON PATH')"
+            echo "--- pm2 processes ---"
+            pm2 list 2>&1 || echo 'pm2 list failed'
+            echo "=========================="
+            echo "##### PHASE 1: cd to app dir #####"
+            cd /var/www/zoiko-suite/app
+            echo "##### PHASE 2: reset working tree #####"
+            git reset --hard HEAD
+            git clean -fd
+            echo "##### PHASE 3: pull main #####"
+            git pull origin main
+            echo "deploying commit: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
+            echo "##### PHASE 4: npm ci #####"
+            npm ci
+            echo "##### PHASE 5: next build #####"
+            export NODE_OPTIONS="--max-old-space-size=4096"
+            npm run build
+            echo "##### PHASE 6: pm2 restart #####"
+            pm2 restart zoiko-suite
+            echo "##### DEPLOY OK #####"
+            pm2 list
