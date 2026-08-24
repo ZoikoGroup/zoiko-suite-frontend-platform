@@ -4,12 +4,12 @@ import { useState } from "react";
 import { Plus, Calendar, UserMinus, CheckCircle2, X, Server, Zap, Loader2 } from "lucide-react";
 
 const SERVICES = [
-  { name: "employee-master-svc",      port: "8109", color: "bg-emerald-500" },
-  { name: "employment-contracts-svc", port: "8110", color: "bg-emerald-500" },
-  { name: "leave-absence-svc",        port: "8111", color: "bg-emerald-500" },
-  { name: "org-structure-svc",        port: "8131", color: "bg-emerald-500" },
-  { name: "offboarding-severance-svc",port: "8132", color: "bg-emerald-500" },
-  { name: "workforce-compliance-svc", port: "8133", color: "bg-emerald-500" },
+  { name: "employee-master-svc",      port: "8108", color: "bg-emerald-500" },
+  { name: "employment-contracts-svc", port: "8109", color: "bg-emerald-500" },
+  { name: "leave-absence-svc",        port: "8115", color: "bg-emerald-500" },
+  { name: "org-structure-svc",        port: "8116", color: "bg-emerald-500" },
+  { name: "offboarding-severance-svc",port: "8117", color: "bg-emerald-500" },
+  { name: "workforce-compliance-svc", port: "8118", color: "bg-emerald-500" },
 ];
 
 function AddEmployeeModal({ onClose }: { onClose: () => void }) {
