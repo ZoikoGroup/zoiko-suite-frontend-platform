@@ -41,6 +41,54 @@ import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } f
 
 export type JournalStatus = "PENDING" | "VALIDATED" | "FINALIZED" | "REVERSED";
 
+/**
+ * ACC-03's journal type. A closed set, because the type decides how every
+ * downstream consumer reads the posting — an accrual is expected to reverse, an
+ * opening balance is excluded from period movement — so the service refuses a
+ * value outside this list rather than storing a category nothing understands.
+ *
+ * UNSPECIFIED is deliberately absent: it is the marker the service backfilled
+ * onto journals written before the input contract existed, and it is refused on
+ * a new one. It can still come back on a read of a historical journal, which is
+ * what `JournalTypeOnRead` covers.
+ */
+export type JournalType =
+  | "STANDARD"
+  | "ADJUSTMENT"
+  | "ACCRUAL"
+  | "REVERSAL"
+  | "OPENING"
+  | "CLOSING"
+  | "RECLASS";
+
+/** What a read can return, including the pre-contract backfill marker. */
+export type JournalTypeOnRead = JournalType | "UNSPECIFIED";
+
+/** Selectable types, with the wording the register uses. Ordered by how often
+ *  they are actually chosen, not alphabetically. */
+export const JOURNAL_TYPES: { value: JournalType; label: string; hint: string }[] = [
+  { value: "STANDARD", label: "Standard", hint: "An ordinary posting." },
+  { value: "ADJUSTMENT", label: "Adjustment", hint: "Corrects a previously posted figure." },
+  { value: "ACCRUAL", label: "Accrual", hint: "Recognises a cost or revenue before its document arrives. Expected to be reversed." },
+  { value: "RECLASS", label: "Reclassification", hint: "Moves a balance between accounts without changing the total." },
+  { value: "OPENING", label: "Opening balance", hint: "Carries a balance in. Excluded from period movement." },
+  { value: "CLOSING", label: "Closing entry", hint: "Closes a period's results out." },
+  { value: "REVERSAL", label: "Reversal", hint: "Normally produced by reversing a journal, not chosen by hand." },
+];
+
+/** Short labels for the register, where the column is narrow. UNSPECIFIED is
+ *  absent on purpose — the register names a pre-contract entry in words rather
+ *  than showing the marker as if it were a type someone chose. */
+export const JOURNAL_TYPE_LABELS: Record<JournalType, string> = {
+  STANDARD: "Standard",
+  ADJUSTMENT: "Adjustment",
+  ACCRUAL: "Accrual",
+  REVERSAL: "Reversal",
+  OPENING: "Opening",
+  CLOSING: "Closing",
+  RECLASS: "Reclass",
+};
+
 /** Wire shape of a journal header. Field names match the Go json tags exactly. */
 export type JournalHeader = {
   journal_id: string;
@@ -49,6 +97,26 @@ export type JournalHeader = {
   /** Plain string reference, e.g. "2026-07". No fiscal calendar service exists. */
   fiscal_period: string;
   status: JournalStatus;
+
+  // ── ACC-03 required business/source inputs ─────────────────────────────
+
+  journal_type: JournalTypeOnRead;
+  /** ISO calendar date, "2026-07-28". When the source document is dated. */
+  transaction_date: string;
+  /** ISO calendar date. When the entry takes effect in the ledger. Legitimately
+   *  later than transaction_date — an invoice dated the 28th, posted the 3rd. */
+  posting_date: string;
+  /** ISO 4217, e.g. "GBP". The transaction currency of every line. */
+  currency_code: string;
+  /** Null in practice: REF-06 Accounting Book / Ledger Basis does not exist, so
+   *  nothing can issue or validate a book. Carried so callers can begin sending
+   *  one — see docs/architecture/input-contract-conformance.md gap G-1. */
+  book_id?: string | null;
+  reporting_basis?: string | null;
+  /** Supporting documents, unioned from the request body and the §4 envelope's
+   *  X-Evidence-Refs header. */
+  evidence_refs?: string[] | null;
+
   /** Set only on a reversing journal, pointing at the journal it reverses. */
   reversal_of_journal_id?: string | null;
   /** Atomic Linking references: the upstream event and/or governance decision
@@ -80,6 +148,11 @@ export type JournalLine = {
    *  null in practice — no TaxLogicSnapshot-producing service exists yet. */
   tax_code?: string | null;
   tax_logic_snapshot_id?: string | null;
+  /** ACC-03 "dimensions" — cost centre, project, department, whatever axes the
+   *  tenant posts against. Free-form keys: REF-08 Financial Dimension Registry
+   *  does not exist, so nothing says which dimensions a tenant has defined or
+   *  which values are valid for one. */
+  dimensions?: Record<string, string> | null;
 };
 
 /** What the read endpoints and every write return: the header plus its lines. */
@@ -194,6 +267,9 @@ export type CreateJournalLineInput = {
   debitAmount?: number;
   creditAmount?: number;
   description?: string;
+  /** ACC-03 "dimensions". Per line, not per journal — one journal routinely
+   *  splits a single cost across cost centres. Validated by nothing. */
+  dimensions?: Record<string, string>;
 };
 
 export type CreateJournalInput = {
@@ -201,7 +277,43 @@ export type CreateJournalInput = {
   fiscalPeriod: string;
   description: string;
   lines: CreateJournalLineInput[];
+
+  // ── ACC-03 required business/source inputs ─────────────────────────────
+  //
+  // All four are required by the service. A journal missing any of them is
+  // refused 400 `missing_field` naming the one that was absent.
+
+  journalType: JournalType;
+  /** ISO calendar date, "2026-07-28". Not a timestamp: a posting belongs to a
+   *  day in the entity's books, and a time-of-day would let the same business
+   *  day fall into two periods across a timezone boundary. */
+  transactionDate: string;
+  /** ISO calendar date. May be later than transactionDate; never earlier — the
+   *  service refuses 400 `invalid_posting_date`. */
+  postingDate: string;
+  /** ISO 4217 alphabetic code. Shape-checked only (three uppercase letters):
+   *  REF-02 Currency Registry does not exist, so nothing can say whether a
+   *  well-formed code is one this tenant actually transacts in. */
+  currencyCode: string;
+
+  /** Optional. Nothing can validate it yet — see JournalHeader.book_id. */
+  bookId?: string;
+  reportingBasis?: string;
+  /** Supporting documents. Merged with the §4 envelope's X-Evidence-Refs
+   *  rather than replacing it, so both survive. */
+  evidenceRefs?: string[];
 };
+
+/** Today as an ISO calendar date, for defaulting the two date fields.
+ *
+ *  Uses the local calendar day rather than toISOString(), which converts to UTC
+ *  first and so names yesterday for anyone west of Greenwich after 00:00 UTC —
+ *  putting a posting in the wrong period for exactly the users least likely to
+ *  notice. */
+export function todayISODate(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
 
 /**
  * Record a journal. It lands PENDING and posts nothing to the books.
@@ -220,6 +332,12 @@ export type CreateJournalInput = {
 export async function createJournal(
   input: CreateJournalInput,
 ): Promise<ApiWriteResult<JournalWithLines>> {
+  // One key for both roles. correlation_id is the service's own idempotency key
+  // (partial unique index on tenant_id, correlation_id) and Idempotency-Key is
+  // the §4 envelope's. Deriving them from the same value means a retry that
+  // reaches either check is recognised as the same submission by both.
+  const submissionKey = crypto.randomUUID();
+
   return apiPost<JournalWithLines>(
     "generalLedger",
     "/v1/journals",
@@ -228,15 +346,25 @@ export async function createJournal(
       legal_entity_id: input.identity.legalEntityId,
       fiscal_period: input.fiscalPeriod,
       description: input.description,
+
+      journal_type: input.journalType,
+      transaction_date: input.transactionDate,
+      posting_date: input.postingDate,
+      currency_code: input.currencyCode,
+      book_id: input.bookId,
+      reporting_basis: input.reportingBasis,
+      evidence_refs: input.evidenceRefs,
+
       lines: input.lines.map((line) => ({
         account_code: line.accountCode,
         debit_amount: line.debitAmount ?? 0,
         credit_amount: line.creditAmount ?? 0,
         description: line.description,
+        dimensions: line.dimensions,
       })),
-      correlation_id: crypto.randomUUID(),
+      correlation_id: submissionKey,
     },
-    { identity: input.identity },
+    { identity: input.identity, idempotencyKey: submissionKey },
   );
 }
 
@@ -276,11 +404,13 @@ export async function reverseJournal(
   reason: string,
   identity: Identity & { principalId: string; tenantId: string },
 ): Promise<ApiWriteResult<JournalWithLines>> {
+  // Same key in both roles as createJournal — see the note there.
+  const submissionKey = crypto.randomUUID();
   return apiPost<JournalWithLines>(
     "generalLedger",
     `/v1/journals/${journalId}/reverse`,
-    { reason, correlation_id: crypto.randomUUID() },
-    { identity },
+    { reason, correlation_id: submissionKey },
+    { identity, idempotencyKey: submissionKey },
   );
 }
 
@@ -365,6 +495,18 @@ export function explainLedgerError(message: string): string {
   }
   if (message.includes("journal_not_found")) {
     return "No journal with that id exists for this tenant. A journal belonging to another tenant, and an id that is not a UUID at all, both read as absent in exactly the same way.";
+  }
+  if (message.includes("invalid_journal_type")) {
+    return "That is not a journal type this ledger recognises. The accepted values are Standard, Adjustment, Accrual, Reversal, Opening, Closing and Reclassification — the type decides how every downstream report reads the posting, so an unrecognised one is refused rather than stored.";
+  }
+  if (message.includes("invalid_currency_code")) {
+    return "The currency must be a three-letter ISO 4217 code, such as GBP. Only the shape is checked — no Currency Registry service exists, so a well-formed code for a currency this entity never trades in would still be accepted.";
+  }
+  if (message.includes("invalid_posting_date")) {
+    return "The posting date cannot be earlier than the transaction date — a journal cannot reach the ledger before the document it records exists. The reverse is fine: an invoice dated the 28th and posted on the 3rd is an ordinary entry.";
+  }
+  if (message.includes("envelope_incomplete")) {
+    return "The request did not carry the canonical input contract this platform requires (ZS-ARCH-SVC-001 §4). The detail names each missing header. Nothing was written.";
   }
   if (message.includes("no_lines")) {
     return "A journal needs at least one line. Nothing was written.";

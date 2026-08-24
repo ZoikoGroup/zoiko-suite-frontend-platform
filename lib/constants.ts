@@ -22,6 +22,7 @@ import {
   Bell,
   Globe2,
   FileText,
+  Fingerprint,
 } from "lucide-react";
 
 export type DomainKey =
@@ -258,9 +259,12 @@ export const PLATFORM_NAV = [
   // in the platform can be created until a tenant and a legal entity exist here,
   // and every other service scopes its data by the ids this registry issues.
   { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },
+  // Identity resolution comes next: every downstream service consumes the
+  // signed envelope issued here. This is the third thing that has to exist.
+  { label: "Identity Context", href: "/admin/identity", icon: Fingerprint },
   // Immediately after the registry, and before the pages that consume grants:
   // a role defined here is what every other service's authz check resolves
-  // against, so this is the second thing that has to exist.
+  // against, so this is the fourth thing that has to exist.
   { label: "Roles & Access", href: "/admin/access-control", icon: KeySquare },
   { label: "Governance Log", href: "/admin/governance", icon: ScrollText },
   { label: "Policies", href: "/admin/policies", icon: Gavel },

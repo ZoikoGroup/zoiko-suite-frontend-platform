@@ -9,6 +9,7 @@
 // panels always read live state without an explicit no-store.
 
 import { REQUEST_TIMEOUT_MS, serviceLabel, serviceUrl, type ServiceName } from "./config";
+import { envelopeHeaders, type EnvelopeOptions, type Identity } from "./envelope";
 
 /**
  * Result of a backend call. Deliberately a union rather than a throw: one
@@ -43,42 +44,18 @@ export type ApiError = {
   body?: unknown;
 };
 
-/**
- * Resolved caller identity, forwarded as the X-*-Id headers every backend
- * trusts.
- *
- * In production these are set by Traefik from gateway-auth-svc's ForwardAuth
- * check of the signed identity envelope, and a service that receives a request
- * without them fails closed. The local single-port gateway routes deliberately
- * carry no ForwardAuth middleware, so the console supplies them from the
- * session instead — see lib/auth.ts DEMO_IDENTITY.
- *
- * Sending these matters beyond writes: services with row-level security read
- * X-Tenant-Id to scope the query, and a read that omits it comes back 404 or
- * empty rather than failing loudly.
- */
-export type Identity = {
-  principalId?: string;
-  tenantId?: string;
-  legalEntityId?: string;
-};
+// Identity moved to ./envelope, where it sits alongside the rest of the §4
+// canonical input contract it is one part of. Re-exported so the ~30 lib/api
+// modules that import it from here keep working.
+export type { Identity, EnvelopeOptions, EnvelopeViolation } from "./envelope";
 
-type GetOptions = {
+type GetOptions = EnvelopeOptions & {
   /** Query parameters. Undefined and empty values are dropped. */
   query?: Record<string, string | number | undefined>;
-  /** Propagated to the backend as X-Correlation-ID for cross-service tracing. */
-  correlationId?: string;
   identity?: Identity;
 };
 
-function identityHeaders(identity: Identity | undefined): Record<string, string> {
-  if (!identity) return {};
-  const headers: Record<string, string> = {};
-  if (identity.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
-  return headers;
-}
+type WriteOptions = EnvelopeOptions & { identity?: Identity };
 
 /**
  * GET a JSON resource from a backend service.
@@ -99,15 +76,13 @@ export async function apiGet<T>(
     url.searchParams.set(key, String(value));
   }
 
-  const correlationId = options.correlationId ?? crypto.randomUUID();
-
   let response: Response;
   try {
     response = await fetch(url, {
       headers: {
         Accept: "application/json",
-        "X-Correlation-ID": correlationId,
-        ...identityHeaders(options.identity),
+        // materialWrite: false — a read carries no idempotency key. See envelope.ts.
+        ...envelopeHeaders({ ...options, materialWrite: false }),
       },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -197,7 +172,7 @@ export async function apiPost<T>(
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string; identity?: Identity } = {},
+  options: WriteOptions = {},
 ): Promise<ApiWriteResult<T>> {
   return apiWrite<T>("POST", service, path, body, options);
 }
@@ -213,7 +188,7 @@ export async function apiPut<T>(
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string; identity?: Identity } = {},
+  options: WriteOptions = {},
 ): Promise<ApiWriteResult<T>> {
   return apiWrite<T>("PUT", service, path, body, options);
 }
@@ -232,7 +207,7 @@ export async function apiPatch<T>(
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string; identity?: Identity } = {},
+  options: WriteOptions = {},
 ): Promise<ApiWriteResult<T>> {
   return apiWrite<T>("PATCH", service, path, body, options);
 }
@@ -249,11 +224,7 @@ export async function apiPatch<T>(
 export async function apiDelete<T>(
   service: ServiceName,
   path: string,
-  options: {
-    query?: Record<string, string | number | undefined>;
-    correlationId?: string;
-    identity?: Identity;
-  } = {},
+  options: WriteOptions & { query?: Record<string, string | number | undefined> } = {},
 ): Promise<ApiWriteResult<T>> {
   const url = new URL(serviceUrl(service) + path);
   for (const [key, value] of Object.entries(options.query ?? {})) {
@@ -268,11 +239,10 @@ async function apiWrite<T>(
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string; identity?: Identity } = {},
+  options: WriteOptions = {},
   absoluteURL = false,
 ): Promise<ApiWriteResult<T>> {
   const url = absoluteURL ? path : serviceUrl(service) + path;
-  const correlationId = options.correlationId ?? crypto.randomUUID();
 
   let response: Response;
   try {
@@ -281,8 +251,11 @@ async function apiWrite<T>(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        "X-Correlation-ID": correlationId,
-        ...identityHeaders(options.identity),
+        // materialWrite: true — every method reaching here changes state, so the
+        // envelope carries an idempotency key (INV-08). DELETE included: it is
+        // idempotent at the HTTP level but not at the accounting level, and the
+        // registry's end-dating routes use it.
+        ...envelopeHeaders({ ...options, materialWrite: true }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

@@ -14,6 +14,7 @@ const DEFAULTS = {
   configuration: "http://localhost:8086",
   secretVault: "http://localhost:8087",
   obligations: "http://localhost:8088",
+  identityContext: "http://localhost:8080",
   // Read-only here. obligations-svc validates every jurisdiction_id against this
   // service on the write path and fails closed, so the console reads the same
   // register to offer a picker — a free-text UUID field would produce
@@ -155,6 +156,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   configuration: "/configuration-feature-flag-svc",
   secretVault: "/secret-vault-integration-svc",
   obligations: "/obligations-svc",
+  identityContext: "/identity-context-svc",
   // The compose KEY is `jurisdiction-svc` but container_name — and therefore the
   // generated Traefik prefix — is `jurisdiction-rules-svc`. Using the key here
   // would 404 in a way that looks like a dead service.

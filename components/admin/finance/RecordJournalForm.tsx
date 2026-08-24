@@ -1,11 +1,12 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useSyncExternalStore } from "react";
 import { Plus, X } from "lucide-react";
 import { CopyableId, ResultBanner, type BannerTone } from "@/components/admin/shared";
 import { FIELD, LABEL, OPTIONAL } from "@/components/admin/shared/form";
 import { Button } from "@/components/ui";
 import { recordJournal } from "@/app/admin/finance/actions";
+import { JOURNAL_TYPES, todayISODate } from "@/lib/api/general-ledger";
 import {
   IDLE_LEDGER_STATE,
   JOURNAL_LINE_SLOTS,
@@ -28,6 +29,33 @@ const TONE: Record<LedgerActionState["status"], BannerTone> = {
 };
 
 const CELL_FIELD = `${FIELD} text-sm`;
+
+/**
+ * Today's calendar date, as the *browser* reckons it.
+ *
+ * This cannot be an initial useState value or a defaultValue. The form renders
+ * on the server as well, where the clock is UTC, and the operator's calendar day
+ * differs from UTC's for a wide band of timezones at any given moment — so the
+ * server would emit one date into the HTML and the client would render another,
+ * producing a hydration mismatch on the very field whose entire job is to name
+ * the right day. useSyncExternalStore is the supported way to say "this value is
+ * legitimately different on the server": it renders the server snapshot during
+ * hydration and swaps to the client's afterwards.
+ *
+ * The snapshot is memoised because useSyncExternalStore compares snapshots by
+ * identity and would loop forever on a function that returned a fresh string
+ * each call. One consequence: a console left open across midnight keeps
+ * yesterday as the *default*. That is a default, not a submitted value — the
+ * operator sees the date in the field and the service records what is sent.
+ */
+const subscribeToNothing = () => () => {};
+let todaySnapshot: string | null = null;
+const getTodaySnapshot = () => (todaySnapshot ??= todayISODate());
+const getServerTodaySnapshot = () => "";
+
+function useToday(): string {
+  return useSyncExternalStore(subscribeToNothing, getTodaySnapshot, getServerTodaySnapshot);
+}
 
 /**
  * Stage 1 of 3 — record a journal.
@@ -63,8 +91,22 @@ export function RecordJournalForm() {
   // what is sent — it is display, not a source of truth.
   const [amounts, setAmounts] = useState<Record<number, { debit: string; credit: string }>>({});
 
+  // ACC-03's two business dates. Null means "operator has not touched it", and
+  // falls back to today — see useToday for why today cannot simply be the
+  // initial state.
+  const today = useToday();
+  const [transactionDateInput, setTransactionDate] = useState<string | null>(null);
+  const [postingDateInput, setPostingDate] = useState<string | null>(null);
+  const transactionDate = transactionDateInput ?? today;
+  const postingDate = postingDateInput ?? today;
+
   const debitTotal = sumColumn(lineIds, amounts, "debit");
   const creditTotal = sumColumn(lineIds, amounts, "credit");
+
+  // Shown beside the field rather than waiting for the service's 400. The
+  // service still refuses it — this is an affordance, not the enforcement.
+  const postingBeforeTransaction =
+    transactionDate !== "" && postingDate !== "" && postingDate < transactionDate;
   // Compared in minor units: 0.1 + 0.2 !== 0.3 in binary floating point, and
   // this is the figure that tells an operator whether validation will pass.
   const balanced = Math.round(debitTotal * 100) === Math.round(creditTotal * 100);
@@ -134,6 +176,117 @@ export function RecordJournalForm() {
             for the life of the ledger and cannot be edited once posted.
           </p>
         </div>
+      </div>
+
+      {/*
+        ACC-03 required business/source inputs (ZS-ARCH-SVC-001 §9.D). The
+        ledger refuses a journal missing any of the four, naming the one that
+        was absent, so they are grouped here rather than scattered through the
+        form — an operator filling this in top to bottom should not discover a
+        required field only after a round trip.
+      */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <div>
+          <label htmlFor="journal_type" className={LABEL}>
+            Journal type
+          </label>
+          <select id="journal_type" name="journal_type" required defaultValue="STANDARD" className={FIELD}>
+            {JOURNAL_TYPES.map((type) => (
+              <option key={type.value} value={type.value}>
+                {type.label}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            Decides how downstream reports read this posting — an accrual is expected to reverse, an
+            opening balance is excluded from period movement.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="transaction_date" className={LABEL}>
+            Transaction date
+          </label>
+          <input
+            id="transaction_date"
+            name="transaction_date"
+            type="date"
+            required
+            value={transactionDate}
+            onChange={(event) => setTransactionDate(event.target.value)}
+            className={FIELD}
+          />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            The date on the source document.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="posting_date" className={LABEL}>
+            Posting date
+          </label>
+          <input
+            id="posting_date"
+            name="posting_date"
+            type="date"
+            required
+            value={postingDate}
+            onChange={(event) => setPostingDate(event.target.value)}
+            min={transactionDate || undefined}
+            aria-invalid={postingBeforeTransaction || undefined}
+            className={FIELD}
+          />
+          <p
+            className={`mt-1.5 text-xs ${
+              postingBeforeTransaction
+                ? "text-amber-600 dark:text-amber-500"
+                : "text-slate-400 dark:text-slate-500"
+            }`}
+          >
+            {postingBeforeTransaction
+              ? "Earlier than the transaction date — a journal cannot reach the ledger before the document it records exists. The ledger will refuse this."
+              : "When it takes effect in the ledger. May be later than the transaction date — never earlier."}
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="currency_code" className={LABEL}>
+            Currency
+          </label>
+          <input
+            id="currency_code"
+            name="currency_code"
+            required
+            placeholder="GBP"
+            pattern="[A-Za-z]{3}"
+            maxLength={3}
+            className={`${FIELD} uppercase`}
+            autoComplete="off"
+          />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            ISO 4217, three letters. Only the shape is checked — no currency registry service
+            exists — so a code this entity never trades in still posts.
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor="book_id" className={LABEL}>
+          Accounting book <span className={OPTIONAL}>(optional)</span>
+        </label>
+        <input
+          id="book_id"
+          name="book_id"
+          placeholder="BOOK-STAT-GB"
+          className={FIELD}
+          autoComplete="off"
+        />
+        <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+          Which book or reporting basis this posting belongs to. Recorded as typed and validated by
+          nothing: no Accounting Book service exists yet, so the statutory / management / tax split
+          the architecture calls for cannot be enforced here. Leaving it blank is the honest default
+          until one ships.
+        </p>
       </div>
 
       <div className="space-y-2">
