@@ -28,27 +28,40 @@ import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth"
 import {
   assignJurisdiction,
   createEntity,
+  createHierarchy,
   createResidencyPolicy,
+  createWorkspace,
+  endDateHierarchy,
   endDateJurisdictionAssignment,
+  isBillableClassification,
   isUuid,
   provisionTenant,
   transitionEntityStatus,
   transitionTenantLifecycle,
+  updateEntity,
+  BILLING_CLASSIFICATIONS,
   ENTITY_STATUS_TRANSITIONS,
   TENANT_LIFECYCLE_TRANSITIONS,
+  type UpdateEntityInput,
 } from "@/lib/api/tenants";
 import type { ApiError } from "@/lib/api/client";
 import {
   IDLE_CREATE_ENTITY,
+  IDLE_HIERARCHY_WRITE,
   IDLE_JURISDICTION_WRITE,
   IDLE_PROVISION_TENANT,
   IDLE_RESIDENCY_POLICY,
   IDLE_TRANSITION,
+  IDLE_UPDATE_ENTITY,
+  IDLE_WORKSPACE,
   type CreateEntityState,
+  type HierarchyWriteState,
   type JurisdictionWriteState,
   type ProvisionTenantState,
   type ResidencyPolicyState,
   type TransitionState,
+  type UpdateEntityState,
+  type WorkspaceState,
 } from "./state";
 
 const PATH = "/admin/tenants";
@@ -86,9 +99,35 @@ function toRFC3339(date: string): string {
  * grant. 503 is neither — the decision could not be obtained and nothing was
  * written, so the reader should retry rather than change anything.
  */
-type FailureKind = "unauthenticated" | "unauthorized" | "unvalidated" | "conflict" | "illegal" | "error";
+type FailureKind =
+  | "unauthenticated"
+  | "unauthorized"
+  | "unvalidated"
+  | "conflict"
+  | "illegal"
+  | "tenant-context"
+  | "error";
 
 function failureKind(error: ApiError): { kind: FailureKind; message: string } {
+  // Checked before status, because a GOV-01 refusal reuses 403 and 503 for
+  // reasons that have nothing to do with this principal's grants or with the
+  // registry's own health. gateway-auth-svc resolves the tenant before Traefik
+  // forwards anything, so these never reached the service at all.
+  if (error.tenantContext === "denied") {
+    return {
+      kind: "tenant-context",
+      message:
+        "The gateway refused this request before it reached the registry: the tenant on your session is not in a state that may transact, or the legal entity on it belongs to a different tenant. " +
+        "This is not a permissions problem — a grant will not change it. Check the tenant's status and lifecycle_state.",
+    };
+  }
+  if (error.tenantContext === "unresolved") {
+    return {
+      kind: "unvalidated",
+      message:
+        "The gateway could not reach the tenant registry to confirm your tenant may transact, so it refused the request rather than assuming. Nothing was written — retry when the registry is back.",
+    };
+  }
   if (error.status === 401) {
     return {
       kind: "unauthenticated",
@@ -479,5 +518,272 @@ export async function createResidencyPolicyAction(
     message: regionId
       ? `Policy ${result.data.policy_code} created with a region assigned — the tenant's hosting region now resolves.`
       : `Policy ${result.data.policy_code} created with no region. The tenant's hosting region stays unresolved until one is set.`,
+  };
+}
+
+// ── Update a legal entity ───────────────────────────────────────────────────
+
+/**
+ * PATCH an entity's descriptive fields.
+ *
+ * Only the fields the reader actually changed are sent — the registry treats an
+ * omitted key as "leave alone", so sending all three every time would overwrite
+ * a value another operator changed between this form being rendered and
+ * submitted.
+ *
+ * Clearing a trading name is distinguished from leaving it alone, because JSON
+ * null and an absent key mean different things to the backend and a form that
+ * could only send strings would make clearing one impossible.
+ */
+export async function updateEntityAction(
+  _prev: UpdateEntityState,
+  formData: FormData,
+): Promise<UpdateEntityState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ...IDLE_UPDATE_ENTITY, status: "error", message: EXPIRED_MESSAGE };
+  }
+
+  const entityId = String(formData.get("entity_id") ?? "").trim();
+  if (!isUuid(entityId)) {
+    return { status: "error", message: "That is not a valid entity ID." };
+  }
+
+  const input: UpdateEntityInput = {};
+
+  const legalName = String(formData.get("legal_name") ?? "").trim();
+  if (legalName) input.legal_name = legalName;
+
+  const currency = String(formData.get("default_currency_code") ?? "").trim();
+  if (currency) input.default_currency_code = currency;
+
+  const tradingIntent = String(formData.get("trading_name_intent") ?? "unchanged");
+  if (tradingIntent === "clear") {
+    input.trading_name = null;
+  } else if (tradingIntent === "set") {
+    const tradingName = String(formData.get("trading_name") ?? "").trim();
+    if (!tradingName) {
+      return {
+        status: "error",
+        message: "Choose Clear to remove the trading name, or type a new one.",
+      };
+    }
+    input.trading_name = tradingName;
+  }
+
+  if (Object.keys(input).length === 0) {
+    return {
+      status: "unchanged",
+      message: "Nothing was changed, so nothing was sent. Fill in at least one field.",
+    };
+  }
+
+  const changed = Object.keys(input).join(", ");
+
+  const result = await updateEntity(entityId, input, identity);
+  if (!result.ok) {
+    return classify(result.error, ["unauthenticated", "unauthorized", "tenant-context"] as const);
+  }
+
+  revalidatePath(PATH);
+  return {
+    status: "updated",
+    entity: result.data,
+    message:
+      `Entity ${result.data.entity_code} updated: ${changed}. ` +
+      `Type, jurisdiction, fiscal calendar and residency policy are fixed at creation and were not touched.`,
+  };
+}
+
+// ── Workspaces ──────────────────────────────────────────────────────────────
+
+/**
+ * Create a workspace under this tenant.
+ *
+ * billing_classification is validated here against the same list the backend
+ * holds. The backend fails closed on an unrecognised value rather than
+ * defaulting one in, so catching it locally turns a service rejection into a
+ * form error that names the offending value.
+ */
+export async function createWorkspaceAction(
+  _prev: WorkspaceState,
+  formData: FormData,
+): Promise<WorkspaceState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ...IDLE_WORKSPACE, status: "error", message: EXPIRED_MESSAGE };
+  }
+
+  const tenantId = String(formData.get("tenant_id") ?? identity.tenantId ?? "").trim();
+  if (!isUuid(tenantId)) {
+    return { status: "error", message: "That is not a valid tenant ID." };
+  }
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) {
+    return { status: "error", message: "A workspace name is required." };
+  }
+
+  const classification = String(formData.get("billing_classification") ?? "").trim();
+  if (!(BILLING_CLASSIFICATIONS as readonly string[]).includes(classification)) {
+    return {
+      status: "invalid-classification",
+      message:
+        `"${classification}" is not a billing classification the registry accepts. It fails closed on an ` +
+        `unrecognised value rather than defaulting one in, because whether a workspace can ever produce a ` +
+        `live charge is not something to guess.`,
+    };
+  }
+
+  // A workspace may legitimately have no entity scope — it hangs from the
+  // tenant — so an empty value is omitted rather than sent blank.
+  const legalEntityId = String(formData.get("legal_entity_id") ?? "").trim();
+  if (legalEntityId && !isUuid(legalEntityId)) {
+    return { status: "error", message: "That is not a valid legal entity ID." };
+  }
+
+  const result = await createWorkspace(
+    {
+      tenant_id: tenantId,
+      legal_entity_id: legalEntityId || undefined,
+      name,
+      business_unit: String(formData.get("business_unit") ?? "").trim() || undefined,
+      billing_classification: classification,
+      billing_source: String(formData.get("billing_source") ?? "NONE").trim() || undefined,
+    },
+    identity,
+  );
+
+  if (!result.ok) {
+    return classify(
+      result.error,
+      ["unauthenticated", "unauthorized", "conflict", "tenant-context"] as const,
+    );
+  }
+
+  revalidatePath(PATH);
+  return {
+    status: "created",
+    workspace: result.data,
+    message: isBillableClassification(result.data.billing_classification)
+      ? `Workspace "${result.data.name}" created as ${result.data.billing_classification} — a commercial class, so it can produce live charges.`
+      : `Workspace "${result.data.name}" created as ${result.data.billing_classification} — a non-billable class, so it must never produce a live charge regardless of what entitlement says.`,
+  };
+}
+
+// ── Entity hierarchy ────────────────────────────────────────────────────────
+
+/**
+ * Create a parent/child relationship between two legal entities.
+ *
+ * The same pair can hold several relationships at once — an OWNERSHIP edge and
+ * a REPORTING edge are different facts about the same two entities — so an
+ * existing relationship is not treated as a duplicate.
+ */
+export async function createHierarchyAction(
+  _prev: HierarchyWriteState,
+  formData: FormData,
+): Promise<HierarchyWriteState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ...IDLE_HIERARCHY_WRITE, status: "error", message: EXPIRED_MESSAGE };
+  }
+
+  const tenantId = String(formData.get("tenant_id") ?? identity.tenantId ?? "").trim();
+  const parentId = String(formData.get("parent_legal_entity_id") ?? "").trim();
+  const childId = String(formData.get("child_legal_entity_id") ?? "").trim();
+  const effectiveFrom = String(formData.get("effective_from") ?? "").trim();
+
+  if (!isUuid(tenantId)) {
+    return { status: "error", message: "That is not a valid tenant ID." };
+  }
+  if (!isUuid(parentId) || !isUuid(childId)) {
+    return { status: "error", message: "Pick both a parent and a child entity." };
+  }
+  if (parentId === childId) {
+    return {
+      status: "cycle",
+      message: "An entity cannot be its own parent. Pick two different entities.",
+    };
+  }
+  if (!effectiveFrom) {
+    return { status: "error", message: "An effective-from date is required." };
+  }
+
+  const result = await createHierarchy(
+    {
+      tenant_id: tenantId,
+      parent_legal_entity_id: parentId,
+      child_legal_entity_id: childId,
+      relationship_type: String(formData.get("relationship_type") ?? "OWNERSHIP"),
+      effective_from: toRFC3339(effectiveFrom),
+    },
+    identity,
+  );
+
+  if (!result.ok) {
+    // A cycle is kept apart from an ordinary conflict because no different date
+    // will make it succeed — the shape of the graph is what was refused.
+    if (result.error.status === 409 && /cycl|circular|ancestor/i.test(result.error.message)) {
+      return {
+        status: "cycle",
+        message:
+          "That relationship would create a cycle — the child is already an ancestor of the parent. Nothing was written.",
+      };
+    }
+    return classify(
+      result.error,
+      ["unauthenticated", "unauthorized", "conflict", "tenant-context"] as const,
+    );
+  }
+
+  revalidatePath(PATH);
+  return {
+    status: "created",
+    hierarchy: result.data,
+    message: `${result.data.relationship_type} relationship created — hierarchy ${result.data.hierarchy_id}, effective ${result.data.effective_from.slice(0, 10)}.`,
+  };
+}
+
+export async function endDateHierarchyAction(
+  _prev: HierarchyWriteState,
+  formData: FormData,
+): Promise<HierarchyWriteState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ...IDLE_HIERARCHY_WRITE, status: "error", message: EXPIRED_MESSAGE };
+  }
+
+  const hierarchyId = String(formData.get("hierarchy_id") ?? "").trim();
+  const endDate = String(formData.get("end_date") ?? "").trim();
+
+  if (!isUuid(hierarchyId)) {
+    return { status: "error", message: "That is not a valid hierarchy ID." };
+  }
+  if (!endDate) {
+    return { status: "error", message: "An end date is required." };
+  }
+
+  const result = await endDateHierarchy(hierarchyId, toRFC3339(endDate), identity);
+  if (!result.ok) {
+    return classify(
+      result.error,
+      ["unauthenticated", "unauthorized", "conflict", "tenant-context"] as const,
+    );
+  }
+
+  revalidatePath(PATH);
+  return {
+    status: "end-dated",
+    message:
+      "Relationship end-dated. Despite the DELETE verb nothing was removed — the row keeps its history and now carries an effective_to.",
   };
 }

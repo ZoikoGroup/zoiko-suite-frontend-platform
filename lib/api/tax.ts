@@ -86,6 +86,56 @@ export async function listTaxRules(
 
 export type DeterminationStatus = "CALCULATED" | "APPLIED" | "OVERRIDDEN" | "REVERSED";
 
+/**
+ * TAX-03's product/service classification, at the level that changes the
+ * treatment. Every VAT and GST system distinguishes these three: goods follow
+ * where they move, services follow where the customer belongs, and digital
+ * services carry their own destination rules.
+ *
+ * UNSPECIFIED can come back on a determination made before the input contract
+ * existed. It is refused on a new one.
+ */
+export type SupplyKind = "GOODS" | "SERVICES" | "DIGITAL_SERVICES";
+export type SupplyKindOnRead = SupplyKind | "UNSPECIFIED";
+
+/** TAX-03's B2B/B2C fact. B2G is separate because public bodies attract
+ *  distinct e-invoicing and withholding obligations in several jurisdictions. */
+export type SupplyType = "B2B" | "B2C" | "B2G";
+export type SupplyTypeOnRead = SupplyType | "UNSPECIFIED";
+
+/**
+ * How the place of supply was arrived at.
+ *
+ * Only CALLER_ASSERTED occurs today. §9.J expects place-of-supply RULES to
+ * derive it from establishments, supply kind and B2B/B2C facts, and those rules
+ * are jurisdiction-pack data that no pack currently carries — so the service
+ * records that the caller stated the place of supply rather than letting it read
+ * as something the engine determined. Surfaced in the UI for the same reason.
+ */
+export type PlaceOfSupplyBasis = "CALLER_ASSERTED" | "RULE_DERIVED";
+
+export const SUPPLY_KINDS: { value: SupplyKind; label: string; hint: string }[] = [
+  { value: "GOODS", label: "Goods", hint: "Physical supply. Treatment follows where the goods move." },
+  { value: "SERVICES", label: "Services", hint: "Treatment generally follows where the customer belongs." },
+  { value: "DIGITAL_SERVICES", label: "Digital services", hint: "Electronically supplied services, which carry their own destination rules." },
+];
+
+/** Short labels for the determination register, where the column is narrow.
+ *  UNSPECIFIED maps to an em dash rather than the raw marker: a reader scanning
+ *  the table needs to see an absence, not a word that looks like a choice. */
+export const SUPPLY_KIND_LABELS: Record<SupplyKindOnRead, string> = {
+  GOODS: "Goods",
+  SERVICES: "Services",
+  DIGITAL_SERVICES: "Digital",
+  UNSPECIFIED: "—",
+};
+
+export const SUPPLY_TYPES: { value: SupplyType; label: string; hint: string }[] = [
+  { value: "B2C", label: "B2C — consumer", hint: "Buyer is not registered for tax in the place of supply." },
+  { value: "B2B", label: "B2B — business", hint: "Requires the buyer's registration: its presence is what makes a cross-border supply reverse-charge." },
+  { value: "B2G", label: "B2G — public body", hint: "Distinct e-invoicing and withholding obligations in several jurisdictions." },
+];
+
 export type TaxDetermination = {
   determination_id: string;
   tenant_id: string;
@@ -108,6 +158,45 @@ export type TaxDetermination = {
   evaluated_by: string;
   created_at: string;
   updated_at: string;
+
+  // ── TAX-03 required business/source inputs ──────────────────────────────
+
+  seller_party_id: string;
+  buyer_party_id: string;
+  /** Null: ORG-08 Address & Establishment does not exist, so nothing can issue
+   *  or validate an establishment id. Carried for callers that track them. */
+  seller_establishment_id?: string | null;
+  buyer_establishment_id?: string | null;
+  /** Validated against jurisdiction-rules-svc when present. Often absent — a
+   *  supply of services frequently has no movement. */
+  ship_from_jurisdiction_id?: string | null;
+  ship_to_jurisdiction_id?: string | null;
+  /** The place of supply: the jurisdiction whose rules govern this
+   *  transaction. Validated against jurisdiction-rules-svc. */
+  supply_jurisdiction_id: string;
+  /** The tax point, as an ISO calendar date. Distinct from effective_from,
+   *  which is when the rule version applies. */
+  supply_date?: string | null;
+  place_of_supply_basis: PlaceOfSupplyBasis;
+  product_classification: string;
+  supply_kind: SupplyKindOnRead;
+  supply_type: SupplyTypeOnRead;
+  /** The buyer's registration in the place of supply. Required for B2B. */
+  buyer_tax_registration_id?: string | null;
+  /** Why an exemption was claimed, and what substantiates it. Required
+   *  whenever exempt_amount is greater than zero (INV-10). */
+  exemption_reason?: string | null;
+  exemption_certificate_ref?: string | null;
+
+  // ── TAX-03 server-resolved input ────────────────────────────────────────
+
+  /** The seller's tax registration in the place of supply, read from
+   *  tenant-entity-registry-svc's tax identity bundles as at the supply date —
+   *  not accepted from the caller. Null means the seller holds none there,
+   *  which is a real state and the fact that decides whether tax is charged
+   *  at all, not a failed lookup. */
+  seller_registration_id?: string | null;
+  seller_registration_status?: string | null;
 };
 
 type DeterminationsResponse = { determinations: TaxDetermination[]; total: number };

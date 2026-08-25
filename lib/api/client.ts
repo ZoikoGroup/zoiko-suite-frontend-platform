@@ -42,7 +42,39 @@ export type ApiError = {
    * kept intact here instead, and callers that need a field read it directly.
    */
   body?: unknown;
+
+  /**
+   * Set when the refusal came from the gateway's GOV-01 tenant-context
+   * resolution rather than from the service the request was addressed to.
+   *
+   * gateway-auth-svc resolves the tenant against tenant-entity-registry-svc
+   * before Traefik forwards anything, so these refusals never reach the backend
+   * at all — and they carry the same 403/503 statuses a backend uses for
+   * completely different reasons. Without this flag the console would report a
+   * suspended tenant as "authorization-svc refused your principal", which sends
+   * the reader to an RBAC grant that was never the problem.
+   *
+   * `denied` — the registry answered: unknown tenant, suspended tenant, or a
+   * legal entity belonging to a different tenant. Re-authenticating will not
+   * help.
+   * `unresolved` — the registry could not be reached, so no decision exists and
+   * nothing was written. Retry.
+   */
+  tenantContext?: "denied" | "unresolved";
 };
+
+/**
+ * Read the gateway's GOV-01 signal off a response.
+ *
+ * Traefik returns an unsuccessful ForwardAuth reply to the client verbatim —
+ * status, body and headers — which is what makes this readable here. Unknown
+ * values are dropped rather than passed through, so a future header value
+ * cannot silently become a state the console does not handle.
+ */
+function tenantContextSignal(response: Response): "denied" | "unresolved" | undefined {
+  const signal = response.headers.get("X-Tenant-Context");
+  return signal === "denied" || signal === "unresolved" ? signal : undefined;
+}
 
 // Identity moved to ./envelope, where it sits alongside the rest of the §4
 // canonical input contract it is one part of. Re-exported so the ~30 lib/api
@@ -116,6 +148,7 @@ export async function apiGet<T>(
           ? `${serviceLabel(service)} rejected the request (${response.status}) — ${detail}`
           : `${serviceLabel(service)} returned ${response.status} for ${path}`,
         body: errorBody,
+        tenantContext: tenantContextSignal(response),
       },
     };
   }
@@ -284,6 +317,7 @@ async function apiWrite<T>(
           ? `${serviceLabel(service)} rejected the write (${response.status}) — ${detail}`
           : `${serviceLabel(service)} returned ${response.status} for ${path}`,
         body: errorBody,
+        tenantContext: tenantContextSignal(response),
       },
     };
   }
