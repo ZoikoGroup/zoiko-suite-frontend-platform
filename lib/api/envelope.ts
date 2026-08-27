@@ -27,6 +27,20 @@ export type Identity = {
   principalId?: string;
   tenantId?: string;
   legalEntityId?: string;
+
+  /**
+   * The signed IdentityContextEnvelope from identity-context-svc, when the
+   * session has one. Sent as `Authorization: Bearer`.
+   *
+   * This is the field that matters the day the gateway goes in front. Today
+   * ZOIKO_USE_GATEWAY is false and the console talks to service ports directly,
+   * so services read the X-*-Id headers below and nothing verifies a token. With
+   * Traefik in front, gateway-auth-svc verifies THIS against identity-svc's JWKS
+   * and overwrites those headers from the verified claims — at which point the
+   * headers become an unverified hint and the envelope becomes the identity.
+   * Sending both now means the switch is a routing change, not a code change.
+   */
+  envelopeJwt?: string;
 };
 
 /**
@@ -114,6 +128,12 @@ export function envelopeHeaders(input: BuildEnvelopeInput): Record<string, strin
   set("X-Principal-Id", input.identity?.principalId);
   set("X-Tenant-Id", input.identity?.tenantId);
   set("X-Legal-Entity-Id", input.identity?.legalEntityId);
+
+  // Not a §4 field — §4 describes the context a request carries, and this is the
+  // credential that proves it. Set here anyway because this function is the one
+  // choke point every outbound call already passes through, so an envelope
+  // added to a session reaches every service without touching 58 API modules.
+  set("Authorization", input.identity?.envelopeJwt ? `Bearer ${input.identity.envelopeJwt}` : undefined);
 
   set("X-Operation", input.operation);
   set("X-Causation-Id", input.causationId);

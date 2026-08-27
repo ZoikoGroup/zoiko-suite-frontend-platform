@@ -29,7 +29,7 @@ import {
   UpdateEntityForm,
   WorkspaceTable,
 } from "@/components/admin/tenants";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession, toIdentity, type SessionIdentity } from "@/lib/auth";
 import {
   getTenant,
   listEntities,
@@ -84,14 +84,13 @@ function unwrapList<T>(
  */
 const HIERARCHY_ENTITY_LIMIT = 25;
 
-async function sessionIdentity() {
+async function sessionIdentity(): Promise<Partial<SessionIdentity>> {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
-  return {
-    principalId: session?.principalId,
-    tenantId: session?.tenantId,
-    legalEntityId: session?.legalEntityId,
-  };
+  // Partial rather than a thrown error when there is no session: this runs in a
+  // page, and the panels below render "no tenant on this session" instead of
+  // crashing the route.
+  return session ? toIdentity(session) : {};
 }
 
 /**

@@ -104,13 +104,62 @@ export type SessionIdentity = {
   principalId: string;
   tenantId: string;
   legalEntityId: string;
+
+  /**
+   * The signed envelope, when the session has one. Optional so the ~50 places
+   * that build this object from three literal fields keep compiling and keep
+   * working — they simply do not present a bearer token, which changes nothing
+   * while ZOIKO_USE_GATEWAY is false and the console talks to service ports
+   * directly. Use toIdentity() below rather than constructing it by hand.
+   */
+  envelopeJwt?: string;
 };
+
+/**
+ * The identity to pass to any lib/api call, taken from a decoded session.
+ *
+ * Prefer this over building the object inline: it is the one place that decides
+ * what a request presents about who is making it, so a field added to the
+ * session reaches every caller that uses it instead of the fifty that would each
+ * need editing.
+ */
+export function toIdentity(session: SessionPayload): SessionIdentity {
+  return {
+    principalId: session.principalId,
+    tenantId: session.tenantId,
+    legalEntityId: session.legalEntityId,
+    envelopeJwt: session.envelopeJwt,
+  };
+}
 
 export type SessionPayload = {
   email: string;
   name: string;
   role: string;
   iat: number;
+
+  /**
+   * The signed IdentityContextEnvelope from identity-context-svc, when the
+   * login went through the real identity provider.
+   *
+   * Optional on purpose. A session minted before this field existed, or one
+   * from the offline fallback below, has no envelope — and every read path
+   * still works, because the console sends the §4 identity headers directly and
+   * ZOIKO_USE_GATEWAY is false, so nothing is verifying a bearer token today.
+   * Once the gateway is in front, an absent envelope is what will start failing,
+   * and it fails as a 401 from gateway-auth-svc rather than silently.
+   */
+  envelopeJwt?: string;
+
+  /**
+   * The session this envelope belongs to, for
+   * GET/POST /v1/context/session/{id}. Logging out can then invalidate the
+   * session server-side instead of only dropping the cookie.
+   */
+  sessionContextId?: string;
+
+  /** Unix seconds at which envelopeJwt expires. Short — minutes, not hours. */
+  envelopeExpiresAt?: number;
 } & SessionIdentity;
 
 export function findUserByCredentials(email: string, password: string): GovernedUserAccount | null {

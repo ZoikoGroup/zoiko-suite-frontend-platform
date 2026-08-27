@@ -24,7 +24,7 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession, toIdentity, type SessionIdentity } from "@/lib/auth";
 import {
   assignJurisdiction,
   createEntity,
@@ -72,11 +72,7 @@ async function requireIdentity(): Promise<SessionIdentity> {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
   if (!session?.email) throw new Error("Unauthorized");
-  return {
-    principalId: session.principalId,
-    tenantId: session.tenantId,
-    legalEntityId: session.legalEntityId,
-  };
+  return toIdentity(session);
 }
 
 /**

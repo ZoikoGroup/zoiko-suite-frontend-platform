@@ -82,6 +82,60 @@ export type DelegatedAuthority = {
 
 // ─── POST /v1/context/resolve ────────────────────────────────────────────────
 
+export type AuthenticateRequest = {
+  tenant_id: string;
+  email: string;
+  password: string;
+  correlation_id?: string;
+};
+
+/**
+ * What a successful password exchange returns. `access_token` is NOT the
+ * identity envelope and grants nothing on its own — it is a short-lived
+ * (IDP_TOKEN_TTL_SECONDS, 300s) intermediate credential whose only use is to be
+ * handed straight to `resolveIdentity`.
+ */
+export type AuthenticateResponse = {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  principal_id: string;
+  tenant_id: string;
+  /** Advisory. authorization-svc, not this service, decides if a posture suffices. */
+  mfa_required: boolean;
+};
+
+/**
+ * Exchange a human's password for the bearer token `resolveIdentity` accepts.
+ *
+ * This is the entry point to the whole platform and the ONE endpoint reachable
+ * without an identity — it is exempt from the canonical input contract, because
+ * that contract's mandatory X-Tenant-Id and X-Principal-Id are set by
+ * gateway-auth-svc only after verifying a signed envelope, which is exactly what
+ * this call exists to make obtainable. Demanding them here would be circular and
+ * satisfiable only by a caller asserting the identity it has not yet proven.
+ *
+ * The tenant therefore travels in the BODY, not a header. That is not a
+ * weakening: naming a tenant selects which tenant's principals to search and
+ * confers nothing, and a caller naming a tenant it has no credential in gets the
+ * same rejection as any other wrong password.
+ *
+ * Every rejection — wrong password, unknown email, disabled principal, locked
+ * account — is the same 401 "invalid credentials". Do not surface anything more
+ * specific to the user; the reason is in the service's decision log, deliberately
+ * not on the wire, so this response cannot be used to enumerate accounts.
+ */
+export async function authenticate(
+  request: AuthenticateRequest,
+): Promise<ApiWriteResult<AuthenticateResponse>> {
+  return apiPost<AuthenticateResponse>(
+    "identityContext",
+    "/v1/authenticate",
+    request,
+    { correlationId: request.correlation_id },
+  );
+}
+
 /**
  * Resolve a bearer token (or SAML assertion) into a signed IdentityContextEnvelope.
  *
@@ -91,6 +145,12 @@ export type DelegatedAuthority = {
  * Requires exactly one of bearer_token or saml_assertion.
  * Fails closed on any verification failure (invalid token, inactive principal/tenant/entity,
  * unauthorized entity, blocked trust posture, upstream unavailable).
+ *
+ * The legal entity is sent as X-Legal-Entity-Id as well as in the body:
+ * identity-context-svc declares LegalEntityID RequiredOnWrite in its §4 policy,
+ * so a resolve without that header is refused 401 envelope_incomplete before the
+ * handler runs. The body field is what the resolver scopes the session to; the
+ * header is what the contract checks.
  */
 export async function resolveIdentity(input: {
   request: ResolveRequest;
@@ -105,6 +165,7 @@ export async function resolveIdentity(input: {
       identity: {
         principalId: input.callerIdentity.principalId,
         tenantId: input.callerIdentity.tenantId,
+        legalEntityId: input.request.legal_entity_id,
       },
     },
   );
