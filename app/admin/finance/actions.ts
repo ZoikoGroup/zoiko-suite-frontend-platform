@@ -56,13 +56,22 @@ import {
   explainBlockingIssue,
   type PeriodLockResult,
 } from "@/lib/api/financial-close";
+import {
+  issueCustomerInvoice,
+  sendCustomerInvoice,
+  markCustomerInvoiceOverdue,
+  receiveCustomerInvoicePayment,
+  explainAccountsReceivableError,
+} from "@/lib/api/accounts-receivable";
 import { formatMoney } from "@/lib/format";
 import type { LookupState } from "@/components/admin/shared/lookup";
-import type {
-  CloseActionState,
-  LedgerActionState,
-  PayableActionState,
-  ReconciliationActionState,
+import {
+  isReceivableHop,
+  type CloseActionState,
+  type LedgerActionState,
+  type PayableActionState,
+  type ReceivableActionState,
+  type ReconciliationActionState,
 } from "./state";
 
 // Writes end in refresh(), not revalidatePath. Nothing on this route is cached
@@ -1108,4 +1117,217 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function isUuid(value: string): boolean {
   return UUID_RE.test(value);
+}
+
+// ─── accounts-receivable-svc (:8101) ─────────────────────────────────────────
+//
+// The fifth and last service behind /admin/finance, and the only one that was
+// still reached through the legacy lib/api-client.ts layer. That layer answered
+// every failure with three hardcoded invoices — with the fallback ON unless
+// NEXT_PUBLIC_ENABLE_BACKEND_MOCK_FALLBACK was explicitly "false" — so the 403
+// that every write actually received, no RBAC bundle having ever granted AR_*,
+// arrived in the UI as a successful create. Nothing here falls back to anything:
+// a refusal is reported as a refusal.
+
+/**
+ * Issue a customer invoice. It lands ISSUED.
+ *
+ * 201 means an invoice was opened. 200 means the service recognised the
+ * submission as a replay of this correlation id and wrote nothing — reported as
+ * such rather than as a second receivable, since an invented receivable
+ * overstates what customers owe.
+ */
+export async function issueCustomerInvoiceAction(
+  _previous: ReceivableActionState,
+  formData: FormData,
+): Promise<ReceivableActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const customerId = String(formData.get("customer_id") ?? "").trim();
+  const invoiceNumber = String(formData.get("invoice_number") ?? "").trim();
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const currencyCode = String(formData.get("currency_code") ?? "").trim();
+  const dueDateRaw = String(formData.get("due_date") ?? "").trim();
+  // One fresh idempotency key per submission.
+  //
+  // It keys the service's partial unique index on (tenant_id, correlation_id), so
+  // what it protects is a RETRY of this one POST — the client-timeout-on-a-request-
+  // that-actually-succeeded case the index was built for. It does not, and must
+  // not, span submissions: the form briefly supplied a useId()-derived value for
+  // that purpose and, useId being deterministic per tree position, made every
+  // later submission an idempotent replay of the first invoice. A deliberate
+  // second submit of the same form is caught by the (customer, invoice_number)
+  // unique constraint instead, which answers 409 rather than opening a duplicate.
+  const correlationId = crypto.randomUUID();
+
+  if (!customerId) {
+    return {
+      status: "error",
+      message:
+        "A customer reference is required. Nothing validates it — there is no Customer Master service on this platform — so it is also the one field a typo passes silently.",
+    };
+  }
+  if (!invoiceNumber) {
+    return { status: "error", message: "An invoice number is required." };
+  }
+
+  const amount = Number(amountRaw);
+  if (amountRaw === "" || !Number.isFinite(amount) || amount <= 0) {
+    return { status: "error", message: "Amount must be a number greater than zero." };
+  }
+  if (!currencyCode) return { status: "error", message: "Currency is required." };
+
+  // due_date is a DATE column, so a day is the honest unit; the explicit instant
+  // pins it to UTC midnight rather than relying on the service's parsing. It is
+  // also load-bearing beyond validation: the due date is what the overdue check
+  // measures against, so a wrong one makes an invoice late early or never.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateRaw)) {
+    return { status: "error", message: "A due date is required, as YYYY-MM-DD." };
+  }
+  const dueDate = `${dueDateRaw}T00:00:00Z`;
+
+  const result = await issueCustomerInvoice({
+    identity,
+    legalEntityId: identity.legalEntityId ?? "",
+    customerId,
+    invoiceNumber,
+    amount,
+    currencyCode,
+    dueDate,
+    correlationId,
+  });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    const explained = explainAccountsReceivableError(message);
+
+    // 409 is a re-keyed invoice number, not a failure of the service. Kept apart
+    // from `error` so the banner reads as "that number is already on the
+    // register" rather than as something broken — this arrived as a 503
+    // store_unavailable until this pass, indistinguishable from a dead database.
+    if (status === 409) return { status: "duplicate", message: explained };
+
+    // The legal entity is not in this tenant, or is not trading. A governance
+    // answer about attribution rather than a fault, so it is not rendered red.
+    if (
+      message.includes("legal_entity_not_in_tenant") ||
+      message.includes("legal_entity_not_active")
+    ) {
+      return { status: "entity-refused", message: explained };
+    }
+    return { status: "error", message: explained };
+  }
+
+  refresh();
+
+  const invoice = result.data;
+  const money = formatMoney(invoice.amount, invoice.currency_code);
+
+  return result.status === 201
+    ? {
+        status: "issued",
+        invoiceId: invoice.invoice_id,
+        stage: invoice.status,
+        message: `Invoice ${invoice.invoice_number} issued to ${invoice.customer_id} for ${money}, status ${invoice.status} — ID ${invoice.invoice_id}. It is not yet a claim on the customer: sending it, declaring it late and recording payment are three further steps, each a separate grant.`,
+      }
+    : {
+        status: "replayed",
+        invoiceId: invoice.invoice_id,
+        stage: invoice.status,
+        message: `No new invoice written — this replayed an existing one (${invoice.invoice_number}, ${money}, currently ${invoice.status}, ID ${invoice.invoice_id}). The service is idempotent on correlation ID, so a resubmitted form resolves to the original rather than opening a second receivable.`,
+      };
+}
+
+/**
+ * Move one invoice one hop: send it, declare it overdue, or record payment.
+ *
+ * The hop comes from the form because the register derives it from the row's own
+ * status, and it is re-checked here against a closed set: a Server Action is
+ * reachable by direct POST, so an arbitrary string must never reach the service
+ * as a URL path segment. The status check itself stays with the backend, which
+ * does it as one conditional UPDATE, so a stale page cannot skip a hop — it gets
+ * 422 invalid_transition instead.
+ */
+export async function advanceCustomerInvoice(
+  _previous: ReceivableActionState,
+  formData: FormData,
+): Promise<ReceivableActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const invoiceId = String(formData.get("invoice_id") ?? "").trim();
+  const rawHop = String(formData.get("hop") ?? "").trim();
+
+  if (!invoiceId) return { status: "error", message: "Missing invoice ID." };
+  if (!isUuid(invoiceId)) {
+    return { status: "error", message: "An invoice ID must be a UUID." };
+  }
+  if (!isReceivableHop(rawHop)) {
+    return { status: "error", message: "Unrecognised transition." };
+  }
+
+  const result =
+    rawHop === "send"
+      ? await sendCustomerInvoice({ identity, invoiceId })
+      : rawHop === "overdue"
+        ? await markCustomerInvoiceOverdue({ identity, invoiceId })
+        : await receiveCustomerInvoicePayment({ identity, invoiceId });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    const explained = explainAccountsReceivableError(message);
+
+    // 400 ledger_verification_failed is the outcome an operator will meet most
+    // often on the payment hop, and it is not a fault: the books hold no
+    // finalized journal for this invoice yet. Given its own state so the banner
+    // reads as the next thing to do rather than as something broken.
+    if (status === 400 && message.includes("ledger_verification")) {
+      return { status: "unledgered", message: explained, invoiceId };
+    }
+    // The books DO carry a finalized journal for this invoice, for a different
+    // amount. Opposite remedy to `unledgered`: nothing to post, something to
+    // correct — so it gets its own state rather than being folded in.
+    if (status === 400 && message.includes("ledger_amount_mismatch")) {
+      return { status: "unbalanced", message: explained, invoiceId };
+    }
+    if (status === 503 && message.includes("ledger_service_unavailable")) {
+      return { status: "unledgered", message: explained, invoiceId };
+    }
+    // 422 splits two ways: an invoice that is not yet late, and an invoice that
+    // is in the wrong status. Both are correct refusals, with different remedies.
+    if (status === 422) {
+      return message.includes("not_yet_due") || message.includes("before its due date")
+        ? { status: "not-yet-due", message: explained, invoiceId }
+        : { status: "out-of-sequence", message: explained, invoiceId };
+    }
+    return { status: "error", message: explained, invoiceId };
+  }
+
+  refresh();
+
+  const invoice = result.data;
+  const money = formatMoney(invoice.amount, invoice.currency_code);
+
+  const detail =
+    invoice.status === "SENT"
+      ? `${invoice.invoice_number} is now SENT to ${invoice.customer_id} and attributed to you. It becomes overdue only after ${new Date(invoice.due_date).toLocaleDateString()}.`
+      : invoice.status === "OVERDUE"
+        ? `${invoice.invoice_number} is now OVERDUE, attributed to you. receivable.overdue has been published — aging and impairment downstream count this, so it is a statement about the customer, not a display change. Payment can still be recorded.`
+        : `${invoice.invoice_number} is PAID for ${money}, attributed to you. Terminal: payment.received has been published and no further transition is possible. The payment was accepted only because general-ledger-svc holds a FINALIZED journal for this invoice.`;
+
+  return {
+    status: "advanced",
+    invoiceId: invoice.invoice_id,
+    stage: invoice.status,
+    message: detail,
+  };
 }

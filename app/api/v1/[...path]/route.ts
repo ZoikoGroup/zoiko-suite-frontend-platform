@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listTaxRules,
   listTaxDeterminations,
@@ -45,11 +47,24 @@ import { listPurchaseRequests } from "@/lib/api/purchase-requests";
 import { listEvidenceRequirements } from "@/lib/api/evidence";
 import { listVendorChecks } from "@/lib/api/vendor-due-diligence";
 
+/**
+ * Read-through for the client components that refresh a domain panel.
+ *
+ * THIS ROUTE HAD NO SESSION CHECK AND TOOK ITS TENANT FROM A REQUEST HEADER.
+ * `callerIdentity` read X-Tenant-Id straight off the incoming browser request
+ * and fell back to a hardcoded demo tenant — so anything that could reach the
+ * console's port could read any tenant's tax rules, contracts, obligations,
+ * payroll, workforce, compliance and finance data by setting one header, and
+ * This is the same defect, in a second file, as the /api/backend/[...path] proxy
+ * deleted during the receivables pass. This one has live consumers, so it is
+ * fixed rather than removed: the session is verified here, and the identity
+ * forwarded downstream comes from that session and nowhere else.
+ */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const endpoint = path.join("/");
 
-  const identity = callerIdentity(req);
+  const identity = await resolveIdentity(req);
 
   // Tax Domain
   if (endpoint === "tax-rules") {
@@ -199,7 +214,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return NextResponse.json({ events: result.data, summary: result.summary, is_mock: result.isMock });
   }
   if (endpoint === "audit/logs") {
-    // audit/logs is a filtered alias of the same event store (sorted, paginated)
     const result = await getAuditEvents();
     const logs = result.data.map((e) => ({
       id: e.id,
@@ -224,16 +238,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return NextResponse.json({ requirements: res.ok ? res.data : [] });
   }
   if (endpoint === "evidence/evaluations" || endpoint === "evidence/verification") {
-    // Use the requirements catalog as the proxy for evidence verification state.
-    // A dedicated listEvidenceEvaluations endpoint does not exist in the current
-    // API client; the evaluation records are queried individually by id.
     const res = await listEvidenceRequirements(
       { tenantId: identity.tenantId },
       identity,
     );
     return NextResponse.json({ evaluations: res.ok ? res.data : [], note: "returns evidence requirements catalog" });
   }
-  // tamper/alerts: derive from events where hash chain is at risk (DENIED or anomalous)
   if (endpoint === "tamper/alerts") {
     const result = await getAuditEvents();
     const alerts = result.data
@@ -275,7 +285,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     });
   }
   if (endpoint === "onboarding") {
-    // Onboarding is derived from recently-added employees without a confirmed start
     const res = await listEmployees(identity);
     const onboarding = (res.ok ? res.data : []).filter(
       (e: { status?: string }) => e.status === "ONBOARDING" || e.status === "PENDING_START"
@@ -286,11 +295,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   return NextResponse.json({ message: `Endpoint /v1/${endpoint} handled by Zoiko Suite Next.js API Gateway`, status: "ACTIVE" });
 }
 
+function notImplemented(endpoint: string, verb: string) {
+  return NextResponse.json(
+    {
+      error: "not_implemented",
+      message:
+        `${verb} /v1/${endpoint} does not write anything. This console route is read-only; ` +
+        "use the domain's Server Action instead.",
+    },
+    { status: 501 },
+  );
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const endpoint = path.join("/");
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const identity = callerIdentity(req);
+  const identity = await resolveIdentity(req);
 
   // ── Tax Domain POST Handlers ────────────────────────────────────────────────
   if (endpoint === "tax-rules") {
@@ -298,16 +319,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 201 });
     }
-    const ruleCode = String(body.rule_code || `${body.jurisdiction_id || "uk-gov-01"}-${body.category || "VAT"}`);
-    return NextResponse.json({
-      rule_id: `rule-${Date.now().toString(36)}`,
-      rule_code: ruleCode,
-      name: body.name || `Tax Rule ${ruleCode}`,
-      category: body.category || "VAT",
-      tax_rate_percentage: Number(body.tax_rate_percentage || 20),
-      status: "ACTIVE",
-      created_at: new Date().toISOString(),
-    }, { status: 201 });
   }
 
   if (endpoint === "tax-determinations") {
@@ -315,18 +326,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 201 });
     }
-    const gross = Number(body.gross_amount || 100000);
-    const rate = body.tax_category === "VAT" ? 20 : 21;
-    return NextResponse.json({
-      determination_id: `det-${Date.now().toString(36)}`,
-      rule_id: `rule-calc-${String(body.tax_category || "vat").toLowerCase()}`,
-      taxable_amount: gross,
-      tax_rate_percentage: rate,
-      calculated_tax_amount: Math.round(gross * (rate / 100)),
-      status: "CALCULATED",
-      transaction_id: String(body.transaction_id || `tx-${Date.now().toString(36)}`),
-      currency: String(body.currency || "USD"),
-    }, { status: 201 });
   }
 
   if (endpoint === "vat-returns") {
@@ -334,13 +333,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 201 });
     }
-    return NextResponse.json({
-      return_id: `vat-${String(body.tax_period || "2026-q2").toLowerCase()}-${Date.now().toString(36)}`,
-      tax_period: body.tax_period || "2026-Q2",
-      net_tax_payable: Number(body.output_tax_amount || 0) - Number(body.input_tax_amount || 0),
-      status: "DRAFT",
-      currency: body.currency || "GBP",
-    }, { status: 201 });
   }
 
   if (endpoint === "corporate-tax-returns") {
@@ -348,13 +340,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 201 });
     }
-    return NextResponse.json({
-      return_id: `cit-${body.fiscal_year || 2026}-${Date.now().toString(36)}`,
-      fiscal_year: Number(body.fiscal_year || 2026),
-      balance_due: Math.round(Number(body.taxable_income || 0) * (Number(body.tax_rate_percent || 21) / 100)),
-      status: "DRAFT",
-      currency: body.currency || "USD",
-    }, { status: 201 });
   }
 
   if (endpoint === "withholding-tax") {
@@ -362,13 +347,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 201 });
     }
-    return NextResponse.json({
-      obligation_id: `wht-${Date.now().toString(36)}`,
-      payment_reference: body.payment_reference || `PAY-${Date.now().toString(36).toUpperCase()}`,
-      withheld_amount: Number(body.withheld_amount || 0),
-      status: "CALCULATED",
-      currency: body.currency || "EUR",
-    }, { status: 201 });
   }
 
   if (endpoint === "filing-preparation/drafts") {
@@ -376,13 +354,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 201 });
     }
-    return NextResponse.json({
-      draft_id: `draft-${Date.now().toString(36)}`,
-      filing_type: body.filing_type || "VAT100_MTD",
-      period_key: body.period_key || "2026-Q2",
-      validation_status: "PREPARED",
-      created_at: new Date().toISOString(),
-    }, { status: 201 });
   }
 
   if (endpoint.startsWith("filing-preparation/drafts/") && endpoint.endsWith("/finalize")) {
@@ -391,12 +362,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 200 });
     }
-    return NextResponse.json({
-      draft_id: draftId,
-      validation_status: "FINALIZED",
-      filing_type: "VAT100_MTD",
-      period_key: "2026-Q2",
-    }, { status: 200 });
   }
 
   if (endpoint === "tax-authority/interfaces") {
@@ -404,12 +369,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     if (res.ok) {
       return NextResponse.json(res.data, { status: 201 });
     }
-    return NextResponse.json({
-      interface_id: `if-${Date.now().toString(36)}`,
-      authority_code: body.authority_code || "HMRC_MTD",
-      status: "ACTIVE",
-      created_at: new Date().toISOString(),
-    }, { status: 201 });
   }
 
   if (endpoint.startsWith("tax-authority/interfaces/") && endpoint.endsWith("/test")) {
@@ -425,19 +384,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     }, { status: 200 });
   }
 
-  return NextResponse.json({
-    message: `Resource created/processed successfully at /v1/${endpoint}`,
-    received_payload: body,
-    status: "CREATED",
-    timestamp: new Date().toISOString(),
-  }, { status: 201 });
+  return notImplemented(endpoint, "POST");
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const endpoint = path.join("/");
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const identity = callerIdentity(req);
+  const identity = await resolveIdentity(req);
 
   if (path[0] === "tax-rules" && path[1]) {
     const res = await patchTaxRule(path[1], body, identity);
@@ -468,25 +422,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ pa
     return NextResponse.json(res.ok ? res.data : { ok: true, patched: body });
   }
 
-  return NextResponse.json({
-    message: `Resource updated at /v1/${endpoint}`,
-    received_payload: body,
-    status: "UPDATED",
-    timestamp: new Date().toISOString(),
-  }, { status: 200 });
+  return notImplemented(endpoint, "PATCH");
 }
 
-export async function PUT(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
+export async function PUT(_req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
-  const endpoint = path.join("/");
-  const body = await req.json().catch(() => ({}));
-
-  return NextResponse.json({
-    message: `Resource updated at /v1/${endpoint}`,
-    received_payload: body,
-    status: "UPDATED",
-    timestamp: new Date().toISOString(),
-  }, { status: 200 });
+  return notImplemented(path.join("/"), "PUT");
 }
 
 /**
@@ -499,7 +440,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ path
  */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
-  const identity = callerIdentity(req);
+  const identity = await resolveIdentity(req);
 
   // Guard: these are append-only records and must never be deleted.
   const IMMUTABLE_PREFIXES = ["audit", "governance", "evidence/evaluations", "tamper"];
@@ -517,7 +458,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   const resourceId = path[1] ?? null;
 
   // ── Tax Domain ──────────────────────────────────────────────────────────────
-  // Tax rules are logically retired (status → INACTIVE), not hard-deleted.
   if (path[0] === "tax-rules" && resourceId) {
     return NextResponse.json({
       rule_id: resourceId,
@@ -528,7 +468,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
     }, { status: 200 });
   }
 
-  // Filing drafts can be cancelled before they are finalized.
   if (path[0] === "filing-preparation" && path[1] === "drafts" && path[2]) {
     return NextResponse.json({
       draft_id: path[2],
@@ -538,7 +477,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
     }, { status: 200 });
   }
 
-  // Tax authority interfaces can be deactivated.
   if (path[0] === "tax-authority" && path[1] === "interfaces" && path[2]) {
     return NextResponse.json({
       interface_id: path[2],
@@ -548,7 +486,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   }
 
   // ── Commercial Ops ──────────────────────────────────────────────────────────
-  // Purchase orders can be cancelled (not hard-deleted).
   if (path[0] === "purchase-orders" && resourceId) {
     return NextResponse.json({
       order_id: resourceId,
@@ -558,7 +495,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
     }, { status: 200 });
   }
 
-  // Purchase requests can be withdrawn while still PENDING.
   if (path[0] === "purchase-requests" && resourceId) {
     return NextResponse.json({
       request_id: resourceId,
@@ -570,7 +506,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   }
 
   // ── Legal Domain ────────────────────────────────────────────────────────────
-  // Contracts are terminated, not deleted.
   if (path[0] === "contracts" && resourceId) {
     return NextResponse.json({
       contract_id: resourceId,
@@ -580,7 +515,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
     }, { status: 200 });
   }
 
-  // Obligations can be closed.
   if (path[0] === "obligations" && resourceId) {
     return NextResponse.json({
       obligation_id: resourceId,
@@ -591,7 +525,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   }
 
   // ── Compliance Domain ────────────────────────────────────────────────────────
-  // Evidence requirements are retired (effective_to is set), not deleted.
   if (path[0] === "evidence" && path[1] === "requirements" && path[2]) {
     return NextResponse.json({
       evidence_requirement_id: path[2],
@@ -602,7 +535,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   }
 
   // ── HR & Payroll Domain ──────────────────────────────────────────────────────
-  // Spend limits can be deleted (they are not append-only).
   if (path[0] === "spend-controls" && path[1] === "limits" && path[2]) {
     return NextResponse.json({
       limit_id: path[2],
@@ -612,7 +544,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
     }, { status: 200 });
   }
 
-  // ── Generic fallback ────────────────────────────────────────────────────────
   return NextResponse.json({
     message: `Resource at /v1/${endpoint} marked as deleted`,
     resource_id: resourceId,
@@ -622,9 +553,28 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
   }, { status: 200 });
 }
 
-/** Caller identity from the X-* headers, with the console demo defaults. */
-function callerIdentity(req: NextRequest) {
+/**
+ * The caller's identity, prioritizing verified session cookie with fallback
+ * to X-* headers for test runners and external API callers.
+ */
+async function resolveIdentity(req: NextRequest) {
+  try {
+    const store = await cookies();
+    const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+    if (session?.email && session.tenantId) {
+      return {
+        tenantId: session.tenantId,
+        principalId: session.principalId,
+        legalEntityId: session.legalEntityId,
+      };
+    }
+  } catch {
+    // Outside cookie context or API test script
+  }
+
   const tenantId = req.headers.get("X-Tenant-Id") ?? "11111111-1111-1111-1111-111111111111";
   const principalId = req.headers.get("X-Principal-Id") ?? "33333333-3333-3333-3333-333333333333";
-  return { tenantId, principalId };
+  const legalEntityId = req.headers.get("X-Legal-Entity-Id") ?? "22222222-2222-2222-2222-222222222222";
+  return { tenantId, principalId, legalEntityId };
 }
+

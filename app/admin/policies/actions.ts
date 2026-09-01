@@ -155,6 +155,8 @@ export async function submitPolicyVersion(
     tenantId: scope === "global" ? undefined : identity.tenantId,
     legalEntityId: scope === "entity" ? identity.legalEntityId : undefined,
     principalId: identity.principalId,
+    // The scope the version binds can be global; who published it cannot.
+    callerTenantId: identity.tenantId,
   });
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message);

@@ -6,13 +6,14 @@ import { LookupById } from "@/components/admin/shared";
 import { DOMAINS } from "@/lib/constants";
 import {
   AccountsPayablePanel,
-  AccountsReceivableView,
+  AccountsReceivablePanel,
   BankReconciliationPanel,
   FinanceActionHeader,
   FinanceSummaryBar,
   FinanceProcessTimeline,
   FinancialClosePanel,
   GeneralLedgerPanel,
+  IssueInvoiceForm,
   IngestStatementLineForm,
   RecordInvoiceForm,
   RecordJournalForm,
@@ -60,6 +61,11 @@ const WIRED_SERVICES = new Set([
   "Bank Reconciliation Service",
   "Accounts Payable Service",
   "Financial Close Service",
+  // Added 19 Aug, when the receivables register started reading this service
+  // instead of three hardcoded invoices. It was deliberately absent before: the
+  // old view claimed "Live Local Backend (Port 8101)" from a /healthz probe while
+  // displaying mock rows, which is exactly the vouching this set exists to avoid.
+  "Accounts Receivable Service",
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -241,7 +247,7 @@ export default async function FinancePage({ searchParams }: PageProps) {
           reconciliation will only match against a journal it reports
           FINALIZED. Everything below the live registers is either a
           read-only summary or indicative sample data. */}
-      <Card>
+      <Card id="record-journal">
         <CardHeader>
           <div>
             <CardTitle>Record a journal</CardTitle>
@@ -379,7 +385,7 @@ export default async function FinancePage({ searchParams }: PageProps) {
           line against a journal it verifies as FINALIZED, on the same legal
           entity, moving the same amount through this bank account's ledger
           account in the same direction. */}
-      <Card>
+      <Card id="ingest-statement-line">
         <CardHeader>
           <div>
             <CardTitle>Ingest a statement line</CardTitle>
@@ -646,7 +652,7 @@ export default async function FinancePage({ searchParams }: PageProps) {
           Last of the three live registers, and deliberately after the ledger:
           a period is closed on the strength of what is in the journal register
           above it, and the readiness check reports on exactly that. */}
-      <Card>
+      <Card id="register-fiscal-period">
         <CardHeader>
           <div>
             <CardTitle>Register a fiscal period</CardTitle>
@@ -737,8 +743,48 @@ export default async function FinancePage({ searchParams }: PageProps) {
 
       <hr className="border-slate-200 dark:border-slate-800" />
 
-      {/* Accounts Receivable & General Ledger Widget */}
-      <AccountsReceivableView />
+      {/* ── accounts-receivable-svc (:8101) ───────────────────────────────────
+          The fifth live, writable register on this page, and the last service on
+          this console to come off the legacy lib/api-client.ts layer. */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Issue a customer invoice</CardTitle>
+            <CardDescription>
+              Live, writable. Backed by accounts-receivable-svc — the asset side of the ledger. An
+              invoice enters ISSUED and travels ISSUED → SENT → OVERDUE or PAID, where PAID is
+              terminal. Unlike payables the path BRANCHES: an invoice paid on time never passes
+              through OVERDUE. Each hop is a separate authorization grant, checked against
+              authorization-svc and failing closed — and recording payment additionally requires a
+              FINALIZED general-ledger journal correlated to the invoice, so cash is never
+              recognised against a receivable the books do not carry.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <IssueInvoiceForm />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Receivables register</CardTitle>
+            <CardDescription>
+              Every customer invoice for this tenant, newest first, scoped to your verified tenant
+              by the service rather than by anything this page sends. Each row offers the
+              transitions that are legal from where it stands — two of them from SENT, because an
+              invoice there can be paid or declared late and both succeed.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {/* Its own boundary so a slow backend cannot hold up the form above it. */}
+          <Suspense fallback={<RegisterSkeleton />}>
+            <AccountsReceivablePanel />
+          </Suspense>
+        </CardContent>
+      </Card>
     </div>
   );
 }

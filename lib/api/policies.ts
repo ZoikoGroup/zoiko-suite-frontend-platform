@@ -96,6 +96,17 @@ export type ApplicableScope = {
   /** Omit for global-only scope. */
   tenantId?: string;
   legalEntityId?: string;
+  /**
+   * The caller's own verified tenant, sent as X-Tenant-Id. Distinct from
+   * `tenantId`, which is the SCOPE being asked about — a global-only read has
+   * no scope tenant but still has a caller.
+   *
+   * Required: policy-svc used to take `?tenant_id=` as the scope outright, so
+   * any caller could read the policy set another tenant is governed by. It now
+   * refuses a read with no verified scope, and a `tenantId` naming a different
+   * tenant is a 403.
+   */
+  callerTenantId: string;
 };
 
 /**
@@ -117,6 +128,7 @@ export async function listApplicablePolicyVersions(
       tenant_id: scope.tenantId,
       legal_entity_id: scope.legalEntityId,
     },
+    identity: { tenantId: scope.callerTenantId },
   });
 
   if (!result.ok) return result;
@@ -200,6 +212,17 @@ export type CreatePolicyVersionInput = {
   tenantId?: string;
   legalEntityId?: string;
   principalId: string;
+  /**
+   * The caller's own verified tenant, sent as X-Tenant-Id. Distinct from
+   * `tenantId`, which is the SCOPE the version binds — a global version binds
+   * no tenant but is still published BY one.
+   *
+   * Required: `tenant_id` in the body used to be written straight through, so a
+   * principal holding POLICY_VERSION_CREATE on one legal entity could publish a
+   * version binding another tenant entirely. The service now files the version
+   * under the verified scope and answers 403 when the body disagrees.
+   */
+  callerTenantId: string;
   policyVersionId?: string;
 };
 
@@ -224,7 +247,7 @@ export async function createPolicyVersion(
       ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
       created_by_principal_id: input.principalId,
     },
-    { identity: { principalId: input.principalId } },
+    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
   );
 }
 
