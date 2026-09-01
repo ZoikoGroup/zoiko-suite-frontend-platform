@@ -23,6 +23,7 @@ import {
   Globe2,
   FileText,
   Fingerprint,
+  Bot,
 } from "lucide-react";
 
 export type DomainKey =
@@ -283,4 +284,90 @@ export const PLATFORM_NAV = [
 
 export const SECONDARY_NAV = [
   { label: "Settings", href: "/admin/settings", icon: Settings },
+];
+
+/**
+ * The console's navigation, grouped by the domain each page's service belongs
+ * to.
+ *
+ * PRIMARY_NAV and PLATFORM_NAV split the same pages two ways — "business
+ * domain" and "governance plane" — which answers a question about architecture
+ * rather than the one an operator asks. Somebody looking for the governance
+ * decision log had to know it was a cross-cutting control rather than a
+ * finance page; somebody looking for board resolutions had to know they live
+ * under Legal.
+ *
+ * These headings name the domain a page's owning service actually sits in, so
+ * a page is found where its subject is. The two lists above are kept and still
+ * exported: DOMAINS carries the per-domain purpose text the overview cards
+ * read, and nothing else has to change to use this grouping.
+ *
+ * Order runs from the controls that constrain everything else down to the
+ * operational domains they constrain — the same dependency order PLATFORM_NAV
+ * documented, widened to the whole console.
+ */
+export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
+  {
+    title: "Governance, Compliance & Audit",
+    items: [
+      { label: "Governance Log", href: "/admin/governance", icon: ScrollText },
+      { label: "Policies", href: "/admin/policies", icon: Gavel },
+      { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },
+      { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },
+      { label: "Compliance", href: "/admin/compliance", icon: ShieldCheck },
+      { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
+      { label: "Audit Event Store", href: "/admin/audit-events", icon: History },
+      { label: "AI Governance", href: "/admin/ai-governance", icon: Bot },
+    ],
+  },
+  {
+    title: "Identity, Access & Authorization",
+    items: [
+      { label: "Identity Context", href: "/admin/identity", icon: Fingerprint },
+      { label: "Roles & Access", href: "/admin/access-control", icon: KeySquare },
+      { label: "Delegated Authority", href: "/admin/delegations", icon: KeyRound },
+    ],
+  },
+  {
+    title: "Organization & Reference Data",
+    items: [
+      { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },
+      { label: "Jurisdictions & Rules", href: "/admin/jurisdictions", icon: Globe2 },
+    ],
+  },
+  {
+    title: "Accounting & Finance",
+    items: [{ label: "Finance", href: "/admin/finance", icon: Landmark }],
+  },
+  {
+    title: "Workforce, HR & Payroll",
+    items: [
+      { label: "HR & Workforce", href: "/admin/hr", icon: Users },
+      { label: "Payroll", href: "/admin/payroll", icon: Wallet },
+    ],
+  },
+  {
+    title: "Procurement & Payables",
+    items: [
+      { label: "Purchase Requests", href: "/admin/purchase-requests", icon: ClipboardList },
+      { label: "Commercial Ops", href: "/admin/commercial-ops", icon: ShoppingCart },
+    ],
+  },
+  {
+    title: "Legal, Contracts & Documents",
+    items: [
+      { label: "Legal & Contracts", href: "/admin/legal", icon: Scale },
+      { label: "Document Vault", href: "/admin/documents", icon: FileText },
+      { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },
+      { label: "Retention & Holds", href: "/admin/retention", icon: Snowflake },
+    ],
+  },
+  {
+    title: "Tax & Regulatory",
+    items: [{ label: "Tax", href: "/admin/tax", icon: Percent }],
+  },
+  {
+    title: "Notification & Communication",
+    items: [{ label: "Notifications", href: "/admin/notifications", icon: Bell }],
+  },
 ];
