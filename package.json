@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "mock:services": "node scratch/mock-tax-services.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

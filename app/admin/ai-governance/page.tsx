@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui";
-import { Bot, Cpu, CheckCircle2, Lock, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Bot, Cpu, CheckCircle2, Lock } from "lucide-react";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   getActionRiskClassification,
   verifyModelProvider,
 } from "@/lib/api/ai-governance";
+import { AiGovernanceInteractivePanel } from "@/components/admin/ai-governance/AiGovernanceInteractivePanel";
 
 export const metadata: Metadata = { title: "AI Governance & Safety Controls | Zoiko Suite" };
 
@@ -120,6 +121,9 @@ export default async function AiGovernancePage() {
           <CardContent className="text-xs text-slate-500">Instant Global Freeze Enabled</CardContent>
         </Card>
       </div>
+
+      {/* Interactive AI Governance Actions Panel */}
+      <AiGovernanceInteractivePanel />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Model Provider Registry */}

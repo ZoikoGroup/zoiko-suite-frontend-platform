@@ -480,9 +480,24 @@ createService(
 
 // 3. vat-gst-svc (8127)
 createService(8127, "vat-gst-svc", (path, params, headers, send) => {
-  return send(200, { vat_returns: VAT_RETURNS, returns: VAT_RETURNS, total: VAT_RETURNS.length });
+  // Enrich stored VAT returns with computed net_tax_payable if missing
+  const enriched = VAT_RETURNS.map(r => ({
+    ...r,
+    net_tax_payable: r.net_tax_payable != null
+      ? r.net_tax_payable
+      : ((r.output_tax_amount ?? 0) - (r.input_tax_amount ?? 0)),
+  }));
+  return send(200, { vat_returns: enriched, returns: enriched, total: enriched.length });
 }, (path, body, headers, send) => {
-  const newRet = { return_id: "vat-" + Date.now(), status: "DRAFT", ...body, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const newRet = {
+    return_id: "vat-" + Date.now(),
+    tenant_id: headers["x-tenant-id"] || body.tenant_id || "11111111-1111-1111-1111-111111111111",
+    status: "DRAFT",
+    net_tax_payable: ((body.output_tax_amount ?? 0) - (body.input_tax_amount ?? 0)),
+    ...body,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
   VAT_RETURNS.unshift(newRet);
   return send(201, { vat_return: newRet });
 });
@@ -498,12 +513,72 @@ createService(8128, "corporate-tax-svc", (path, params, headers, send) => {
 
 // 5. withholding-tax-svc (8129)
 createService(8129, "withholding-tax-svc", (path, params, headers, send) => {
-  return send(200, { obligations: WITHHOLDING_OBLIGATIONS, total: WITHHOLDING_OBLIGATIONS.length });
+  // Expose both key variants so the lib transform always finds the data
+  return send(200, { obligations: WITHHOLDING_OBLIGATIONS, withholding_obligations: WITHHOLDING_OBLIGATIONS, total: WITHHOLDING_OBLIGATIONS.length });
+}, (path, body, headers, send) => {
+  const newObl = {
+    obligation_id: "wht-" + Date.now(),
+    tenant_id: headers["x-tenant-id"] || body.tenant_id || "11111111-1111-1111-1111-111111111111",
+    status: "CALCULATED",
+    // Normalise rate/amount field names to canonical schema on creation
+    withholding_rate_percent: body.withholding_rate_percent ?? body.applied_rate_percent ?? 0,
+    withheld_amount: body.withheld_amount ?? body.tax_withheld_amount ?? 0,
+    ...body,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  WITHHOLDING_OBLIGATIONS.unshift(newObl);
+  return send(201, { obligation: newObl });
 });
 
 // 6. filing-preparation-svc (8130)
 createService(8130, "filing-preparation-svc", (path, params, headers, send) => {
-  return send(200, { drafts: FILING_DRAFTS, total: FILING_DRAFTS.length });
+  return send(200, { drafts: FILING_DRAFTS, filing_drafts: FILING_DRAFTS, total: FILING_DRAFTS.length });
+}, (path, body, headers, send) => {
+  const parts = path.split("/").filter(Boolean);
+  // Handle /v1/filing-preparation/drafts/:id/finalize
+  if (parts.length === 5 && parts[4] === "finalize") {
+    const draftId = parts[3];
+    const idx = FILING_DRAFTS.findIndex(d => d.draft_id === draftId);
+    if (idx === -1) {
+      // Return a valid finalized shell even if ID unknown (created by gateway BFF)
+      return send(200, {
+        draft_id: draftId,
+        validation_status: "FINALIZED",
+        status: "FINALIZED",
+        notes: body.notes || "Finalized",
+        updated_at: new Date().toISOString()
+      });
+    }
+    FILING_DRAFTS[idx] = {
+      ...FILING_DRAFTS[idx],
+      validation_status: "FINALIZED",
+      status: "FINALIZED",
+      notes: body.notes,
+      updated_at: new Date().toISOString()
+    };
+    return send(200, { draft: FILING_DRAFTS[idx] });
+  }
+  // Normal draft creation
+  const draftId = "draft-" + Date.now();
+  const newDraft = {
+    draft_id: draftId,
+    tenant_id: headers["x-tenant-id"] || body.tenant_id || "11111111-1111-1111-1111-111111111111",
+    legal_entity_id: body.legal_entity_id || "",
+    jurisdiction_id: body.jurisdiction_id || "",
+    filing_type: body.filing_type || "VAT_RETURN",
+    period_key: body.period_key || body.reporting_period || "",
+    reporting_period: body.reporting_period || body.period_key || "",
+    due_date: body.due_date || "",
+    payload_data: body.payload_data || "{}",
+    validation_status: "PREPARED",
+    status: "PREPARED",
+    created_by: headers["x-principal-id"] || "filing-daemon",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  FILING_DRAFTS.unshift(newDraft);
+  return send(201, { draft_id: draftId, draft: newDraft });
 });
 
 // 7. tax-authority-interface-svc (8147)
