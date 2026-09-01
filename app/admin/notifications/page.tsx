@@ -54,17 +54,36 @@ export default async function NotificationsPage() {
         <CardHeader>
           <div>
             <CardTitle>Send a notification</CardTitle>
+            {/*
+              Every line break in the paragraph below carries an explicit {" "}, and there are no
+              JSX comments inside it.
+
+              Both rules were learned the hard way here. A literal space either side of an inline
+              <strong> was silently dropped from the rendered output - the browser showed
+              "EMAILSENT" and "WEBHOOKhas" while the source read correctly, so it passed a source
+              review and was only caught by reading the DOM back. Putting an explanatory comment
+              in the middle of the prose then produced "deliveredby", because an expression
+              container splits the text into two JSXText nodes and the whitespace at each new
+              boundary is trimmed.
+
+              Which breaks are fragile is not obvious from looking: the ones adjacent to an
+              element or expression boundary lose their space, the purely textual ones do not.
+              So every join is explicit rather than guessed at, and prose wraps at an element,
+              never mid-phrase.
+            */}
             <CardDescription>
               Live, writable. Backed by notification-svc on :8133. Idempotent on a correlation id, so
               a retry replays the stored notification instead of sending a second one. What SENT is
-              worth depends on the channel: an <strong>IN_APP</strong> notice is genuinely delivered
-              by being recorded, while <strong>EMAIL</strong> SENT means a mail provider accepted the
-              message &mdash; not that it arrived, and not that anyone read it.{" "}
-              <strong>WEBHOOK</strong> has no provider and is recorded as FAILED naming what is
-              missing, rather than reported as sent &mdash; machine-to-machine exchange is XIC&rsquo;s
-              authority, not this service&rsquo;s. <strong>SMS</strong> has been withdrawn: it was
-              accepted and then failed every send, so it is now refused at the boundary like any
-              unrecognised channel, with a 400 rather than a stored FAILED delivery.
+              worth depends on the channel: an <strong>IN_APP</strong>{" "}
+              notice is genuinely delivered by being recorded, while <strong>EMAIL</strong>{" "}
+              SENT means a mail provider accepted the message &mdash; not that it arrived, and not{" "}
+              that anyone read it. <strong>WEBHOOK</strong>{" "}
+              has no provider and is recorded as FAILED naming what is missing, rather than{" "}
+              reported as sent &mdash; machine-to-machine exchange is XIC&rsquo;s authority, not{" "}
+              this service&rsquo;s. <strong>SMS</strong>{" "}
+              has been withdrawn: it was accepted and then failed every send, so it is now refused{" "}
+              at the boundary like any unrecognised channel, with a 400 rather than a stored{" "}
+              FAILED delivery.
             </CardDescription>
           </div>
         </CardHeader>
