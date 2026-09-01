@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { JsonBlock, ResultBanner } from "@/components/admin/shared";
 import { FIELD, LABEL, OPTIONAL } from "@/components/admin/shared/form";
@@ -11,7 +11,7 @@ import type { NotificationTemplate } from "@/lib/api/notifications";
 const TONE = {
   sent: "success",
   replayed: "neutral",
-  // Warning, like `failed` — but the two say different things, and the message
+  // Warning, like `failed` â€” but the two say different things, and the message
   // carries the difference: a retrying notice has not been given up on.
   retrying: "warning",
   failed: "warning",
@@ -29,7 +29,7 @@ function humanise(variable: string): string {
 type Props = {
   /**
    * The catalogue, fetched server-side. Empty means the service could not be
-   * asked — the form still works for free-text sends, and says why the
+   * asked â€” the form still works for free-text sends, and says why the
    * template option is missing rather than silently offering nothing.
    */
   templates: NotificationTemplate[];
@@ -47,6 +47,26 @@ export function SendNotificationForm({ templates, templatesError }: Props) {
   // once would let an operator build a request that is refused on submit.
   const [templateName, setTemplateName] = useState("");
   const selected = templates.find((t) => t.name === templateName);
+
+  // React resets a <form action={...}> once the action returns, which clears
+  // the uncontrolled fields AND the template <select> back to its default. This
+  // state does not follow on its own, and the two then disagree: measured after
+  // a successful send, the select read "" while the variables panel was still
+  // rendered and subject/body were still disabled. The form was left unusable â€”
+  // no template visibly chosen, and no way to type a subject either.
+  //
+  // Resetting alongside the DOM keeps the two descriptions of "which template
+  // is selected" as one. It runs for a failed or retrying send as well: those
+  // are recorded notifications, the form was reset for them too, and leaving
+  // half of it populated would be the same contradiction.
+  //
+  // Not on "error": a request refused before it reached the service (a missing
+  // subject, a template with both forms supplied) is one the operator is about
+  // to correct, and clearing their selection would make them start over.
+  useEffect(() => {
+    if (state.status === "idle" || state.status === "error" || state.status === "denied") return;
+    setTemplateName("");
+  }, [state]);
 
   return (
     <form action={action} className="space-y-4">
@@ -80,7 +100,7 @@ export function SendNotificationForm({ templates, templatesError }: Props) {
           </select>
         </div>
 
-        {/* ── Content: a template, or free text ─────────────────────────── */}
+        {/* â”€â”€ Content: a template, or free text â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="sm:col-span-2">
           <label htmlFor="template" className={LABEL}>
             Template <span className={OPTIONAL}>(optional)</span>
@@ -93,10 +113,10 @@ export function SendNotificationForm({ templates, templatesError }: Props) {
             className={FIELD}
             disabled={templates.length === 0}
           >
-            <option value="">— none, write the subject and body below —</option>
+            <option value="">â€” none, write the subject and body below â€”</option>
             {templates.map((t) => (
               <option key={t.name} value={t.name}>
-                {t.name} — {t.subject}
+                {t.name} â€” {t.subject}
               </option>
             ))}
           </select>
@@ -184,7 +204,7 @@ export function SendNotificationForm({ templates, templatesError }: Props) {
           />
         </div>
 
-        {/* ── Delivery ──────────────────────────────────────────────────── */}
+        {/* â”€â”€ Delivery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="sm:col-span-2">
           <label htmlFor="recipient_address" className={LABEL}>
             Recipient address override <span className={OPTIONAL}>(optional)</span>
@@ -193,14 +213,14 @@ export function SendNotificationForm({ templates, templatesError }: Props) {
             id="recipient_address"
             name="recipient_address"
             type="email"
-            placeholder="Leave empty — the address is resolved from identity-context-svc"
+            placeholder="Leave empty â€” the address is resolved from identity-context-svc"
             className={FIELD}
             autoComplete="off"
           />
           <p className="mt-1 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
             Normally leave this empty: the address is read from the recipient&rsquo;s principal
             record, which is the authoritative contact fact, and the notification records that it
-            came from there. Set it only for someone who is not an established principal yet — the
+            came from there. Set it only for someone who is not an established principal yet â€” the
             registration notice that goes to an organization awaiting approval. The stored
             provenance keeps the two distinguishable afterwards.
           </p>
@@ -235,10 +255,10 @@ export function SendNotificationForm({ templates, templatesError }: Props) {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" loading={pending} size="sm">
-          {pending ? "Sending…" : "Send notification"}
+          {pending ? "Sendingâ€¦" : "Send notification"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Idempotent on correlation id — a retry replays the stored notice, never sends twice
+          Idempotent on correlation id â€” a retry replays the stored notice, never sends twice
         </p>
       </div>
 
