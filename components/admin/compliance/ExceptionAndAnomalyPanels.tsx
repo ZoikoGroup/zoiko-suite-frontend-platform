@@ -4,22 +4,19 @@ import {
   listEscalatedExceptions,
   listAnomalies,
   getDecisionSupportChecklist,
-  getRiskScoringSummary,
 } from "@/lib/api/compliance";
-import { AlertOctagon, Activity, Sparkles, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { AlertOctagon, Activity, Sparkles, ShieldCheck } from "lucide-react";
 
 export async function ExceptionAndAnomalyPanels() {
-  const [excRes, anomRes, decRes, scoreRes] = await Promise.all([
+  const [excRes, anomRes, decRes] = await Promise.all([
     listEscalatedExceptions(),
     listAnomalies(),
     getDecisionSupportChecklist(),
-    getRiskScoringSummary(),
   ]);
 
   const exceptions = excRes.ok ? excRes.data : [];
   const anomalies = anomRes.ok ? anomRes.data : [];
   const decisions = decRes.ok ? decRes.data : [];
-  const scores = scoreRes.ok ? scoreRes.data : [];
 
   return (
     <div className="space-y-6">

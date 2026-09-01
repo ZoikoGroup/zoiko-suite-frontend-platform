@@ -1,7 +1,7 @@
 import React from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui";
 import { listDepartments, listReviewCycles, listWorkforceAlerts } from "@/lib/api/hr";
-import { Network, Award, ShieldAlert, Users, FolderTree } from "lucide-react";
+import { Network, Award, ShieldAlert, FolderTree } from "lucide-react";
 
 export async function OrgAndPerformancePanels() {
   const [deptRes, cycleRes, alertRes] = await Promise.all([

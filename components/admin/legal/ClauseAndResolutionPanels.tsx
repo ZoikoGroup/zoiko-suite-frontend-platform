@@ -1,7 +1,7 @@
 import React from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui";
 import { listClauses, listBoardResolutions, listCorporateActions } from "@/lib/api/legal";
-import { FileCode, Vote, Briefcase, CheckCircle, Scale } from "lucide-react";
+import { FileCode, Vote, Briefcase } from "lucide-react";
 
 export async function ClauseAndResolutionPanels() {
   const [clauseRes, resRes, actionRes] = await Promise.all([

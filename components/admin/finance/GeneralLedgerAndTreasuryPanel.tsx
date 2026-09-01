@@ -2,7 +2,7 @@ import React from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui";
 import { listJournalEntries, listCashPositions, listBankReconciliations } from "@/lib/api/finance";
 import { formatMoney } from "@/lib/format";
-import { BookOpen, Wallet, CheckCircle2, AlertTriangle, ArrowUpRight } from "lucide-react";
+import { BookOpen, Wallet, CheckCircle2 } from "lucide-react";
 
 export async function GeneralLedgerAndTreasuryPanel() {
   const [glRes, treasuryRes, reconRes] = await Promise.all([

@@ -9,13 +9,13 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-
+ 
 # testing
 /coverage
 
 # next.js
 /.next/
-/out/
+/out/  
 
 # production
 /build
@@ -47,5 +47,10 @@ cookies.txt
 
 # nested clone ignore
 zoiko-suite-frontend-platform/
+
+# local exports
+/exports/
+scratch/*.log
+
 
 
