@@ -11,6 +11,11 @@ import {
 const TONE = {
   sent: "success",
   pending: "neutral",
+  // Warning, not danger. A scheduled retry has not been given up on — the
+  // platform is still actively trying to deliver it — so it must not sit in
+  // the register wearing the same colour as a notice that definitively did not
+  // go out.
+  retrying: "warning",
   failed: "danger",
 } as const;
 
@@ -18,9 +23,13 @@ const TONE = {
  * Raw delivery records.
  *
  * A FAILED row is not a cosmetic error state — it is recorded proof the notice
- * did not go out, and the only way today to reach it is an unsupported channel.
- * SENT means "recorded and stub-delivered", which must not be read as "actually
- * received": no provider is wired up on this platform.
+ * did not go out. It is now genuinely reachable: a provider refusing the
+ * recipient, an address that could not be resolved, or a channel with no
+ * provider behind it all produce one.
+ *
+ * SENT must not be rendered as "received". For IN_APP it does mean delivered —
+ * the row is the delivery. For EMAIL it means a provider accepted the message,
+ * which ZS-SVC-Y-001 §0.4 requires be reported as acceptance and nothing more.
  */
 export function NotificationTable({ notifications }: { notifications: Notification[] }) {
   return (
@@ -70,16 +79,88 @@ export function NotificationTable({ notifications }: { notifications: Notificati
                 </td>
                 <td className={CELL}>
                   <Badge tone={TONE[reading]} dot>
-                    {notification.status}
+                    {/* RETRYING is a reading, not a stored status — the row
+                        really is PENDING. Showing the raw status here would
+                        put a plain "PENDING" next to an amber badge and a
+                        failure reason, which reads as a contradiction. */}
+                    {reading === "retrying" ? "RETRYING" : notification.status}
                   </Badge>
                   {reading === "failed" && (
                     <p className="mt-1 max-w-[14rem] text-[11px] leading-snug text-amber-600 dark:text-amber-400">
                       {notification.failure_reason ?? "delivery failed"}
                     </p>
                   )}
+                  {reading === "retrying" && (
+                    <p className="mt-1 max-w-[14rem] text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+                      {/* Deliberately phrased as the LAST attempt, not as the
+                          outcome. The notice has not failed; this is why the
+                          most recent try did not land. */}
+                      Attempt {notification.delivery_attempts ?? 1} failed
+                      {notification.failure_reason ? `: ${notification.failure_reason}` : ""}
+                      {notification.next_attempt_at && (
+                        <span className="mt-0.5 block text-slate-500 dark:text-slate-400">
+                          Next attempt {formatDateTime(notification.next_attempt_at)}
+                        </span>
+                      )}
+                    </p>
+                  )}
+
+                  {/* Read state, IN_APP only. This service cannot observe
+                      whether an email was opened and does not pretend to, so
+                      the absence of a marker on an EMAIL row is not "unread" —
+                      it is "unknowable", and showing "unread" there would be a
+                      claim the platform has no basis for. */}
+                  {notification.channel === "IN_APP" && reading === "sent" && (
+                    <p className="mt-1 text-[11px] leading-snug">
+                      {notification.read_at ? (
+                        <span className="text-slate-500 dark:text-slate-400">
+                          Read {formatDateTime(notification.read_at)}
+                        </span>
+                      ) : (
+                        <span className="font-medium text-navy-600 dark:text-navy-300">
+                          Unread
+                        </span>
+                      )}
+                    </p>
+                  )}
+
+                  {/* Acceptance evidence, never a delivery receipt. */}
+                  {notification.provider_response && reading === "sent" && (
+                    <p
+                      className="mt-1 max-w-[14rem] truncate text-[11px] leading-snug text-slate-400 dark:text-slate-500"
+                      title={`Provider acceptance evidence — not proof of receipt: ${notification.provider_response}`}
+                    >
+                      {notification.provider_response}
+                    </p>
+                  )}
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
                   <CopyableId value={notification.recipient_principal_id} />
+
+                  {/* Where the message actually went, and who vouched for that
+                      address. The register named only the principal before, so
+                      "which address did we use" — the whole question when
+                      someone says they never received a notice — had no answer
+                      anywhere in the console. */}
+                  {notification.recipient_address ? (
+                    <span className="mt-1 block text-[11px] leading-snug">
+                      <span className="text-slate-600 dark:text-slate-300">
+                        {notification.recipient_address}
+                      </span>
+                      {notification.recipient_address_source === "REQUEST" && (
+                        <span
+                          className="ml-1 rounded bg-amber-100 px-1 py-px text-[10px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+                          title="Supplied by the caller, not read from the identity authority"
+                        >
+                          caller-supplied
+                        </span>
+                      )}
+                    </span>
+                  ) : notification.channel === "IN_APP" ? (
+                    <span className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500">
+                      in-app &mdash; no external address
+                    </span>
+                  ) : null}
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
                   {notification.source_event_type ? (

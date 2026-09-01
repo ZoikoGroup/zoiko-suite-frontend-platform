@@ -84,9 +84,12 @@ const DEFAULTS = {
   procurementWorkflow: "http://localhost:8140",
   // ── Filing Tracker ────────────────────────────────────────────────────────
   filingTracker: "http://localhost:8141",
-  // 8133, per compose. notification-svc delivers governed notifications via a
-  // documented stub adapter (see lib/api/notifications.ts) — no provider is
-  // wired up on the platform yet.
+  // 8133, per compose. notification-svc delivers governed notifications. EMAIL
+  // goes through a real SMTP provider (Mailpit locally, on :8025); IN_APP is
+  // delivered by being recorded and carries read state. WEBHOOK has no provider
+  // and is recorded FAILED naming what is missing; SMS was withdrawn and is
+  // refused at the boundary. What SENT is worth per channel is set out in
+  // lib/api/notifications.ts.
   notification: "http://localhost:8133",
   // 8122, per compose. board-resolutions-svc owns board meetings and their
   // resolutions; the write path authorizes MEETING_CREATE / RESOLUTION_CREATE /
