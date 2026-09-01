@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui";
 import { JsonBlock, ResultBanner } from "@/components/admin/shared";
 import { FIELD, LABEL, OPTIONAL } from "@/components/admin/shared/form";
@@ -60,13 +60,24 @@ export function SendNotificationForm({ templates, templatesError }: Props) {
   // are recorded notifications, the form was reset for them too, and leaving
   // half of it populated would be the same contradiction.
   //
-  // Not on "error": a request refused before it reached the service (a missing
-  // subject, a template with both forms supplied) is one the operator is about
-  // to correct, and clearing their selection would make them start over.
-  useEffect(() => {
-    if (state.status === "idle" || state.status === "error" || state.status === "denied") return;
-    setTemplateName("");
-  }, [state]);
+  // Not on "error" or "denied": a request refused before it reached the service
+  // (a missing subject, a template with both forms supplied) is one the
+  // operator is about to correct, and clearing their selection would make them
+  // start over.
+  //
+  // Adjusted during render rather than in an effect. An effect calling setState
+  // runs after the browser has painted, so the form would show a frame of the
+  // contradictory state before correcting itself, and
+  // react-hooks/set-state-in-effect rejects it for the cascading render.
+  // Comparing against the previously handled state is React's documented way to
+  // derive state from a changed input: the extra render happens before paint.
+  const [handledState, setHandledState] = useState(state);
+  if (state !== handledState) {
+    setHandledState(state);
+    if (state.status !== "idle" && state.status !== "error" && state.status !== "denied") {
+      setTemplateName("");
+    }
+  }
 
   return (
     <form action={action} className="space-y-4">
