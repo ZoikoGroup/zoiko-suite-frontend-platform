@@ -1258,6 +1258,22 @@ const FALLBACK_DETERMINATIONS: TaxDetermination[] = [
     evaluated_by: "tax-engine-daemon",
     created_at: "2026-07-31T14:30:00Z",
     updated_at: "2026-07-31T14:30:00Z",
+    // TAX-03 classification facts. The rate above says nothing about why it
+    // applies without them, and the table renders all three.
+    seller_party_id: "22222222-2222-2222-2222-222222222222",
+    buyer_party_id: "party-uk-northwind-ltd",
+    supply_jurisdiction_id: "jur-uk-gb",
+    // Only CALLER_ASSERTED occurs today: no jurisdiction pack carries
+    // place-of-supply rules, so nothing derives this.
+    place_of_supply_basis: "CALLER_ASSERTED",
+    product_classification: "PROFESSIONAL_SERVICES",
+    supply_kind: "SERVICES",
+    supply_type: "B2B",
+    supply_date: "2026-07-31",
+    // Charging 20% here requires a registration here; a row showing the rate
+    // with none would contradict itself.
+    seller_registration_id: "GB123456789",
+    seller_registration_status: "ACTIVE",
   },
   {
     determination_id: "det-2026-002",
@@ -1280,6 +1296,16 @@ const FALLBACK_DETERMINATIONS: TaxDetermination[] = [
     evaluated_by: "tax-engine-daemon",
     created_at: "2026-06-30T10:00:00Z",
     updated_at: "2026-06-30T10:00:00Z",
+    // Corporate income tax is not levied on a supply, so the supply facts do
+    // not apply here. UNSPECIFIED is the value the type defines for exactly
+    // this - inventing GOODS or B2B would assert something untrue.
+    seller_party_id: "22222222-2222-2222-2222-222222222222",
+    buyer_party_id: "22222222-2222-2222-2222-222222222222",
+    supply_jurisdiction_id: "jur-us-fed",
+    place_of_supply_basis: "CALLER_ASSERTED",
+    product_classification: "NOT_APPLICABLE",
+    supply_kind: "UNSPECIFIED",
+    supply_type: "UNSPECIFIED",
   },
   {
     determination_id: "det-2026-003",
@@ -1302,6 +1328,16 @@ const FALLBACK_DETERMINATIONS: TaxDetermination[] = [
     evaluated_by: "tax-engine-daemon",
     created_at: "2026-07-31T15:00:00Z",
     updated_at: "2026-07-31T15:00:00Z",
+    seller_party_id: "22222222-2222-2222-2222-222222222222",
+    buyer_party_id: "party-sg-consumer-4471",
+    supply_jurisdiction_id: "jur-sg-01",
+    place_of_supply_basis: "CALLER_ASSERTED",
+    product_classification: "DIGITAL_SUBSCRIPTION",
+    supply_kind: "DIGITAL_SERVICES",
+    supply_type: "B2C",
+    supply_date: "2026-07-15",
+    seller_registration_id: "M90312345X",
+    seller_registration_status: "ACTIVE",
   },
 ];
 
