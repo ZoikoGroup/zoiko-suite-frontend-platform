@@ -44,6 +44,14 @@ function isExpiringSoon(contract: Contract): boolean {
   return diffDays >= 0 && diffDays <= 30;
 }
 
+type ContractVariant = Contract & {
+  stage?: string;
+  value?: number;
+  expires_at?: string;
+  counterparty?: string;
+  type?: string;
+};
+
 export async function ContractLifecyclePanel() {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
@@ -78,16 +86,16 @@ export async function ContractLifecyclePanel() {
     );
   }
 
-  const contracts: Contract[] = result.ok ? result.data : [];
+  const contracts: ContractVariant[] = result.ok ? (result.data as ContractVariant[]) : [];
 
-  const active = contracts.filter((c) => c.status === "ACTIVE" || (c as any).stage === "EXECUTED");
-  const draft = contracts.filter((c) => c.status === "DRAFT" || (c as any).stage === "DRAFT");
-  const pending = contracts.filter((c) => c.status === "PENDING_APPROVAL" || (c as any).stage === "REVIEW");
+  const active = contracts.filter((c) => c.status === "ACTIVE" || c.stage === "EXECUTED");
+  const draft = contracts.filter((c) => c.status === "DRAFT" || c.stage === "DRAFT");
+  const pending = contracts.filter((c) => c.status === "PENDING_APPROVAL" || c.stage === "REVIEW");
   const expiringSoon = active.filter(isExpiringSoon);
 
   const totalValue = contracts
-    .filter((c) => c.status === "ACTIVE" || (c as any).stage === "EXECUTED")
-    .reduce((sum, c) => sum + (c.total_value ?? (c as any).value ?? 0), 0);
+    .filter((c) => c.status === "ACTIVE" || c.stage === "EXECUTED")
+    .reduce((sum, c) => sum + (c.total_value ?? c.value ?? 0), 0);
 
   return (
     <div className="space-y-5">
@@ -125,12 +133,12 @@ export async function ContractLifecyclePanel() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {contracts.map((c) => {
-                const status = (c.status ?? (c as any).stage ?? "DRAFT") as string;
+                const status = (c.status ?? c.stage ?? "DRAFT") as string;
                 const warnExpiry = isExpiringSoon(c);
-                const value = c.total_value ?? (c as any).value ?? 0;
+                const value = c.total_value ?? c.value ?? 0;
                 const currency = c.currency ?? "GBP";
-                const type = (c.contract_type ?? (c as any).type ?? "MSA") as string;
-                const counterparty = c.counterparty_name || (c as any).counterparty || c.counterparty_id || "—";
+                const type = (c.contract_type ?? c.type ?? "MSA") as string;
+                const counterparty = c.counterparty_name || c.counterparty || c.counterparty_id || "—";
                 const version = c.version ?? 1;
 
                 return (
@@ -161,9 +169,9 @@ export async function ContractLifecyclePanel() {
                       {value > 0 ? formatCurrency(value, currency) : "—"}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {c.effective_to || (c as any).expires_at ? (
+                      {c.effective_to || c.expires_at ? (
                         <span className={`text-xs font-medium ${warnExpiry ? "text-orange-500 dark:text-orange-400" : "text-slate-500 dark:text-slate-400"}`}>
-                          {new Date(c.effective_to || (c as any).expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          {new Date(c.effective_to || c.expires_at || "").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                           {warnExpiry && " ⚠"}
                         </span>
                       ) : (

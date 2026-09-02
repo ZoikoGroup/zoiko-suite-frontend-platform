@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus, ShieldCheck, Lock, CheckCircle2, X, Server, Zap, Loader2, Download, AlertTriangle } from "lucide-react";
+import { Plus, Lock, CheckCircle2, X, Server, Zap, Loader2, Download, AlertTriangle } from "lucide-react";
 import { verifyChainAction, exportAuditLogAction } from "@/app/admin/audit-events/actions";
 import { IDLE_VERIFY_STATE, IDLE_EXPORT_STATE, type VerifyChainState, type ExportState } from "@/app/admin/audit-events/state";
 

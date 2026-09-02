@@ -102,7 +102,9 @@ export async function listCustomerInvoices(params: {
     },
   });
   if (!res.ok) return res;
-  const list = Array.isArray(res.data) ? res.data : (res.data as any)?.invoices ?? [];
+  const list = Array.isArray(res.data)
+    ? (res.data as CustomerInvoice[])
+    : ((res.data as Record<string, unknown>)?.invoices as CustomerInvoice[] | undefined) ?? [];
   return { ok: true, data: list };
 }
 

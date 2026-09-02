@@ -10,7 +10,7 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
-import { CheckCircle2, Info, AlertCircle, ThumbsUp, ThumbsDown, ArrowRight, ExternalLink } from "lucide-react";
+import { CheckCircle2, Info, AlertCircle, ThumbsUp, ThumbsDown, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {

@@ -101,9 +101,9 @@ function getTargetLink(svc: typeof SERVICES[0], data: unknown): { href: string; 
   if (!data || typeof data !== "object") {
     return { href: baseHref, label: `Open in ${svc.domain} Console` };
   }
-  const obj = data as Record<string, any>;
-  const record = obj.contract ?? obj.data ?? obj.record ?? obj;
-  const contractId = record.contract_id ?? record.id;
+  const obj = data as Record<string, unknown>;
+  const record = (obj.contract ?? obj.data ?? obj.record ?? obj) as Record<string, unknown>;
+  const contractId = (record.contract_id ?? record.id) as string | undefined;
   if (svc.id === 9 && contractId && typeof contractId === "string") {
     return { href: `/admin/legal/${encodeURIComponent(contractId)}`, label: `View Contract ${contractId} in Legal` };
   }
@@ -111,7 +111,7 @@ function getTargetLink(svc: typeof SERVICES[0], data: unknown): { href: string; 
     return { href: `/admin/obligations`, label: `View in Obligations Register` };
   }
   if (svc.id === 18) {
-    const poNum = record.po_number || record.poNumber;
+    const poNum = (record.po_number ?? record.poNumber) as string | undefined;
     return {
       href: poNum ? `/admin/commercial-ops?po=${encodeURIComponent(poNum)}` : `/admin/commercial-ops`,
       label: `View Purchase Order in Commercial Ops`,
@@ -648,7 +648,7 @@ export default function ServiceInputsPage() {
         {filteredDomains.map(([domain, svcs]) => {
           const meta = DOMAIN_META[domain] ?? DOMAIN_META["Audit Event Store"];
           const domainResults = Object.entries(results).filter(([id]) => svcs.some((s) => s.id === Number(id)));
-          const domainPassed = domainResults.filter(([_, r]) => r.ok).length;
+          const domainPassed = domainResults.filter(([, r]) => r.ok).length;
           const domainHref = DOMAIN_HREFS[domain] ?? "/admin";
           const filteredSvcs = search
             ? svcs.filter(

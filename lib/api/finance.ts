@@ -256,7 +256,11 @@ export async function listJournals(identity?: Identity): Promise<ApiResult<Journ
     base,
     "general-ledger-svc",
     identity,
-    (d: any) => (Array.isArray(d) ? d : d?.journal_entries ?? d?.journals ?? []),
+    (d: unknown) => {
+      if (Array.isArray(d)) return d as JournalHeader[];
+      const rec = d as { journal_entries?: JournalHeader[]; journals?: JournalHeader[] } | null | undefined;
+      return rec?.journal_entries ?? rec?.journals ?? [];
+    },
   );
 }
 
@@ -270,11 +274,13 @@ export async function listARInvoices(identity?: Identity): Promise<ApiResult<ARI
     base,
     "accounts-receivable-svc",
     identity,
-    (d: any) => (Array.isArray(d) ? d : d?.invoices ?? []),
+    (d: unknown) => {
+      if (Array.isArray(d)) return d as ARInvoice[];
+      const rec = d as { invoices?: ARInvoice[] } | null | undefined;
+      return rec?.invoices ?? [];
+    },
   );
 }
-
-type TreasuryResponse = { cash_positions?: CashPosition[]; total_liquidity_gbp?: number };
 
 export async function listCashPositions(identity?: Identity): Promise<ApiResult<CashPosition[]>> {
   const base = treasuryUrl();
@@ -283,7 +289,11 @@ export async function listCashPositions(identity?: Identity): Promise<ApiResult<
     base,
     "treasury-svc",
     identity,
-    (d: any) => (Array.isArray(d) ? d : d?.cash_positions ?? []),
+    (d: unknown) => {
+      if (Array.isArray(d)) return d as CashPosition[];
+      const rec = d as { cash_positions?: CashPosition[] } | null | undefined;
+      return rec?.cash_positions ?? [];
+    },
   );
 }
 
@@ -297,7 +307,11 @@ export async function listStatementLines(identity?: Identity): Promise<ApiResult
     base,
     "bank-reconciliation-svc",
     identity,
-    (d: any) => (Array.isArray(d) ? d : d?.statement_lines ?? []),
+    (d: unknown) => {
+      if (Array.isArray(d)) return d as StatementLine[];
+      const rec = d as { statement_lines?: StatementLine[] } | null | undefined;
+      return rec?.statement_lines ?? [];
+    },
   );
 }
 
@@ -321,7 +335,11 @@ export async function listFiscalPeriods(identity?: Identity): Promise<ApiResult<
     base,
     "financial-close-svc",
     identity,
-    (d: any) => (Array.isArray(d) ? d : d?.close_periods ?? d?.periods ?? []),
+    (d: unknown) => {
+      if (Array.isArray(d)) return d as FiscalPeriod[];
+      const rec = d as { close_periods?: FiscalPeriod[]; periods?: FiscalPeriod[] } | null | undefined;
+      return rec?.close_periods ?? rec?.periods ?? [];
+    },
   );
 }
 
