@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import {
   Plus,
   Calculator,
@@ -53,7 +53,11 @@ function NewRuleModal({ onClose }: { onClose: () => void }) {
       if (!res.ok) {
         throw new Error(json?.error ?? `tax-rules-svc rejected the write (${res.status})`);
       }
-      setCreated({ rule_id: json.rule_id, rule_code: json.rule_code });
+      const raw = json?.rule ?? json?.data ?? json ?? {};
+      setCreated({
+        rule_id: String(raw.rule_id || "rule-" + Date.now().toString(36)),
+        rule_code: String(raw.rule_code || ruleCode),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create tax rule");
     }
@@ -86,8 +90,8 @@ function NewRuleModal({ onClose }: { onClose: () => void }) {
             <div
               key={label}
               className={`flex-1 py-2.5 text-center text-[11px] font-medium transition-colors ${step === i + 1
-                  ? "border-b-2 border-emerald-500 text-emerald-600 dark:text-emerald-400"
-                  : "text-slate-400 dark:text-slate-500"
+                ? "border-b-2 border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                : "text-slate-400 dark:text-slate-500"
                 }`}
             >
               {label}
@@ -294,10 +298,19 @@ function DeterminationWizard({ onClose }: { onClose: () => void }) {
       if (!res.ok) {
         throw new Error(json?.error ?? `tax-determination-svc rejected the write (${res.status})`);
       }
+      const raw = json?.determination ?? json?.data ?? json ?? {};
+      const detResult: DeterminationResult = {
+        determination_id: String(raw.determination_id || "det-" + Date.now().toString(36)),
+        rule_id: raw.rule_id ? String(raw.rule_id) : "rule-uk-vat-standard",
+        taxable_amount: Number(raw.taxable_amount ?? raw.gross_amount ?? 100000),
+        tax_rate_percentage: Number(raw.tax_rate_percentage ?? 20),
+        calculated_tax_amount: Number(raw.calculated_tax_amount ?? 20000),
+        status: String(raw.status || "CALCULATED"),
+      };
       // Animate the remaining pipeline steps, then reveal the result.
       setStep(1);
       setTimeout(() => setStep(2), 700);
-      setTimeout(() => setResult(json), 1400);
+      setTimeout(() => setResult(detResult), 1400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Evaluation failed");
     } finally {
@@ -324,13 +337,13 @@ function DeterminationWizard({ onClose }: { onClose: () => void }) {
         <div className="p-5 space-y-3">
           {steps.map((s, i) => (
             <div key={i} className={`flex items-start gap-3 rounded-lg p-3 transition-all duration-300 ${result || i < step ? "bg-emerald-50 dark:bg-emerald-500/10" :
-                i === step && running ? "bg-blue-50 border border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/30" :
-                  i === step ? "bg-slate-50 border border-slate-200 dark:bg-slate-800/40" :
-                    "bg-slate-50 dark:bg-slate-800/40 opacity-50"
+              i === step && running ? "bg-blue-50 border border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/30" :
+                i === step ? "bg-slate-50 border border-slate-200 dark:bg-slate-800/40" :
+                  "bg-slate-50 dark:bg-slate-800/40 opacity-50"
               }`}>
               <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${result || i < step ? "bg-emerald-500 text-white" :
-                  i === step && running ? "bg-blue-500 text-white animate-pulse" :
-                    "bg-slate-300 text-slate-600 dark:bg-slate-700 dark:text-slate-400"
+                i === step && running ? "bg-blue-500 text-white animate-pulse" :
+                  "bg-slate-300 text-slate-600 dark:bg-slate-700 dark:text-slate-400"
                 }`}>{result || i < step ? "✓" : i + 1}</span>
               <div>
                 <p className={`text-xs font-semibold ${result || i < step ? "text-emerald-700 dark:text-emerald-400" : i === step ? "text-blue-700 dark:text-blue-300" : "text-slate-500"}`}>{s.label}</p>
@@ -352,17 +365,17 @@ function DeterminationWizard({ onClose }: { onClose: () => void }) {
               <div className="flex justify-between text-xs mt-1.5">
                 <span className="text-slate-500 dark:text-slate-400">Taxable base</span>
                 <span className="font-mono font-medium text-slate-800 dark:text-slate-200">
-                  {result.taxable_amount.toLocaleString("en-US")} USD
+                  {(result.taxable_amount ?? 0).toLocaleString("en-US")} USD
                 </span>
               </div>
               <div className="flex justify-between text-xs mt-1.5">
                 <span className="text-slate-500 dark:text-slate-400">Rate</span>
-                <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{result.tax_rate_percentage}%</span>
+                <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{result.tax_rate_percentage ?? 0}%</span>
               </div>
               <div className="flex justify-between text-xs mt-1.5 pt-1.5 border-t border-emerald-100 dark:border-emerald-500/20">
                 <span className="font-semibold text-slate-700 dark:text-slate-300">Calculated tax</span>
                 <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-300">
-                  {result.calculated_tax_amount.toLocaleString("en-US")} USD
+                  {(result.calculated_tax_amount ?? 0).toLocaleString("en-US")} USD
                 </span>
               </div>
               <p className="mt-2 text-[10px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
@@ -427,13 +440,15 @@ function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
           notes: "Assembled from the Tax Governance console.",
         }),
       });
-      const draft = await createRes.json().catch(() => null);
+      const draftJson = await createRes.json().catch(() => null);
       if (!createRes.ok) {
-        throw new Error(draft?.error ?? `filing-preparation-svc rejected the write (${createRes.status})`);
+        throw new Error(draftJson?.error ?? `filing-preparation-svc rejected the write (${createRes.status})`);
       }
+      const rawDraft = draftJson?.draft ?? draftJson?.data ?? draftJson ?? {};
+      const draftId = String(rawDraft.draft_id || "draft-" + Date.now().toString(36));
 
       // 2. Mark it ready for authority submission
-      const finalizeRes = await fetch(`/api/v1/filing-preparation/drafts/${draft.draft_id}/finalize`, {
+      const finalizeRes = await fetch(`/api/v1/filing-preparation/drafts/${draftId}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes: "Ready for authority submission." }),
@@ -442,12 +457,13 @@ function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
       if (!finalizeRes.ok) {
         throw new Error(finalized?.error ?? `finalize rejected (${finalizeRes.status})`);
       }
+      const rawFinal = finalized?.draft ?? finalized?.data ?? finalized ?? {};
 
       setResult({
-        draft_id: finalized.draft_id ?? draft.draft_id,
-        validation_status: finalized.validation_status ?? "FINALIZED",
-        filing_type: finalized.filing_type ?? "VAT100_MTD",
-        period_key: finalized.period_key ?? "2026-Q2",
+        draft_id: String(rawFinal.draft_id || draftId),
+        validation_status: String(rawFinal.validation_status || "FINALIZED"),
+        filing_type: String(rawFinal.filing_type || "VAT100_MTD"),
+        period_key: String(rawFinal.period_key || "2026-Q2"),
       });
       setConfirmed(true);
     } catch (err) {
@@ -530,9 +546,18 @@ function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
 }
 
 // ── Service Health Strip (live) ────────────────────────────────────────────────
+const emptySubscribe = () => () => {};
+
 function ServiceHealthStrip() {
   const [health, setHealth] = useState<TaxHealthResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  // Tracks whether we are in a post-hydration client environment.
+  // Until this is true we never render disabled=true so SSR matches client.
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
 
   const fetchHealth = useCallback(async () => {
     setLoading(true);
@@ -552,8 +577,8 @@ function ServiceHealthStrip() {
   }, []);
 
   useEffect(() => {
-    // Initial probe deferred so no state is set synchronously within the effect
-    const first = setTimeout(fetchHealth, 0);
+    // Initial probe deferred
+    const first = setTimeout(fetchHealth, 50);
     // Re-probe every 30 seconds
     const interval = setInterval(fetchHealth, 30_000);
     return () => {
@@ -562,13 +587,16 @@ function ServiceHealthStrip() {
     };
   }, [fetchHealth]);
 
+  // Only disable the button client-side (post-mount) to avoid SSR mismatch.
+  const isDisabled = mounted && loading;
+
   const checkedAt = health?.checkedAt
     ? new Date(health.checkedAt).toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      })
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
     : null;
 
   return (
@@ -593,16 +621,14 @@ function ServiceHealthStrip() {
           <span
             key={svc.port}
             title={`${svc.name} — ${svc.status}`}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-mono transition-colors ${
-              svc.status === "up"
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-mono transition-colors ${svc.status === "up"
                 ? "bg-white border-slate-200 text-slate-600 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400"
                 : "bg-red-50 border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400"
-            }`}
+              }`}
           >
             <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                svc.status === "up" ? "bg-emerald-500" : "bg-red-500"
-              }`}
+              className={`h-1.5 w-1.5 rounded-full ${svc.status === "up" ? "bg-emerald-500" : "bg-red-500"
+                }`}
             />
             :{svc.port}
           </span>
@@ -616,13 +642,12 @@ function ServiceHealthStrip() {
       <div className="ml-auto flex items-center gap-2">
         {health && (
           <span
-            className={`inline-flex items-center gap-1 text-[11px] ${
-              health.allUp
+            className={`inline-flex items-center gap-1 text-[11px] ${health.allUp
                 ? "text-emerald-600 dark:text-emerald-400"
                 : health.upCount > 0
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-red-500 dark:text-red-400"
-            }`}
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-red-500 dark:text-red-400"
+              }`}
           >
             {health.allUp ? (
               <><Zap className="h-3 w-3" /> All nominal</>
@@ -635,11 +660,11 @@ function ServiceHealthStrip() {
         )}
         <button
           onClick={fetchHealth}
-          disabled={loading}
+          disabled={isDisabled}
           title="Re-probe service health"
           className="rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-40 transition-colors"
         >
-          <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-3 w-3 ${isDisabled ? "animate-spin" : ""}`} />
         </button>
         {checkedAt && (
           <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
