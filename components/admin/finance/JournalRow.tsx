@@ -11,6 +11,7 @@ import { advanceJournalEntry, reverseJournalEntry } from "@/app/admin/finance/ac
 import { IDLE_LEDGER_STATE, type LedgerActionState } from "@/app/admin/finance/state";
 import {
   JOURNAL_STAGES,
+  JOURNAL_TYPE_LABELS,
   NEXT_STEP,
   stageIndex,
   type JournalHeader,
@@ -183,6 +184,48 @@ export function JournalRow({
 
         <td className={cn(CELL, "whitespace-nowrap tabular-nums text-slate-500 dark:text-slate-400")}>
           {journal.fiscal_period}
+
+          {/* ACC-03 inputs, under the period they belong to. The posting date is
+              what decides which period this lands in; the transaction date is
+              shown only when it differs, because on most journals they are the
+              same day and repeating it would be noise. */}
+          {journal.posting_date && (
+            <span className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500">
+              posted {journal.posting_date}
+              {journal.transaction_date && journal.transaction_date !== journal.posting_date && (
+                <> · doc {journal.transaction_date}</>
+              )}
+            </span>
+          )}
+
+          <span className="mt-1 flex flex-wrap items-center gap-1.5">
+            {journal.journal_type && journal.journal_type !== "UNSPECIFIED" && (
+              <Badge tone="neutral">{JOURNAL_TYPE_LABELS[journal.journal_type] ?? journal.journal_type}</Badge>
+            )}
+            {journal.currency_code && journal.currency_code !== "XXX" && (
+              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                {journal.currency_code}
+              </span>
+            )}
+          </span>
+
+          {/* Both markers of a journal written before the input contract
+              existed. Named rather than hidden: a reader comparing two rows
+              needs to know the blank is historical, not a data fault. */}
+          {(journal.journal_type === "UNSPECIFIED" || journal.currency_code === "XXX") && (
+            <span
+              className="mt-1 block text-[11px] text-slate-400 dark:text-slate-500"
+              title="Written before the ACC-03 input contract; the service backfilled these markers rather than inventing values."
+            >
+              pre-contract entry
+            </span>
+          )}
+
+          {journal.book_id && (
+            <span className="mt-1 block break-words text-[11px] text-slate-400 dark:text-slate-500">
+              book {journal.book_id}
+            </span>
+          )}
         </td>
 
         <td className={CELL}>

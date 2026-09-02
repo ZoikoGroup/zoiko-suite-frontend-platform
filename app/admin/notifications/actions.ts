@@ -12,6 +12,7 @@ import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   sendNotification,
   explainNotificationError,
+  isRetrying,
   type NotificationChannel,
 } from "@/lib/api/notifications";
 import type { SendNotificationState } from "./state";
@@ -32,7 +33,7 @@ async function requirePrincipal(): Promise<{
   };
 }
 
-const CHANNELS = new Set<NotificationChannel>(["EMAIL", "SMS", "IN_APP", "WEBHOOK"]);
+const CHANNELS = new Set<NotificationChannel>(["EMAIL", "IN_APP", "WEBHOOK"]);
 
 /**
  * Send a governed notification.
@@ -59,6 +60,20 @@ export async function submitNotification(
   const body = String(formData.get("body") ?? "").trim();
   const sourceEventType = String(formData.get("source_event_type") ?? "").trim();
   const sourceReference = String(formData.get("source_reference") ?? "").trim();
+  const recipientAddress = String(formData.get("recipient_address") ?? "").trim();
+  const template = String(formData.get("template") ?? "").trim();
+
+  // Template variables arrive as var_<name> fields, so the form can render one
+  // input per required variable without the action needing to know the
+  // catalogue. Blank values are dropped rather than sent: the service treats a
+  // blank required variable as missing, and sending "" would produce a 400
+  // that reads as though the field were absent from the form entirely.
+  const variables: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith("var_")) continue;
+    const v = String(value).trim();
+    if (v) variables[key.slice("var_".length)] = v;
+  }
 
   if (!recipientPrincipalId) {
     return { status: "error", message: "Recipient principal id is required." };
@@ -67,19 +82,37 @@ export async function submitNotification(
     return {
       status: "error",
       message:
-        "Channel must be one of EMAIL, SMS, IN_APP, or WEBHOOK. Any other channel is the only way this service records a FAILED delivery, and it does so silently by design.",
+        "Channel must be one of EMAIL, IN_APP, or WEBHOOK. SMS was withdrawn — it was accepted and then failed every time, which is worse than refusing it up front.",
     };
   }
-  if (!subject) return { status: "error", message: "Subject is required." };
+
+  // The two content forms are mutually exclusive at the service, so the form
+  // is refused here rather than round-tripping to collect a 400. A template
+  // supplies its own subject; requiring one alongside would guarantee the
+  // conflict.
+  if (template && subject) {
+    return {
+      status: "error",
+      message:
+        "Choose either a template or a subject, not both. A template provides its own subject and body — accepting both would leave it ambiguous which one the recipient actually received.",
+    };
+  }
+  if (!template && !subject) {
+    return {
+      status: "error",
+      message: "Supply a subject, or pick a template that provides one.",
+    };
+  }
 
   const result = await sendNotification({
     identity,
     recipientPrincipalId,
     channel,
-    subject,
-    ...(body ? { body } : {}),
+    ...(template ? { template, variables } : { subject }),
+    ...(body && !template ? { body } : {}),
     ...(sourceEventType ? { sourceEventType } : {}),
     ...(sourceReference ? { sourceReference } : {}),
+    ...(recipientAddress ? { recipientAddress } : {}),
     // Idempotency key: a retry of the same form submission replays the stored
     // notification instead of sending a second notice.
     correlationId: `console-${identity.principalId}-${recipientPrincipalId}-${Date.now()}`,
@@ -92,6 +125,23 @@ export async function submitNotification(
   refresh();
 
   const n = result.data;
+
+  // Checked before FAILED and before the success branch. A transient failure
+  // comes back 201 with status PENDING and a schedule on it — neither of the
+  // other branches describes that, and the success branch would have reported
+  // a provider acceptance that did not happen.
+  if (isRetrying(n)) {
+    return {
+      status: "retrying",
+      notification: n,
+      message: `Delivery did not succeed on the first attempt — ${
+        n.failure_reason ?? "no reason given"
+      }. The failure looks transient, so the notification is recorded and scheduled for another attempt${
+        n.next_attempt_at ? ` at ${new Date(n.next_attempt_at).toLocaleString()}` : ""
+      }. It has not failed and nothing has been sent twice; no failure event was published.`,
+    };
+  }
+
   if (n.status === "FAILED") {
     return {
       status: "failed",
@@ -104,11 +154,49 @@ export async function submitNotification(
     ? {
         status: "sent",
         notification: n,
-        message: `Notification recorded and stub-delivered (${n.channel}) to ${n.recipient_principal_id}. Remember: no real provider is wired up — SENT means recorded, not received.`,
+        // The old copy here said "no real provider is wired up — SENT means
+        // recorded, not received". One is now wired up, so that caveat had to
+        // go; the weaker half of it is still true and still worth saying.
+        // ZS-SVC-Y-001 §0.4 forbids reporting provider acceptance as receipt,
+        // and this message is where an operator would form that belief.
+        message: describeDelivery(n),
       }
     : {
         status: "replayed",
         notification: n,
         message: `This correlation was already processed — the stored notification is shown below. Nothing was sent twice.`,
       };
+}
+
+/**
+ * Describe a successful send without overstating it.
+ *
+ * The distinction is not pedantic. An IN_APP notice is genuinely delivered by
+ * being recorded — the recipient reads it from the same register, and no third
+ * party stands between the claim and the fact. An EMAIL has only been handed
+ * to a provider that said it would take it, which is a materially weaker
+ * statement and the one ZS-SVC-Y-001 §0.4 requires be reported as such.
+ */
+function describeDelivery(n: {
+  channel: string;
+  recipient_principal_id: string;
+  recipient_address?: string;
+  recipient_address_source?: string;
+  provider_response?: string;
+}): string {
+  if (n.channel === "IN_APP") {
+    return `Delivered in-app to ${n.recipient_principal_id}. It is in their notification register now and will show as unread until they open it.`;
+  }
+
+  const to = n.recipient_address
+    ? `${n.recipient_address} (${
+        n.recipient_address_source === "IDENTITY_CONTEXT"
+          ? "resolved from identity-context-svc"
+          : "supplied with the request"
+      })`
+    : n.recipient_principal_id;
+
+  const evidence = n.provider_response ? ` Provider evidence: ${n.provider_response}.` : "";
+
+  return `Accepted by the provider for delivery to ${to}.${evidence} Accepted is not received — this records that a provider took the message, not that anyone read it.`;
 }

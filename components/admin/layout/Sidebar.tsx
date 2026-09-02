@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronLeft, X } from "lucide-react";
-import { PRIMARY_NAV, PLATFORM_NAV, SECONDARY_NAV } from "@/lib/constants";
+import { NAV_SECTIONS, SECONDARY_NAV, PRIMARY_NAV } from "@/lib/constants";
 import { Logo } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,9 @@ function isActive(pathname: string, href: string) {
 }
 
 type NavItem = { label: string; href: string; icon: (typeof PRIMARY_NAV)[number]["icon"] };
+
+// Overview is not part of any domain section - it is the way back out.
+const OVERVIEW_NAV: NavItem = PRIMARY_NAV[0];
 
 function NavLink({
   item,
@@ -79,8 +82,14 @@ function SectionLabel({
   return (
     <p
       className={cn(
-        "mb-2 overflow-hidden whitespace-nowrap px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 transition-all duration-200 dark:text-slate-500",
-        collapsed ? "max-h-0 opacity-0" : "max-h-5 opacity-100",
+        // Wraps rather than nowrap: the headings are domain names now, not
+        // single words, and "Governance, Compliance & Audit" is wider than the
+        // 16rem rail. With nowrap the tail was simply clipped off.
+        //
+        // max-h is generous enough for two lines for the same reason — the
+        // previous max-h-5 was sized for one.
+        "mb-2 overflow-hidden px-3 text-[11px] font-semibold uppercase leading-tight tracking-wider text-slate-400 transition-all duration-200 dark:text-slate-500",
+        collapsed ? "max-h-0 opacity-0" : "max-h-10 opacity-100",
       )}
     >
       {children}
@@ -99,34 +108,37 @@ function NavList({
 }) {
   return (
     <nav className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden scrollbar-thin px-3 py-6">
+      {/* Overview sits above the sections, unlabelled: it is the way back out
+          of a domain rather than a page inside one. */}
       <div className="space-y-0.5">
-        <SectionLabel collapsed={collapsed}>Domains</SectionLabel>
-        {PRIMARY_NAV.map((item) => (
-          <NavLink
-            key={item.href}
-            item={item}
-            active={isActive(pathname, item.href)}
-            collapsed={collapsed}
-            onNavigate={onNavigate}
-          />
-        ))}
+        <NavLink
+          item={OVERVIEW_NAV}
+          active={isActive(pathname, OVERVIEW_NAV.href)}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
       </div>
 
-      {/* Its own group, not folded into the domains above: a policy or evidence
-          requirement configured here constrains every domain, so it does not sit
-          at the same level as one of them. */}
-      <div className="space-y-0.5">
-        <SectionLabel collapsed={collapsed}>Governance plane</SectionLabel>
-        {PLATFORM_NAV.map((item) => (
-          <NavLink
-            key={item.href}
-            item={item}
-            active={isActive(pathname, item.href)}
-            collapsed={collapsed}
-            onNavigate={onNavigate}
-          />
-        ))}
-      </div>
+      {/* One group per domain, so a page is found where its subject is. The
+          previous two-way split (business domain / governance plane) described
+          the architecture rather than answering the question an operator asks:
+          it required knowing that the governance decision log is a
+          cross-cutting control and that board resolutions live under Legal
+          before either could be found. */}
+      {NAV_SECTIONS.map((section) => (
+        <div key={section.title} className="space-y-0.5">
+          <SectionLabel collapsed={collapsed}>{section.title}</SectionLabel>
+          {section.items.map((item) => (
+            <NavLink
+              key={item.href}
+              item={item}
+              active={isActive(pathname, item.href)}
+              collapsed={collapsed}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      ))}
 
       <div className="mt-auto space-y-0.5 border-t border-slate-200 pt-4 dark:border-slate-800">
         {SECONDARY_NAV.map((item) => (

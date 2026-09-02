@@ -2,7 +2,8 @@
 
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui";
-import { CopyableId, ResultBanner } from "@/components/admin/shared";
+import { ResultBanner } from "@/components/admin/shared";
+import { LabelledId } from "./LabelledId";
 import { FIELD, LABEL, OPTIONAL, PANEL } from "@/components/admin/shared/form";
 import {
   ENTITY_STATUS_TRANSITIONS,
@@ -50,6 +51,7 @@ const PROVISION_TONE = {
   unauthorized: "error",
   error: "error",
   idle: "neutral",
+  "tenant-context": "error",
 } as const;
 
 const TRANSITION_TONE = {
@@ -59,6 +61,7 @@ const TRANSITION_TONE = {
   unauthorized: "error",
   error: "error",
   idle: "neutral",
+  "tenant-context": "error",
 } as const;
 
 const ENTITY_TONE = {
@@ -70,6 +73,7 @@ const ENTITY_TONE = {
   unauthorized: "error",
   error: "error",
   idle: "neutral",
+  "tenant-context": "error",
 } as const;
 
 const JURISDICTION_TONE = {
@@ -81,6 +85,7 @@ const JURISDICTION_TONE = {
   unauthorized: "error",
   error: "error",
   idle: "neutral",
+  "tenant-context": "error",
 } as const;
 
 const POLICY_TONE = {
@@ -90,26 +95,13 @@ const POLICY_TONE = {
   unauthorized: "error",
   error: "error",
   idle: "neutral",
+  "tenant-context": "error",
 } as const;
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/**
- * An id with a caption. CopyableId's own `label` REPLACES the displayed text
- * rather than captioning it, so passing "Tenant ID" there would show the words
- * and hide the value — the opposite of what a form result needs, since every
- * one of these ids is required by another form on this page.
- */
-function LabelledId({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-slate-500 dark:text-slate-400">{label}</span>
-      <CopyableId value={value} />
-    </div>
-  );
-}
 
 // ── Provision tenant ────────────────────────────────────────────────────────
 

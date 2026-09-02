@@ -35,8 +35,10 @@ import {
   totalLines,
   formatAmount,
   NEXT_STEP as JOURNAL_NEXT_STEP,
+  JOURNAL_TYPES,
   type CreateJournalLineInput,
   type JournalAction,
+  type JournalType,
 } from "@/lib/api/general-ledger";
 import {
   ingestStatementLine,
@@ -302,6 +304,12 @@ const LEDGER_EXPIRED: LedgerActionState = {
  *  check it is financial-close-svc, which only knows periods someone registered. */
 const FISCAL_PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+/** ACC-03's two business dates, as ISO calendar dates. Shape only — there is no
+ *  fiscal calendar service to say whether the day falls in an open period, and
+ *  the range check that does exist (posting not before transaction) is done by
+ *  comparing the strings, which sort correctly precisely because they are ISO. */
+const ISO_DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
 /**
  * Record a journal from the intake form. It lands PENDING and posts nothing.
  *
@@ -343,6 +351,52 @@ export async function recordJournal(
       message: "A description is required — it is the only human-readable account of why this posting exists.",
     };
   }
+
+  // ── ACC-03 required business/source inputs ────────────────────────────────
+  //
+  // Checked here as well as in the service so the operator gets the answer
+  // beside the field rather than as a round-trip refusal. The service still
+  // enforces all four: this is an affordance, not the enforcement.
+
+  const journalType = String(formData.get("journal_type") ?? "").trim();
+  if (!JOURNAL_TYPES.some((t) => t.value === journalType)) {
+    return {
+      status: "error",
+      message:
+        "Choose a journal type. It decides how every downstream report reads this posting — an accrual is expected to reverse, an opening balance is excluded from period movement — so the ledger will not accept a posting without one.",
+    };
+  }
+
+  const transactionDate = String(formData.get("transaction_date") ?? "").trim();
+  const postingDate = String(formData.get("posting_date") ?? "").trim();
+
+  if (!ISO_DATE_RE.test(transactionDate)) {
+    return { status: "error", message: "A transaction date is required, as YYYY-MM-DD. This is the date on the source document." };
+  }
+  if (!ISO_DATE_RE.test(postingDate)) {
+    return { status: "error", message: "A posting date is required, as YYYY-MM-DD. This is the date the entry takes effect in the ledger." };
+  }
+  if (postingDate < transactionDate) {
+    // String comparison is exact for ISO dates — they sort lexicographically.
+    return {
+      status: "error",
+      message:
+        "The posting date cannot be earlier than the transaction date — a journal cannot reach the ledger before the document it records exists. Later is fine: an invoice dated the 28th, posted on the 3rd, is an ordinary entry.",
+    };
+  }
+
+  const currencyCode = String(formData.get("currency_code") ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currencyCode)) {
+    return {
+      status: "error",
+      message:
+        "A three-letter ISO 4217 currency code is required, such as GBP. Only the shape can be checked — no Currency Registry service exists, so a well-formed code for a currency this entity never trades in would still be accepted.",
+    };
+  }
+
+  // Optional, and unvalidatable: REF-06 Accounting Book / Ledger Basis does not
+  // exist, so a book named here is recorded as supplied and checked by nothing.
+  const bookId = String(formData.get("book_id") ?? "").trim() || undefined;
 
   const accountCodes = formData.getAll("account_code").map((value) => String(value).trim());
   const debits = formData.getAll("debit").map((value) => String(value).trim());
@@ -399,7 +453,17 @@ export async function recordJournal(
     return { status: "error", message: "A journal needs at least one line." };
   }
 
-  const result = await createJournal({ identity, fiscalPeriod, description, lines });
+  const result = await createJournal({
+    identity,
+    fiscalPeriod,
+    description,
+    lines,
+    journalType: journalType as JournalType,
+    transactionDate,
+    postingDate,
+    currencyCode,
+    bookId,
+  });
 
   if (!result.ok) {
     // 412 is a closed period: the books are shut, which is the system working.

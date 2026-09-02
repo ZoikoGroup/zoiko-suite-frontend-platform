@@ -400,7 +400,20 @@ export async function recordDecision(
         : { evaluation_context: input.evaluationContext }),
       ...(input.decidedAt ? { decided_at: input.decidedAt } : {}),
     },
-    { correlationId: input.correlationId, identity: input.identity },
+    {
+      correlationId: input.correlationId,
+      identity: input.identity,
+      // governance-decision-log-svc enforces §4 purpose_context — "required for
+      // governed sensitive access" — and refuses the write with 400
+      // envelope_incomplete without it. The envelope builder has always
+      // supported the field; nothing passed one, so every append from the
+      // console was refused before it reached the service.
+      //
+      // The value states why the decision register is being written to, which
+      // is what the contract asks for: this endpoint records a governance
+      // decision, and that is the purpose.
+      purposeContext: "GOVERNANCE_DECISION_RECORD",
+    },
   );
 }
 
