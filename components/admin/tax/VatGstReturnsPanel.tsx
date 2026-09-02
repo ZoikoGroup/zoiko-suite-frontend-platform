@@ -146,7 +146,7 @@ export async function VatGstReturnsPanel() {
   const vatReturns: VATReturn[] = result.ok ? result.data : [];
 
   // Sort chronologically for trend calculation
-  const sorted = [...vatReturns].sort((a, b) => a.tax_period.localeCompare(b.tax_period));
+  const sorted = [...vatReturns].sort((a, b) => (a.tax_period ?? "").localeCompare(b.tax_period ?? ""));
 
   return (
     <div className="space-y-4">

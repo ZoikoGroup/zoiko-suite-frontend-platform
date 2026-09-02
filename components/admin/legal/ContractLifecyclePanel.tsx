@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
-import { CloudOff, FileText, ShieldAlert } from "lucide-react";
+import { CloudOff, FileText, ShieldAlert, ExternalLink } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listContracts, type Contract } from "@/lib/api/legal";
@@ -79,14 +80,14 @@ export async function ContractLifecyclePanel() {
 
   const contracts: Contract[] = result.ok ? result.data : [];
 
-  const active = contracts.filter((c) => c.status === "ACTIVE");
-  const draft = contracts.filter((c) => c.status === "DRAFT");
-  const pending = contracts.filter((c) => c.status === "PENDING_APPROVAL");
+  const active = contracts.filter((c) => c.status === "ACTIVE" || (c as any).stage === "EXECUTED");
+  const draft = contracts.filter((c) => c.status === "DRAFT" || (c as any).stage === "DRAFT");
+  const pending = contracts.filter((c) => c.status === "PENDING_APPROVAL" || (c as any).stage === "REVIEW");
   const expiringSoon = active.filter(isExpiringSoon);
 
   const totalValue = contracts
-    .filter((c) => c.status === "ACTIVE")
-    .reduce((sum, c) => sum + (c.total_value ?? 0), 0);
+    .filter((c) => c.status === "ACTIVE" || (c as any).stage === "EXECUTED")
+    .reduce((sum, c) => sum + (c.total_value ?? (c as any).value ?? 0), 0);
 
   return (
     <div className="space-y-5">
@@ -124,28 +125,45 @@ export async function ContractLifecyclePanel() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {contracts.map((c) => {
+                const status = (c.status ?? (c as any).stage ?? "DRAFT") as string;
                 const warnExpiry = isExpiringSoon(c);
+                const value = c.total_value ?? (c as any).value ?? 0;
+                const currency = c.currency ?? "GBP";
+                const type = (c.contract_type ?? (c as any).type ?? "MSA") as string;
+                const counterparty = c.counterparty_name || (c as any).counterparty || c.counterparty_id || "—";
+                const version = c.version ?? 1;
+
                 return (
                   <tr key={c.contract_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 max-w-[200px]">
-                      <span className="block truncate font-medium text-slate-800 dark:text-slate-200">{c.title}</span>
-                      <span className="text-[11px] text-slate-400 dark:text-slate-500">v{c.version}</span>
+                    <td className="px-4 py-3 max-w-[220px]">
+                      <Link
+                        href={`/admin/legal/${encodeURIComponent(c.contract_id)}`}
+                        className="group flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-200 hover:text-navy-600 dark:hover:text-gold-400 transition-colors"
+                      >
+                        <span className="truncate">{c.title}</span>
+                        <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-slate-400" />
+                      </Link>
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+                        <span>v{version}</span>
+                        <span>•</span>
+                        <span className="truncate max-w-[120px]">{c.contract_id}</span>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${TYPE_COLORS[c.contract_type] ?? "bg-slate-100 text-slate-600"}`}>
-                        {c.contract_type}
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${TYPE_COLORS[type] ?? "bg-slate-100 text-slate-600"}`}>
+                        {type}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 max-w-[140px]">
-                      <span className="block truncate">{c.counterparty_name || c.counterparty_id || "—"}</span>
+                      <span className="block truncate">{counterparty}</span>
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                      {c.total_value > 0 ? formatCurrency(c.total_value, c.currency) : "—"}
+                      {value > 0 ? formatCurrency(value, currency) : "—"}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {c.effective_to ? (
+                      {c.effective_to || (c as any).expires_at ? (
                         <span className={`text-xs font-medium ${warnExpiry ? "text-orange-500 dark:text-orange-400" : "text-slate-500 dark:text-slate-400"}`}>
-                          {new Date(c.effective_to).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          {new Date(c.effective_to || (c as any).expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                           {warnExpiry && " ⚠"}
                         </span>
                       ) : (
@@ -153,8 +171,8 @@ export async function ContractLifecyclePanel() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[c.status] ?? "bg-slate-100 text-slate-600"}`}>
-                        {c.status.replace(/_/g, " ")}
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[status] ?? "bg-slate-100 text-slate-600"}`}>
+                        {status.replace(/_/g, " ")}
                       </span>
                     </td>
                   </tr>

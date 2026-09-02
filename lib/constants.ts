@@ -20,6 +20,7 @@ import {
   Bell,
   Globe2,
   FileText,
+  Sliders,
 } from "lucide-react";
 
 export type DomainKey =
@@ -265,6 +266,7 @@ export const PLATFORM_NAV = [
   // this sits with the platform services and not under a business area.
   { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
+  { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
 ];
 
 export const SECONDARY_NAV = [

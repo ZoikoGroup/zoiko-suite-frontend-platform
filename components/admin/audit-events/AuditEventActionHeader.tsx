@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, ShieldCheck, Lock, CheckCircle2, X, Server, Zap, Loader2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { Plus, ShieldCheck, Lock, CheckCircle2, X, Server, Zap, Loader2, Download, AlertTriangle } from "lucide-react";
+import { verifyChainAction, exportAuditLogAction } from "@/app/admin/audit-events/actions";
+import { IDLE_VERIFY_STATE, IDLE_EXPORT_STATE, type VerifyChainState, type ExportState } from "@/app/admin/audit-events/state";
 
 const SERVICES = [
   { name: "tenant-entity-registry-svc",    port: "8081", color: "bg-emerald-500" },
@@ -60,7 +62,20 @@ function IngestEventModal({ onClose }: { onClose: () => void }) {
               <CheckCircle2 className="h-10 w-10 text-emerald-500" />
               <p className="font-semibold text-slate-800 dark:text-slate-200">Audit Event Ingested</p>
               <p className="text-xs text-slate-500">Event written to audit-event-store-svc and SHA-256 hash chained.</p>
-              <button onClick={onClose} className="mt-2 rounded-lg bg-slate-800 dark:bg-slate-700 px-4 py-2 text-xs font-medium text-white">Done</button>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  onClick={() => {
+                    onClose();
+                    window.location.reload();
+                  }}
+                  className="rounded-lg bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-xs font-medium text-white transition-colors"
+                >
+                  Reload Audit Chain
+                </button>
+                <button onClick={onClose} className="rounded-lg bg-slate-800 dark:bg-slate-700 px-4 py-2 text-xs font-medium text-white">
+                  Close
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-4">
@@ -93,6 +108,79 @@ function IngestEventModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function VerifyChainModal({
+  onClose,
+  state,
+  onVerify,
+  pending,
+}: {
+  onClose: () => void;
+  state: VerifyChainState;
+  onVerify: () => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-500/10">
+              <Lock className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            </span>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Cryptographic Chain Verification</h2>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:text-slate-600">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+            Re-computes and checks SHA-256 hash linkages across the entire audit log in <code>audit-event-store-svc</code>.
+            Each event&apos;s hash must match the cryptographic signature computed from its predecessor.
+          </p>
+
+          {state.status === "verified" && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300 flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+              <span>{state.message}</span>
+            </div>
+          )}
+
+          {state.status === "compromised" && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+              <span>{state.message}</span>
+            </div>
+          )}
+
+          {state.status === "error" && (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+              {state.message}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={onVerify}
+              disabled={pending}
+              className="flex-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 text-xs font-medium text-white flex items-center justify-center gap-1.5 disabled:opacity-60 transition-colors"
+            >
+              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
+              {pending ? "Verifying SHA-256..." : "Run Chain Verification"}
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type AuditEventActionHeaderProps = {
   serviceStatus?: "operational" | "attention" | "degraded";
   activeServices?: string;
@@ -100,6 +188,35 @@ type AuditEventActionHeaderProps = {
 
 export function AuditEventActionHeader({ serviceStatus = "operational", activeServices }: AuditEventActionHeaderProps = {}) {
   const [modal, setModal] = useState<string | null>(null);
+  const [verifyState, setVerifyState] = useState<VerifyChainState>(IDLE_VERIFY_STATE);
+  const [isVerifying, startVerifyTransition] = useTransition();
+  const [exportState, setExportState] = useState<ExportState>(IDLE_EXPORT_STATE);
+  const [isExporting, startExportTransition] = useTransition();
+
+  function handleVerify() {
+    startVerifyTransition(async () => {
+      const res = await verifyChainAction(verifyState, new FormData());
+      setVerifyState(res);
+    });
+  }
+
+  function handleExport() {
+    startExportTransition(async () => {
+      const res = await exportAuditLogAction(exportState, new FormData());
+      setExportState(res);
+      if (res.status === "exported" && res.payload) {
+        const blob = new Blob([res.payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = res.filename ?? "audit-log.json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    });
+  }
 
   const statusBadgeColor =
     serviceStatus === "degraded"
@@ -118,6 +235,14 @@ export function AuditEventActionHeader({ serviceStatus = "operational", activeSe
   return (
     <>
       {modal === "ingest" && <IngestEventModal onClose={() => setModal(null)} />}
+      {modal === "verify" && (
+        <VerifyChainModal
+          onClose={() => setModal(null)}
+          state={verifyState}
+          onVerify={handleVerify}
+          pending={isVerifying}
+        />
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
@@ -137,18 +262,22 @@ export function AuditEventActionHeader({ serviceStatus = "operational", activeSe
               Emit Test Event
             </button>
             <button
-              onClick={() => setModal("ingest")}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              onClick={() => {
+                setModal("verify");
+                handleVerify();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition-colors"
             >
               <Lock className="h-3.5 w-3.5 text-emerald-500" />
               Verify Hash Chain
             </button>
             <button
-              onClick={() => setModal("ingest")}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              onClick={handleExport}
+              disabled={isExporting}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition-colors disabled:opacity-60"
             >
-              <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />
-              Toggle Feature Flag
+              {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5 text-indigo-500" />}
+              Export Audit Log
             </button>
           </div>
         </div>
@@ -171,3 +300,4 @@ export function AuditEventActionHeader({ serviceStatus = "operational", activeSe
     </>
   );
 }
+

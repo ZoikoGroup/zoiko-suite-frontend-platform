@@ -91,7 +91,7 @@ export async function listCustomerInvoices(params: {
   limit?: number;
   offset?: number;
 }): Promise<ApiResult<CustomerInvoice[]>> {
-  return apiGet<CustomerInvoice[]>("accountsReceivable", "/v1/invoices/", {
+  const res = await apiGet<unknown>("accountsReceivable", "/v1/invoices/", {
     identity: params.identity,
     query: {
       legal_entity_id: params.legalEntityId,
@@ -101,6 +101,9 @@ export async function listCustomerInvoices(params: {
       offset: params.offset,
     },
   });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data) ? res.data : (res.data as any)?.invoices ?? [];
+  return { ok: true, data: list };
 }
 
 /**

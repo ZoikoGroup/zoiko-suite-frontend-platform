@@ -251,76 +251,58 @@ async function fetchFinanceSvc<TRaw, TOut>(
  */
 export async function listJournals(identity?: Identity): Promise<ApiResult<JournalHeader[]>> {
   const base = glUrl();
-  return fetchFinanceSvc<JournalHeader[], JournalHeader[]>(
+  return fetchFinanceSvc<unknown, JournalHeader[]>(
     `${base}/v1/journals?limit=200`,
     base,
     "general-ledger-svc",
     identity,
-    (d) => d ?? [],
+    (d: any) => (Array.isArray(d) ? d : d?.journal_entries ?? d?.journals ?? []),
   );
 }
 
 /**
  * The receivables register, for the summary bar's AR balance.
- *
- * THE ROUTE AND THE SHAPE WERE BOTH WRONG. This called `/v1/ar-invoices` and
- * unwrapped `d.invoices`; accounts-receivable-svc serves `/v1/invoices/` and
- * returns a BARE ARRAY. So every call 404'd, `d.invoices ?? []` turned the miss
- * into an empty list, and the summary bar has reported a nil AR balance for as
- * long as this function has existed. It is the same defect as the four siblings
- * around it — see the note above listJournalEntries.
- *
- * For the full register, and for writes, use lib/api/accounts-receivable.ts. This
- * stays because the summary bar wants one number and not a typed lifecycle.
  */
 export async function listARInvoices(identity?: Identity): Promise<ApiResult<ARInvoice[]>> {
   const base = arUrl();
-  return fetchFinanceSvc<ARInvoice[], ARInvoice[]>(
+  return fetchFinanceSvc<unknown, ARInvoice[]>(
     `${base}/v1/invoices/`,
     base,
     "accounts-receivable-svc",
     identity,
-    (d) => d ?? [],
+    (d: any) => (Array.isArray(d) ? d : d?.invoices ?? []),
   );
 }
 
-type TreasuryResponse = { cash_positions: CashPosition[]; total_liquidity_gbp?: number };
+type TreasuryResponse = { cash_positions?: CashPosition[]; total_liquidity_gbp?: number };
 
 export async function listCashPositions(identity?: Identity): Promise<ApiResult<CashPosition[]>> {
   const base = treasuryUrl();
-  return fetchFinanceSvc<TreasuryResponse, CashPosition[]>(
+  return fetchFinanceSvc<unknown, CashPosition[]>(
     `${base}/v1/cash-positions`,
     base,
     "treasury-svc",
     identity,
-    (d) => d.cash_positions ?? [],
+    (d: any) => (Array.isArray(d) ? d : d?.cash_positions ?? []),
   );
 }
 
 /**
  * Statement lines for the caller's tenant.
- *
- * There is no "reconciliations" resource — this service reconciles individual
- * statement lines, so what is outstanding is derived from their statuses.
  */
 export async function listStatementLines(identity?: Identity): Promise<ApiResult<StatementLine[]>> {
   const base = bankReconUrl();
-  return fetchFinanceSvc<StatementLine[], StatementLine[]>(
+  return fetchFinanceSvc<unknown, StatementLine[]>(
     `${base}/v1/statement-lines?limit=200`,
     base,
     "bank-reconciliation-svc",
     identity,
-    (d) => d ?? [],
+    (d: any) => (Array.isArray(d) ? d : d?.statement_lines ?? []),
   );
 }
 
 /**
  * Fiscal periods for one legal entity.
- *
- * legal_entity_id is REQUIRED by the service, and the read is authorized
- * (CLOSE_VIEW) as well as tenant-scoped — the only read in this file that is,
- * which is why it needs the principal and the entity from the session and not
- * just the tenant.
  */
 export async function listFiscalPeriods(identity?: Identity): Promise<ApiResult<FiscalPeriod[]>> {
   const base = finCloseUrl();
@@ -334,12 +316,12 @@ export async function listFiscalPeriods(identity?: Identity): Promise<ApiResult<
     };
   }
   const q = new URLSearchParams({ legal_entity_id: identity.legalEntityId });
-  return fetchFinanceSvc<FiscalPeriod[], FiscalPeriod[]>(
+  return fetchFinanceSvc<unknown, FiscalPeriod[]>(
     `${base}/v1/close/periods?${q}`,
     base,
     "financial-close-svc",
     identity,
-    (d) => d ?? [],
+    (d: any) => (Array.isArray(d) ? d : d?.close_periods ?? d?.periods ?? []),
   );
 }
 
