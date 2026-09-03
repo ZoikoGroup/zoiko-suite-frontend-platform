@@ -82,7 +82,7 @@ export async function submitPolicy(
     policyCode,
     policyName,
     policyType,
-    principalId: identity.principalId,
+    identity,
   });
 
   if (!result.ok) return writeFailure(result.error.status, result.error.message);

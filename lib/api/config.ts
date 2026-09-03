@@ -14,6 +14,7 @@ const DEFAULTS = {
   configuration: "http://localhost:8086",
   secretVault: "http://localhost:8087",
   obligations: "http://localhost:8088",
+  identityContext: "http://localhost:8080",
   // Read-only here. obligations-svc validates every jurisdiction_id against this
   // service on the write path and fails closed, so the console reads the same
   // register to offer a picker — a free-text UUID field would produce
@@ -83,9 +84,12 @@ const DEFAULTS = {
   procurementWorkflow: "http://localhost:8140",
   // ── Filing Tracker ────────────────────────────────────────────────────────
   filingTracker: "http://localhost:8141",
-  // 8133, per compose. notification-svc delivers governed notifications via a
-  // documented stub adapter (see lib/api/notifications.ts) — no provider is
-  // wired up on the platform yet.
+  // 8133, per compose. notification-svc delivers governed notifications. EMAIL
+  // goes through a real SMTP provider (Mailpit locally, on :8025); IN_APP is
+  // delivered by being recorded and carries read state. WEBHOOK has no provider
+  // and is recorded FAILED naming what is missing; SMS was withdrawn and is
+  // refused at the boundary. What SENT is worth per channel is set out in
+  // lib/api/notifications.ts.
   notification: "http://localhost:8133",
   // 8122, per compose. board-resolutions-svc owns board meetings and their
   // resolutions; the write path authorizes MEETING_CREATE / RESOLUTION_CREATE /
@@ -123,6 +127,16 @@ const DEFAULTS = {
   withholdingTax: "http://localhost:8129",
   filingPreparation: "http://localhost:8130",
   taxAuthorityInterface: "http://localhost:8147",
+  // 8148, per compose. retention-registry-svc answers "is it safe to delete,
+  // export or migrate this record yet" for every service that owns deletable
+  // data. Two independent findings, never collapsed: an ACTIVE legal hold blocks
+  // regardless of what any retention policy permits, and the policy separately
+  // says how long the record must be kept. It never deletes anything itself.
+  //
+  // Its gateway route did not exist until deployments/traefik-dynamic was
+  // regenerated — the checked-in file was stale and this service was one of
+  // seven with no prefix at all, so ZOIKO_USE_GATEWAY=true would have 404'd.
+  retentionRegistry: "http://localhost:8148",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -145,6 +159,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   configuration: "/configuration-feature-flag-svc",
   secretVault: "/secret-vault-integration-svc",
   obligations: "/obligations-svc",
+  identityContext: "/identity-context-svc",
   // The compose KEY is `jurisdiction-svc` but container_name — and therefore the
   // generated Traefik prefix — is `jurisdiction-rules-svc`. Using the key here
   // would 404 in a way that looks like a dead service.
@@ -175,6 +190,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   withholdingTax: "/withholding-tax-svc",
   filingPreparation: "/filing-preparation-svc",
   taxAuthorityInterface: "/tax-authority-interface-svc",
+  retentionRegistry: "/retention-registry-svc",
   // Finance Domain extras
   treasury: "/treasury-svc",
   intercompanyAccounting: "/intercompany-accounting-svc",

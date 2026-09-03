@@ -178,7 +178,17 @@ export type CreatePolicyInput = {
   policyCode: string;
   policyName: string;
   policyType: string;
-  principalId: string;
+  /**
+   * The full caller identity, not just the principal.
+   *
+   * This took a principalId alone, so the envelope carried X-Principal-Id and
+   * neither X-Tenant-Id nor X-Legal-Entity-Id — and policy-svc enforces the
+   * same canonical contract every service does, refusing the write with
+   * "canonical input contract violated: legal_entity_id, tenant_id". Every
+   * policy created from this console was rejected before it reached the
+   * service.
+   */
+  identity: Identity;
   /** Optional client-supplied id. The service generates one when omitted. */
   policyId?: string;
 };
@@ -193,9 +203,9 @@ export async function createPolicy(input: CreatePolicyInput): Promise<ApiWriteRe
       policy_code: input.policyCode,
       policy_name: input.policyName,
       policy_type: input.policyType,
-      created_by_principal_id: input.principalId,
+      created_by_principal_id: input.identity.principalId,
     },
-    { identity: { principalId: input.principalId } },
+    { identity: input.identity },
   );
 }
 

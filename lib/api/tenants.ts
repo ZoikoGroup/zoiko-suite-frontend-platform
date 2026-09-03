@@ -41,7 +41,7 @@
 //     400; an unreachable jurisdiction service is 503. The console offers a
 //     picker reading the same register rather than a free-text UUID field.
 
-import { apiDelete, apiGet, apiPost, type ApiResult, type ApiWriteResult } from "./client";
+import { apiDelete, apiGet, apiPatch, apiPost, type ApiResult, type ApiWriteResult } from "./client";
 import type { Identity } from "./client";
 
 // ── Wire shapes. Field names match the Go json tags exactly. ─────────────────
@@ -80,6 +80,51 @@ export type LegalEntity = {
   entity_status: string;
   primary_jurisdiction_id: string;
   data_residency_policy_id: string;
+  created_at: string;
+  updated_at: string;
+  created_by_principal_id: string;
+  updated_by_principal_id: string;
+};
+
+/**
+ * A workspace sits beneath a tenant and may optionally scope to one legal
+ * entity.
+ *
+ * `billing_classification` is mandatory precisely so that a workspace's
+ * commercial status is never inferred from its name or its age. The
+ * non-commercial classes (INTERNAL, DEMO, SANDBOX, QA_AUTOMATION,
+ * PILOT_NON_BILLABLE) must never produce a live charge regardless of what
+ * entitlement says, so the console shows the classification wherever it shows
+ * the workspace rather than hiding it behind a detail view.
+ */
+export type Workspace = {
+  workspace_id: string;
+  tenant_id: string;
+  legal_entity_id: string | null;
+  name: string;
+  business_unit: string | null;
+  billing_classification: string;
+  billing_source: string;
+  commercial_account_id: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  created_by_principal_id: string;
+  updated_by_principal_id: string;
+};
+
+/**
+ * A parent/child relationship between two legal entities, effective-dated.
+ * `effective_to: null` means open. End-dating closes it; nothing is deleted.
+ */
+export type EntityHierarchy = {
+  hierarchy_id: string;
+  tenant_id: string;
+  parent_legal_entity_id: string;
+  child_legal_entity_id: string;
+  relationship_type: string;
+  effective_from: string;
+  effective_to: string | null;
   created_at: string;
   updated_at: string;
   created_by_principal_id: string;
@@ -167,6 +212,43 @@ export const ENTITY_STATUS_TRANSITIONS: Record<string, readonly string[]> = {
 
 export const ENTITY_TYPES = ["SUBSIDIARY", "BRANCH", "HOLDING", "OPERATIONAL"] as const;
 export const JURISDICTION_ASSIGNMENT_TYPES = ["PRIMARY", "SECONDARY", "TAX_ONLY", "FILING_ONLY"] as const;
+export const HIERARCHY_RELATIONSHIP_TYPES = ["OWNERSHIP", "REPORTING", "OPERATIONAL"] as const;
+export const WORKSPACE_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
+
+/**
+ * Billing classifications, mirrored from ValidBillingClassifications. The
+ * backend fails closed on an unrecognised value rather than defaulting one in,
+ * so the console offers exactly this set and nothing else.
+ */
+export const BILLING_CLASSIFICATIONS = [
+  "COMMERCIAL_STANDALONE",
+  "COMMERCIAL_ZOIKO_ONE",
+  "LEGACY_MIGRATION",
+  "PILOT_NON_BILLABLE",
+  "INTERNAL",
+  "DEMO",
+  "SANDBOX",
+  "QA_AUTOMATION",
+] as const;
+
+export const BILLING_SOURCES = ["NONE", "DIRECT", "ZOIKO_ONE_BUNDLE"] as const;
+
+/**
+ * The classes that may never produce a live charge. Kept as data rather than a
+ * naming convention because "SANDBOX" being non-billable is a commercial rule,
+ * not something derivable from the string.
+ */
+const NON_BILLABLE = new Set<string>([
+  "PILOT_NON_BILLABLE",
+  "INTERNAL",
+  "DEMO",
+  "SANDBOX",
+  "QA_AUTOMATION",
+]);
+
+export function isBillableClassification(classification: string): boolean {
+  return !NON_BILLABLE.has(classification);
+}
 export const RESIDENCY_MODES = ["STRICT_REGION", "PREFERRED_REGION", "FOLLOW_ENTITY"] as const;
 export const CONFLICT_RESOLUTION_MODES = ["FAIL_CLOSED", "LOG_AND_PROCEED", "ESCALATE"] as const;
 export const TAX_BUNDLE_STATUSES = ["PENDING", "ACTIVE", "EXPIRED", "SUPERSEDED"] as const;
@@ -235,8 +317,45 @@ export function listTaxIdentityBundles(
   });
 }
 
+export function listWorkspaces(tenantId: string, identity: Identity): Promise<ApiResult<Workspace[]>> {
+  return apiGet<Workspace[]>("tenantRegistry", `/v1/tenants/${tenantId}/workspaces`, { identity });
+}
+
+export function getWorkspace(workspaceId: string, identity: Identity): Promise<ApiResult<Workspace>> {
+  return apiGet<Workspace>("tenantRegistry", `/v1/workspaces/${workspaceId}`, { identity });
+}
+
+/**
+ * Hierarchy rows for one entity.
+ *
+ * The route is entity-scoped but the rows are not one-directional: an entity
+ * appears here both as a parent and as a child, so a caller rendering "children
+ * of X" must filter on parent_legal_entity_id rather than assume the whole list
+ * hangs below the entity it asked about.
+ */
+export function listHierarchies(
+  entityId: string,
+  identity: Identity,
+): Promise<ApiResult<EntityHierarchy[]>> {
+  return apiGet<EntityHierarchy[]>("tenantRegistry", `/v1/entities/${entityId}/hierarchies`, { identity });
+}
+
 export function listResidencyRegions(identity: Identity): Promise<ApiResult<ResidencyRegion[]>> {
   return apiGet<ResidencyRegion[]>("tenantRegistry", "/v1/residency-regions", { identity });
+}
+
+export function getResidencyRegion(
+  regionId: string,
+  identity: Identity,
+): Promise<ApiResult<ResidencyRegion>> {
+  return apiGet<ResidencyRegion>("tenantRegistry", `/v1/residency-regions/${regionId}`, { identity });
+}
+
+export function getTaxIdentityBundle(
+  bundleId: string,
+  identity: Identity,
+): Promise<ApiResult<TaxIdentityBundle>> {
+  return apiGet<TaxIdentityBundle>("tenantRegistry", `/v1/tax-identity-bundles/${bundleId}`, { identity });
 }
 
 export function getResidencyPolicy(policyId: string, identity: Identity): Promise<ApiResult<DataResidencyPolicy>> {
@@ -333,6 +452,103 @@ export function transitionEntityStatus(
     { new_status: newStatus, correlation_id: correlationId ?? "" },
     { identity, correlationId },
   );
+}
+
+/**
+ * Fields the registry permits changing on an existing entity.
+ *
+ * Deliberately narrow. entity_type, jurisdiction, fiscal calendar, residency
+ * policy and entity_code are all absent because changing them would rewrite
+ * what the entity legally *is* after transactions have referenced it — the
+ * registry has no PATCH path for them, and status moves through its own
+ * transition endpoint rather than through here.
+ *
+ * Every field is optional; omitted keys are left untouched. Sending an explicit
+ * null for trading_name clears it, which is why the type allows null and the
+ * form distinguishes "unchanged" from "cleared".
+ */
+export type UpdateEntityInput = {
+  legal_name?: string;
+  trading_name?: string | null;
+  default_currency_code?: string;
+  correlation_id?: string;
+};
+
+/** Update an entity's mutable descriptive fields. Returns the updated entity. */
+export function updateEntity(
+  entityId: string,
+  input: UpdateEntityInput,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<LegalEntity>> {
+  return apiPatch<LegalEntity>("tenantRegistry", `/v1/entities/${entityId}`, input, {
+    identity,
+    correlationId,
+  });
+}
+
+export type CreateWorkspaceInput = {
+  tenant_id: string;
+  legal_entity_id?: string;
+  name: string;
+  business_unit?: string;
+  billing_classification: string;
+  billing_source?: string;
+  commercial_account_id?: string;
+  correlation_id?: string;
+};
+
+/**
+ * Create a workspace.
+ *
+ * billing_classification is required and validated fail-closed — an
+ * unrecognised value is refused rather than defaulted, so the console must send
+ * one of BILLING_CLASSIFICATIONS.
+ */
+export function createWorkspace(
+  input: CreateWorkspaceInput,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<Workspace>> {
+  return apiPost<Workspace>("tenantRegistry", "/v1/workspaces", input, { identity, correlationId });
+}
+
+export type CreateHierarchyInput = {
+  tenant_id: string;
+  parent_legal_entity_id: string;
+  child_legal_entity_id: string;
+  relationship_type: string;
+  effective_from: string;
+  correlation_id?: string;
+};
+
+export function createHierarchy(
+  input: CreateHierarchyInput,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<EntityHierarchy>> {
+  return apiPost<EntityHierarchy>("tenantRegistry", "/v1/entity-hierarchies", input, {
+    identity,
+    correlationId,
+  });
+}
+
+/**
+ * End-date a hierarchy relationship. DELETE, but nothing is deleted — the row
+ * gets an effective_to and stays in the register, same as jurisdiction
+ * assignments. Returns 204 with no body.
+ */
+export function endDateHierarchy(
+  hierarchyId: string,
+  endDate: string,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiDelete<void>("tenantRegistry", `/v1/entity-hierarchies/${hierarchyId}`, {
+    query: { end_date: endDate },
+    identity,
+    correlationId,
+  });
 }
 
 export type AssignJurisdictionInput = {

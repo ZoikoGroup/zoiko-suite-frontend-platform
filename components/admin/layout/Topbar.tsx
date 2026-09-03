@@ -1,7 +1,8 @@
 "use client";
 
-import { Bell, Menu, Search } from "lucide-react";
+import { Menu, Search } from "lucide-react";
 import { UserMenu } from "./UserMenu";
+import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "@/components/theme";
 
 type TopbarProps = {
@@ -32,16 +33,7 @@ export function Topbar({ onMenuClick, user }: TopbarProps) {
       <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
         <ThemeToggle />
 
-        <button
-          className="relative rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-          aria-label="Notifications"
-        >
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-1.5 top-1.5 flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold-500 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-gold-500" />
-          </span>
-        </button>
+        <NotificationBell />
 
         <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />
 

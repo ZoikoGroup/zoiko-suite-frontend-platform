@@ -9,6 +9,7 @@
 // panels always read live state without an explicit no-store.
 
 import { REQUEST_TIMEOUT_MS, serviceLabel, serviceUrl, type ServiceName } from "./config";
+import { envelopeHeaders, type EnvelopeOptions, type Identity } from "./envelope";
 
 /**
  * Result of a backend call. Deliberately a union rather than a throw: one
@@ -41,44 +42,52 @@ export type ApiError = {
    * kept intact here instead, and callers that need a field read it directly.
    */
   body?: unknown;
+
+  /**
+   * Set when the refusal came from the gateway's GOV-01 tenant-context
+   * resolution rather than from the service the request was addressed to.
+   *
+   * gateway-auth-svc resolves the tenant against tenant-entity-registry-svc
+   * before Traefik forwards anything, so these refusals never reach the backend
+   * at all — and they carry the same 403/503 statuses a backend uses for
+   * completely different reasons. Without this flag the console would report a
+   * suspended tenant as "authorization-svc refused your principal", which sends
+   * the reader to an RBAC grant that was never the problem.
+   *
+   * `denied` — the registry answered: unknown tenant, suspended tenant, or a
+   * legal entity belonging to a different tenant. Re-authenticating will not
+   * help.
+   * `unresolved` — the registry could not be reached, so no decision exists and
+   * nothing was written. Retry.
+   */
+  tenantContext?: "denied" | "unresolved";
 };
 
 /**
- * Resolved caller identity, forwarded as the X-*-Id headers every backend
- * trusts.
+ * Read the gateway's GOV-01 signal off a response.
  *
- * In production these are set by Traefik from gateway-auth-svc's ForwardAuth
- * check of the signed identity envelope, and a service that receives a request
- * without them fails closed. The local single-port gateway routes deliberately
- * carry no ForwardAuth middleware, so the console supplies them from the
- * session instead — see lib/auth.ts DEMO_IDENTITY.
- *
- * Sending these matters beyond writes: services with row-level security read
- * X-Tenant-Id to scope the query, and a read that omits it comes back 404 or
- * empty rather than failing loudly.
+ * Traefik returns an unsuccessful ForwardAuth reply to the client verbatim —
+ * status, body and headers — which is what makes this readable here. Unknown
+ * values are dropped rather than passed through, so a future header value
+ * cannot silently become a state the console does not handle.
  */
-export type Identity = {
-  principalId?: string;
-  tenantId?: string;
-  legalEntityId?: string;
-};
+function tenantContextSignal(response: Response): "denied" | "unresolved" | undefined {
+  const signal = response.headers.get("X-Tenant-Context");
+  return signal === "denied" || signal === "unresolved" ? signal : undefined;
+}
 
-type GetOptions = {
+// Identity moved to ./envelope, where it sits alongside the rest of the §4
+// canonical input contract it is one part of. Re-exported so the ~30 lib/api
+// modules that import it from here keep working.
+export type { Identity, EnvelopeOptions, EnvelopeViolation } from "./envelope";
+
+type GetOptions = EnvelopeOptions & {
   /** Query parameters. Undefined and empty values are dropped. */
   query?: Record<string, string | number | undefined>;
-  /** Propagated to the backend as X-Correlation-ID for cross-service tracing. */
-  correlationId?: string;
   identity?: Identity;
 };
 
-function identityHeaders(identity: Identity | undefined): Record<string, string> {
-  if (!identity) return {};
-  const headers: Record<string, string> = {};
-  if (identity.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
-  return headers;
-}
+type WriteOptions = EnvelopeOptions & { identity?: Identity };
 
 /**
  * GET a JSON resource from a backend service.
@@ -99,15 +108,13 @@ export async function apiGet<T>(
     url.searchParams.set(key, String(value));
   }
 
-  const correlationId = options.correlationId ?? crypto.randomUUID();
-
   let response: Response;
   try {
     response = await fetch(url, {
       headers: {
         Accept: "application/json",
-        "X-Correlation-ID": correlationId,
-        ...identityHeaders(options.identity),
+        // materialWrite: false — a read carries no idempotency key. See envelope.ts.
+        ...envelopeHeaders({ ...options, materialWrite: false }),
       },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -141,6 +148,7 @@ export async function apiGet<T>(
           ? `${serviceLabel(service)} rejected the request (${response.status}) — ${detail}`
           : `${serviceLabel(service)} returned ${response.status} for ${path}`,
         body: errorBody,
+        tenantContext: tenantContextSignal(response),
       },
     };
   }
@@ -197,7 +205,7 @@ export async function apiPost<T>(
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string; identity?: Identity } = {},
+  options: WriteOptions = {},
 ): Promise<ApiWriteResult<T>> {
   return apiWrite<T>("POST", service, path, body, options);
 }
@@ -213,9 +221,28 @@ export async function apiPut<T>(
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string; identity?: Identity } = {},
+  options: WriteOptions = {},
 ): Promise<ApiWriteResult<T>> {
   return apiWrite<T>("PUT", service, path, body, options);
+}
+
+/**
+ * PATCH a JSON body to a backend service.
+ *
+ * Distinct from apiPut because the semantics the services attach to it differ:
+ * a PUT here restates a whole resource, while access-control-svc's
+ * PATCH /v1/role-definitions/{id} is a partial update where an omitted field
+ * means "leave it alone" — sending an empty role_name would not blank the name,
+ * it would keep the current one. A caller must be able to express "change only
+ * the status" without also having to resend every other field correctly.
+ */
+export async function apiPatch<T>(
+  service: ServiceName,
+  path: string,
+  body: unknown,
+  options: WriteOptions = {},
+): Promise<ApiWriteResult<T>> {
+  return apiWrite<T>("PATCH", service, path, body, options);
 }
 
 /**
@@ -230,11 +257,7 @@ export async function apiPut<T>(
 export async function apiDelete<T>(
   service: ServiceName,
   path: string,
-  options: {
-    query?: Record<string, string | number | undefined>;
-    correlationId?: string;
-    identity?: Identity;
-  } = {},
+  options: WriteOptions & { query?: Record<string, string | number | undefined> } = {},
 ): Promise<ApiWriteResult<T>> {
   const url = new URL(serviceUrl(service) + path);
   for (const [key, value] of Object.entries(options.query ?? {})) {
@@ -245,15 +268,14 @@ export async function apiDelete<T>(
 }
 
 async function apiWrite<T>(
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   service: ServiceName,
   path: string,
   body: unknown,
-  options: { correlationId?: string; identity?: Identity } = {},
+  options: WriteOptions = {},
   absoluteURL = false,
 ): Promise<ApiWriteResult<T>> {
   const url = absoluteURL ? path : serviceUrl(service) + path;
-  const correlationId = options.correlationId ?? crypto.randomUUID();
 
   let response: Response;
   try {
@@ -262,8 +284,11 @@ async function apiWrite<T>(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        "X-Correlation-ID": correlationId,
-        ...identityHeaders(options.identity),
+        // materialWrite: true — every method reaching here changes state, so the
+        // envelope carries an idempotency key (INV-08). DELETE included: it is
+        // idempotent at the HTTP level but not at the accounting level, and the
+        // registry's end-dating routes use it.
+        ...envelopeHeaders({ ...options, materialWrite: true }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -292,6 +317,7 @@ async function apiWrite<T>(
           ? `${serviceLabel(service)} rejected the write (${response.status}) — ${detail}`
           : `${serviceLabel(service)} returned ${response.status} for ${path}`,
         body: errorBody,
+        tenantContext: tenantContextSignal(response),
       },
     };
   }
