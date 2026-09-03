@@ -322,13 +322,14 @@ export function AuditEventLedgerPanel({
                       </td>
 
                       <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1" suppressHydrationWarning>
                           <Clock className="h-3 w-3 text-slate-400" />
-                          {new Date(evt.timestamp).toLocaleTimeString([], {
+                          {new Intl.DateTimeFormat("en-US", {
                             hour: "2-digit",
                             minute: "2-digit",
                             second: "2-digit",
-                          })}
+                            hour12: true,
+                          }).format(new Date(evt.timestamp))}
                         </div>
                       </td>
 
