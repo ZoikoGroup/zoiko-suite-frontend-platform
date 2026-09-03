@@ -29,8 +29,17 @@ import {
   type RoleStatus,
 } from "@/lib/api/access-control";
 import {
+  assignRole,
+  createSoDRule,
+  explainAuthorizationError,
+  revokeRoleAssignment,
+} from "@/lib/api/authorization";
+import {
+  type AssignRoleState,
   type CreateBundleState,
   type CreateRoleState,
+  type CreateSoDRuleState,
+  type RevokeAssignmentState,
   type UpdateRoleState,
 } from "./state";
 
@@ -264,5 +273,198 @@ export async function createBundleAction(
     status: "created",
     bundle: result.data,
     message: `${result.data.bundle_code} attached and provisioned into authorization-svc — ${result.data.permitted_actions.length} action(s) now granted by this role.`,
+  };
+}
+
+// ═══ authorization-svc actions ═══════════════════════════════════════════════
+//
+// Everything above talks to access-control-svc, which owns role DEFINITIONS.
+// Everything below talks to authorization-svc (:8089), which owns the live
+// plane: who holds what, and which combinations are forbidden.
+//
+// The split is not cosmetic. A role defined above grants nothing until
+// assignRoleAction below succeeds — that was the functional gap in this
+// console, and it is why the success message here talks about access rather
+// than records.
+
+// ─── Assign a role to a principal ────────────────────────────────────────────
+
+export async function assignRoleAction(
+  _prev: AssignRoleState,
+  formData: FormData,
+): Promise<AssignRoleState> {
+  let identity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "unauthorized", message: EXPIRED };
+  }
+
+  const principalId = String(formData.get("principal_id") ?? "").trim();
+  const roleId = String(formData.get("role_id") ?? "").trim();
+  const legalEntityId = String(formData.get("legal_entity_id") ?? "").trim();
+  const effectiveFromRaw = String(formData.get("effective_from") ?? "").trim();
+  const correlationId = String(formData.get("correlation_id") ?? "").trim();
+
+  if (!principalId) {
+    return { status: "error", message: "A principal id is required — this is who receives the access." };
+  }
+  if (!roleId) return { status: "error", message: "Choose the role to assign." };
+
+  // authorization-svc requires effective_from; there is no implicit "now".
+  // An empty field means the operator meant now, so state that explicitly
+  // rather than sending nothing and getting a missing_field back.
+  let effectiveFrom: string;
+  if (effectiveFromRaw) {
+    const parsed = new Date(effectiveFromRaw);
+    if (Number.isNaN(parsed.getTime())) {
+      return { status: "error", message: "That effective-from date could not be read. Use the date picker." };
+    }
+    effectiveFrom = parsed.toISOString();
+  } else {
+    effectiveFrom = new Date().toISOString();
+  }
+
+  const result = await assignRole({
+    identity: { ...identity, principalId: identity.principalId, tenantId: identity.tenantId },
+    principalId,
+    roleId,
+    legalEntityId: legalEntityId || undefined,
+    effectiveFrom,
+    correlationId,
+  });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    if (status === 401) return { status: "unauthorized", message: explainAuthorizationError(message) };
+    if (status === 403) return { status: "refused", message: explainAuthorizationError(message) };
+    // 404 is role_not_found, which the handler also returns when the role
+    // exists but belongs to another tenant — deliberately indistinguishable at
+    // the API so a probe cannot confirm a foreign role_id. The operator still
+    // needs both possibilities spelled out, because "not found" alone sends
+    // them looking for a typo that may not exist.
+    if (status === 404) {
+      return {
+        status: "scopeMismatch",
+        message:
+          "That role was not found in your tenant. Either it does not exist, or it belongs to another tenant — the service answers both the same way on purpose. Check the role catalogue below.",
+      };
+    }
+    return { status: "error", message: explainAuthorizationError(message) };
+  }
+
+  refresh();
+
+  const scope = result.data.legal_entity_id
+    ? `legal entity ${result.data.legal_entity_id}`
+    : "every legal entity in this tenant";
+  return {
+    status: "granted",
+    assignment: result.data,
+    message: `${principalId} now holds this role across ${scope}, effective ${new Date(result.data.effective_from).toUTCString()}. This grant is live — the next authorization check for its actions resolves against it.`,
+  };
+}
+
+// ─── Revoke an assignment ────────────────────────────────────────────────────
+
+export async function revokeAssignmentAction(
+  _prev: RevokeAssignmentState,
+  formData: FormData,
+): Promise<RevokeAssignmentState> {
+  let identity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "unauthorized", message: EXPIRED };
+  }
+
+  const assignmentId = String(formData.get("assignment_id") ?? "").trim();
+  const correlationId = String(formData.get("correlation_id") ?? "").trim();
+  if (!assignmentId) return { status: "error", message: "No assignment selected." };
+
+  const result = await revokeRoleAssignment({
+    identity: { ...identity, principalId: identity.principalId, tenantId: identity.tenantId },
+    assignmentId,
+    correlationId,
+  });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    if (status === 401) return { status: "unauthorized", message: explainAuthorizationError(message) };
+    if (status === 403) return { status: "refused", message: explainAuthorizationError(message) };
+    // The store matches only assignments still in force, so a 404 means it is
+    // already revoked (or was never this tenant's). The intent is satisfied
+    // either way — reporting a failure would invite a pointless retry.
+    if (status === 404) {
+      return {
+        status: "alreadyRevoked",
+        message: "That assignment was already revoked, so nothing changed. The principal does not hold it.",
+      };
+    }
+    return { status: "error", message: explainAuthorizationError(message) };
+  }
+
+  refresh();
+  const endedAt = new Date(result.data.effective_to ?? Date.now()).toUTCString();
+  return {
+    status: "revoked",
+    assignment: result.data,
+    message: `Revoked. ${result.data.principal_id} no longer holds this role — the next authorization check resolves without it. The row is kept, ended at ${endedAt}, so the history stays auditable.`,
+  };
+}
+
+// ─── Create a Separation-of-Duties rule ──────────────────────────────────────
+
+export async function createSoDRuleAction(
+  _prev: CreateSoDRuleState,
+  formData: FormData,
+): Promise<CreateSoDRuleState> {
+  let identity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "unauthorized", message: EXPIRED };
+  }
+
+  const domainCode = asCode(String(formData.get("domain_code") ?? ""));
+  const actionA = asCode(String(formData.get("action_a") ?? ""));
+  const actionB = asCode(String(formData.get("action_b") ?? ""));
+  const conflictType = asCode(String(formData.get("conflict_type") ?? "") || "HARD");
+  const correlationId = String(formData.get("correlation_id") ?? "").trim();
+
+  if (!domainCode) return { status: "error", message: "A domain code is required, e.g. PAYMENTS." };
+  if (!actionA || !actionB) return { status: "error", message: "Both conflicting actions are required." };
+  if (actionA === actionB) {
+    // The evaluator compares the candidate action against the OTHER actions a
+    // principal holds, so a self-pair can never match. It would sit in the
+    // register looking like a control while enforcing nothing.
+    return {
+      status: "error",
+      message:
+        "The two actions must differ. A rule pairing an action with itself can never trigger, so it would be a control in name only.",
+    };
+  }
+
+  const result = await createSoDRule({
+    identity: { ...identity, principalId: identity.principalId, tenantId: identity.tenantId },
+    domainCode,
+    actionA,
+    actionB,
+    conflictType,
+    correlationId,
+  });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    if (status === 401) return { status: "unauthorized", message: explainAuthorizationError(message) };
+    if (status === 403) return { status: "refused", message: explainAuthorizationError(message) };
+    return { status: "error", message: explainAuthorizationError(message) };
+  }
+
+  refresh();
+  return {
+    status: "created",
+    rule: result.data,
+    message: `${actionA} and ${actionB} are now in conflict for this tenant. This is live and retroactive in effect: any principal who already holds both is denied BOTH actions from the next check onward, with basis sod:conflict_with. Nothing has to be re-run for it to bite.`,
   };
 }
