@@ -30,11 +30,23 @@ export type EvidenceEvaluateState = {
     | "satisfied"
     | "missing"
     | "none-defined"
+    /** An outcome this console has not been taught. Never rendered as a pass —
+     *  see OUTCOME_STATUS in actions.ts for why it is a state of its own. */
+    | "unrecognised"
     | "undeterminable"
     | "denied"
     | "error";
   message: string;
   result?: EvidenceEvaluationResult;
+  /**
+   * What was asked about.
+   *
+   * Not in the service's response — it answers with an outcome and a reference
+   * and says nothing about the question. An answer that cannot state what it was
+   * about is not an explanation, so the action carries the question back for the
+   * summary to render.
+   */
+  asked?: { domainCode: string; actionType: string };
 };
 
 export const IDLE_EVIDENCE_EVALUATE: EvidenceEvaluateState = { status: "idle", message: "" };

@@ -6,10 +6,20 @@
 // session is verified inside every action rather than relying on the proxy's
 // /admin matcher.
 //
-// This service performs no authorization of its own and applies no tenant
-// filter, so the session check here is the console's only gate on writing to the
-// evidence log. That is worth being explicit about: anything the gateway admits
-// can append a decision, and any caller can read any tenant's decisions.
+// Both of the claims that used to be here — that the service performs no
+// authorization of its own, and that it applies no tenant filter — were wrong,
+// and every one of them has now been checked against the running service:
+//
+//   * A write is authorized. CreateDecision calls authorization-svc for the
+//     action GOVERNANCE_DECISION_RECORD and fails closed on a denial (403) or
+//     on an unreachable authorizer (503).
+//   * Reads and writes are tenant-scoped, with row-level security forced in the
+//     database (migrations 000002 and 000006). A read carrying another tenant's
+//     X-Tenant-Id returns an empty list; a lookup by id returns 404. A request
+//     with no X-Tenant-Id at all is refused with 400 missing_tenant_id.
+//
+// So the session check here is not the only gate, and the identity it resolves
+// is not decoration — it is what scopes every call below.
 
 import { cookies } from "next/headers";
 import { refresh } from "next/cache";
@@ -19,6 +29,7 @@ import {
   getDecision,
   explainDecisionError,
   DECISION_OUTCOMES,
+  type GovernanceDecision,
 } from "@/lib/api/governance";
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type { RecordDecisionState } from "./state";
@@ -148,11 +159,12 @@ export async function submitDecision(
  * applies no tenant filter to a lookup — it is not "not visible to you".
  */
 export async function lookupDecision(
-  _previous: LookupState,
+  _previous: LookupState<GovernanceDecision>,
   formData: FormData,
-): Promise<LookupState> {
+): Promise<LookupState<GovernanceDecision>> {
+  let identity: SessionIdentity;
   try {
-    await requireIdentity();
+    identity = await requireIdentity();
   } catch {
     return { status: "error", message: "Your session has expired — sign in again." };
   }
@@ -160,14 +172,21 @@ export async function lookupDecision(
   const decisionId = String(formData.get("decision_id") ?? "").trim();
   if (!decisionId) return { status: "error", message: "Enter a decision ID." };
 
-  const result = await getDecision(decisionId);
+  // The identity has to be passed. This read used to call getDecision(decisionId)
+  // with nothing, on the belief — stated in this file and in lib/api/governance.ts
+  // — that the service reads no identity headers. It does: without X-Tenant-Id
+  // it answers 400 `missing_tenant_id` before it looks anything up, so every
+  // lookup failed and reported the failure as though the id were at fault.
+  const result = await getDecision(decisionId, identity);
 
   if (!result.ok) {
     if (result.error.status === 404) {
       return {
         status: "missing",
         message:
-          "No decision with that id exists in the log. This service applies no tenant filter to a lookup, so this is genuinely absent rather than out of scope.",
+          "No decision with that id is visible to your organisation. The lookup is scoped to " +
+          "your tenant, so this means either that no such decision exists or that it belongs " +
+          "to another tenant — from here the two are indistinguishable.",
       };
     }
     return { status: "error", message: explainDecisionError(result.error.message) };

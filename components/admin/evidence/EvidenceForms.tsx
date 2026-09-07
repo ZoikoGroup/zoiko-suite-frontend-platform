@@ -2,9 +2,9 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui";
-import { JsonBlock, ResultBanner } from "@/components/admin/shared";
+import { ResultBanner } from "@/components/admin/shared";
 import { FIELD, LABEL, OPTIONAL } from "@/components/admin/shared/form";
-import { EVIDENCE_TYPES } from "@/lib/api/evidence";
+import { EVIDENCE_TYPES, describeEvidenceType, domainLabel } from "@/lib/api/evidence";
 import {
   submitRequirement,
   submitRetirement,
@@ -17,6 +17,7 @@ import {
   type RequirementWriteState,
   type EvidenceEvaluateState,
 } from "@/app/admin/evidence/state";
+import { RequirementSummary, OutcomeSummary } from "./EvidenceSummary";
 
 const WRITE_TONE = {
   created: "success",
@@ -31,30 +32,57 @@ const WRITE_TONE = {
 /**
  * Evaluation tones.
  *
- * NO_REQUIREMENTS_DEFINED is amber, not green. It means nothing is configured to
- * check — an honest answer, and not a pass. Rendering it as success would undo the
+ * `none-defined` is amber, not green. It means nothing is configured to check —
+ * an honest answer, and not a pass. Rendering it as success would undo the
  * distinction the service was built to make.
+ *
+ * `undeterminable` is amber for the same reason from the other direction: the
+ * service refused to answer rather than guess, and that is neither a pass nor a
+ * block.
  */
 const EVAL_TONE = {
   satisfied: "success",
   missing: "error",
   "none-defined": "warning",
+  unrecognised: "warning",
   undeterminable: "warning",
   denied: "error",
   error: "error",
   idle: "neutral",
 } as const;
 
+/**
+ * A record inside a tinted banner.
+ *
+ * The banner's own text is a sentence about what happened; a record needs to
+ * read as the record rather than as more of that sentence.
+ */
+function ResultPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg bg-white/70 p-3 ring-1 ring-inset ring-black/5 dark:bg-slate-900/40 dark:ring-white/5">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The business-area selector.
+ *
+ * Options read as their plain names, with the stored code alongside. The code
+ * stays visible because it is what the service records and what someone would
+ * have to quote — but it is no longer the only thing on offer, which is what
+ * made this list unreadable to anyone who had not seen the schema.
+ */
 function DomainField({ id, defaultValue = "FINANCE" }: { id: string; defaultValue?: string }) {
   return (
     <div>
       <label htmlFor={id} className={LABEL}>
-        Domain
+        Business area
       </label>
       <select id={id} name="domain_code" defaultValue={defaultValue} className={FIELD}>
         {DOMAIN_CODES.map((code) => (
           <option key={code} value={code}>
-            {code}
+            {domainLabel(code)} ({code})
           </option>
         ))}
       </select>
@@ -74,7 +102,7 @@ export function CreateRequirementForm() {
         <DomainField id="requirement_domain" />
         <div>
           <label htmlFor="requirement_action" className={LABEL}>
-            Action type
+            Action to gate
           </label>
           <input
             id="requirement_action"
@@ -84,10 +112,13 @@ export function CreateRequirementForm() {
             className={FIELD}
             autoComplete="off"
           />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            The action this evidence will be required for
+          </p>
         </div>
         <div>
           <label htmlFor="requirement_scope" className={LABEL}>
-            Scope
+            Who it applies to
           </label>
           <select
             id="requirement_scope"
@@ -95,13 +126,13 @@ export function CreateRequirementForm() {
             defaultValue="tenant"
             className={FIELD}
           >
-            <option value="tenant">Tenant-wide — every entity</option>
-            <option value="entity">This legal entity only</option>
+            <option value="tenant">Every company in the group</option>
+            <option value="entity">This company only</option>
           </select>
         </div>
         <div>
           <label htmlFor="evidence_type" className={LABEL}>
-            Evidence type
+            Evidence needed
           </label>
           <select
             id="evidence_type"
@@ -109,17 +140,23 @@ export function CreateRequirementForm() {
             defaultValue="SUPPORTING_DOCUMENT"
             className={FIELD}
           >
-            {EVIDENCE_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
-                {type === "SUPPORTING_DOCUMENT" ? " — verified" : " — unverified"}
-              </option>
-            ))}
+            {EVIDENCE_TYPES.map((type) => {
+              const described = describeEvidenceType(type);
+              return (
+                <option key={type} value={type}>
+                  {described.label}
+                  {described.verified ? " — checked by the platform" : " — taken as stated"}
+                </option>
+              );
+            })}
           </select>
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            Only documents are looked up; the rest are recorded as stated
+          </p>
         </div>
         <div>
           <label htmlFor="minimum_count" className={LABEL}>
-            Minimum count <span className={OPTIONAL}>(blank = 1)</span>
+            How many are needed <span className={OPTIONAL}>(blank means one)</span>
           </label>
           <input
             id="minimum_count"
@@ -131,7 +168,7 @@ export function CreateRequirementForm() {
         </div>
         <div>
           <label htmlFor="artifact_subtype" className={LABEL}>
-            Artifact subtype <span className={OPTIONAL}>(optional)</span>
+            Narrow it to one kind <span className={OPTIONAL}>(optional)</span>
           </label>
           <input
             id="artifact_subtype"
@@ -143,15 +180,15 @@ export function CreateRequirementForm() {
         </div>
         <div className="sm:col-span-3">
           <label htmlFor="description" className={LABEL}>
-            Description{" "}
+            What to produce{" "}
             <span className={OPTIONAL}>
-              (shown to whoever gets blocked, so they know what to produce)
+              (shown to anyone this stops, so they know what is being asked for)
             </span>
           </label>
           <input
             id="description"
             name="description"
-            placeholder="A counter-signed vendor agreement stored in the document vault"
+            placeholder="A counter-signed vendor agreement, filed in the document store"
             className={FIELD}
             autoComplete="off"
           />
@@ -163,21 +200,15 @@ export function CreateRequirementForm() {
           {pending ? "Adding…" : "Add requirement"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Authorization-gated and fail-closed — an unreachable authorization-svc refuses this
+          Your permission is checked first, and nothing is saved if it cannot be checked
         </p>
       </div>
 
       <ResultBanner tone={WRITE_TONE[state.status]} message={state.message}>
         {state.requirement && (
-          <JsonBlock
-            value={{
-              evidence_requirement_id: state.requirement.evidence_requirement_id,
-              domain_code: state.requirement.domain_code,
-              action_type: state.requirement.action_type,
-              evidence_type: state.requirement.evidence_type,
-              effective_from: state.requirement.effective_from,
-            }}
-          />
+          <ResultPanel>
+            <RequirementSummary requirement={state.requirement} variant="compact" />
+          </ResultPanel>
         )}
       </ResultBanner>
     </form>
@@ -195,7 +226,7 @@ export function RetireRequirementForm() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="retire_requirement_id" className={LABEL}>
-            Requirement ID
+            Requirement reference
           </label>
           <input
             id="retire_requirement_id"
@@ -204,16 +235,19 @@ export function RetireRequirementForm() {
             className={`${FIELD} font-mono text-xs`}
             autoComplete="off"
           />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            Copy it from the catalog above
+          </p>
         </div>
         <div>
           <label htmlFor="retire_reason" className={LABEL}>
-            Reason <span className={OPTIONAL}>(required)</span>
+            Why <span className={OPTIONAL}>(required)</span>
           </label>
           <input
             id="retire_reason"
             name="reason"
             required
-            placeholder="Superseded by the group-level control"
+            placeholder="Replaced by the group-level control"
             className={FIELD}
             autoComplete="off"
           />
@@ -222,18 +256,18 @@ export function RetireRequirementForm() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" loading={pending} size="sm">
-          {pending ? "Retiring…" : "Retire requirement"}
+          {pending ? "Withdrawing…" : "Withdraw requirement"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          End-dating, not deletion — the row stays readable so past evaluations stay explicable
+          Nothing is deleted — it stays readable so past decisions can still be explained
         </p>
       </div>
 
       <ResultBanner tone={WRITE_TONE[state.status]} message={state.message}>
-        {state.requirement?.effective_to && (
-          <p className="text-xs">
-            Retired as of <code>{state.requirement.effective_to}</code>.
-          </p>
+        {state.requirement && (
+          <ResultPanel>
+            <RequirementSummary requirement={state.requirement} variant="compact" />
+          </ResultPanel>
         )}
       </ResultBanner>
     </form>
@@ -246,15 +280,13 @@ export function EvaluateEvidenceForm() {
     IDLE_EVIDENCE_EVALUATE,
   );
 
-  const unmet = state.result?.unmet ?? [];
-
   return (
     <form action={action} className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <DomainField id="evaluate_domain" />
         <div>
           <label htmlFor="evaluate_action" className={LABEL}>
-            Action type
+            Action to check
           </label>
           <input
             id="evaluate_action"
@@ -267,10 +299,8 @@ export function EvaluateEvidenceForm() {
         </div>
         <div className="sm:col-span-2">
           <label htmlFor="present_artifacts" className={LABEL}>
-            Artifacts you assert exist{" "}
-            <span className={OPTIONAL}>
-              (one per line: TYPE reference-id [subtype] — leave blank to test the empty case)
-            </span>
+            Evidence you say exists{" "}
+            <span className={OPTIONAL}>(leave blank to see what would be required)</span>
           </label>
           <textarea
             id="present_artifacts"
@@ -279,35 +309,38 @@ export function EvaluateEvidenceForm() {
             placeholder={"SUPPORTING_DOCUMENT doc-1234 SIGNED_CONTRACT\nAPPROVAL_RECORD apr-5678"}
             className={`${FIELD} font-mono text-xs`}
           />
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-400 dark:text-slate-500">
+            One item per line: the kind of evidence, then its reference, then optionally which kind
+            it is. The kinds you can use are{" "}
+            {EVIDENCE_TYPES.map((type, index) => (
+              <span key={type}>
+                {index > 0 && ", "}
+                <span className="font-mono">{type}</span>
+              </span>
+            ))}
+            .
+          </p>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" loading={pending} size="sm">
-          {pending ? "Evaluating…" : "Evaluate"}
+          {pending ? "Checking…" : "Check this action"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          SUPPORTING_DOCUMENT references are checked against document-vault-svc; other types are
-          taken on trust
+          Documents are looked up to confirm they exist; other kinds are recorded as stated
         </p>
       </div>
 
       <ResultBanner tone={EVAL_TONE[state.status]} message={state.message}>
-        {unmet.length > 0 && (
-          <ul className="space-y-1.5 text-xs">
-            {unmet.map((item) => (
-              <li key={item.evidence_requirement_id}>
-                <strong className="font-medium">{item.evidence_type}</strong> — {item.reason}
-              </li>
-            ))}
-          </ul>
-        )}
         {state.result && (
-          <p className="text-xs">
-            Recorded as evaluation{" "}
-            <code className="font-mono">{state.result.evaluation_id}</code>. This record is
-            append-only and froze its payloads at decision time.
-          </p>
+          <ResultPanel>
+            <OutcomeSummary
+              result={state.result}
+              domainCode={state.asked?.domainCode}
+              actionType={state.asked?.actionType}
+            />
+          </ResultPanel>
         )}
       </ResultBanner>
     </form>

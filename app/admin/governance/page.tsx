@@ -8,13 +8,13 @@ import {
   CardContent,
   Skeleton,
 } from "@/components/ui";
-import { PageHeader, LookupById } from "@/components/admin/shared";
+import { PageHeader } from "@/components/admin/shared";
 import {
   DecisionFilterBar,
   DecisionLogPanel,
+  DecisionLookup,
   RecordDecisionForm,
 } from "@/components/admin/governance";
-import { lookupDecision } from "./actions";
 import type { DecisionFilters } from "@/lib/api/governance";
 
 export const metadata: Metadata = { title: "Governance Log" };
@@ -66,23 +66,26 @@ export default async function GovernancePage({ searchParams }: PageProps) {
         description="The append-only evidence store behind every governed decision in the suite. Records are written here by policy-svc on each evaluation, and by any service that must preserve the basis for an action it took."
       />
 
-      <Card className="mb-6 border-amber-200 dark:border-amber-500/30">
+      <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>This log is not tenant-scoped</CardTitle>
-            <CardDescription>
-              Worth knowing before you read anything below
-            </CardDescription>
+            <CardTitle>What you are looking at</CardTitle>
+            <CardDescription>Worth knowing before you read anything below</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
           <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-            governance-decision-log-svc reads no identity headers and applies no row-level
-            security. <strong className="font-medium">Every</strong> decision in the store is
-            returned, filtered only by the query parameters given — so the entity filter is the
-            only thing scoping a read, and there is no tenant boundary to rely on. Writes are
-            equally ungated: the service authorizes nothing, so anything the gateway admits can
-            append evidence. Both are properties of the service, not of this console.
+            Every row here is a record of a governed action being{" "}
+            <strong className="font-medium">allowed</strong>,{" "}
+            <strong className="font-medium">refused</strong>, or{" "}
+            <strong className="font-medium">sent for review</strong>, together with the rule that
+            settled it. Records are written automatically by the services that make those
+            decisions, and{" "}
+            <strong className="font-medium">nothing here can be edited or deleted</strong>
+            {" — a correction is made by recording a new decision, never by changing an old one."}{" "}
+            You are
+            seeing only your own organisation&rsquo;s decisions; the log is scoped to your tenant
+            and enforces that in the database.
           </p>
         </CardContent>
       </Card>
@@ -111,19 +114,13 @@ export default async function GovernancePage({ searchParams }: PageProps) {
           <div>
             <CardTitle>Look up a decision</CardTitle>
             <CardDescription>
-              By decision ID — the id a caller supplied when the decision was recorded, which is
-              also the idempotency key
+              By decision ID — the reference recorded with the decision, shown in the log above
+              and quotable back to whoever asks about it
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
-          <LookupById
-            action={lookupDecision}
-            inputName="decision_id"
-            label="Decision ID"
-            placeholder="4f8c2a91-…"
-            hint="Shown as JSON, including the evaluation context the table truncates."
-          />
+          <DecisionLookup />
         </CardContent>
       </Card>
 

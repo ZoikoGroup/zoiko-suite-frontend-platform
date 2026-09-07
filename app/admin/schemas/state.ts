@@ -35,3 +35,21 @@ export type RegisterSchemaState = {
 };
 
 export const IDLE_REGISTER_SCHEMA: RegisterSchemaState = { status: "idle", message: "" };
+
+/**
+ * Everything the console shows when someone looks up one event's contract.
+ *
+ * Two reads composed into one answer, because "what does this event have to
+ * contain" and "how did it get that way" are the same question asked twice and
+ * the registry has no endpoint that answers both. `latest` is read separately
+ * rather than taken as the last element of `versions`: the versions list is
+ * paged, so on a long history the page that comes back need not contain the
+ * current version at all.
+ */
+export type ContractReport = {
+  latest: EventSchema;
+  /** The most recent page of versions, oldest first, as the service returns them. */
+  versions: EventSchema[];
+  /** Versions older than the ones listed exist. Nothing is ever deleted here. */
+  truncated: boolean;
+};

@@ -1,12 +1,13 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useActionState } from "react";
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui";
 import { JsonBlock } from "./JsonBlock";
 import { ResultBanner } from "./ResultBanner";
 import { FIELD, LABEL } from "./form";
-import { IDLE_LOOKUP, type LookupState } from "./lookup";
+import { type LookupState } from "./lookup";
 
 const TONE = {
   found: "success",
@@ -18,27 +19,35 @@ const TONE = {
 /**
  * "Paste an ID, read one record."
  *
- * The found record is rendered as JSON rather than as a formatted card. These
- * lookups exist for diagnosis — an operator checking whether a write landed, or
- * following an id out of a log — and a curated view would hide exactly the field
- * they came to check.
+ * Pass `renderRecord` to show the record as something a person can read. Without
+ * it the record falls back to JSON, which is what every one of these lookups
+ * used to do unconditionally — defensible for a developer checking whether a
+ * write landed, useless to the operators who actually run these pages, who
+ * cannot be expected to read a wire format to find out whether a payment was
+ * approved. New call sites should pass it; the fallback exists so the pages not
+ * yet converted keep working rather than rendering nothing.
  */
-export function LookupById({
+export function LookupById<T = unknown>({
   action,
   inputName,
   label,
   placeholder,
   hint,
   buttonLabel = "Look up",
+  renderRecord,
 }: {
-  action: (previous: LookupState, formData: FormData) => Promise<LookupState>;
+  action: (previous: LookupState<T>, formData: FormData) => Promise<LookupState<T>>;
   inputName: string;
   label: string;
   placeholder?: string;
   hint?: string;
   buttonLabel?: string;
+  renderRecord?: (record: T) => ReactNode;
 }) {
-  const [state, submit, pending] = useActionState<LookupState, FormData>(action, IDLE_LOOKUP);
+  const [state, submit, pending] = useActionState<LookupState<T>, FormData>(action, {
+    status: "idle",
+    message: "",
+  });
 
   return (
     <form action={submit} className="space-y-3">
@@ -64,7 +73,9 @@ export function LookupById({
       </div>
 
       <ResultBanner tone={TONE[state.status]} message={state.message}>
-        {state.status === "found" && <JsonBlock value={state.record} />}
+        {state.status === "found" &&
+          state.record !== undefined &&
+          (renderRecord ? renderRecord(state.record) : <JsonBlock value={state.record} />)}
       </ResultBanner>
     </form>
   );

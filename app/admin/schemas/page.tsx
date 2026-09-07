@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader } from "@/components/admin/shared";
-import { RegisterSchemaForm, SchemaRegisterPanel } from "@/components/admin/schemas";
+import { ContractLookup, RegisterSchemaForm, SchemaRegisterPanel } from "@/components/admin/schemas";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listEventNames } from "@/lib/api/schemas";
 
@@ -37,7 +37,7 @@ export default function SchemasPage() {
     <div>
       <PageHeader
         title="Event Schemas"
-        description="The canonical registry of event payload contracts. Every event on the platform is meant to be registered here, each version declares the compatibility discipline it was accepted under, and nothing is ever edited or deleted — evolution only ever appends."
+        description="What every event on the platform is required to carry. Each contract is registered here before anything publishes it, each version records whether it was checked against the one before it, and nothing is ever edited or deleted — a change always adds the next version and leaves the old one readable."
       />
 
       <Card className="mb-6">
@@ -45,9 +45,10 @@ export default function SchemasPage() {
           <div>
             <CardTitle>Contract register</CardTitle>
             <CardDescription>
-              Current version of every registered event. A version marked NONE was accepted without a
-              compatibility check — permitted for a controlled rollout, and shown here so the exemption is
-              visible rather than inferred from a schema that changed shape.
+              The current version of every registered event, what an event of that kind must contain, and
+              whether the change that produced it was checked against the version before it. A version
+              registered without that check is marked as such, so an exemption is something you can read
+              here rather than something to infer from a payload that changed shape.
             </CardDescription>
           </div>
         </CardHeader>
@@ -61,12 +62,30 @@ export default function SchemasPage() {
       <Card className="mb-6">
         <CardHeader>
           <div>
+            <CardTitle>Look up one contract</CardTitle>
+            <CardDescription>
+              What an event of a given kind has to carry today, field by field, and every change the
+              contract has been through to get there. Nothing is ever edited or deleted here, so the
+              history is complete — and the schema as the registry stores it is one click away on each
+              version, for anyone who needs the document itself.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ContractLookup />
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
             <CardTitle>Register a version</CardTitle>
             <CardDescription>
-              Publishing is governed, not self-served: authorization-svc must grant SCHEMA_PUBLISH, and an
-              unreachable decision refuses the write rather than allowing it. The version number is assigned
-              by the registry, so two people registering at once cannot collide — the later one is told to
-              re-read and resubmit.
+              Publishing is governed, not self-served: your account needs permission to publish event
+              contracts, and if that permission cannot be confirmed the registration is refused rather
+              than allowed. The version number is assigned by the registry, so two people registering at
+              once cannot collide — the later one is told to read the new current version and submit
+              again.
             </CardDescription>
           </div>
         </CardHeader>
@@ -93,21 +112,21 @@ export default function SchemasPage() {
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Top-level fields only.
+                  Outermost fields only.
                 </strong>{" "}
-                The checker reads a schema&apos;s <code className="font-mono text-xs">properties</code> and{" "}
-                <code className="font-mono text-xs">required</code>. It does not descend into nested objects
-                or arrays, so a breaking change inside one is accepted.
+                The check compares the outermost fields of a payload — their names, the kind of value each
+                carries, and which of them have to be present. It does not look inside a field that holds
+                a group or a list, so a breaking change made in there is accepted.
               </span>
             </li>
             <li className="flex gap-2.5">
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Checked against the latest version only.
+                  Compared with the current version only.
                 </strong>{" "}
-                A consumer still pinned to an older version is not considered. Backward compatibility here
-                means compatible with the current contract, not with every version ever published.
+                Anything still reading an older version is not considered. &ldquo;Checked&rdquo; here means
+                compatible with the contract in use now, not with every version ever published.
               </span>
             </li>
             <li className="flex gap-2.5">
@@ -124,11 +143,11 @@ export default function SchemasPage() {
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Reads are identity-gated, not entity-gated.
+                  Anyone signed in can read all of it.
                 </strong>{" "}
-                Any signed-in principal can read the whole catalogue. An event contract is platform-wide
-                reference data with no legal entity of its own, so there is no per-entity grant to scope a
-                read by — the bar is that the caller is identified at all.
+                Reading the register asks only that you are signed in, not that you hold any particular
+                permission. An event contract belongs to the platform rather than to one legal entity, so
+                there is no per-entity permission to narrow a read by.
               </span>
             </li>
           </ul>

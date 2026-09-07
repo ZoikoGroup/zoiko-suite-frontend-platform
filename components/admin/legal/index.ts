@@ -19,6 +19,10 @@ export { BoardResolutionsPanel } from "./BoardResolutionsPanel";
 export { BoardMeetingForm } from "./BoardMeetingForm";
 export { BoardResolutionForm } from "./BoardResolutionForm";
 export { ResolutionActions } from "./ResolutionActions";
+// board-resolutions-svc's two records in plain English. Prefer these over
+// rendering a status code or a vote count directly — a resolution's state and
+// its tally are both routinely misread, and the summaries say what each means.
+export { ResolutionSummary, MeetingSummary, VoteTally } from "./BoardSummary";
 export { CorporateActionsAndCounterpartiesPanel } from "./CorporateActionsAndCounterpartiesPanel";
 export { LegalActionHeader } from "./LegalActionHeader";
 export { LegalSummaryBar } from "./LegalSummaryBar";
