@@ -26,7 +26,10 @@ function useLiveStepCounts(): Record<string, number> {
         ["cash-positions", "bank-rec"],
         ["journal-entries", "ap-settle"],
         ["journal-entries", "intercompany"],
-        ["journal-entries", "close"],
+        // The close stage counts fiscal periods, not journals. It read
+        // journal-entries until now, so the card labelled financial-close-svc
+        // was showing the ledger's figure under the close service's name.
+        ["fiscal-periods", "close"],
       ];
       const results = await Promise.allSettled(
         endpoints.map(async ([ep, stepId]) => {

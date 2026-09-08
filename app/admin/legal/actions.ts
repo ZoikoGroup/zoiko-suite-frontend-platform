@@ -391,7 +391,9 @@ export async function scheduleBoardMeeting(
     effectiveFrom,
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(explainBoardError(result.error.message, { status: result.error.status }));
+  }
 
   refresh();
 
@@ -442,7 +444,18 @@ export async function proposeBoardResolution(
     ...(effectiveTo ? { effectiveTo } : {}),
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(
+      explainBoardError(result.error.message, {
+        status: result.error.status,
+        // A 404 here is the meeting the resolution was put to, not the
+        // resolution — nothing has been created yet for a 404 to be about.
+        notFound:
+          "The meeting this was to be put to is no longer in the diary, so nothing was saved. " +
+          "Reload the page and pick a meeting from the list again, or propose it standalone.",
+      }),
+    );
+  }
 
   refresh();
 
@@ -493,7 +506,19 @@ export async function tallyResolutionVotes(
     abstentions,
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(
+      explainBoardError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That resolution is no longer on record for your organisation, so no count was " +
+          "saved. Reload the page to see what the register holds now.",
+        conflict:
+          "Nothing was saved. This resolution has already been closed, and the tally of a " +
+          "closed resolution cannot be changed. Reload the page to see how it was decided.",
+      }),
+    );
+  }
 
   refresh();
 
@@ -546,7 +571,20 @@ export async function passResolutionIntoForce(
     passedBy: identity.principalId,
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(
+      explainBoardError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That resolution is no longer on record for your organisation, so nothing was " +
+          "passed. Reload the page to see what the register holds now.",
+        conflict:
+          "Nothing was changed. This resolution has already been closed — passed, turned " +
+          "down, or withdrawn — so its outcome is fixed. Reload the page to see how it was " +
+          "decided.",
+      }),
+    );
+  }
 
   refresh();
 

@@ -25,3 +25,8 @@ export { PurchaseOrdersAndSpendPanel } from "./PurchaseOrdersAndSpendPanel";
 export { CommercialOpsActionHeader } from "./CommercialOpsActionHeader";
 export { CommercialOpsSummaryBar } from "./CommercialOpsSummaryBar";
 export { CommercialOpsProcessTimeline } from "./CommercialOpsProcessTimeline";
+// purchase-request-svc's record in plain English, and the lookup that renders
+// it. Prefer the summary over showing a status code or a raw record anywhere an
+// approver rather than a developer is the reader.
+export { PurchaseRequestSummary } from "./PurchaseRequestSummary";
+export { PurchaseRequestLookup } from "./PurchaseRequestLookup";

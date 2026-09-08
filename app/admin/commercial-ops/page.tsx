@@ -19,6 +19,7 @@ import {
   CommercialOpsActionHeader,
   CommercialOpsSummaryBar,
   CommercialOpsProcessTimeline,
+  PurchaseRequestLookup,
 } from "@/components/admin/commercial-ops";
 import { DOMAINS } from "@/lib/constants";
 import type { OrderStatusFilter } from "@/lib/api/purchase-orders";
@@ -26,7 +27,6 @@ import type { RequestStatus } from "@/lib/api/purchase-requests";
 import {
   lookupOrder,
   lookupOrderAmendments,
-  lookupPurchaseRequest,
   lookupVendorCheck,
 } from "./actions";
 
@@ -326,12 +326,10 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
           </Suspense>
 
           <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
-            <LookupById
-              action={lookupPurchaseRequest}
-              inputName="lookup_request_id"
+            <PurchaseRequestLookup
               label="Read one request"
               placeholder="Must be a UUID"
-              hint="The full record, including the rejection reason and who decided it. A non-UUID fails inside the Postgres driver and surfaces as a 503, so it is rejected here first."
+              hint="The full record: where the request stands, who decided it and when, and the reason recorded for a refusal. A reference that is not a UUID is rejected here rather than passed on, because it fails inside the database driver and comes back looking like an outage."
             />
           </div>
         </CardContent>

@@ -3,15 +3,15 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { ShieldAlert } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
-import { PageHeader, LookupById } from "@/components/admin/shared";
+import { PageHeader } from "@/components/admin/shared";
 import {
   PurchaseRequestPanel,
   RaiseRequestForm,
   DecideRequestForm,
+  PurchaseRequestLookup,
 } from "@/components/admin/purchase-requests";
 import { DOMAINS } from "@/lib/constants";
 import type { RequestStatus } from "@/lib/api/purchase-requests";
-import { lookupPurchaseRequest } from "../commercial-ops/actions";
 
 export const metadata: Metadata = { title: "Purchase Requests | Zoiko Suite" };
 
@@ -79,9 +79,9 @@ export default async function PurchaseRequestsPage({ searchParams }: PageProps) 
           <div>
             <CardTitle>Raise a purchase request</CardTitle>
             <CardDescription>
-              The requisition that a purchase order originates from. A request lands PENDING and
-              authorises nothing — purchase-order-svc refuses to issue against anything that is
-              not APPROVED and owned by this tenant and legal entity.
+              The requisition a purchase order starts from. A new request is raised awaiting a
+              decision and authorises nothing on its own: no order can be placed against it until
+              somebody else approves it, and only then for this organisation and company.
             </CardDescription>
           </div>
         </CardHeader>
@@ -95,9 +95,9 @@ export default async function PurchaseRequestsPage({ searchParams }: PageProps) 
           <div>
             <CardTitle>Approve or reject a request</CardTitle>
             <CardDescription>
-              One transition out of PENDING, two branches, both terminal. A second decision is
-              refused rather than applied, so who decided a request and when cannot be overwritten.
-              Rejecting requires a reason — that reason is the audit record for the refusal.
+              One decision, either way, and it is final. A second decision is refused rather than
+              applied, so who decided a request and when cannot be overwritten. Rejecting needs a
+              reason — that reason is the record of why the spend was refused.
             </CardDescription>
           </div>
         </CardHeader>
@@ -186,11 +186,8 @@ export default async function PurchaseRequestsPage({ searchParams }: PageProps) 
           </div>
         </CardHeader>
         <CardContent>
-          <LookupById
-            action={lookupPurchaseRequest}
-            inputName="lookup_request_id"
+          <PurchaseRequestLookup
             label="Purchase request ID"
-            placeholder="00000000-0000-0000-0000-000000000000"
             hint="Paste a request ID from the register above, or from an order that was issued against it."
             buttonLabel="Look up"
           />

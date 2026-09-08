@@ -4,6 +4,8 @@
 // This lives outside actions.ts deliberately: a "use server" file may only
 // export async functions, so the initial-state constant cannot live there.
 
+import type { PurchaseRequest } from "@/lib/api/purchase-requests";
+
 export type OrderActionState = {
   status: "idle" | "created" | "replayed" | "amended" | "closed" | "error";
   message: string;
@@ -33,6 +35,14 @@ export type RequestActionState = {
   /** Echoed back so the UI can name what was acted on, and so the operator has
    *  the id to paste into the issue-order form. */
   requestId?: string;
+  /** The record the write produced, so the form can read it back in plain
+   *  English instead of reporting a one-line message and leaving the reader to
+   *  find the row in the register below.
+   *
+   *  Action returns are serialized to the client, so this is the service's own
+   *  read model rather than anything wider — and every field of it is rendered
+   *  by PurchaseRequestSummary, so nothing is shipped that the UI does not use. */
+  request?: PurchaseRequest;
 };
 
 export const IDLE_REQUEST_STATE: RequestActionState = { status: "idle", message: "" };

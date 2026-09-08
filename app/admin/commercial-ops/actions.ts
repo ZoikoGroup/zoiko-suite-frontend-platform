@@ -29,6 +29,8 @@ import {
   rejectPurchaseRequest,
   getPurchaseRequest,
   explainRequestError,
+  describeRequestStatus,
+  type PurchaseRequest,
 } from "@/lib/api/purchase-requests";
 import {
   createSpendPolicy,
@@ -360,7 +362,10 @@ export async function submitPurchaseRequest(
   const result = await createPurchaseRequest({ identity, description, amount, currencyCode });
 
   if (!result.ok) {
-    return { status: "error", message: explainRequestError(result.error.message) };
+    return {
+      status: "error",
+      message: explainRequestError(result.error.message, { status: result.error.status }),
+    };
   }
 
   refresh();
@@ -375,12 +380,14 @@ export async function submitPurchaseRequest(
     ? {
         status: "created",
         requestId: request.request_id,
-        message: `Request raised for ${money}, status ${request.status} — ID ${request.request_id}. It authorises nothing until approved; an order cannot be issued against it yet.`,
+        request,
+        message: `Request raised for ${money}, and it is now awaiting a decision — reference ${request.request_id}. It authorises nothing yet: no order can be placed against it until somebody else approves it.`,
       }
     : {
         status: "replayed",
         requestId: request.request_id,
-        message: `No new request written — this replayed an existing one for ${money}, currently ${request.status}, ID ${request.request_id}. The service is idempotent on correlation ID, so a retried submit resolves to the original rather than duplicating it.`,
+        request,
+        message: `No new request written — one for ${money} had already been raised, and it stands as ${describeRequestStatus(request.status).label.toLowerCase()}. Reference ${request.request_id}. Submitting the form again resolved to the request that already exists rather than raising a second one for the same spend.`,
       };
 }
 
@@ -443,9 +450,20 @@ async function decideRequest(
 
   if (!result.ok) {
     if (result.error.status === 422) {
-      return { status: "already-decided", message: explainRequestError(result.error.message) };
+      return {
+        status: "already-decided",
+        message: explainRequestError(result.error.message, { status: result.error.status }),
+      };
     }
-    return { status: "error", message: explainRequestError(result.error.message) };
+    return {
+      status: "error",
+      message: explainRequestError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That request is no longer on record for your organisation, so nothing was decided. " +
+          "Reload the register to see which requests it holds now.",
+      }),
+    };
   }
 
   refresh();
@@ -455,20 +473,22 @@ async function decideRequest(
     ? {
         status: "approved",
         requestId: request.request_id,
-        message: `Request APPROVED and attributed to you. An order can now be issued against it — paste this ID into the issue form above: ${request.request_id}`,
+        request,
+        message: `Request approved, and the approval is recorded against you. An order can now be placed against it — paste this reference into the issue form above: ${request.request_id}. The decision is final and cannot be reversed here.`,
       }
     : {
         status: "rejected",
         requestId: request.request_id,
-        message: `Request REJECTED, with your reason stored on the record. No order can be issued against it.`,
+        request,
+        message: `Request rejected, with your reason stored on the record as the account of why. No order can be placed against it, and the decision cannot be reversed — a fresh request would have to be raised.`,
       };
 }
 
 /** Read one purchase request by id. */
 export async function lookupPurchaseRequest(
-  _previous: LookupState,
+  _previous: LookupState<PurchaseRequest>,
   formData: FormData,
-): Promise<LookupState> {
+): Promise<LookupState<PurchaseRequest>> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -492,7 +512,10 @@ export async function lookupPurchaseRequest(
           "No purchase request with that id exists for this tenant. A request belonging to another tenant reads as absent in exactly the same way.",
       };
     }
-    return { status: "error", message: explainRequestError(result.error.message) };
+    return {
+      status: "error",
+      message: explainRequestError(result.error.message, { status: result.error.status }),
+    };
   }
 
   return { status: "found", record: result.data, message: "" };

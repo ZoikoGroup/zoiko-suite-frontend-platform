@@ -774,13 +774,91 @@ export function describeNextStep(resolution: BoardResolution): string {
 }
 
 /**
+ * What a board refusal carries beyond its message.
+ *
+ * board-resolutions-svc answers some refusals with a body the console can match
+ * on and others — the envelope middleware's 401, a bare 500 — with something
+ * that names a header, or with nothing at all. The status is the only thing
+ * present in every case, so it is passed alongside rather than parsed back out
+ * of the folded message string.
+ */
+export type BoardErrorContext = {
+  /** The HTTP status, when the failure had one. */
+  status?: number;
+  /** What a 404 means for this particular write. */
+  notFound?: string;
+  /** What a 409 means for this particular write. */
+  conflict?: string;
+};
+
+/** Strip the console's own framing off a refusal, leaving the service's words.
+ *
+ *  client.ts folds a failure into `board-resolutions-svc rejected the write
+ *  (400) — <detail>`. That prefix is for a developer reading a log; quoting it
+ *  back at a company secretary names a service and a status code they cannot
+ *  act on. Only the detail is ever shown, and only as a marked quotation. */
+function boardDetail(message: string): string {
+  const separator = message.indexOf(" — ");
+  return separator === -1 ? message : message.slice(separator + 3).trim();
+}
+
+/**
  * Turn a refused board write into something the reader can act on.
  *
  * The service answers in short machine phrases, so the matching is on those.
  * Each message says what was refused, why, and what would make it go through —
  * a refusal a reader cannot act on is not much better than the status code.
+ *
+ * Nothing here returns the service's phrasing on its own. A director told
+ * `envelope_incomplete: canonical input contract violated: request_id` learns
+ * only that something went wrong, and cannot tell whether the board's decision
+ * was recorded — which is the one thing they came to find out. Where no wording
+ * fits, the fallback says what happened and quotes the service's words as a
+ * quotation, so the fact stays reportable without being the answer.
  */
-export function explainBoardError(message: string): string {
+export function explainBoardError(message: string, context: BoardErrorContext = {}): string {
+  // ── The request never reached the service ─────────────────────────────────
+  //
+  // These arrive as sentences already, but they name a port and a URL. Matched
+  // first, because the board panel's reads degrade to a written empty state
+  // while a write in the same session would otherwise report the same outage
+  // as `board-resolutions-svc is unreachable at http://localhost:8122`.
+  if (message.includes("is unreachable at")) {
+    return (
+      "Nothing was saved. The service that holds the board's records is not running, or " +
+      "cannot be reached from here — this is not something you entered. It has to be " +
+      "started before meetings or resolutions can be recorded."
+    );
+  }
+  if (message.includes("did not respond within")) {
+    return (
+      "Nothing was saved. The service that holds the board's records did not answer in " +
+      "time. Try again — if it keeps happening the service is overloaded or stuck, and " +
+      "needs looking into."
+    );
+  }
+  if (message.includes("non-JSON body")) {
+    return (
+      "The service sent back something this console could not read, so it cannot say " +
+      "whether anything was saved. Check the register below before trying again, and " +
+      "report it."
+    );
+  }
+
+  // ── Refused before the handler ever saw the request ───────────────────────
+  //
+  // Checked ahead of the field branches: the envelope names its unmet fields —
+  // `legal_entity_id`, `correlation_id` — in the same string, so a later match
+  // on one of those would report a console fault as something the reader left
+  // blank and send them back to a form that is already complete.
+  if (message.includes("envelope_incomplete")) {
+    return (
+      "Nothing was saved. The request was missing information the service requires on " +
+      "every change. This is a fault in the console rather than in anything you entered — " +
+      "report it rather than retyping the form."
+    );
+  }
+
   if (message.includes("principal may not approve or decide on their own submission")) {
     return (
       "Refused: the person who proposed a resolution is not allowed to be the one who " +
@@ -794,6 +872,16 @@ export function explainBoardError(message: string): string {
       "Refused: the pass has to be attributed to whoever is signed in, and this request " +
       "named someone else. A pass recorded against another person's name would defeat the " +
       "point of recording it."
+    );
+  }
+  // The same control on the way in. Proposing under another person's name would
+  // put their name on the record AND leave the proposer free to pass their own
+  // resolution afterwards, since the segregation check compares the two names.
+  if (message.includes("created_by")) {
+    return (
+      "Refused: a resolution is filed under whoever is signed in, and this request named " +
+      "someone else. Recording it against another person would also leave you free to pass " +
+      "your own resolution later, which is the thing the board's rules exist to prevent."
     );
   }
   if (message.includes("forbidden")) {
@@ -863,13 +951,90 @@ export function explainBoardError(message: string): string {
   if (message.includes("request body exceeds")) {
     return "The wording is too long to store. Shorten it, or attach the full text as a document instead.";
   }
+  // Distinct from "a submitted field is not a valid value": that is a value the
+  // service understood and would not accept, this is a request it could not
+  // read at all. Nothing the reader typed produces it.
+  if (message.includes("invalid request body")) {
+    return (
+      "Nothing was saved. The service could not read the request this console sent. That is " +
+      "a fault in the console rather than in what you entered — report it."
+    );
+  }
+  // Paging, from the register's own reads rather than from a form. Named so it
+  // cannot fall through to "check what you entered", which would send the
+  // reader to a form that had nothing to do with it.
+  if (message.includes("limit must be an integer") || message.includes("offset must be")) {
+    return (
+      "The list could not be fetched: this console asked for the records in a way the " +
+      "service would not accept. Nothing is wrong with the board's records — report it."
+    );
+  }
   if (message.includes("not found")) {
     return (
       "No such record exists for your organisation. A record belonging to another " +
       "organisation reads the same way, so this does not confirm it exists elsewhere."
     );
   }
-  return message;
+
+  // ── Status-based fallback ─────────────────────────────────────────────────
+  //
+  // The branch that catches whatever the service adds later without the console
+  // being taught its wording. A status alone cannot say which conflict or which
+  // missing record it is, so a caller supplies the wording for its own write
+  // where it knows it.
+  switch (context.status) {
+    case 400:
+      return "The service rejected this as invalid and saved nothing. Check what you entered and try again.";
+    case 401:
+      return "The service no longer accepts this session. Sign in again and repeat this.";
+    case 403:
+      return (
+        "You do not have permission to do this for this company. Board records are checked " +
+        "against your permissions for the legal entity they belong to — whoever administers " +
+        "access can grant it."
+      );
+    case 404:
+      return (
+        context.notFound ??
+        "Nothing on record matches the reference given. Check it against the register below — " +
+          "references are long and easy to mistype."
+      );
+    case 409:
+      return (
+        context.conflict ??
+        "This clashes with something already on record, so nothing was saved. Reload the page " +
+          "to see where the resolution stands now."
+      );
+    case 413:
+      return "The wording is too long to store. Shorten it, or attach the full text as a document instead.";
+    case 422:
+      return (
+        "Nothing was changed. The board's rules were not satisfied, so the service refused " +
+        "rather than recording a decision that should not stand."
+      );
+    case 503:
+      return (
+        "Nothing was changed. Something the board service depends on was unavailable, so the " +
+        "request was refused rather than allowed through unchecked. Try again shortly."
+      );
+    default:
+      break;
+  }
+  if (context.status !== undefined && context.status >= 500) {
+    return (
+      "The board service failed while handling this, and nothing was saved. If it keeps " +
+      "happening it is a fault in the service rather than in what you entered."
+    );
+  }
+
+  // Last resort. The service's own words are quoted rather than presented as
+  // the answer: a reader cannot act on them, but whoever they report this to
+  // can, and dropping them would make the refusal unreportable.
+  return (
+    "The board service refused this and nothing was saved. It gave a reason this console " +
+    `does not have wording for yet, repeated here as it was sent: “${boardDetail(message)}”. ` +
+    "Report it with that wording if it keeps happening."
+  );
 }
 
 // ─── 5. Corporate Actions ────────────────────────────────────────────────────

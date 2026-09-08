@@ -7,14 +7,17 @@ import { FIELD, HINT, LABEL, OPTIONAL } from "@/components/admin/shared/form";
 import {
   assignRoleAction,
   createSoDRuleAction,
+  setSoDRuleEnforcementAction,
   revokeAssignmentAction,
 } from "@/app/admin/access-control/actions";
 import {
   IDLE_ASSIGN_ROLE,
   IDLE_CREATE_SOD_RULE,
+  IDLE_SOD_ENFORCEMENT,
   IDLE_REVOKE_ASSIGNMENT,
   type AssignRoleState,
   type CreateSoDRuleState,
+  type SoDRuleEnforcementState,
   type RevokeAssignmentState,
 } from "@/app/admin/access-control/state";
 import type { RoleDefinition } from "@/lib/api/access-control";
@@ -344,7 +347,8 @@ export function SoDRulesPanel({
                 <th className="py-2 pr-4 font-medium">Domain</th>
                 <th className="py-2 pr-4 font-medium">Conflicting actions</th>
                 <th className="py-2 pr-4 font-medium">Type</th>
-                <th className="py-2 font-medium">Applies to</th>
+                <th className="py-2 pr-4 font-medium">Applies to</th>
+                <th className="py-2 font-medium">Enforcement</th>
               </tr>
             </thead>
             <tbody>
@@ -364,7 +368,7 @@ export function SoDRulesPanel({
                       <Badge tone="neutral">inactive</Badge>
                     )}
                   </td>
-                  <td className="py-2 text-xs text-slate-600 dark:text-slate-400">
+                  <td className="py-2 pr-4 text-xs text-slate-600 dark:text-slate-400">
                     {r.tenant_id ? (
                       "this tenant"
                     ) : (
@@ -372,6 +376,9 @@ export function SoDRulesPanel({
                         <Badge tone="warning">every tenant</Badge>
                       </span>
                     )}
+                  </td>
+                  <td className="max-w-[16rem] py-2 align-top text-xs">
+                    <SoDRuleEnforcementButton rule={r} />
                   </td>
                 </tr>
               ))}
@@ -446,6 +453,64 @@ export function SoDRulesPanel({
           </ResultBanner>
         )}
       </form>
+    </div>
+  );
+}
+
+/**
+ * Stop a conflict rule denying, or start it again.
+ *
+ * The control this object never had. `active_flag` was always what stopped an
+ * SoD rule denying and no route could set it, so a rule authored by mistake
+ * refused its action to every principal holding the pair with no way back
+ * through the API.
+ *
+ * Not offered for a platform-wide rule. Those bind every organisation and the
+ * service answers 404 from a single tenant's scope — deliberately — so a
+ * button here could only ever fail, and a control that reliably fails teaches
+ * an operator to ignore refusals.
+ */
+function SoDRuleEnforcementButton({ rule }: { rule: SoDRule }) {
+  const [state, action, pending] = useActionState<SoDRuleEnforcementState, FormData>(
+    setSoDRuleEnforcementAction,
+    IDLE_SOD_ENFORCEMENT,
+  );
+
+  if (!rule.tenant_id) {
+    return (
+      <span className="text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+        Applies to every organisation — only whoever administers the platform can change it.
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <form action={action}>
+        <input type="hidden" name="sod_rule_id" value={rule.sod_rule_id} />
+        <input type="hidden" name="active" value={rule.active_flag ? "false" : "true"} />
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          {pending ? "Saving…" : rule.active_flag ? "Stop enforcing" : "Enforce again"}
+        </button>
+      </form>
+
+      {state.status !== "idle" && (
+        <p
+          className={
+            state.status === "retired" || state.status === "reactivated"
+              ? "text-[11px] leading-relaxed text-emerald-700 dark:text-emerald-400"
+              : "text-[11px] leading-relaxed text-rose-700 dark:text-rose-400"
+          }
+          role="status"
+          aria-live="polite"
+        >
+          {state.message}
+        </p>
+      )}
     </div>
   );
 }

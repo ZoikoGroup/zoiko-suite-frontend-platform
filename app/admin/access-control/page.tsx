@@ -11,10 +11,17 @@ import {
 } from "@/components/ui";
 import { PageHeader } from "@/components/admin/shared";
 import {
+  AbacRulesPanel,
+  AccessDecisionLookup,
   AssignmentsPanel,
   AssignRoleForm,
   AttachBundleForm,
+  DeclareAbacRuleForm,
   DefineRoleForm,
+  DelegateAuthorityForm,
+  EvaluateAccessForm,
+  EvaluationDelegationsPanel,
+  EvaluationRolesPanel,
   RoleCataloguePanel,
   SoDRulesPanel,
   UpdateRoleForm,
@@ -231,6 +238,148 @@ async function LivePlane() {
   );
 }
 
+
+/**
+ * The evaluation plane: the questions the service exists to answer.
+ *
+ * Deliberately LAST on the page, after the definitions, the grants and the
+ * conflict rules. The order is an argument: everything above is what an
+ * operator configures, and this is the only place that says what any of it
+ * actually amounts to. A page that ended at "Live grants" invited the reading
+ * that a well-formed set of grants IS the access control — and the whole
+ * lesson of this service is that grants are one of five layers, four of which
+ * can take an action away again.
+ */
+async function EvaluationPlane() {
+  const identity = await sessionIdentity();
+  if (!identity) return null;
+
+  return (
+    <div className="space-y-8">
+      <div className="rounded-xl border border-navy-200 bg-navy-50/60 p-4 text-xs leading-relaxed text-slate-600 dark:border-navy-500/30 dark:bg-navy-500/10 dark:text-slate-400">
+        <p>
+          <strong className="text-slate-900 dark:text-slate-100">
+            This is the service every other service asks.
+          </strong>{" "}
+          A permission check runs through five layers in order: the roles somebody holds, then
+          any authority lent to them, then whether the combination breaks a separation-of-duties
+          rule, then whether they are acting on their own work, then any attribute condition on
+          the action. The first two can grant; the last three can only take away.
+        </p>
+        <p className="mt-2">
+          <strong className="text-slate-900 dark:text-slate-100">
+            A refusal is not the same as a failure.
+          </strong>{" "}
+          &ldquo;You may not&rdquo; is an answer, recorded with the reason it was reached.
+          &ldquo;We could not determine whether you may&rdquo; is the service declining to
+          guess — nothing is decided and nothing is recorded, and every service asking that
+          question is refusing to write while it lasts. The panels below never show those the
+          same way.
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Check what somebody can do</CardTitle>
+          <CardDescription>
+            Ask the same question a service asks before it writes, and read the answer with its
+            reason. The answer is recorded as a decision in its own right — this is not a
+            rehearsal.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <EvaluateAccessForm legalEntityId={identity.legalEntityId} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Explain a decision that was already made</CardTitle>
+          <CardDescription>
+            Every permission check ever made was recorded before its answer was returned, so that
+            a refusal could be explained afterwards. Paste the reference to read one back.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AccessDecisionLookup />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Roles as the enforcing plane holds them</CardTitle>
+          <CardDescription>
+            The row a permission check actually joins through. A role retired in the catalogue at
+            the top of this page while it is still enforced here is a retirement that is a label
+            and not a control — which is why both lists are shown.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<PanelSkeleton />}>
+            <EvaluationRolesPanel identity={identity} />
+          </Suspense>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Borrowed authority</CardTitle>
+          <CardDescription>
+            Who is currently acting on somebody else&rsquo;s behalf. A delegation can never confer
+            more than the lender holds themselves, and it shrinks automatically if the
+            lender&rsquo;s own access does.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <Suspense fallback={<PanelSkeleton />}>
+            <EvaluationDelegationsPanel identity={identity} />
+          </Suspense>
+
+          <div className="border-t border-slate-100 pt-6 dark:border-slate-800">
+            <h3 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-200">
+              Lend your authority to somebody
+            </h3>
+            <p className="mb-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+              You can only lend what you hold yourself, and only you can withdraw it again. What
+              it confers is checked against your own access on every decision, so it narrows on
+              its own if yours does.
+            </p>
+            <DelegateAuthorityForm />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-amber-200 dark:border-amber-500/30">
+        <CardHeader>
+          <CardTitle>Attribute conditions</CardTitle>
+          <CardDescription>
+            The last layer, and the only one that judges the request rather than the person. Every
+            condition here can take an action away and none can grant one — so a condition is
+            never the fix for somebody being unable to do their job.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <Suspense fallback={<PanelSkeleton rows={3} />}>
+            <AbacRulesPanel identity={identity} />
+          </Suspense>
+
+          <div className="border-t border-slate-100 pt-6 dark:border-slate-800">
+            <h3 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-200">
+              Declare a condition
+            </h3>
+            <p className="mb-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+              In force the moment it saves, with nobody having to do anything else. The easiest
+              way to get this wrong is to require an attribute the calling service does not send —
+              which refuses the action for everybody, immediately.
+            </p>
+            <DeclareAbacRuleForm />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AccessControlPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8 p-6">
@@ -300,6 +449,10 @@ export default function AccessControlPage() {
 
       <Suspense fallback={<PanelSkeleton rows={6} />}>
         <LivePlane />
+      </Suspense>
+
+      <Suspense fallback={<PanelSkeleton rows={8} />}>
+        <EvaluationPlane />
       </Suspense>
     </div>
   );

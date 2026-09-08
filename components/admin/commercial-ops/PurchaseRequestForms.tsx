@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { CheckCircle2, Info, AlertCircle, ThumbsUp, ThumbsDown } from "lucide-react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { PurchaseRequestSummary } from "./PurchaseRequestSummary";
 import {
   submitPurchaseRequest,
   submitRequestApproval,
@@ -71,7 +72,21 @@ function Feedback({ state }: { state: RequestActionState }) {
       aria-live="polite"
     >
       <feedback.icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="break-words">{state.message}</span>
+      <div className="min-w-0 flex-1 space-y-2.5">
+        <p className="break-words">{state.message}</p>
+        {/* The record the write produced, read back in plain English. A
+            one-line confirmation says the write happened; it does not let the
+            reader check that what was stored is what they meant, and that is
+            the part they cannot get anywhere else on the form.
+
+            On its own ground rather than tinted by the banner: it is a neutral
+            read of what was stored, not part of the verdict. */}
+        {state.request && state.status !== "error" && (
+          <div className="rounded-lg bg-white/70 p-3 ring-1 ring-inset ring-black/5 dark:bg-slate-900/40 dark:ring-white/5">
+            <PurchaseRequestSummary request={state.request} variant="compact" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -139,7 +154,8 @@ export function RaiseRequestForm() {
           {pending ? "Raising…" : "Raise request"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Step 1 of 2. Lands PENDING — no order can be issued against it until it is approved.
+          Step 1 of 2. It goes on the register awaiting a decision — no order can be placed
+          against it until somebody else approves it.
         </p>
       </div>
 

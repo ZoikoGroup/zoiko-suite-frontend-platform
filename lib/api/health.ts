@@ -92,6 +92,7 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "filing-preparation-svc", port: 8130 },
     { name: "tax-authority-interface-svc", port: 8147 },
   ],
+  "source-authority": [{ name: "source-authority-svc", port: 8150 }],
   compliance: [
     { name: "obligations-svc", port: 8088 },
     { name: "evidence-manifest-svc", port: 8095 },

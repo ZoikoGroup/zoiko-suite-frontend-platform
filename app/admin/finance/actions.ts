@@ -55,6 +55,7 @@ import {
   checkPeriodReadiness,
   lockFiscalPeriod,
   explainCloseError,
+  describeCloseStatus,
   explainBlockingIssue,
   type PeriodLockResult,
 } from "@/lib/api/financial-close";
@@ -701,7 +702,9 @@ export async function registerFiscalPeriod(
     return {
       status: "error",
       message:
-        "A period name is required. general-ledger-svc matches a journal's fiscal_period against this string exactly, with no normalisation — so “2026-7” and “2026-07” are two different periods, and only one of them will ever be locked.",
+        "A period name is required, and it has to be written exactly the way journals for this " +
+        "period are filed — nothing tidies it up. “2026-7” and “2026-07” count as two separate " +
+        "periods, and a close would only ever find the journals filed under the one it matches.",
     };
   }
   if (!DATE_RE.test(periodStart) || !DATE_RE.test(periodEnd)) {
@@ -725,7 +728,10 @@ export async function registerFiscalPeriod(
   });
 
   if (!result.ok) {
-    return { status: "error", message: explainCloseError(result.error.message) };
+    return {
+      status: "error",
+      message: explainCloseError(result.error.message, { status: result.error.status }),
+    };
   }
 
   refresh();
@@ -740,7 +746,7 @@ export async function registerFiscalPeriod(
     : {
         status: "replayed",
         periodId: period.fiscal_period_id,
-        message: `No new period written — ${period.period_name} was already registered for this entity (currently ${period.close_status}, ID ${period.fiscal_period_id}). The name is unique per legal entity, so a retried submit resolves to the original rather than creating a second period that could be locked independently.`,
+        message: `No new period written — ${period.period_name} was already registered for this company, and stands as ${describeCloseStatus(period.close_status).label.toLowerCase()}. The name can only be used once per company, so submitting the form again resolved to the period that already exists rather than creating a second one that could be closed separately.`,
       };
 }
 
@@ -769,7 +775,15 @@ export async function checkCloseReadiness(
 
   const result = await checkPeriodReadiness(periodId, identity);
   if (!result.ok) {
-    return { status: "error", message: explainCloseError(result.error.message) };
+    return {
+      status: "error",
+      message: explainCloseError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That period is no longer on record for this company, so nothing was checked. " +
+          "Reload the register to see which periods it holds now.",
+      }),
+    };
   }
 
   const readiness = result.data;
@@ -844,10 +858,18 @@ export async function closeFiscalPeriod(
       return {
         status: "unevidenced",
         periodId,
-        message: explainCloseError(result.error.message),
+        message: explainCloseError(result.error.message, { status: result.error.status }),
       };
     }
-    return { status: "error", message: explainCloseError(result.error.message) };
+    return {
+      status: "error",
+      message: explainCloseError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That period is no longer on record for this company, so nothing was closed. " +
+          "Reload the register to see which periods it holds now.",
+      }),
+    };
   }
 
   refresh();

@@ -7,3 +7,5 @@
 export { PurchaseRequestPanel } from "../commercial-ops/PurchaseRequestPanel";
 export { PurchaseRequestTable } from "../commercial-ops/PurchaseRequestTable";
 export { RaiseRequestForm, DecideRequestForm } from "../commercial-ops/PurchaseRequestForms";
+export { PurchaseRequestSummary } from "../commercial-ops/PurchaseRequestSummary";
+export { PurchaseRequestLookup } from "../commercial-ops/PurchaseRequestLookup";

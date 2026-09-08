@@ -105,6 +105,12 @@ const DEFAULTS = {
   // documents: append-only version lineage, a SHA-256 checksum re-verified on
   // every read, and an append-only access log of who read what.
   documentVault: "http://localhost:8094",
+  // 8150, per compose. source-authority-svc answers "which connected system's
+  // value should I trust for this field, right now" — precedence rules that are
+  // platform-wide reference data, composed over normalized facts that are
+  // tenant business data. The two are deliberately scoped differently; see
+  // lib/api/source-authority.ts.
+  sourceAuthority: "http://localhost:8150",
   // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
   //
   // TWO OF THESE COLLIDE with entries above, and the collision is inherited
@@ -182,6 +188,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   boardResolutions: "/board-resolutions-svc",
   delegatedAuthority: "/delegated-authority-svc",
   documentVault: "/document-vault-svc",
+  sourceAuthority: "/source-authority-svc",
   // Tax Domain
   taxRules: "/tax-rules-svc",
   taxDetermination: "/tax-determination-svc",

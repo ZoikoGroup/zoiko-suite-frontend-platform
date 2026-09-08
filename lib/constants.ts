@@ -24,6 +24,7 @@ import {
   FileText,
   Fingerprint,
   Bot,
+  Layers,
 } from "lucide-react";
 
 export type DomainKey =
@@ -35,6 +36,7 @@ export type DomainKey =
   | "compliance"
   | "jurisdictions"
   | "delegations"
+  | "source-authority"
   | "documents"
   | "commercial-ops"
   | "purchase-requests"
@@ -188,6 +190,16 @@ export const DOMAINS: Domain[] = [
     coreServices: ["Delegated Authority Service"],
   },
   {
+    key: "source-authority",
+    label: "Source Authority",
+    href: "/admin/source-authority",
+    icon: Layers,
+    purpose:
+      "Decide which connected system's value to trust for a field — precedence rules over the systems, append-only observations of what each one reported, and a resolution that blocks rather than guessing when equally-ranked sources disagree.",
+    status: "operational",
+    coreServices: ["Source Authority Service"],
+  },
+  {
     key: "jurisdictions",
     label: "Jurisdictions & Rules",
     href: "/admin/jurisdictions",
@@ -333,6 +345,10 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
     items: [
       { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },
       { label: "Jurisdictions & Rules", href: "/admin/jurisdictions", icon: Globe2 },
+      // Sits here rather than under a business domain because it decides which
+      // system is believed for a field family across every domain at once —
+      // payroll, HR and billing all resolve through the same precedence rules.
+      { label: "Source Authority", href: "/admin/source-authority", icon: Layers },
     ],
   },
   {
