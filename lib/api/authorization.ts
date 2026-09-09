@@ -491,6 +491,227 @@ export async function getAccessDecision(
   );
 }
 
+/**
+ * Search the decision log.
+ *
+ * WHY THIS EXISTS, and it is not a convenience. The service's spec places two
+ * evidence obligations on it: every decision logged with actor, action, basis
+ * and outcome, and — separately — "denials must be evidentially retrievable".
+ * The first has always held. The second did not, because `getAccessDecision`
+ * was the only read, and retrieval by id only serves somebody who already has
+ * the id. For a denial that id exists in exactly one place: the response handed
+ * to the service that was refused. So answering "why was this person blocked
+ * last Tuesday" meant going and reading another service's logs to find a UUID
+ * to bring back here. `AccessDecisionLookup`'s own hint text said so.
+ *
+ * Every filter is optional and each one narrows. There is deliberately no
+ * tenant filter: the scope comes from the caller's verified envelope header and
+ * no parameter here can widen it.
+ *
+ * Newest first, keyset-paginated. Pass a previous page's `next_cursor` as
+ * `cursor` to continue; its ABSENCE is the only correct test for "that was the
+ * last page" — a short page is not proof of the end once a filter is applied.
+ * The token is opaque and the service refuses one it did not issue rather than
+ * silently restarting at page one.
+ */
+export type ListAccessDecisionsOptions = {
+  principalId?: string;
+  /** "GRANTED" or "DENIED". Anything else is refused with a 400 that names the
+   *  field, rather than quietly matching nothing — an empty list caused by a
+   *  typo is indistinguishable from a tenant that has denied nobody. */
+  outcome?: "GRANTED" | "DENIED";
+  actionType?: string;
+  legalEntityId?: string;
+  /** RFC3339, inclusive. */
+  decidedFrom?: string;
+  /** RFC3339, exclusive. */
+  decidedTo?: string;
+  /** 1..200. Above 200 is clamped by the service, not refused. */
+  limit?: number;
+  cursor?: string;
+};
+
+export type AccessDecisionPage = {
+  decisions: AccessDecision[];
+  /** Absent on the last page. */
+  next_cursor?: string;
+};
+
+export async function listAccessDecisions(
+  identity: Identity,
+  options: ListAccessDecisionsOptions = {},
+): Promise<ApiResult<AccessDecisionPage>> {
+  return apiGet<AccessDecisionPage>(SERVICE, "/v1/access-decisions", {
+    identity,
+    query: {
+      principal_id: options.principalId,
+      decision_outcome: options.outcome,
+      action_type: options.actionType,
+      legal_entity_id: options.legalEntityId,
+      decided_from: options.decidedFrom,
+      decided_to: options.decidedTo,
+      limit: options.limit ? String(options.limit) : undefined,
+      cursor: options.cursor,
+    },
+  });
+}
+
+// ── the three pre-checks ────────────────────────────────────────────────────
+//
+// None of these records a decision artifact, and that is the point rather than
+// an omission. The decision log means "one row per authorization of a material
+// act"; these answer questions ABOUT the grant graph, and rows from them would
+// make that meaning false — which is the meaning an auditor reads it for.
+//
+// So they are safe to call while somebody is filling in a form. `authorize` is
+// not: every call to it writes a row an auditor will later read.
+
+export type EntityScopeResult = {
+  legal_entity_id: string;
+  in_scope: boolean;
+  /** Same vocabulary as `decision_basis`, so `explainDecisionBasis` reads it. */
+  basis: string;
+  /** Only returned when no `actionType` was asked for. */
+  permitted_actions?: string[];
+};
+
+/**
+ * "Which of these companies may this person act in?"
+ *
+ * One call for a whole list. Asking the same question through `authorize`
+ * would be one call per company AND one row in the decision log per company —
+ * twelve audit records written to grey out four buttons.
+ *
+ * Omit `actionType` for the broad question ("can they act here at all"), which
+ * also returns everything they hold in each entity. Give it for the narrow one
+ * ("can they do this specific thing here"), which suppresses the full list:
+ * a caller asking about one action has not asked for the person's whole
+ * permission map.
+ *
+ * Delegated authority counts as in scope — a delegate acting in a company is
+ * in scope for it, and saying otherwise would grey out exactly the buttons a
+ * delegation was created to enable.
+ */
+export async function validateEntityScope(input: {
+  identity: Identity;
+  principalId: string;
+  /** Up to 100. Accepts PLATFORM_SCOPE_SENTINEL. */
+  legalEntityIds: string[];
+  actionType?: string;
+}): Promise<ApiWriteResult<{ principal_id: string; action_type?: string; results: EntityScopeResult[] }>> {
+  return apiPost(
+    SERVICE,
+    "/v1/entity-scope/validate",
+    {
+      principal_id: input.principalId,
+      legal_entity_ids: input.legalEntityIds,
+      ...(input.actionType ? { action_type: input.actionType } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export type SoDConflict = {
+  candidate_action: string;
+  conflicts_with: string;
+  /** "held" — the person already has the other action, so something has to be
+   *  taken away first. "candidate" — the bundle conflicts with itself and has
+   *  to be split. The remedy differs, which is why the field exists. */
+  source: "held" | "candidate" | string;
+};
+
+export type SoDValidation = {
+  conflict_free: boolean;
+  conflicts: SoDConflict[];
+  /** Actions a rule forbids performing on an item the person also prepared.
+   *  NOT a conflict: the grant is fine, one use of it will be refused. */
+  own_object_restricted?: string[];
+};
+
+/**
+ * "Would granting this break separation of duties?" — asked BEFORE the grant
+ * exists.
+ *
+ * This is the question `authorize` structurally cannot answer. Separation of
+ * duties is violated by a COMBINATION, so the conflict only becomes visible
+ * once the combination exists — meaning the only way to discover that a role
+ * must not go to somebody was to grant it and then watch every use of it be
+ * denied. The control worked; the operator was left holding a live assignment
+ * that confers nothing, with no explanation until they read a decision log.
+ *
+ * Give `principalId` + `legalEntityId` for "may THIS person hold this role",
+ * which checks the candidates against what they already hold (including by
+ * delegation). Omit both for "is this bundle internally conflicted", which
+ * checks the candidates against each other — the case somebody designing a
+ * role needs before anybody holds it. A principal WITHOUT an entity is
+ * refused rather than downgraded to the narrower question: grants are
+ * entity-scoped, and answering the other question would return
+ * `conflict_free: true` for a person who does conflict.
+ *
+ * `conflict_free` reflects conflicts only. An own-object restriction is
+ * reported separately and does not block the grant.
+ */
+export async function validateSoDConflicts(input: {
+  identity: Identity;
+  /** Up to 200. */
+  candidateActions: string[];
+  principalId?: string;
+  /** Required when principalId is given. */
+  legalEntityId?: string;
+}): Promise<ApiWriteResult<SoDValidation>> {
+  return apiPost<SoDValidation>(
+    SERVICE,
+    "/v1/sod/validate",
+    {
+      candidate_actions: input.candidateActions,
+      ...(input.principalId ? { principal_id: input.principalId } : {}),
+      ...(input.legalEntityId ? { legal_entity_id: input.legalEntityId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export type DelegatedAccessEvaluation = {
+  principal_id: string;
+  legal_entity_id: string;
+  has_delegated_access: boolean;
+  basis: string;
+  delegated_actions?: string[];
+  /** Whether they ALSO hold the named action through their own roles. Only
+   *  meaningful when an actionType was given. */
+  held_directly?: boolean;
+};
+
+/**
+ * "Is this person acting on their own authority, or somebody else's?"
+ *
+ * `authorize` collapses both paths into one GRANTED and names RBAC as the
+ * basis when both apply — so a person who holds an action directly AND by
+ * delegation reads as pure RBAC. For a four-eyes step that has to know whether
+ * the delegate or the delegator satisfied it, that is the whole question, and
+ * `held_directly` is the field that answers it.
+ *
+ * `delegated_actions` is already intersected with the lenders' LIVE grants by
+ * the service, so it can never list something a lender no longer holds.
+ */
+export async function evaluateDelegatedAccess(input: {
+  identity: Identity;
+  principalId: string;
+  legalEntityId: string;
+  actionType?: string;
+}): Promise<ApiWriteResult<DelegatedAccessEvaluation>> {
+  return apiPost<DelegatedAccessEvaluation>(
+    SERVICE,
+    "/v1/delegated-access/evaluate",
+    {
+      principal_id: input.principalId,
+      legal_entity_id: input.legalEntityId,
+      ...(input.actionType ? { action_type: input.actionType } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
 // ── the evaluation ──────────────────────────────────────────────────────────
 
 /** `legal_entity_id: "PLATFORM"` resolves to the one configured platform-scope
@@ -855,18 +1076,27 @@ export type BasisExplanation = {
   /** The role code, delegator, conflicting action or rule code the basis
    *  names, when it names one — so a UI can link or highlight it. */
   subject?: string;
-  /** Which layer decided: the four the service documents, plus "unknown". */
-  layer: "rbac" | "delegated" | "sod" | "abac" | "none" | "unknown";
+  /**
+   * Which layer decided. "principal" is layer 0 — the account-status gate,
+   * which runs before RBAC and refuses everything for an account that is not
+   * active. It is listed first here because it decides first.
+   */
+  layer: "principal" | "rbac" | "delegated" | "sod" | "abac" | "none" | "unknown";
   unmapped: boolean;
 };
 
 /**
  * Say what a decision basis means.
  *
- * The eight forms the service emits, each `prefix:key=subject` or a bare word.
+ * The nine forms the service emits, each `prefix:key=subject` or a bare word.
  * An unrecognised basis is described as unrecognised rather than guessed at,
  * and is deliberately never presented as a grant — the safe reading of a
  * decision we cannot interpret is that nothing was authorised.
+ *
+ * A basis form the service emits and this function does not match falls
+ * through to "Reason not recognised", which is safe but useless — so every
+ * new basis on the service side needs a branch here. `principal_status:` is
+ * the case that made that concrete.
  */
 export function explainDecisionBasis(rawBasis: string): BasisExplanation {
   const raw = rawBasis?.trim() || "(empty)";
@@ -999,6 +1229,44 @@ export function explainDecisionBasis(rawBasis: string): BasisExplanation {
       subject,
       layer: "abac",
       unmapped: false,
+    };
+  }
+
+  // Layer 0 — the principal-status gate. Must come BEFORE the fallback, and
+  // it is the reason this function was revisited: without it every suspension
+  // denial rendered as "Reason not recognised", which is the least useful
+  // possible answer to "why was this person refused" when the answer is
+  // "because their account has been stood down".
+  if (raw.startsWith("principal_status:")) {
+    const status = raw.slice("principal_status:".length).trim();
+    const suspended = status === "SUSPENDED";
+    const disabled = status === "DISABLED";
+    const known = suspended || disabled;
+    return {
+      label: known
+        ? `Blocked — the account is ${suspended ? "suspended" : "disabled"}`
+        : "Blocked — the account is not active",
+      meaning:
+        "This has nothing to do with what the person is allowed to do. Their account itself " +
+        `is recorded as ${status}, not active, and an account in that state may do nothing at ` +
+        "all — every action is refused before any role or delegation is even looked at. " +
+        (suspended
+          ? "Suspended is normally a temporary hold somebody has applied deliberately."
+          : disabled
+            ? "Disabled is normally permanent — an account that has been closed."
+            : "This platform does not recognise that state, so it is treated as not active, " +
+              "which is the cautious reading.") +
+        " Note that the roles they hold are untouched and still recorded: nothing was revoked.",
+      nextStep:
+        "Nothing here will fix it — granting more roles changes nothing while the account is " +
+        "in this state. The account status is owned by the identity service, so it has to be " +
+        "reinstated there; the moment it is, everything this person held works again exactly " +
+        "as before.",
+      tone: "danger",
+      raw,
+      subject: status,
+      layer: "principal",
+      unmapped: !known,
     };
   }
 
@@ -1293,6 +1561,150 @@ export function describeSoDRule(rule: SoDRule): string {
     `Nobody may hold both ${rule.action_a} and ${rule.action_b}. Somebody who has been given ` +
     `both is refused either one, rather than being allowed the combination.${where}${scope}`
   );
+}
+
+/**
+ * Say what a pre-flight separation-of-duties check came back with.
+ *
+ * Written as the sentence somebody about to click "grant" needs, because that
+ * is when this runs. The two conflict sources get different words on purpose:
+ * they need different remedies, and "there is a conflict" alone leaves the
+ * operator to work out which.
+ */
+export function describeSoDValidation(
+  result: SoDValidation,
+  context: { subjectNamed: boolean } = { subjectNamed: false },
+): { headline: string; detail: string; tone: AuthzTone } {
+  const restricted = result.own_object_restricted ?? [];
+
+  // Own-object restrictions are mentioned in every branch, including the
+  // all-clear one: the grant is fine and one use of it will still be refused,
+  // and finding that out later reads as a bug in the grant.
+  const ownObjectNote =
+    restricted.length === 0
+      ? ""
+      : ` Separately, and this does not block anything: ${restricted.join(", ")} ` +
+        `${restricted.length === 1 ? "is" : "are"} refused on items this person prepared ` +
+        "themselves. The access is real; approving your own work is what is not allowed.";
+
+  if (result.conflict_free) {
+    return {
+      headline: restricted.length === 0 ? "No conflict — safe to grant" : "No conflict — safe to grant, with one caveat",
+      detail:
+        (context.subjectNamed
+          ? "Nothing this person already holds conflicts with these actions, and the actions do not conflict with each other."
+          : "These actions do not conflict with each other. Nobody was named, so this does not say whether a particular person can hold them.") +
+        ownObjectNote,
+      tone: restricted.length === 0 ? "success" : "info",
+    };
+  }
+
+  const held = result.conflicts.filter((c) => c.source === "held");
+  const internal = result.conflicts.filter((c) => c.source === "candidate");
+
+  const parts: string[] = [];
+  if (held.length > 0) {
+    parts.push(
+      "This person ALREADY HOLDS something that conflicts: " +
+        held.map((c) => `${c.candidate_action} against ${c.conflicts_with}`).join("; ") +
+        ". Granting this would leave them refused for both halves, not allowed the combination — " +
+        "so something they currently hold has to be taken away first, or the duty has to go to " +
+        "somebody else.",
+    );
+  }
+  if (internal.length > 0) {
+    parts.push(
+      "These actions conflict WITH EACH OTHER: " +
+        internal.map((c) => `${c.candidate_action} against ${c.conflicts_with}`).join("; ") +
+        ". A role carrying both gives everybody who holds it two duties they may not combine, " +
+        "and then refuses them both — so this set has to be split across two roles.",
+    );
+  }
+
+  return {
+    headline: "Conflict — do not grant this as it stands",
+    detail: parts.join(" ") + ownObjectNote,
+    tone: "danger",
+  };
+}
+
+/**
+ * Say what an entity-scope answer means for one company.
+ *
+ * Kept separate from `explainDecisionBasis` even though it reads the same
+ * basis strings: that function explains a RECORDED DECISION about an action
+ * somebody attempted, and this explains a capability nobody has exercised.
+ * Reusing it would tell an operator their colleague "was refused" for a
+ * question the console asked on its own.
+ */
+export function describeEntityScope(result: EntityScopeResult): string {
+  if (!result.in_scope) {
+    return (
+      "Cannot act here. No role they hold covers this company, and no delegation lends them " +
+      "anything in it — a plain absence rather than a block."
+    );
+  }
+  const basis = explainDecisionBasis(result.basis);
+  const via =
+    basis.layer === "delegated"
+      ? `on authority lent by ${basis.subject ?? "somebody else"}`
+      : basis.layer === "rbac"
+        ? `through the role ${basis.subject ?? "they hold"}`
+        : "through a grant they hold";
+  const count = result.permitted_actions?.length ?? 0;
+  const what = count === 0 ? "" : ` ${count} ${count === 1 ? "action" : "actions"} available.`;
+  return `Can act here ${via}.${what}`;
+}
+
+/**
+ * Say whether authority is the person's own or borrowed.
+ *
+ * `held_directly` is the field worth surfacing, because the decision log
+ * cannot: /v1/authorize names RBAC as the basis when both paths apply, so a
+ * person holding an action both ways looks like ordinary role-based access.
+ * For a four-eyes step that has to know who actually satisfied it, that is
+ * the whole question.
+ */
+export function describeDelegatedAccess(
+  result: DelegatedAccessEvaluation,
+  options: { actionNamed: boolean } = { actionNamed: false },
+): { headline: string; detail: string; tone: AuthzTone } {
+  if (!result.has_delegated_access) {
+    return {
+      headline: "Nothing borrowed",
+      detail: options.actionNamed
+        ? "No live delegation lends this person this action in this company. If they can do it, " +
+          "it is their own access."
+        : "No live delegation lends this person anything in this company.",
+      tone: "neutral",
+    };
+  }
+
+  const basis = explainDecisionBasis(result.basis);
+  const lender = basis.subject ?? "somebody else";
+  const count = result.delegated_actions?.length ?? 0;
+
+  if (options.actionNamed && result.held_directly) {
+    return {
+      headline: "Both — their own access and borrowed authority",
+      detail:
+        `This person can do this in their own right AND has it lent to them by ${lender}. ` +
+        "That matters for any step that needs two different people: a check on the outcome " +
+        "alone would report this as ordinary role-based access and could not tell you a " +
+        "delegation was also in play. Revoking the delegation would not remove the access.",
+      tone: "warning",
+    };
+  }
+
+  return {
+    headline: "Borrowed authority only",
+    detail:
+      `This person does not hold this themselves. They are acting within authority lent by ` +
+      `${lender}, and it disappears the moment that delegation is revoked or expires, or if ` +
+      `${lender} loses the access.` +
+      (count > 0 ? ` ${count} ${count === 1 ? "action is" : "actions are"} lent in this company.` : ""),
+    tone: "info",
+  };
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

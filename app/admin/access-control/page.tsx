@@ -17,12 +17,14 @@ import {
   AssignRoleForm,
   AttachBundleForm,
   DeclareAbacRuleForm,
+  DecisionLogPanel,
   DefineRoleForm,
   DelegateAuthorityForm,
   EvaluateAccessForm,
   EvaluationDelegationsPanel,
   EvaluationRolesPanel,
   RoleCataloguePanel,
+  SoDPrecheckForm,
   SoDRulesPanel,
   UpdateRoleForm,
 } from "@/components/admin/access-control";
@@ -294,10 +296,41 @@ async function EvaluationPlane() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Explain a decision that was already made</CardTitle>
+          <CardTitle>Would this grant break separation of duties?</CardTitle>
           <CardDescription>
-            Every permission check ever made was recorded before its answer was returned, so that
-            a refusal could be explained afterwards. Paste the reference to read one back.
+            Asked <em>before</em> granting. A duty conflict is a combination, so the check above
+            can only find one after it already exists — which used to mean discovering that a
+            role must not go to somebody by giving it to them and watching every use of it be
+            refused. This records nothing.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SoDPrecheckForm legalEntityId={identity.legalEntityId} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>The decision history</CardTitle>
+          <CardDescription>
+            Every permission check ever made, searchable by person, action, answer and date. Until
+            now this record could only be read one row at a time by reference — and a
+            refusal&rsquo;s reference is returned to the service that was refused and nowhere
+            else, so explaining a refusal started by reading another service&rsquo;s logs.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DecisionLogPanel legalEntityId={identity.legalEntityId ?? undefined} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Explain one decision by reference</CardTitle>
+          <CardDescription>
+            When you already have the reference — from the answer a check gave you, or from a
+            service that was refused — this reads that one decision back directly. Searching the
+            history above is the way in when you do not.
           </CardDescription>
         </CardHeader>
         <CardContent>

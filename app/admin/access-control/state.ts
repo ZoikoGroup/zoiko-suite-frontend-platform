@@ -1,11 +1,13 @@
 import type { PermissionBundleDef, RoleDefinition } from "@/lib/api/access-control";
 import type {
   ABACRule,
+  AccessDecision,
   AuthorizeDecision,
   DelegatedAuthority,
   PermissionBundle,
   Role,
   RoleAssignment,
+  SoDConflict,
   SoDRule,
 } from "@/lib/api/authorization";
 
@@ -243,3 +245,85 @@ export const IDLE_BUNDLE_ENFORCEMENT: BundleEnforcementState = { status: "idle" 
 export const IDLE_CREATE_ABAC_RULE: CreateAbacRuleState = { status: "idle" };
 export const IDLE_ABAC_ENFORCEMENT: AbacRuleEnforcementState = { status: "idle" };
 export const IDLE_DELEGATE_AUTHORITY: DelegateAuthorityState = { status: "idle" };
+
+/**
+ * Searching the decision log.
+ *
+ * `searched` carries the page AND the filters it was run with, because the
+ * cursor is only meaningful alongside them: continuing a page with different
+ * filters would silently return a different question's next page. The form
+ * therefore re-submits both together rather than keeping the cursor alone.
+ *
+ * `empty` is kept apart from `searched` with no rows for the reason this
+ * console keeps every such pair apart: on an AUDIT read, "this organisation
+ * refused nobody in that window" and "your filters matched nothing" are
+ * different facts, and reporting the second as the first would let somebody
+ * close an investigation on a typo.
+ */
+export type DecisionSearchFilters = {
+  principalId: string;
+  outcome: "" | "GRANTED" | "DENIED";
+  actionType: string;
+  legalEntityId: string;
+  decidedFrom: string;
+  decidedTo: string;
+};
+
+export type DecisionSearchState =
+  | { status: "idle" }
+  | {
+      status: "searched";
+      decisions: AccessDecision[];
+      /** Absent when this was the last page. Its presence is the only correct
+       *  test for "there is more" — a short page is not proof of the end. */
+      nextCursor?: string;
+      filters: DecisionSearchFilters;
+      message: string;
+    }
+  | { status: "empty"; filters: DecisionSearchFilters; message: string }
+  /** A filter the service refused — a mistyped outcome, an unparseable date,
+   *  an inverted window. Its own state because nothing was searched, and
+   *  showing an empty table would answer the question wrongly. */
+  | { status: "invalidFilter"; message: string }
+  | { status: "unauthorized"; message: string }
+  | { status: "error"; message: string };
+
+/**
+ * The pre-flight separation-of-duties check.
+ *
+ * `conflict` is NOT an error state, and that distinction is the whole point of
+ * the check: a conflict is the control working, discovered before a grant was
+ * made instead of after every use of it started being refused. It gets its own
+ * status so the UI can say "do not grant this" in the words of a finding
+ * rather than the words of a failure.
+ */
+export type SoDPrecheckState =
+  | { status: "idle" }
+  | {
+      status: "clear";
+      headline: string;
+      detail: string;
+      ownObjectRestricted: string[];
+    }
+  | {
+      status: "conflict";
+      headline: string;
+      detail: string;
+      conflicts: SoDConflict[];
+      ownObjectRestricted: string[];
+    }
+  | { status: "refused"; message: string }
+  | { status: "unauthorized"; message: string }
+  | { status: "error"; message: string };
+
+export const IDLE_DECISION_SEARCH: DecisionSearchState = { status: "idle" };
+export const IDLE_SOD_PRECHECK: SoDPrecheckState = { status: "idle" };
+
+export const EMPTY_DECISION_FILTERS: DecisionSearchFilters = {
+  principalId: "",
+  outcome: "",
+  actionType: "",
+  legalEntityId: "",
+  decidedFrom: "",
+  decidedTo: "",
+};

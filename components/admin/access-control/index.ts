@@ -26,3 +26,16 @@ export {
   AbacRulesPanel,
 } from "./EvaluationPlanePanels";
 export { DelegateAuthorityForm, WithdrawDelegationButton } from "./DelegationForms";
+
+// ─── the audit read and the pre-flight check ────────────────────────────────
+//
+// Both are reads. DecisionLogPanel is what makes the service's "denials must
+// be evidentially retrievable" obligation true from here — AccessDecisionLookup
+// needs a reference, and a denial's reference exists only in the response
+// handed to the service that was refused.
+//
+// SoDPrecheckForm asks the one question POST /v1/authorize structurally cannot:
+// whether a grant WOULD breach separation of duties, before it exists. Neither
+// records a decision artifact, unlike EvaluateAccessForm above.
+export { DecisionLogPanel } from "./DecisionLogPanel";
+export { SoDPrecheckForm } from "./SoDPrecheckForm";
