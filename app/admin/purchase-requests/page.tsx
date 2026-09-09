@@ -11,7 +11,7 @@ import {
 } from "@/components/admin/purchase-requests";
 import { DOMAINS } from "@/lib/constants";
 import type { RequestStatus } from "@/lib/api/purchase-requests";
-import { lookupPurchaseRequest } from "../commercial-ops/actions";
+import { lookupPurchaseRequest } from "./actions";
 
 export const metadata: Metadata = { title: "Purchase Requests | Zoiko Suite" };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -19,7 +19,7 @@ import {
   type PrincipalStatus,
   explainIdentityError,
 } from "@/lib/api/identity";
-import { apiGet, type Identity } from "@/lib/api/client";
+import { type Identity } from "@/lib/api/client";
 
 const DEMO_IDENTITY: Identity & { principalId: string; tenantId: string } = {
   principalId: "demo-admin",
@@ -76,7 +76,7 @@ export default function IdentityAdminPage() {
       setResolveResult({ error: explainIdentityError(result.error.message) });
     }
     setResolving(false);
-  }, [bearerToken, legalEntityId]);
+  }, [bearerToken, legalEntityId, callerIdentity]);
 
   // Get Session
   const handleGetSession = useCallback(async () => {
