@@ -2,6 +2,8 @@ import type { PermissionBundleDef, RoleDefinition } from "@/lib/api/access-contr
 import type {
   ABACRule,
   AccessDecision,
+  AuthzTone,
+  EntityScopeResult,
   AuthorizeDecision,
   DelegatedAuthority,
   PermissionBundle,
@@ -327,3 +329,78 @@ export const EMPTY_DECISION_FILTERS: DecisionSearchFilters = {
   decidedFrom: "",
   decidedTo: "",
 };
+
+/**
+ * "Where can this person act?" — the entity-scope check.
+ *
+ * `results` carries one row per company asked about, in the order asked, so a
+ * caller can line the answers up against its own list. `inScopeCount` is kept
+ * alongside rather than derived in the component because the headline sentence
+ * ("can act in 2 of 5") is the answer, and recomputing it in two places is how
+ * the two disagree.
+ */
+/**
+ * What was submitted, echoed back on EVERY non-idle status.
+ *
+ * NOT a convenience. React re-creates the form subtree when the panel's shape
+ * changes between statuses, which discards an uncontrolled input's value — so
+ * after one submit the fields silently reverted to their defaults, and a
+ * "tweak it and run it again" re-sent the ORIGINAL question while showing the
+ * operator the text they had typed. Measured in a browser: a two-line entity
+ * list came back as one line after the first submit.
+ *
+ * Echoing the submission back as `defaultValue` is the same fix
+ * DecisionSearchState carries in its `filters` field, and for the same reason.
+ */
+export type EntityScopeSubmission = {
+  principalId: string;
+  actionType: string;
+  /** The raw textarea contents, so line breaks and order survive. */
+  legalEntityIdsRaw: string;
+};
+
+export type EntityScopeCheckState =
+  | { status: "idle" }
+  | {
+      status: "checked";
+      submitted: EntityScopeSubmission;
+      results: Array<{ result: EntityScopeResult; explanation: string }>;
+      inScopeCount: number;
+      message: string;
+    }
+  | { status: "refused"; submitted: EntityScopeSubmission; message: string }
+  | { status: "unauthorized"; submitted: EntityScopeSubmission; message: string }
+  | { status: "error"; submitted: EntityScopeSubmission; message: string };
+
+/**
+ * "Whose authority is this person using?" — the delegated-access check.
+ *
+ * `bothPaths` is its own field rather than something the UI infers, because it
+ * is the finding: somebody holding an action in their own right AND by
+ * delegation is invisible to the evaluation endpoint, which names RBAC as the
+ * basis when both apply. A four-eyes step reading only the outcome would count
+ * the delegator's own authority as the delegate's.
+ */
+export type DelegatedAccessSubmission = {
+  principalId: string;
+  actionType: string;
+  legalEntityId: string;
+};
+
+export type DelegatedAccessCheckState =
+  | { status: "idle" }
+  | {
+      status: "checked";
+      submitted: DelegatedAccessSubmission;
+      headline: string;
+      detail: string;
+      tone: AuthzTone;
+      delegatedActions: string[];
+      bothPaths: boolean;
+    }
+  | { status: "refused"; submitted: DelegatedAccessSubmission; message: string }
+  | { status: "unauthorized"; submitted: DelegatedAccessSubmission; message: string }
+  | { status: "error"; submitted: DelegatedAccessSubmission; message: string };
+
+export const IDLE_ENTITY_SCOPE_CHECK: EntityScopeCheckState = { status: "idle" };
+export const IDLE_DELEGATED_ACCESS_CHECK: DelegatedAccessCheckState = { status: "idle" };

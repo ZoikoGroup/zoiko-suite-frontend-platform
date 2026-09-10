@@ -39,3 +39,10 @@ export { DelegateAuthorityForm, WithdrawDelegationButton } from "./DelegationFor
 // records a decision artifact, unlike EvaluateAccessForm above.
 export { DecisionLogPanel } from "./DecisionLogPanel";
 export { SoDPrecheckForm } from "./SoDPrecheckForm";
+
+// The other two pre-flight questions, and the last of the five Doc 03 §8.3
+// inbound APIs to reach the console. Neither is the evaluate form run twice:
+// asking "which companies" through /v1/authorize costs one decision artifact
+// per company for a question nobody acted on, and "whose authority" it cannot
+// answer at all — it names the role as the basis when both paths apply.
+export { EntityScopeCheckForm, DelegatedAccessCheckForm } from "./ReachChecks";

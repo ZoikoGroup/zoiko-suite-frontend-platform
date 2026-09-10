@@ -805,6 +805,24 @@ export type CreateRoleInput = {
  * existed in the tenant and the service resolved to it rather than creating a
  * second — the code is the idempotent key, so a retried submit cannot produce
  * two roles that could then be assigned independently.
+ *
+ * ── THE CONSOLE DELIBERATELY DOES NOT CALL THIS ─────────────────────────────
+ *
+ * It is the one function in this module with no caller, and that is by design
+ * rather than an oversight — worth saying, because an unused export on a module
+ * where everything else is wired reads as something somebody forgot.
+ *
+ * access-control-svc owns role DEFINITIONS: the governed, auditable record that
+ * a role exists and what it is permitted to permit. It forwards each write on to
+ * authorization-svc itself, synchronously and fail-closed. So the console
+ * defines roles through `createRoleDefinition` in `./access-control`, and this
+ * route is still exercised on every one of those — one hop further along.
+ *
+ * Calling this directly would create a role in the evaluation plane with no
+ * definition behind it: enforced, assignable, and absent from the register an
+ * auditor reads. Kept because it is this service's real contract and a
+ * non-console caller (a migration, a seeding script) legitimately needs it —
+ * `deployments/scripts/seed-demo-rbac.ps1` is exactly that caller.
  */
 export async function createRole(input: CreateRoleInput): Promise<ApiWriteResult<Role>> {
   return apiPost<Role>(

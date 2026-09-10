@@ -18,10 +18,12 @@ import {
   AttachBundleForm,
   DeclareAbacRuleForm,
   DecisionLogPanel,
+  DelegatedAccessCheckForm,
   DefineRoleForm,
   DelegateAuthorityForm,
   EvaluateAccessForm,
   EvaluationDelegationsPanel,
+  EntityScopeCheckForm,
   EvaluationRolesPanel,
   RoleCataloguePanel,
   SoDPrecheckForm,
@@ -306,6 +308,33 @@ async function EvaluationPlane() {
         </CardHeader>
         <CardContent>
           <SoDPrecheckForm legalEntityId={identity.legalEntityId} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Where can somebody act, and on whose authority?</CardTitle>
+          <CardDescription>
+            The other two questions the check above cannot answer. Asking &ldquo;which
+            companies&rdquo; through it costs one recorded decision per company for a question
+            nobody acted on; &ldquo;whose authority&rdquo; it cannot answer at all, because it
+            reports the role as the reason whenever somebody holds an action both in their own
+            right and by delegation. Neither of these records anything.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <EntityScopeCheckForm legalEntityId={identity.legalEntityId ?? undefined} />
+
+          <div className="border-t border-slate-100 pt-6 dark:border-slate-800">
+            <h3 className="mb-1 text-sm font-semibold text-slate-800 dark:text-slate-200">
+              Own authority, or borrowed?
+            </h3>
+            <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+              For a step that needs two different people, this is the question — a delegate
+              acting on the delegator&rsquo;s authority is not the second person.
+            </p>
+            <DelegatedAccessCheckForm legalEntityId={identity.legalEntityId ?? undefined} />
+          </div>
         </CardContent>
       </Card>
 

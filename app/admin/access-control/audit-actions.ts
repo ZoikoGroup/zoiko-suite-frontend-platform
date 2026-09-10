@@ -43,14 +43,21 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import { parsePermittedActions } from "@/lib/api/access-control";
 import {
+  describeDelegatedAccess,
+  describeEntityScope,
   describeSoDValidation,
+  evaluateDelegatedAccess,
   explainAuthorizationError,
   listAccessDecisions,
+  PLATFORM_SCOPE_SENTINEL,
+  validateEntityScope,
   validateSoDConflicts,
 } from "@/lib/api/authorization";
 import {
   type DecisionSearchFilters,
   type DecisionSearchState,
+  type DelegatedAccessCheckState,
+  type EntityScopeCheckState,
   type SoDPrecheckState,
 } from "./state";
 
@@ -75,6 +82,15 @@ function asCode(raw: string): string {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Shared by the two reach checks below, which refuse a malformed company
+ *  reference themselves so the message can name WHICH entry was wrong —
+ *  the service refuses the whole batch on the first bad one and cannot say
+ *  which of five lines it was. */
+function isUuid(v: string): boolean {
+  return UUID_RE.test(v);
+}
+
 
 /**
  * How many decisions per page.
@@ -327,5 +343,259 @@ export async function precheckSoDAction(
     detail: described.detail,
     conflicts: validation.conflicts,
     ownObjectRestricted,
+  };
+}
+
+// ─── "Where can this person act?" ────────────────────────────────────────────
+
+/**
+ * Check a principal's reach across several companies in one call.
+ *
+ * Through the evaluate form this is one submission per company AND — because
+ * every evaluation records its artifact — one row in the decision log per
+ * company, for a question nobody acted on. Asking about five companies would
+ * write five audit records to answer "which of these should be selectable".
+ * This writes none.
+ *
+ * Delegated authority counts as in scope. A delegate acting in a company IS in
+ * scope for it, and reporting otherwise would grey out exactly the companies a
+ * delegation was created to open up.
+ */
+export async function checkEntityScopeAction(
+  _prev: EntityScopeCheckState,
+  formData: FormData,
+): Promise<EntityScopeCheckState> {
+  // Read BEFORE the session check, so a return on an expired session echoes
+  // what was typed too — somebody signing back in should not also lose their
+  // input. Reading FormData has no side effects.
+  const principalId = String(formData.get("principal_id") ?? "").trim();
+  const actionType = asCode(String(formData.get("action_type") ?? ""));
+  const raw = String(formData.get("legal_entity_ids") ?? "");
+
+  // Echoed back on every return below. React discards an uncontrolled input's
+  // value when the panel's shape changes between statuses, so without this a
+  // second submit re-sends the FIRST question while showing the operator the
+  // text they typed — measured in a browser, not guessed.
+  const submitted = { principalId, actionType, legalEntityIdsRaw: raw };
+
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", submitted, message: EXPIRED };
+  }
+
+  if (!principalId) {
+    return {
+      status: "error",
+      submitted,
+      message: "Enter the person whose reach you are checking.",
+    };
+  }
+
+  // Same splitting rule as a permission-bundle list — one per line or
+  // comma-separated — plus the PLATFORM sentinel passed through untouched, so
+  // somebody can ask about platform-wide acts alongside real companies.
+  const legalEntityIds = raw
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+  if (legalEntityIds.length === 0) {
+    // Default to the session's own company rather than refusing: "can this
+    // person act here" is the common question and needs no reference pasted.
+    if (identity.legalEntityId) legalEntityIds.push(identity.legalEntityId);
+  }
+  if (legalEntityIds.length === 0) {
+    return {
+      status: "error",
+      submitted,
+      message: "List at least one company — one per line, or comma-separated.",
+    };
+  }
+  if (legalEntityIds.length > 100) {
+    return {
+      status: "refused",
+      submitted,
+      message: "At most 100 companies per check. Narrow the list and run it again.",
+    };
+  }
+
+  const malformed = legalEntityIds.filter(
+    (v) => v !== PLATFORM_SCOPE_SENTINEL && !isUuid(v),
+  );
+  if (malformed.length > 0) {
+    // Refused here so the message can name WHICH entries are wrong. The
+    // service refuses the whole batch on the first bad one and cannot say
+    // which of five lines it was.
+    return {
+      status: "refused",
+      submitted,
+      message:
+        `Not a company reference: ${malformed.slice(0, 3).join(", ")}` +
+        (malformed.length > 3 ? ` and ${malformed.length - 3} more` : "") +
+        ". Each line is 36 characters of letters, numbers and dashes, or the word PLATFORM for something that belongs to no single company.",
+    };
+  }
+
+  const result = await validateEntityScope({
+    identity,
+    principalId,
+    legalEntityIds,
+    ...(actionType ? { actionType } : {}),
+  });
+
+  if (!result.ok) {
+    if (result.error.status === 401 || result.error.status === 403) {
+      return {
+        status: "unauthorized",
+        submitted,
+        message: "You are not permitted to read this organisation's grants.",
+      };
+    }
+    if (result.error.status === 400) {
+      return {
+        status: "refused",
+        submitted,
+        message: explainAuthorizationError(result.error.message, { status: 400 }),
+      };
+    }
+    return {
+      status: "error",
+      submitted,
+      message:
+        "The check could not be completed, so this is not an answer either way — nothing was read. " +
+        explainAuthorizationError(result.error.message, { status: result.error.status }),
+    };
+  }
+
+  const results = result.data?.results ?? [];
+  const inScopeCount = results.filter((r) => r.in_scope).length;
+
+  return {
+    status: "checked",
+    submitted,
+    results: results.map((r) => ({ result: r, explanation: describeEntityScope(r) })),
+    inScopeCount,
+    message:
+      actionType
+        ? `Can do ${actionType} in ${inScopeCount} of ${results.length}.`
+        : `Can act in ${inScopeCount} of ${results.length}.`,
+  };
+}
+
+// ─── "Whose authority is this person using?" ─────────────────────────────────
+
+/**
+ * Separate a principal's own authority from authority lent to them.
+ *
+ * The evaluate form cannot answer this. It returns one GRANTED for both paths
+ * and names the role as the basis when both apply — so somebody who holds an
+ * action in their own right AND by delegation reads as ordinary role-based
+ * access. For any step that needs two different people, that is the whole
+ * question, and it is the case this check exists to surface.
+ *
+ * Records nothing.
+ */
+export async function checkDelegatedAccessAction(
+  _prev: DelegatedAccessCheckState,
+  formData: FormData,
+): Promise<DelegatedAccessCheckState> {
+  const principalId = String(formData.get("principal_id") ?? "").trim();
+  const actionType = asCode(String(formData.get("action_type") ?? ""));
+  const rawEntity = String(formData.get("legal_entity_id") ?? "").trim();
+
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    // The entity falls back to the session's own, which is exactly what an
+    // expired session cannot supply — so echo the RAW field rather than a
+    // resolved one that would be empty.
+    return {
+      status: "error",
+      submitted: { principalId, actionType, legalEntityId: rawEntity },
+      message: EXPIRED,
+    };
+  }
+
+  const legalEntityId = rawEntity || identity.legalEntityId;
+
+  // See checkEntityScopeAction: echoed on every return so a re-submit does not
+  // silently re-send the previous question.
+  const submitted = { principalId, actionType, legalEntityId };
+
+  if (!principalId) {
+    return { status: "error", submitted, message: "Enter the person you are asking about." };
+  }
+  if (!legalEntityId) {
+    return {
+      status: "error",
+      submitted,
+      message:
+        "A company is needed — borrowed authority is recorded per company, so there is no answer without one.",
+    };
+  }
+  if (legalEntityId !== PLATFORM_SCOPE_SENTINEL && !isUuid(legalEntityId)) {
+    return {
+      status: "refused",
+      submitted,
+      message:
+        "A company reference is 36 characters of letters, numbers and dashes, or the word PLATFORM.",
+    };
+  }
+
+  const result = await evaluateDelegatedAccess({
+    identity,
+    principalId,
+    legalEntityId,
+    ...(actionType ? { actionType } : {}),
+  });
+
+  if (!result.ok) {
+    if (result.error.status === 401 || result.error.status === 403) {
+      return {
+        status: "unauthorized",
+        submitted,
+        message: "You are not permitted to read this organisation's delegations.",
+      };
+    }
+    if (result.error.status === 400) {
+      return {
+        status: "refused",
+        submitted,
+        message: explainAuthorizationError(result.error.message, { status: 400 }),
+      };
+    }
+    return {
+      status: "error",
+      submitted,
+      message:
+        "The check could not be completed, so this is not an answer either way. " +
+        explainAuthorizationError(result.error.message, { status: result.error.status }),
+    };
+  }
+
+  const evaluation = result.data;
+  if (!evaluation) {
+    return { status: "error", submitted, message: "The check returned no answer." };
+  }
+
+  const described = describeDelegatedAccess(evaluation, {
+    actionNamed: Boolean(actionType),
+  });
+
+  return {
+    status: "checked",
+    submitted,
+    headline: described.headline,
+    detail: described.detail,
+    tone: described.tone,
+    delegatedActions: evaluation.delegated_actions ?? [],
+    // Both paths at once is the finding, so it is carried explicitly rather
+    // than re-derived in the component.
+    bothPaths: Boolean(
+      actionType && evaluation.has_delegated_access && evaluation.held_directly,
+    ),
   };
 }
