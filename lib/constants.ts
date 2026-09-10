@@ -22,6 +22,7 @@ import {
   Bell,
   Globe2,
   FileText,
+  Sliders,
   Fingerprint,
   Bot,
   Layers,
@@ -292,6 +293,7 @@ export const PLATFORM_NAV = [
   // every service that owns deletable data rather than belonging to one: an
   // active legal hold here blocks deletion in Finance, HR, Legal and Tax alike.
   { label: "Retention & Holds", href: "/admin/retention", icon: Snowflake },
+  { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
 ];
 
 export const SECONDARY_NAV = [
@@ -330,6 +332,7 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
       { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
       { label: "Audit Event Store", href: "/admin/audit-events", icon: History },
       { label: "AI Governance", href: "/admin/ai-governance", icon: Bot },
+      { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
     ],
   },
   {
