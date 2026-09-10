@@ -96,24 +96,33 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   compliance: [
     { name: "obligations-svc", port: 8088 },
     { name: "evidence-manifest-svc", port: 8095 },
-    // Ports corrected against deployments/docker-compose.yml, which is
-    // authoritative. All three were numbers belonging to OTHER services, so
-    // each probe answered 200 and reported a service as READY that was not the
-    // one being named — the exact failure this file's header warns about:
-    //
-    //   filing-tracker-svc       8136 -> 8131  (8136 is delegated-authority-svc
-    //                                          and compliance-risk-scoring-svc,
-    //                                          which collide with each other)
-    //   compliance-status-svc    8137 -> 8132  (8137 is access-control-svc)
-    //   exception-escalation-svc 8138 -> 8133  (8138 is decision-support-svc)
-    //
-    // The compliance-status-svc entry was the consequential one: it squatted on
-    // access-control-svc's port, so the compliance domain vouched for a service
-    // it never probed while the access-control service it DID probe went
-    // unnamed and unmonitored.
-    { name: "filing-tracker-svc", port: 8131 },
+    // compliance-status-svc sat on 8137, which is access-control-svc's port, so
+    // this domain vouched for a service it never probed while the one it DID
+    // probe went unnamed. Its real port is 8132 (docker-compose.phase5.yml),
+    // which no main-stack service holds — so on a main-only stack it simply
+    // reads DOWN, which is honest.
     { name: "compliance-status-svc", port: 8132 },
-    { name: "exception-escalation-svc", port: 8133 },
+
+    // filing-tracker-svc and exception-escalation-svc are REMOVED rather than
+    // repointed, and the distinction matters.
+    //
+    // Both are phase-only (docker-compose.phase5.yml) and both sit on ports a
+    // MAIN-stack service already holds:
+    //
+    //   filing-tracker-svc       8131 — main: spend-controls-svc
+    //   exception-escalation-svc 8133 — main: notification-svc
+    //
+    // So on the ordinary main stack a probe of either port answers 200 from the
+    // wrong service and the grid reports a phase-only service as READY when it
+    // is not running at all. Correcting them to their "real" ports does not fix
+    // that — it IS that, because the real port is the contested one. An earlier
+    // pass here did exactly that, moving both from one wrong number to another
+    // and calling it a correction.
+    //
+    // This follows the rule the header already states for withholding-tax-svc
+    // and filing-preparation-svc: a service with no main compose block cannot
+    // be running, so listing it can only produce a false reading. Add them back
+    // when they are in docker-compose.yml on ports of their own.
   ],
   // 8082, not 8081 — 8081 is tenant-entity-registry-svc. The wrong number has
   // been written down for this service more than once, including in
