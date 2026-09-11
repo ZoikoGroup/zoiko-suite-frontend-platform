@@ -4,6 +4,8 @@
 // This lives outside actions.ts deliberately: a "use server" file may only
 // export async functions, so the initial-state constant cannot live there.
 
+import type { BoardMeeting, BoardResolution } from "@/lib/api/legal";
+
 /** One state per lifecycle step rather than a single "success", so a form can
  *  report what actually happened — a revision and an activation both return 200
  *  and reading them as the same event would lose the transition. */
@@ -36,6 +38,16 @@ export type BoardActionState = {
   /** Present when the resolution was just passed, so the UI can show the
    *  evidence gate that was satisfied. */
   passedBy?: string;
+  /** The record the service wrote, so the form can read it back in plain
+   *  English instead of reporting a one-line message and leaving the reader to
+   *  find the row in the table below.
+   *
+   *  Action returns are serialized to the client, so this is the service's own
+   *  read model rather than anything wider — and every field of it is rendered
+   *  by ResolutionSummary / MeetingSummary, so nothing is shipped that the UI
+   *  does not use. */
+  resolution?: BoardResolution;
+  meeting?: BoardMeeting;
 };
 
 export const IDLE_BOARD_STATE: BoardActionState = { status: "idle", message: "" };

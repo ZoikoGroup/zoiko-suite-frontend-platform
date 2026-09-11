@@ -10,7 +10,7 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { PageHeader } from "@/components/admin/shared";
-import { FIELD, LABEL } from "@/components/admin/shared/form";
+import { FIELD, HINT, LABEL } from "@/components/admin/shared/form";
 import {
   ApplicablePolicyPanel,
   VersionHistoryPanel,
@@ -19,7 +19,7 @@ import {
   ActivateVersionForm,
   EvaluatePolicyForm,
 } from "@/components/admin/policies";
-import { POLICY_TYPES } from "@/lib/api/policies";
+import { POLICY_TYPES, describePolicyType } from "@/lib/api/policies";
 
 export const metadata: Metadata = { title: "Policies" };
 
@@ -62,14 +62,14 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
     <div>
       <PageHeader
         title="Policies"
-        description="Named policies, their effective-dated versions, and evaluation of an action against whichever version is active. A policy is a container; the rules live on its versions, and only an ACTIVE version has any effect."
+        description="The rules that decide whether something needs approving, and the limits they set. A rule is only a name — the limit lives on its versions, and a version applies to nothing until it is brought into force."
       />
 
       <Card className="mb-6 border-amber-200 dark:border-amber-500/30">
         <CardHeader>
           <div>
-            <CardTitle>What this service does and does not enforce</CardTitle>
-            <CardDescription>Three limits that change how the page below reads</CardDescription>
+            <CardTitle>Three things this page cannot do for you</CardTitle>
+            <CardDescription>Worth knowing before you rely on anything below</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -81,11 +81,11 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
               />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Only APPROVAL_THRESHOLD can be evaluated.
+                  Only approval thresholds are acted on.
                 </strong>{" "}
-                The other types can be created, versioned, and activated — and will then be
-                enforced by nothing, because every evaluation against them answers 501. Active is
-                not the same as applied.
+                The other kinds of rule can be created, given limits, and brought into force —
+                and the platform will still never consult them. A rule being in force is not the
+                same as a rule being applied.
               </span>
             </li>
             <li className="flex gap-2.5">
@@ -95,11 +95,13 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
               />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Policy writes are not authorized.
+                  Changing a rule needs permission, and is refused if it cannot be confirmed.
                 </strong>{" "}
-                policy-svc checks no permission on create, version, or activate. Activation
-                changes what the platform enforces and is gated only by this console&apos;s
-                session check.
+                Creating a rule, setting a limit and bringing one into force are each checked
+                against your permissions before they are allowed. If that check cannot be
+                carried out at all, the change is refused rather than waved through — so a
+                refusal here can mean the permission service is unreachable, not that you lack
+                the permission.
               </span>
             </li>
             <li className="flex gap-2.5">
@@ -109,17 +111,18 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
               />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Evidence recording is best-effort.
+                  A check is not guaranteed to be kept on record.
                 </strong>{" "}
-                Every evaluation appends a decision to{" "}
+                Every check you run is filed in{" "}
                 <Link
                   href="/admin/governance"
                   className="font-medium text-navy-700 underline-offset-4 hover:underline dark:text-navy-300"
                 >
                   the governance log
                 </Link>
-                , but a failure there is logged and swallowed — evaluation still returns 200. A
-                successful evaluation does not prove its evidence was stored.
+                , but if the filing fails the check still comes back with an answer. Getting an
+                answer here does not prove it was recorded — look the reference up in the log
+                when it matters.
               </span>
             </li>
           </ul>
@@ -129,18 +132,18 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Active policy set</CardTitle>
+            <CardTitle>What is in force right now</CardTitle>
             <CardDescription>
-              What would decide, for a given type and scope. Ordered most-specific first — the top
-              row is the one evaluation actually uses.
+              The rules that would decide, for a kind of rule and a scope. The narrowest rule
+              wins, so the top row is the one that actually decides.
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
           <form className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="sm:w-64">
+            <div className="sm:w-72">
               <label htmlFor="policy_type" className={LABEL}>
-                Policy type
+                Kind of rule
               </label>
               <select
                 id="policy_type"
@@ -150,26 +153,26 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
               >
                 {POLICY_TYPES.map((type) => (
                   <option key={type} value={type}>
-                    {type}
+                    {describePolicyType(type).label} ({type})
                   </option>
                 ))}
               </select>
             </div>
-            <div className="sm:w-56">
+            <div className="sm:w-64">
               <label htmlFor="scope" className={LABEL}>
-                Scope
+                Who it applies to
               </label>
               <select id="scope" name="scope" defaultValue={scope} className={FIELD}>
-                <option value="global">Global only</option>
-                <option value="tenant">This tenant</option>
-                <option value="entity">This legal entity</option>
+                <option value="global">Every organisation on the platform</option>
+                <option value="tenant">This organisation</option>
+                <option value="entity">This legal entity only</option>
               </select>
             </div>
             <button
               type="submit"
               className="h-9 shrink-0 rounded-lg bg-navy-900 px-3 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-navy-800 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500 focus-visible:ring-offset-2 dark:bg-navy-600 dark:hover:bg-navy-500 dark:focus-visible:ring-offset-slate-900"
             >
-              Read policy set
+              Show them
             </button>
           </form>
 
@@ -184,37 +187,41 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Version history</CardTitle>
+            <CardTitle>The history of one rule</CardTitle>
             <CardDescription>
-              Every version of one policy, including drafts that were never activated and versions
-              since superseded — the view that answers what a policy required at some past date.
+              Every limit a rule has ever had, including ones never brought into force and ones
+              since replaced — the view that answers what the rule required on some past date.
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
           <form className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            {/* Carried through so switching policy does not reset the policy-set
-                reader above, which reads its own two params from the same URL. */}
+            {/* Carried through so switching rule does not reset the reader
+                above, which reads its own two params from the same URL. */}
             <input type="hidden" name="policy_type" value={policyType} />
             <input type="hidden" name="scope" value={scope} />
             <div className="flex-1">
               <label htmlFor="history_policy_id" className={LABEL}>
-                Policy ID
+                Rule reference
               </label>
               <input
                 id="history_policy_id"
                 name="history_policy_id"
                 defaultValue={historyPolicyId ?? ""}
-                placeholder="pol-… or the ID returned when the policy was created"
+                placeholder="e.g. 4f8c21ba-90d7-4e13-8a55-c7b02e6d41f9"
                 className={`${FIELD} font-mono text-xs`}
                 autoComplete="off"
               />
+              <p className={HINT}>
+                The long reference the service generated for the rule, not the short code you
+                chose. Click a rule reference in the table above to copy it.
+              </p>
             </div>
             <button
               type="submit"
               className="h-9 shrink-0 rounded-lg bg-navy-900 px-3 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-navy-800 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500 focus-visible:ring-offset-2 dark:bg-navy-600 dark:hover:bg-navy-500 dark:focus-visible:ring-offset-slate-900"
             >
-              Read history
+              Show the history
             </button>
           </form>
 
@@ -229,10 +236,10 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Evaluate an amount</CardTitle>
+            <CardTitle>Check an amount</CardTitle>
             <CardDescription>
-              The service&apos;s actual decision path. Compares the amount against the deciding
-              version&apos;s threshold and records the outcome as evidence.
+              Ask whether an amount needs approving. It is compared against whichever limit is in
+              force, and the answer is filed for the record.
             </CardDescription>
           </div>
         </CardHeader>
@@ -244,10 +251,10 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Create a policy</CardTitle>
+            <CardTitle>Create a rule</CardTitle>
             <CardDescription>
-              Step 1 of 3. A container with a stable code — reusing a code with different
-              attributes is a conflict, not an update.
+              Step 1 of 3. Just a name and a code. Reusing a code with different details is
+              treated as redefining the rule, not updating it, and is refused.
             </CardDescription>
           </div>
         </CardHeader>
@@ -259,10 +266,10 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Add a draft version</CardTitle>
+            <CardTitle>Set the limit</CardTitle>
             <CardDescription>
-              Step 2 of 3. The rule content and its scope. Created DRAFT, so it changes nothing
-              yet.
+              Step 2 of 3. The number the rule enforces, and who it applies to. Saving it changes
+              nothing yet.
             </CardDescription>
           </div>
         </CardHeader>
@@ -274,9 +281,10 @@ export default async function PoliciesPage({ searchParams }: PageProps) {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Activate a version</CardTitle>
+            <CardTitle>Bring a limit into force</CardTitle>
             <CardDescription>
-              Step 3 of 3, and the only write here that changes what the platform enforces.
+              Step 3 of 3, and the only thing on this page that changes what the platform
+              actually enforces.
             </CardDescription>
           </div>
         </CardHeader>

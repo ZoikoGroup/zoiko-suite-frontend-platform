@@ -26,11 +26,23 @@ export const IDLE_POLICY_WRITE: PolicyWriteState = { status: "idle", message: ""
  * means no ACTIVE policy applies, and policy-svc deliberately refuses to guess
  * fail-open or fail-closed. Rendering that as an error would suggest a broken
  * service; rendering it as a pass would be a governance failure.
+ *
+ * `amount`, `threshold` and `policyCode` are not part of the evaluate response.
+ * They are carried alongside it so the page can say what was compared against
+ * what — an answer of "APPROVAL_REQUIRED" and a version id explains nothing to a
+ * reader who did not write the service.
  */
 export type EvaluateState = {
   status: "idle" | "within" | "approval-required" | "unenforceable" | "error";
   message: string;
   result?: EvaluateResult;
+  /** The amount that was tested, echoed back so the answer can name it. */
+  amount?: number;
+  /** The limit on the deciding version, read back after the decision.
+   *  Undefined when that read failed — the decision itself still stands. */
+  threshold?: number;
+  /** The code of the rule that decided, where it could be read back. */
+  policyCode?: string;
   /** The decision_id sent, so the operator can find the evidence row it wrote. */
   decisionId?: string;
 };

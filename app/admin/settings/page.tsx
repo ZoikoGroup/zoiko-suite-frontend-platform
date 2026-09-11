@@ -3,15 +3,16 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { KeyRound, ShieldCheck, Building2, Fingerprint } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Badge, Skeleton } from "@/components/ui";
-import { PageHeader, LookupById } from "@/components/admin/shared";
+import { PageHeader } from "@/components/admin/shared";
 import {
   FeatureFlagForm,
   FeatureFlagTable,
   ConfigEntryForm,
   ConfigEntryTable,
+  ConfigEntryLookup,
+  FeatureFlagLookup,
 } from "@/components/admin/settings";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { lookupConfigEntry, lookupFeatureFlag } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -52,11 +53,12 @@ export default async function SettingsPage() {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Feature flags</CardTitle>
+            <CardTitle>Features that can be switched on and off</CardTitle>
             <CardDescription>
-              Live, writable. Backed by configuration-feature-flag-svc on :8086 — an
-              append-only versioned store, so every change is recorded as a new version
-              rather than overwriting the last one.
+              Turn a feature on or off, for your organisation or for everyone in an
+              environment, and release it to a share of people at a time. Every change is
+              kept as history: a new setting is recorded alongside the old one rather than
+              erasing it, so you can always see what was in force and when.
             </CardDescription>
           </div>
         </CardHeader>
@@ -73,10 +75,12 @@ export default async function SettingsPage() {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Config entries</CardTitle>
+            <CardTitle>Settings services read at runtime</CardTitle>
             <CardDescription>
-              Live, writable. The other half of configuration-feature-flag-svc — arbitrary JSON
-              values on the same append-only, effective-dated model as the flags above.
+              Named values the rest of the platform reads to decide how to behave — a cutoff
+              hour, a limit, an address. Same scoping and same history as the features above:
+              nothing is overwritten, and every value is shown here in plain words rather than
+              in the structured form it is stored as.
             </CardDescription>
           </div>
         </CardHeader>
@@ -93,32 +97,25 @@ export default async function SettingsPage() {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Resolve one exact scope</CardTitle>
+            <CardTitle>Check exactly what a service would see</CardTitle>
             <CardDescription>
-              What a service would actually read. These lookups match{" "}
-              <em>(key, environment, tenant)</em> exactly and never fall back — so a miss at
-              tenant scope says nothing about whether a global default exists. The tables above
-              behave the opposite way, listing across all scopes at once.
+              Answers one precise question: for this name, this environment, and this group,
+              what is in force? It checks that one combination and nothing else — so finding
+              nothing here does not mean the setting is unset, only that it is unset for the
+              combination you asked about. The tables above work the other way round, listing
+              everything that applies to you at once.
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <LookupById
-            action={lookupFeatureFlag}
-            inputName="flag_key"
-            label="Feature flag"
-            placeholder="checkout.new_flow local tenant"
-            hint="Space-separated: key, then environment, then tenant or global. Defaults to local and tenant."
-            buttonLabel="Resolve flag"
-          />
-          <LookupById
-            action={lookupConfigEntry}
-            inputName="config_key"
-            label="Config entry"
-            placeholder="payroll.cutoff_hour local tenant"
-            hint="Same three parts. A 404 here is scope-specific, not proof the key is unset."
-            buttonLabel="Resolve config"
-          />
+          {/* Both answers come back as a plain-English summary of the record.
+              They used to come back as the raw record — ten wire fields of
+              snake_case and ISO timestamps — which asked the reader to work out
+              from `enabled` and `rollout_percentage` whether a feature was
+              actually on, and to read `tenant_id: null` as "everyone" rather
+              than "nobody". */}
+          <FeatureFlagLookup />
+          <ConfigEntryLookup />
         </CardContent>
       </Card>
 

@@ -35,8 +35,9 @@ import {
   type CreateFilingDraftInput,
   type CreateTaxAuthorityInput,
 } from "@/lib/api/tax";
-import { listContracts, listClauses, listObligations, listBoardMeetings, listCorporateActions, listCounterparties } from "@/lib/api/legal";
+import { listContracts, listClauses, listObligations, listBoardMeetings, listBoardResolutions, listCorporateActions, listCounterparties } from "@/lib/api/legal";
 import { listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
+import { listFiscalPeriods } from "@/lib/api/financial-close";
 import { listJournals } from "@/lib/api/general-ledger";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
 import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions } from "@/lib/api/payroll";
@@ -133,6 +134,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     const res = await listBoardMeetings(identity);
     return NextResponse.json({ meetings: res.ok ? res.data : [] });
   }
+  // Wired late, and the omission was not visible as one: an unhandled endpoint
+  // falls through to the catch-all below, which answers 200 with a banner
+  // object rather than 404. Both callers of this route read `.resolutions` off
+  // the body, found nothing, and rendered a confident "Board Resolutions: 0"
+  // over a register that was listing resolutions at the same time.
+  if (endpoint === "resolutions") {
+    const res = await listBoardResolutions(identity);
+    return NextResponse.json({ resolutions: res.ok ? res.data : [] });
+  }
   if (endpoint === "corporate-actions") {
     const res = await listCorporateActions(identity);
     return NextResponse.json({ corporate_actions: res.ok ? res.data : [] });
@@ -150,6 +160,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   if (endpoint === "cash-positions") {
     const res = await listCashPositions();
     return NextResponse.json({ cash_positions: res.ok ? res.data : [] });
+  }
+  // financial-close-svc has no "all entities" read, so this is scoped to the
+  // session's legal entity — the same scope the period register on the Finance
+  // page shows, rather than a tenant-wide figure the service cannot produce.
+  if (endpoint === "fiscal-periods") {
+    const res = await listFiscalPeriods({ identity, legalEntityId: identity.legalEntityId });
+    return NextResponse.json({ fiscal_periods: res.ok ? res.data : [] });
   }
   if (endpoint === "finance/summary") {
     const res = await getFinanceSummaryStats(identity);
@@ -383,7 +400,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return NextResponse.json({ policies: res.ok ? res.data : [] });
   }
   if (endpoint === "policies/history") {
-    const res = await listPolicyVersionHistory("POL-SPEND-GLOBAL");
+    const res = await listPolicyVersionHistory("POL-SPEND-GLOBAL", identity.tenantId);
     return NextResponse.json({ history: res.ok ? res.data : [] });
   }
 
