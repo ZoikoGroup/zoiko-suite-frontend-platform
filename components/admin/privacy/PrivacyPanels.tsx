@@ -257,7 +257,7 @@ export function PrivacyPanels() {
             <div>
               <CardTitle>Resolve Consent Status & Audit Evidence</CardTitle>
               <CardDescription>
-                Dynamically resolves the subject's lawful consent status from the immutable receipt ledger.
+                Dynamically resolves the subject&apos;s lawful consent status from the immutable receipt ledger.
               </CardDescription>
             </div>
           </div>
