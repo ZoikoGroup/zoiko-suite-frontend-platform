@@ -34,3 +34,12 @@ export { CompleteStatementForm } from "./CompleteStatementForm";
 export { AccountsReceivablePanel } from "./AccountsReceivablePanel";
 export { ReceivablesTable } from "./ReceivablesTable";
 export { IssueInvoiceForm } from "./IssueInvoiceForm";
+// intercompany-accounting-svc (:8105) — live and writable. Records reciprocal
+// transactions between legal entities, matches counterparty ledger journals,
+// and manages disputes and mismatch resolutions.
+export { IntercompanyPanel } from "./IntercompanyPanel";
+// payee-banking-identity-svc (:8166) — live and writable. Authoritative
+// beneficiary banking identity master with SHA-256 fingerprint duplicate detection,
+// maker-checker SoD approval, and PII masking.
+export { PayeeBankingIdentityWorkbench } from "./PayeeBankingIdentityWorkbench";
+

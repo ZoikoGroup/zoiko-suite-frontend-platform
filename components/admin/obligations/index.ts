@@ -8,3 +8,4 @@ export {
   TransitionObligationForm,
   AddFilingRequirementForm,
 } from "./ObligationForms";
+export { SearchIndexerWorkbench } from "./SearchIndexerWorkbench";
