@@ -13,6 +13,8 @@ import {
   FinanceProcessTimeline,
   FinancialClosePanel,
   GeneralLedgerPanel,
+  IntercompanyPanel,
+  PayeeBankingIdentityWorkbench,
   IssueInvoiceForm,
   IngestStatementLineForm,
   RecordInvoiceForm,
@@ -66,6 +68,10 @@ const WIRED_SERVICES = new Set([
   // old view claimed "Live Local Backend (Port 8101)" from a /healthz probe while
   // displaying mock rows, which is exactly the vouching this set exists to avoid.
   "Accounts Receivable Service",
+  // intercompany-accounting-svc (:8105) — live and writable.
+  "Intercompany Accounting Service",
+  // payee-banking-identity-svc (:8166) — live and writable.
+  "Payee Banking Identity Service",
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -785,6 +791,26 @@ export default async function FinancePage({ searchParams }: PageProps) {
           </Suspense>
         </CardContent>
       </Card>
+
+      {/* ── intercompany-accounting-svc (:8105) ───────────────────────────────
+          Intercompany Accounting and Reciprocal Balance Matching */}
+      <div className="pt-4">
+        <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
+          Intercompany Accounting & Reciprocal Transactions
+        </h2>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Live, writable. Backed by <code className="font-mono text-xs text-navy-700 dark:text-navy-300">intercompany-accounting-svc (:8105)</code>.
+          Enforces multi-entity legal boundaries, reciprocal journal matching against <code className="font-mono text-xs text-navy-700 dark:text-navy-300">general-ledger-svc (:8098)</code>, and intercompany dispute lifecycle.
+        </p>
+      </div>
+
+      <IntercompanyPanel />
+
+      {/* ── payee-banking-identity-svc (:8166) ──────────────────────────────────
+          Payee Banking Identity Master & Beneficiary Governance */}
+      <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+        <PayeeBankingIdentityWorkbench />
+      </div>
     </div>
   );
 }

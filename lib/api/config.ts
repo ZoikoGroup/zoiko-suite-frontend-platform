@@ -82,6 +82,20 @@ const DEFAULTS = {
   authorization: "http://localhost:8089",
   accessControl: "http://localhost:8137",
   procurementWorkflow: "http://localhost:8140",
+  workflow: "http://localhost:8090",
+  workflowHistory: "http://localhost:8097",
+  privacyConsent: "http://localhost:8152",
+  privacyPurposeRegistry: "http://localhost:8151",
+  privacyTransfer: "http://localhost:8155",
+  // ── Payee Banking Identity & Counterparty Domain ─────────────────────────
+  payeeBankingIdentity: "http://localhost:8166",
+  counterpartyManagement: "http://localhost:8124",
+  // ── Edge Gateway & ForwardAuth ──────────────────────────────────────────
+  gatewayAuth: "http://localhost:8092",
+  // ── Enterprise Search & Indexer Domain ────────────────────────────────────
+  searchIndexer: "http://localhost:8096",
+  opensearch: "http://localhost:9200",
+  migrationIntegrity: "http://localhost:8139",
   // ── Filing Tracker ────────────────────────────────────────────────────────
   filingTracker: "http://localhost:8141",
   // 8133, per compose. notification-svc delivers governed notifications. EMAIL
@@ -222,6 +236,17 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   procurementWorkflow: "/procurement-workflow-svc",
   // Filing Tracker
   filingTracker: "/filing-tracker-svc",
+  workflow: "/workflow-svc",
+  workflowHistory: "/workflow-history-svc",
+  privacyConsent: "/privacy-consent-svc",
+  privacyPurposeRegistry: "/privacy-purpose-registry-svc",
+  privacyTransfer: "/privacy-transfer-svc",
+  payeeBankingIdentity: "/payee-banking-identity-svc",
+  counterpartyManagement: "/counterparty-management-svc",
+  gatewayAuth: "/gateway-auth-svc",
+  searchIndexer: "/search-indexer-svc",
+  opensearch: "/opensearch",
+  migrationIntegrity: "/migration-integrity-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
@@ -236,7 +261,11 @@ const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
  * place a service name can be wrong.
  */
 export function serviceLabel(service: ServiceName): string {
-  return GATEWAY_PREFIX[service].slice(1);
+  const prefix = GATEWAY_PREFIX[service];
+  if (prefix && prefix.startsWith("/")) {
+    return prefix.slice(1);
+  }
+  return String(service);
 }
 
 /**
@@ -267,4 +296,4 @@ function stripTrailingSlash(url: string): string {
 }
 
 /** Per-request timeout. Dashboard panels degrade to an empty state on timeout. */
-export const REQUEST_TIMEOUT_MS = Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1500);
+export const REQUEST_TIMEOUT_MS = Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 10000);

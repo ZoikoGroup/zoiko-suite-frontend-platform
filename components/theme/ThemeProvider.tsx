@@ -12,6 +12,7 @@ export function ThemeProvider({
       attribute="class"
       defaultTheme="system"
       enableSystem
+      disableTransitionOnChange
       storageKey="zoiko-theme"
       {...props}
     >

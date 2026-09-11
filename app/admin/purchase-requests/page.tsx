@@ -12,6 +12,7 @@ import {
 import { DOMAINS } from "@/lib/constants";
 import type { RequestStatus } from "@/lib/api/purchase-requests";
 import { lookupPurchaseRequest } from "../commercial-ops/actions";
+import { WorkflowLifecycleCard } from "@/components/admin/workflow/WorkflowLifecycleCard";
 
 export const metadata: Metadata = { title: "Purchase Requests | Zoiko Suite" };
 
@@ -196,6 +197,8 @@ export default async function PurchaseRequestsPage({ searchParams }: PageProps) 
           />
         </CardContent>
       </Card>
+
+      <WorkflowLifecycleCard />
 
       <div className="mt-6 space-y-2">
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
