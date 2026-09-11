@@ -47,6 +47,11 @@ import {
   explainVendorDDError,
 } from "@/lib/api/vendor-due-diligence";
 import { formatMoney } from "@/lib/format";
+import {
+  getWorkflowInstanceHistory,
+  createWorkflowInstance,
+  submitWorkflowStageAction,
+} from "@/lib/api/workflow-history";
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type {
   OrderActionState,
@@ -929,3 +934,133 @@ function formatAmount(amount: number, currency: string): string {
     maximumFractionDigits: 2,
   }).format(amount);
 }
+
+/** Read workflow transition history by workflow instance id from workflow-history-svc (:8097). */
+export async function lookupWorkflowHistory(
+  _previous: LookupState,
+  formData: FormData,
+): Promise<LookupState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const workflowId = String(formData.get("lookup_workflow_id") ?? "").trim();
+  if (!workflowId) return { status: "error", message: "Enter a workflow instance ID." };
+
+  const result = await getWorkflowInstanceHistory(workflowId, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 404) {
+      return {
+        status: "missing",
+        message:
+          "No workflow history found for this workflow instance ID within this tenant.",
+      };
+    }
+    return { status: "error", message: result.error.message || "Failed to query workflow history." };
+  }
+
+  return {
+    status: "found",
+    record: result.data,
+    message: "Workflow history retrieved successfully from workflow-history-svc (:8097)",
+  };
+}
+
+export type WorkflowInitiateState = {
+  status: "idle" | "created" | "error";
+  instanceId?: string;
+  message?: string;
+};
+
+export async function initiateWorkflowAction(
+  _previous: WorkflowInitiateState,
+  formData: FormData,
+): Promise<WorkflowInitiateState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const workflowType = String(formData.get("workflow_type") ?? "PURCHASE_APPROVAL").trim();
+  const stageName = String(formData.get("stage_name") ?? "Manager Approval").trim();
+  const approverId = String(formData.get("approver_principal_id") ?? "55555555-5555-5555-5555-555555555555").trim();
+
+  const res = await createWorkflowInstance(
+    {
+      workflow_type: workflowType,
+      stages: [
+        {
+          stage_order: 1,
+          stage_name: stageName,
+          required_role: "MANAGER",
+          approver_principal_id: approverId,
+        },
+      ],
+    },
+    identity
+  );
+
+  if (!res.ok) {
+    return { status: "error", message: res.error.message || "Failed to initiate workflow." };
+  }
+
+  return {
+    status: "created",
+    instanceId: res.data.workflow_instance_id,
+    message: `Workflow created successfully on workflow-svc (:8090)! Instance ID: ${res.data.workflow_instance_id}`,
+  };
+}
+
+export type WorkflowDecisionState = {
+  status: "idle" | "success" | "error";
+  message?: string;
+};
+
+export async function submitWorkflowDecisionAction(
+  _previous: WorkflowDecisionState,
+  formData: FormData,
+): Promise<WorkflowDecisionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const workflowId = String(formData.get("workflow_instance_id") ?? "").trim();
+  const action = String(formData.get("decision_action") ?? "APPROVE").trim() as "APPROVE" | "REJECT";
+  const comments = String(formData.get("comments") ?? "").trim();
+
+  if (!workflowId) return { status: "error", message: "Workflow Instance ID is required." };
+
+  const approverIdentity: SessionIdentity = {
+    ...identity,
+    principalId: "55555555-5555-5555-5555-555555555555",
+  };
+
+  const res = await submitWorkflowStageAction(
+    workflowId,
+    {
+      action,
+      rationale: comments || undefined,
+    },
+    approverIdentity
+  );
+
+  if (!res.ok) {
+    return { status: "error", message: res.error.message || "Failed to submit workflow decision." };
+  }
+
+  return {
+    status: "success",
+    message: `Decision "${action}" submitted to workflow-svc (:8090)! Event published to Kafka topic zoiko.workflow.events.`,
+  };
+}
+
+

@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { DOMAINS } from "@/lib/constants";
 import {
   EmployeeMasterPanel,
+  EmploymentContractsPanel,
   HrActionHeader,
   HrSummaryBar,
   HrProcessTimeline,
@@ -10,6 +11,11 @@ import {
 } from "@/components/admin/hr";
 
 export const metadata: Metadata = { title: "HR & Workforce Governance | Zoiko Suite" };
+
+const WIRED_SERVICES = new Set([
+  "Employee Master Service",
+  "Employment Contracts Service",
+]);
 
 function PanelSkeleton({ rows = 3 }: { rows?: number }) {
   return (
@@ -48,10 +54,28 @@ export default async function HrPage() {
             className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
           >
             <span className="truncate">{svc}</span>
-            <span className="ml-2 h-2 w-2 shrink-0 rounded-full bg-teal-500" />
+            <span
+              className={
+                WIRED_SERVICES.has(svc)
+                  ? "ml-2 h-2 w-2 shrink-0 rounded-full bg-emerald-500"
+                  : "ml-2 h-2 w-2 shrink-0 rounded-full bg-slate-400 dark:bg-slate-600"
+              }
+              title={
+                WIRED_SERVICES.has(svc)
+                  ? "Wired to this console and verified live"
+                  : "In domain, not yet wired to this console"
+              }
+            />
           </div>
         ))}
       </div>
+
+      <hr className="border-slate-200 dark:border-slate-800" />
+
+      {/* ── employment-contracts-svc (:8109) ─────────────────────────────────── */}
+      <Suspense fallback={<PanelSkeleton rows={4} />}>
+        <EmploymentContractsPanel />
+      </Suspense>
 
       <hr className="border-slate-200 dark:border-slate-800" />
 

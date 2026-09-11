@@ -1,0 +1,10 @@
+INSERT INTO permission_bundles (permission_bundle_id, role_id, bundle_code, permitted_actions, active_flag)
+VALUES (
+  '88888888-8888-8888-8888-888888888888',
+  '44444444-4444-4444-4444-444444444444',
+  'INTERCOMPANY_FULL',
+  '["INTERCOMPANY_ENTRY_CREATE", "INTERCOMPANY_ENTRY_VIEW", "INTERCOMPANY_ENTRY_MATCH", "INTERCOMPANY_ENTRY_ACKNOWLEDGE", "INTERCOMPANY_ENTRY_DISPUTE", "INTERCOMPANY_ENTRY_RESOLVE"]'::jsonb,
+  true
+)
+ON CONFLICT (role_id, bundle_code) DO UPDATE
+SET permitted_actions = EXCLUDED.permitted_actions;

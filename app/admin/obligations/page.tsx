@@ -17,6 +17,7 @@ import {
   TransitionObligationForm,
   AddFilingRequirementForm,
   JurisdictionField,
+  SearchIndexerWorkbench,
 } from "@/components/admin/obligations";
 import { OBLIGATION_STATUSES, OBLIGATION_TYPES } from "@/lib/api/obligations";
 import { lookupObligation, lookupFilingRequirements } from "./actions";
@@ -61,14 +62,47 @@ export default async function ObligationsPage({ searchParams }: PageProps) {
   const dueBeforeDate = one(params.due_before);
   const dueAfterDate = one(params.due_after);
   const allEntities = one(params.scope) === "all";
+  const activeTab = one(params.tab) ?? "search";
 
   return (
     <div>
       <PageHeader
-        title="Obligations"
-        description="The statutory, regulatory and contractual duties this platform is tracking — what is owed, to which jurisdiction, by when, and whether it has been discharged. Every obligation is bound to a legal entity and a jurisdiction, and carries a reference back to whatever created it."
+        title="Obligations & Search Indexer"
+        description="The statutory, regulatory and contractual duties this platform tracks, synchronized into OpenSearch via search-indexer-svc (:8096) for real-time tenant-isolated query resolution."
       />
 
+      {/* Primary Tab Switcher */}
+      <div className="mb-6 flex border-b border-slate-200 dark:border-slate-800">
+        <Link
+          href="/admin/obligations?tab=search"
+          className={`flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-bold transition-colors ${
+            activeTab !== "register"
+              ? "border-navy-900 text-navy-900 dark:border-cyan-400 dark:text-cyan-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+          }`}
+        >
+          <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          Search Indexer & OpenSearch Workbench
+          <span className="rounded-full bg-navy-100 px-2 py-0.5 text-xs font-semibold text-navy-900 dark:bg-navy-800 dark:text-cyan-300">
+            Port :8096
+          </span>
+        </Link>
+        <Link
+          href="/admin/obligations?tab=register"
+          className={`flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-bold transition-colors ${
+            activeTab === "register"
+              ? "border-navy-900 text-navy-900 dark:border-cyan-400 dark:text-cyan-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+          }`}
+        >
+          Obligation Register & Lifecycle
+        </Link>
+      </div>
+
+      {activeTab !== "register" ? (
+        <SearchIndexerWorkbench />
+      ) : (
+        <>
       <Card className="mb-6 border-navy-200 dark:border-navy-500/30">
         <CardHeader>
           <div>
@@ -322,6 +356,8 @@ export default async function ObligationsPage({ searchParams }: PageProps) {
           />
         </CardContent>
       </Card>
+      </>
+      )}
     </div>
   );
 }

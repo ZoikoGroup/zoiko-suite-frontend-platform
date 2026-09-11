@@ -26,6 +26,7 @@ import {
   Fingerprint,
   Bot,
   Layers,
+  ArrowLeftRight,
 } from "lucide-react";
 
 export type DomainKey =
@@ -333,6 +334,7 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
       { label: "Audit Event Store", href: "/admin/audit-events", icon: History },
       { label: "AI Governance", href: "/admin/ai-governance", icon: Bot },
       { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
+      { label: "Migration Integrity", href: "/admin/migrations", icon: ArrowLeftRight },
     ],
   },
   {
@@ -379,6 +381,7 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
       { label: "Document Vault", href: "/admin/documents", icon: FileText },
       { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },
       { label: "Retention & Holds", href: "/admin/retention", icon: Snowflake },
+      { label: "Privacy & Consent", href: "/admin/privacy", icon: ShieldCheck },
     ],
   },
   {
