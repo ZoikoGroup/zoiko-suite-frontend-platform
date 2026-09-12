@@ -495,68 +495,127 @@ docker compose -f deployments/docker-compose.yml up -d --force-recreate accounts
 
 ### Test the intake form
 
-1. **Record an invoice.** Vendor `VND-DELL-UK`, number `INV-2026-00417`, amount
-   `14750.50`, `GBP`, due date about a month out.
-   → **Expect 201**, status `RECEIVED`, and **the invoice ID in the banner as a
-   copy button**. The ID has to leave this form by hand for the lookup panel, and
-   text inside a banner cannot be clicked.
-2. **Submit the exact same form again.**
-   → **Expect an amber "already on the register" banner**, naming the vendor and
-   number. Not green (nothing was written) and not red (nothing is broken).
-   `(tenant, vendor, invoice_number)` is unique. This used to answer **503
-   `store_unavailable`**, i.e. a re-keyed number read as a dead database.
-3. **Same number, different vendor** (`VND-ARUP-ENG`).
-   → **Expect 201.** The constraint is per vendor; two vendors both numbering an
-   invoice `INV-001` is ordinary.
-4. **Amount `0`.** → **Expect 400**, refused by the console before it is sent.
+1. **Record an invoice.** Vendor `VND-DELL-UK`, number `INV-2026-00417`, `GBP`. The form
+   now asks for the supplier's **invoice date**, the **supply date** (the tax point, which
+   can differ and decides the tax period), and a **due date**, each YYYY-MM-DD, plus the
+   **line items** — two empty rows at first, up to six, each with description, quantity,
+   unit price, tax code (optional) and tax amount. **Net is derived, never typed**:
+   quantity × unit price, cut to two decimals; the gross shown is Σnet + Σtax, so the form
+   cannot submit an invoice that fails the balance check.
+   → **Expect 201**, status `RECEIVED`, and **the invoice ID in the banner as a copy
+   button** (the ID has to leave this form by hand for the lookup panel). The banner also
+   names the line count and notes when no document reference was recorded.
+2. **Lines that don't balance.** The UI cannot produce one — it derives gross from lines —
+   so send one directly:
+   ```powershell
+   curl.exe -X POST http://localhost:8099/v1/invoices `
+     -H "Content-Type: application/json" `
+     -H "X-Principal-Id: 33333333-3333-3333-3333-333333333333" `
+     -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111" `
+     -H "X-Legal-Entity-Id: 22222222-2222-2222-2222-222222222222" `
+     -d '{"vendor_id":"VND-DELL-UK","invoice_number":"INV-BAL-1","invoice_date":"2026-09-01","supply_date":"2026-09-01","due_date":"2026-10-01","currency_code":"GBP","amount":100.00,"net_amount":90.00,"tax_amount":0,"lines":[{"description":"oops","quantity":1,"unit_price":90,"net_amount":90,"tax_amount":0}]}'
+   ```
+   → **Expect 400 `invoice_does_not_balance`.** The service accounts in whole cents
+   (Σnet + Σtax must equal `amount`), so a 2dp derived gross always balances and a
+   hand-typed figure that is `98.505` will not.
+3. **Submit the exact same form again.**
+   → **Expect an amber "already on the register" banner**, naming the vendor and number.
+   `(tenant, vendor, invoice_number)` is unique; the service answers **409
+   `duplicate_invoice_number`**. This used to be a **503 `store_unavailable`**, i.e. a
+   re-keyed number read as a dead database.
+4. **Same number, different vendor** (`VND-ARUP-ENG`).
+   → **Expect 201.** The constraint is per vendor; two vendors both numbering an invoice
+   `INV-001` is ordinary.
+5. **Leave every line blank.**
+   → **Expect a refusal before the round trip** — the console's `no_lines` guard: "no
+   lines carry value; at least one line with a price is required". The service would also
+   answer 400 `no_lines` to a direct POST with an empty array.
+6. **Delete the invoice date and the supply date.**
+   → **Expect the console to refuse each**: "required, as YYYY-MM-DD". A direct POST with
+   either missing answers **400 `missing_field`** naming the field.
 
 ### Test the linear state machine — the interesting part
 
-5. **Look at the register.** Each row shows a stage badge, a **four-segment
-   meter** ("2 of 4"), and **exactly one action button** — the only transition
-   legal from where that row stands.
+7. **Look at the register.** Each row now shows the invoice and supply dates, a line
+   count and a **net/tax breakout** under the amount, PO / goods-receipt / document ids
+   when present, a stage badge, a **four-segment meter** ("2 of 4"), and **exactly one
+   action button** — the only transition legal from where that row stands.
    → **Expect:** a `RECEIVED` row offers only *Validate*, an `APPROVED` row only
-   *Request payment*, and a `PAYMENT_REQUESTED` row offers nothing but
-   "Terminal — handed to Treasury". Three buttons per row would be offering two
-   refusals.
-6. **Walk one invoice all the way:** Validate → Approve → Request payment.
-   → **Expect** each to succeed, the meter to advance, and each banner to name
-   the *next* step and that it is a separate grant.
-7. **Prove a stage cannot be skipped.** With a `RECEIVED` invoice, call approve
-   directly:
+   *Request payment*, and a `PAYMENT_REQUESTED` row nothing but "Terminal — handed to
+   Treasury". Three buttons per row would be offering two refusals.
+8. **Walk one invoice all the way: Validate → Approve → Request payment.** Two of the
+   three hops are blocked for the session principal — see 9 and 10 — so expect the walk to
+   need a second principal for the approval. Each banner names the *next* step and that it
+   is a separate grant.
+9. **Segregation of duties (§12.3).** The session principal records and validates, so the
+   `VALIDATED` row shows an amber note **in place of the Approve button**: "You recorded
+   this invoice — approval must come from a different principal (segregation of duties)".
+   The service also refuses the direct attempt, and *that* is the rule to test directly —
+   approve the invoice with the **same** principal that recorded it:
    ```powershell
-   curl -X POST http://localhost:8099/v1/invoices/<id>/approve `
+   curl.exe -X POST http://localhost:8099/v1/invoices/<id>/approve `
      -H "X-Principal-Id: 33333333-3333-3333-3333-333333333333" `
      -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111"
    ```
-   → **Expect 422 `invalid_transition`**, not 409. The service moves an invoice
-   with one atomic `UPDATE … WHERE status = <expected>`, so there is no read-then-
-   write race to exploit.
-8. **Request payment twice.** → **Expect 422** on the second: terminal means
-   terminal.
+   → **Expect 403 `self_approval_not_allowed`**, surfaced as an amber banner by the row.
+Re-run with a **different** principal id that holds the role (`66666666-6666-6666-6666-666666666666`,
+    the approver seeded by `deployments/scripts/seed-demo-rbac.ps1` — `44444444-4444-4444-4444-444444444444`
+    is the *role* id, not a principal) → **Expect 200**, then request payment with the same second
+    principal.
+10. **The evidence check.** An invoice recorded **without** `invoice_document_id` cannot
+    be validated: the `RECEIVED` row shows "No document recorded — validate will refuse
+    until one exists" beside the button, and the direct attempt answers **422
+    `invoice_document_required`**. Record the invoice with a document reference (the form's
+    optional field) and validation passes.
+11. **Prove a stage cannot be skipped.** With a `RECEIVED` invoice, call approve directly:
+    ```powershell
+    curl.exe -X POST http://localhost:8099/v1/invoices/<id>/approve `
+      -H "X-Principal-Id: 66666666-6666-6666-6666-666666666666" `
+      -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111"
+    ```
+    → **Expect 422 `invalid_transition`**, not 409. The service moves an invoice with one
+    atomic `UPDATE … WHERE status = <expected>`, so there is no read-then-write race to
+    exploit.
+12. **Request payment twice.** → **Expect 200 the second time, not an error**: request-payment
+    is idempotent by design — the service recognizes a replay from the invoice's own
+    `PAYMENT_REQUESTED` state and answers with the current record, deliberately **without**
+    publishing a second `payment.requested` event. Exactly one payment request exists for
+    this invoice. (The 422 path for this route is requesting payment from a `RECEIVED`
+    invoice, i.e. before approval: `invalid_transition`.)
 
 ### Test the reads and the absence cases
 
-9. **Filter by stage** (chips) **and by vendor and legal entity** (the form).
-   → **Expect:** all three applied *by the service*, composing with AND, and the
-   tile totals stating they describe the filtered set.
-10. **Filter by a partial vendor reference** (`VND-DELL`).
-    → **Expect an empty register.** The comparison is `vendor_id = $3` — exact,
-    no `LIKE`. A near miss is not a match.
-11. **Filter by a malformed legal entity.**
-    → **Expect the console to drop it and say so.** The service casts the
-    *column* to text rather than the parameter to uuid, so a malformed value does
-    not error — it silently matches nothing, and an empty register reads as "this
-    entity has no invoices".
-12. **Paste an unknown-but-valid UUID** into **Read one invoice**.
-    → **Expect "absent"**, not an error.
-13. **Paste `not-a-uuid`.** → **Expect the console to refuse it.** The service now
-    answers **404** for this (it used to be a **503 that read like an outage**), so
-    the check only saves a round trip.
-14. **Stop `authorization-svc`** and try to validate an invoice.
-    → **Expect** the fail-closed wording — "could not verify authorization, so the
-    action was refused" — distinct from the 403 you get with no RBAC seed. Same
-    assertion as Evidence step 4 and Commercial Ops step 8, third service.
+13. **Filter by stage** (chips) **and by vendor and legal entity** (the form).
+    → **Expect:** all three applied *by the service*, composing with AND, and the tile
+    totals stating they describe the filtered set.
+14. **Filter by a partial vendor reference** (`VND-DELL`).
+    → **Expect an empty register.** The comparison is `vendor_id = $3` — exact, no `LIKE`.
+    A near miss is not a match.
+15. **Filter by a malformed legal entity.**
+    → **Expect the console to drop it and say so.** The service casts the *column* to text
+    rather than the parameter to uuid, so a malformed value does not error — it silently
+    matches nothing, and an empty register reads as "this entity has no invoices".
+16. **Paste an unknown-but-valid UUID** into **Read one invoice**.
+    → **Expect "absent"**, not an error. The lookup now renders the record as a labelled
+    summary — every actor and timestamp, the correlation ID, the line detail — instead of
+    the JSON the other lookups on this page still show.
+17. **Paste `not-a-uuid`.** → **Expect the console to refuse it.** The service answers 404
+    for this.
+18. **Bounded reads.** The panel asks for **400** invoices. When a page is full it says so
+    — "Showing the most recent 400 … there are likely more" — because the tiles and
+    awaiting-payment total describe only the page shown, and the service **refuses rather
+    than clamps** an over-large ask:
+    ```powershell
+    curl.exe "http://localhost:8099/v1/invoices?limit=600" `
+      -H "X-Principal-Id: 33333333-3333-3333-3333-333333333333" `
+      -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111"
+    ```
+    → **Expect 400** — and the same for `limit=0`, `limit=-1` and `offset=-1`. The console
+    never sends these; the test proves the service holds the bound itself.
+19. **Stop `authorization-svc`** and try to validate an invoice.
+    → **Expect** the fail-closed wording — "could not verify authorization, so the action
+    was refused" — distinct from the 403 you get with no RBAC seed. Same assertion as
+    Evidence step and Commercial Ops step, now a third service.
 
 ### Watch for
 
@@ -564,6 +623,11 @@ docker compose -f deployments/docker-compose.yml up -d --force-recreate accounts
   anywhere in this platform, so a mistyped vendor produces a perfectly valid
   invoice against one that does not exist. There is no `vendor_not_found`. The
   form says so under the field; that is the only guard there is.
+- **Only the lines balance the invoice.** `amount` (gross) is *derived* from the
+  lines and never typed in the console; a net amount of `qty × price` cut to two
+  decimals sums to a figure the service's whole-cent comparison always accepts.
+  A hand-built POST that types `amount` separately is how `invoice_does_not_balance`
+  is still reachable.
 - **Overdue counts anything short of `PAYMENT_REQUESTED`** whose due date has
   passed, not just approved rows — an invoice still unvalidated past its due date
   is the more urgent problem.

@@ -8,11 +8,13 @@ import {
   AccountsPayablePanel,
   AccountsReceivablePanel,
   BankReconciliationPanel,
+  CustomerInvoiceLookup,
   FinanceActionHeader,
   FinanceSummaryBar,
   FinanceProcessTimeline,
   FinancialClosePanel,
   GeneralLedgerPanel,
+  InvoiceLookup,
   IssueInvoiceForm,
   IngestStatementLineForm,
   RecordInvoiceForm,
@@ -22,7 +24,7 @@ import {
 import type { InvoiceStatus } from "@/lib/api/accounts-payable";
 import type { StatementLineStatus } from "@/lib/api/bank-reconciliation";
 import type { JournalStatus } from "@/lib/api/general-ledger";
-import { lookupJournal, lookupStatementLine, lookupVendorInvoice } from "./actions";
+import { lookupJournal, lookupStatementLine } from "./actions";
 
 export const metadata: Metadata = { title: "Finance, Payables & Receivables | Zoiko Suite" };
 
@@ -637,9 +639,7 @@ export default async function FinancePage({ searchParams }: PageProps) {
           </Suspense>
 
           <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
-            <LookupById
-              action={lookupVendorInvoice}
-              inputName="lookup_invoice_id"
+            <InvoiceLookup
               label="Read one invoice"
               placeholder="Must be a UUID"
               hint="The full record: every actor and timestamp along the lifecycle, and the correlation ID that ties this invoice to its vendor.invoice.* and payment.requested events. An unknown id, another tenant's invoice, and a malformed one all read as absent — the service deliberately does not distinguish them."
@@ -783,6 +783,14 @@ export default async function FinancePage({ searchParams }: PageProps) {
           <Suspense fallback={<RegisterSkeleton />}>
             <AccountsReceivablePanel />
           </Suspense>
+
+          <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
+            <CustomerInvoiceLookup
+              label="Read one invoice"
+              placeholder="Must be a UUID"
+              hint="The full record — the AR-05 line items the register's list does not carry, the customer-side references, and the AR-08 cash-application payload if the invoice is paid — with every actor and timestamp along the lifecycle and the correlation ID tying it to its domain events and to the general-ledger journal that lets it be paid. An unknown id, another tenant's invoice, and a malformed one all read as absent — the service deliberately does not distinguish them."
+            />
+          </div>
         </CardContent>
       </Card>
     </div>

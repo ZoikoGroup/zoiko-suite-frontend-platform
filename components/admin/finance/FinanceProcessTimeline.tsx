@@ -24,7 +24,11 @@ function useLiveStepCounts(): Record<string, number> {
         ["journal-entries", "ar-invoice"],
         ["journal-entries", "gl-posting"],
         ["cash-positions", "bank-rec"],
-        ["journal-entries", "ap-settle"],
+        // Counts invoices, not journals: accounts-payable-svc books vendor
+        // invoices and requests payment for them, but executes no payment. It
+        // read journal-entries until now — the same ledger figure the GL step
+        // above shows, under this service's name.
+        ["invoices", "ap-settle"],
         ["journal-entries", "intercompany"],
         // The close stage counts fiscal periods, not journals. It read
         // journal-entries until now, so the card labelled financial-close-svc
@@ -78,7 +82,7 @@ export function FinanceProcessTimeline() {
       icon: Scale,
       title: "GL Voucher Posted",
       service: "general-ledger-svc",
-      port: ":8100",
+      port: ":8098",
       count: liveCounts["gl-posting"] ?? 0,
       status: "complete",
       detail: "Double-entry debit/credit vouchers posted to Chart of Accounts (1100-AR Dr / 4000-REV Cr).",
@@ -89,7 +93,7 @@ export function FinanceProcessTimeline() {
       icon: Landmark,
       title: "Bank Rec Matched",
       service: "bank-reconciliation-svc",
-      port: ":8103",
+      port: ":8102",
       count: liveCounts["bank-rec"] ?? 0,
       status: "active",
       detail: "Bank feed transactions matched against GL posting records with automated rule clearance.",
@@ -98,20 +102,29 @@ export function FinanceProcessTimeline() {
     {
       id: "ap-settle",
       icon: DollarSign,
-      title: "AP Disbursement",
+      title: "AP Payable Booked",
       service: "accounts-payable-svc",
-      port: ":8102",
+      port: ":8099",
       count: liveCounts["ap-settle"] ?? 0,
       status: "active",
-      detail: "Vendor bill payment execution and disbursement voucher posting.",
-      examples: ["BILL-2026-0412 · $450,000 USD to Acme Cloud Inc."],
+      // Executing a payment is Treasury's job. This service records the vendor
+      // bill, validates the evidence, applies the segregation-of-duties approval
+      // and posts an open payable (AP-08) — it settles nothing. The old wording
+      // claimed "payment execution and disbursement voucher posting", which this
+      // service does not do.
+      detail:
+        "Vendor invoice recorded, validated and approved — a liability awaiting a payment request. Executed payments belong to Treasury, not this service.",
+      examples: [
+        "Validate → Approve → Request payment",
+        "403 self-approval refused (segregation of duties)",
+      ],
     },
     {
       id: "intercompany",
       icon: Building2,
       title: "IC Elimination",
       service: "intercompany-accounting-svc",
-      port: ":8106",
+      port: ":8105",
       count: liveCounts["intercompany"] ?? 0,
       status: "pending",
       detail: "Cross-entity transfer pricing and intercompany balance eliminations.",

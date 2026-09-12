@@ -13,8 +13,18 @@ const COLUMNS = ["Invoice", "Amount", "Due", "Stage", "Last action", "Next step"
  * column because the read-one panel takes it by hand, and every principal id is
  * copyable for the same reason — they are the values that have to move between
  * this page and a log.
+ *
+ * `currentPrincipalId` lets each row name "you" when the segregation-of-duties
+ * rule applies to the session's operator (the recorder cannot approve their own
+ * invoice), which is why the panel threads it down.
  */
-export function AccountsPayableTable({ invoices }: { invoices: VendorInvoice[] }) {
+export function AccountsPayableTable({
+  invoices,
+  currentPrincipalId,
+}: {
+  invoices: VendorInvoice[];
+  currentPrincipalId?: string;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[56rem] border-collapse text-left">
@@ -39,6 +49,7 @@ export function AccountsPayableTable({ invoices }: { invoices: VendorInvoice[] }
               key={invoice.invoice_id}
               invoice={invoice}
               columnCount={COLUMNS.length}
+              currentPrincipalId={currentPrincipalId}
             />
           ))}
         </tbody>

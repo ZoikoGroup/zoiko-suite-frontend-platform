@@ -43,6 +43,21 @@
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 
+/** One line of the customer's document. The service requires at least one and
+ *  balances the whole invoice against them: amount must equal Σ(net) + Σ(tax). */
+export type CustomerInvoiceLine = {
+  invoice_line_id: string;
+  invoice_id: string;
+  line_number: number;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  net_amount: number;
+  tax_code?: string | null;
+  tax_amount: number;
+  sales_order_line_ref?: string | null;
+};
+
 /** Wire shape. Field names match the Go json tags exactly. */
 export type CustomerInvoice = {
   invoice_id: string;
@@ -50,10 +65,35 @@ export type CustomerInvoice = {
   legal_entity_id: string;
   customer_id: string;
   invoice_number: string;
+  /** Gross total. The service refuses to record an invoice whose lines do not
+   *  roll up to exactly this figure — see explainAccountsReceivableError. */
   amount: number;
   currency_code: string;
+  /** DATE column, carried as an RFC3339 instant at UTC midnight. Format as a
+   *  date in UTC or it reads a day early west of Greenwich — see formatDueDate. */
   due_date: string;
   status: InvoiceStatus;
+  /** The date on our own document. Same DATE-as-RFC3339 shape as due_date;
+   *  distinct from created_at (when it was raised) and from supply_date (when
+   *  the supply took place). */
+  invoice_date?: string;
+  /** The tax point — when the supply took place — and the date that decides
+   *  which tax period the invoice lands in. */
+  supply_date?: string;
+  net_amount?: number;
+  tax_amount?: number;
+  /** The document of record (document-vault-svc reference). Required to leave
+   *  ISSUED, not to enter it — the SEND evidence gate refuses a documented-less
+   *  invoice. */
+  invoice_document_id?: string | null;
+  sales_order_id?: string | null;
+  customer_billing_ref?: string | null;
+  /** AR-08 cash application: when money arrived and under what customer-side
+   *  reference. Optional — the lifecycle stamp is the audit source. */
+  payment_date?: string | null;
+  payment_reference?: string | null;
+  /** Populated by the single-invoice read; absent on the bounded register list. */
+  lines?: CustomerInvoiceLine[];
   created_by_principal_id: string;
   correlation_id: string;
   created_at: string;
@@ -70,6 +110,16 @@ export type CustomerInvoice = {
 // has never emitted — so a status badge could never have matched what came back.
 export const INVOICE_STATUSES = ["ISSUED", "SENT", "OVERDUE", "PAID"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+/** The lifecycle in order, for the "stage N of M" reading in the summary.
+ *  SENT branches to OVERDUE or straight to PAID, so the position in this list is
+ *  not a timeline — paid-on-time invoices never were late. */
+export const AR_STAGES: InvoiceStatus[] = [...INVOICE_STATUSES];
+
+export function stageIndex(status: InvoiceStatus): number {
+  const index = INVOICE_STATUSES.indexOf(status);
+  return index === -1 ? 0 : index;
+}
 
 /**
  * Read the receivables register for the caller's tenant.
@@ -132,6 +182,18 @@ export async function getCustomerInvoice(params: {
   );
 }
 
+/** One line, as the form sends it. net_amount is derived client-side (quantity ×
+ *  unit_price); the service balances the whole invoice, so a line that does not
+ *  add up is refused. */
+export type CreateCustomerInvoiceLineInput = {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  net_amount: number;
+  tax_code?: string;
+  tax_amount: number;
+};
+
 /**
  * Issue a customer invoice, in ISSUED status.
  *
@@ -143,6 +205,11 @@ export async function getCustomerInvoice(params: {
  * "tenant-zoiko-dev-01" and "le-singapore-01" against UUID NOT NULL columns —
  * a create that could never have succeeded against the real schema.
  *
+ * AR-05's required business/source inputs are all here — invoice_date,
+ * supply_date, at least one line, and the optional sales-order and document
+ * references. The service refuses an invoice unless its lines account for the
+ * gross to the cent.
+ *
  * A 200 rather than 201 means this correlationId had already been used and the
  * body is the ORIGINAL invoice: the submission was a duplicate and no second
  * receivable was opened.
@@ -152,9 +219,20 @@ export async function issueCustomerInvoice(params: {
   legalEntityId: string;
   customerId: string;
   invoiceNumber: string;
+  /** Gross total, derived = Σ line net + Σ line tax, never typed. */
   amount: number;
   currencyCode: string;
+  /** RFC3339. The Go field is a CalendarDate that accepts a bare YYYY-MM-DD or
+   *  an instant; the action converts date inputs to the explicit instant. */
   dueDate: string;
+  invoiceDate: string;
+  supplyDate: string;
+  lines: CreateCustomerInvoiceLineInput[];
+  /** Optional. The SEND evidence gate refuses an invoice that has none — see
+   *  explainAccountsReceivableError on invoice_document_required. */
+  invoiceDocumentId?: string;
+  salesOrderId?: string;
+  customerBillingRef?: string;
   correlationId: string;
 }): Promise<ApiWriteResult<CustomerInvoice>> {
   return apiPost<CustomerInvoice>(
@@ -167,6 +245,19 @@ export async function issueCustomerInvoice(params: {
       amount: params.amount,
       currency_code: params.currencyCode,
       due_date: params.dueDate,
+      invoice_date: params.invoiceDate,
+      supply_date: params.supplyDate,
+      lines: params.lines.map((line) => ({
+        description: line.description,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        net_amount: line.net_amount,
+        tax_amount: line.tax_amount,
+        tax_code: line.tax_code || undefined,
+      })),
+      invoice_document_id: params.invoiceDocumentId || undefined,
+      sales_order_id: params.salesOrderId || undefined,
+      customer_billing_ref: params.customerBillingRef || undefined,
       correlation_id: params.correlationId,
     },
     { identity: params.identity, correlationId: params.correlationId },
@@ -196,12 +287,23 @@ export async function markCustomerInvoiceOverdue(params: {
  * {SENT | OVERDUE} -> PAID, terminal. Authorizes AR_PAYMENT_RECEIVE and then
  * requires a FINALIZED general-ledger journal correlated to this invoice — see
  * property 2 at the top of this file.
+ *
+ * paymentDate and paymentReference are the AR-08 cash-application payload:
+ * when the money arrived and under what customer-side reference. Both optional;
+ * the lifecycle stamp is the audit source. Sent as a JSON body only when at
+ * least one is present, which is the normal case — the transition carries no
+ * body for send or overdue.
  */
 export async function receiveCustomerInvoicePayment(params: {
   identity: Identity;
   invoiceId: string;
+  paymentDate?: string;
+  paymentReference?: string;
 }): Promise<ApiWriteResult<CustomerInvoice>> {
-  return transition(params.identity, params.invoiceId, "pay");
+  const body: Record<string, unknown> = {};
+  if (params.paymentDate) body.payment_date = `${params.paymentDate}T00:00:00Z`;
+  if (params.paymentReference) body.payment_reference = params.paymentReference;
+  return transition(params.identity, params.invoiceId, "pay", body);
 }
 
 // One helper for the three hops because they differ only in the path segment.
@@ -213,11 +315,12 @@ function transition(
   identity: Identity,
   invoiceId: string,
   hop: "send" | "overdue" | "pay",
+  body: Record<string, unknown> = {},
 ): Promise<ApiWriteResult<CustomerInvoice>> {
   return apiPost<CustomerInvoice>(
     "accountsReceivable",
     `/v1/invoices/${encodeURIComponent(invoiceId)}/${hop}`,
-    {},
+    body,
     { identity },
   );
 }
@@ -383,6 +486,21 @@ export function explainAccountsReceivableError(message: string): string {
   if (message.includes("authorization_denied")) {
     return "You do not hold the authority for this step on this legal entity. Issuing an invoice, sending it, declaring it late and recording payment are four separate grants (AR_INVOICE_ISSUE, AR_INVOICE_SEND, AR_MARK_OVERDUE, AR_PAYMENT_RECEIVE) — holding one does not imply the next. Run deployments/scripts/seed-demo-rbac.ps1 if this is a local environment.";
   }
+  if (message.includes("self_payment_not_allowed")) {
+    return "You issued this invoice, so you cannot also record its payment. Segregation of duties (§12.3 of the design) requires the cash-handling step to be taken by a different principal — sign in as a second principal who holds AR_PAYMENT_RECEIVE, or the invoice stays unpaid. Nothing was written.";
+  }
+  if (message.includes("invoice_document_required")) {
+    return "This invoice cannot be sent without its document. The evidence gate refuses to SEND an invoice with no document of record — an issued-but-not-yet-sent invoice is a normal working state, a sent one without the customer's document behind it is the audit gap. Record an invoice_document_id (or issue the invoice again with one) and try again.";
+  }
+  if (message.includes("no_lines")) {
+    return "The invoice has no lines. AR-05 requires at least one line item — a receivable with nothing on it would let a gross amount ride on thin air. Add a line and try again.";
+  }
+  if (message.includes("invoice_does_not_balance")) {
+    return "The invoice does not balance. The service requires the amount to equal the lines' net plus tax to the cent, and stores nothing until it does. The detail above shows what the lines roll up to versus the amount sent.";
+  }
+  if (message.includes("invalid_line")) {
+    return "A line was rejected — it needs a description, a non-negative net amount, and a non-negative tax amount. The detail above names the offending line.";
+  }
   if (message.includes("authorization_service_unavailable") || message.includes("authorization-svc unavailable")) {
     return "authorization-svc could not be reached, so no permission could be checked and nothing was written. This service fails closed rather than guessing.";
   }
@@ -408,6 +526,19 @@ export function explainAccountsReceivableError(message: string): string {
     return "No invoice with that id in your tenant.";
   }
   if (message.includes("missing_field")) {
+    const field = message.includes("invoice_date")
+      ? "invoice_date"
+      : message.includes("supply_date")
+        ? "supply_date"
+        : message.includes("due_date")
+          ? "due_date"
+          : "";
+    if (field === "invoice_date") {
+      return "The invoice was refused because invoice_date is missing — the date on the document you issued, distinct from the due date. Add it and try again.";
+    }
+    if (field === "supply_date") {
+      return "The invoice was refused because supply_date is missing — the tax point, which can differ from the invoice date. Add it and try again.";
+    }
     return `The service refused the submission as incomplete: ${message}`;
   }
   if (message.includes("store_unavailable")) {

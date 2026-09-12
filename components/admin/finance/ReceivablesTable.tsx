@@ -13,8 +13,18 @@ const COLUMNS = ["Invoice", "Amount", "Due", "Status", "Last action", "Actions"]
  * column because recording a payment needs the matching general-ledger journal to
  * carry this id as its correlation_id — so this is the value that has to move by
  * hand between this table and the journal form above it.
+ *
+ * currentPrincipalId comes from the session (via the server component) so a row
+ * can tell the operator when they are the invoice's issuer — the segregation-of-
+ * duties case in which their own payment attempt would be refused.
  */
-export function ReceivablesTable({ invoices }: { invoices: CustomerInvoice[] }) {
+export function ReceivablesTable({
+  invoices,
+  currentPrincipalId,
+}: {
+  invoices: CustomerInvoice[];
+  currentPrincipalId: string;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[56rem] border-collapse text-left">
@@ -37,6 +47,7 @@ export function ReceivablesTable({ invoices }: { invoices: CustomerInvoice[] }) 
               key={invoice.invoice_id}
               invoice={invoice}
               columnCount={COLUMNS.length}
+              currentPrincipalId={currentPrincipalId}
             />
           ))}
         </tbody>

@@ -6,6 +6,8 @@ export { FinanceProcessTimeline } from "./FinanceProcessTimeline";
 export { AccountsPayablePanel } from "./AccountsPayablePanel";
 export { AccountsPayableTable } from "./AccountsPayableTable";
 export { RecordInvoiceForm } from "./RecordInvoiceForm";
+export { InvoiceLookup } from "./InvoiceLookup";
+export { InvoiceLookupSummary } from "./InvoiceLookupSummary";
 // general-ledger-svc (:8098) — live and writable. The hub of this domain: the
 // journal register is what treasury, financial close, bank reconciliation,
 // intercompany and consolidation all read.
@@ -33,4 +35,7 @@ export { CompleteStatementForm } from "./CompleteStatementForm";
 // the service does not have.
 export { AccountsReceivablePanel } from "./AccountsReceivablePanel";
 export { ReceivablesTable } from "./ReceivablesTable";
+export { CustomerInvoiceRow } from "./CustomerInvoiceRow";
 export { IssueInvoiceForm } from "./IssueInvoiceForm";
+export { CustomerInvoiceLookup } from "./CustomerInvoiceLookup";
+export { CustomerInvoiceSummary } from "./CustomerInvoiceSummary";

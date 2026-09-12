@@ -16,6 +16,7 @@ import {
   listVendorInvoices,
   summariseInvoices,
   explainPayableError,
+  REGISTER_PAGE_SIZE,
   type InvoiceStatus,
 } from "@/lib/api/accounts-payable";
 import { AccountsPayableTable } from "./AccountsPayableTable";
@@ -96,6 +97,13 @@ export async function AccountsPayablePanel({
     status,
     legalEntityId,
     vendorId,
+    // The service bounds this read now — it used to return every invoice the
+    // tenant had ever recorded on every dashboard load. Asking explicitly means
+    // the counts this panel shows are counts this panel chose, and a full page is
+    // reported as possibly-truncated below rather than passing as the whole
+    // register. The service refuses (400) rather than clamps over 500, so a page
+    // under it cannot be silently bigger than it looks.
+    limit: REGISTER_PAGE_SIZE,
   });
 
   if (!result.ok) {
@@ -143,6 +151,18 @@ export async function AccountsPayablePanel({
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Filtered to {activeFilters.join(", ")}. The totals below describe this filtered set, not
           the whole register.
+        </p>
+      )}
+
+      {/* A full page means there may be more. Said out loud because the tiles and
+          the awaiting-payment total below are computed from THIS page — presenting
+          them as the tenant's liabilities while silently holding back rows would
+          be the same class of untruth as the invented figures this panel replaced. */}
+      {invoices.length >= REGISTER_PAGE_SIZE && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          Showing the most recent {REGISTER_PAGE_SIZE} invoices, which is a full page — there are
+          likely more. The tiles and totals below describe these {REGISTER_PAGE_SIZE}, not the
+          whole register. Narrow by stage or vendor to see a complete set.
         </p>
       )}
 
@@ -219,7 +239,7 @@ export async function AccountsPayablePanel({
         </div>
       </div>
 
-      <AccountsPayableTable invoices={invoices} />
+      <AccountsPayableTable invoices={invoices} currentPrincipalId={session.principalId} />
     </div>
   );
 }

@@ -39,6 +39,7 @@ import { listContracts, listClauses, listObligations, listBoardMeetings, listBoa
 import { listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
 import { listFiscalPeriods } from "@/lib/api/financial-close";
 import { listJournals } from "@/lib/api/general-ledger";
+import { listVendorInvoices } from "@/lib/api/accounts-payable";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
 import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions } from "@/lib/api/payroll";
 import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts, listReviews, listReviewCycles } from "@/lib/api/hr";
@@ -156,6 +157,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   if (endpoint === "journal-entries") {
     const res = await listJournals({ identity });
     return NextResponse.json({ journal_entries: res.ok ? res.data : [] });
+  }
+  // accounts-payable-svc, scoped to the session's tenant like every other
+  // read here. The timeline's AP step counts these; it used to read
+  // journal-entries, which put the ledger's figure under the AP service's name.
+  if (endpoint === "invoices") {
+    const res = await listVendorInvoices({
+      identity: { ...identity, tenantId: identity.tenantId },
+      limit: 500,
+    });
+    return NextResponse.json({ invoices: res.ok ? res.data : [] });
   }
   if (endpoint === "cash-positions") {
     const res = await listCashPositions();

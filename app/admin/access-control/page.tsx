@@ -25,12 +25,16 @@ import {
   EvaluationDelegationsPanel,
   EntityScopeCheckForm,
   EvaluationRolesPanel,
+  ManageBundleForms,
   RoleCataloguePanel,
   SoDPrecheckForm,
   SoDRulesPanel,
   UpdateRoleForm,
 } from "@/components/admin/access-control";
-import { listRoleDefinitions } from "@/lib/api/access-control";
+import {
+  listAllPermissionBundles,
+  listRoleDefinitions,
+} from "@/lib/api/access-control";
 import {
   explainAuthorizationError,
   listRoleAssignments,
@@ -68,16 +72,22 @@ async function Catalogue() {
 }
 
 /**
- * Both write forms need the current role list — one to choose what to change,
- * the other to choose what to attach a bundle to. Read once and shared rather
- * than fetched per form, so the two dropdowns cannot disagree about what exists.
+ * The write forms on this page all need the current role list — to choose what
+ * to define, change, attach to or manage. The manage form also needs every
+ * bundle in one read. Both are fetched here once and shared, so the dropdowns
+ * cannot disagree about what exists and the manage form does not fan out one
+ * request per role.
  */
 async function WriteForms() {
   const identity = await sessionIdentity();
   if (!identity) return null;
 
-  const rolesResult = await listRoleDefinitions(identity);
+  const [rolesResult, bundlesResult] = await Promise.all([
+    listRoleDefinitions(identity),
+    listAllPermissionBundles(identity),
+  ]);
   const roles = rolesResult.ok ? (rolesResult.data ?? []) : [];
+  const bundles = bundlesResult.ok ? (bundlesResult.data ?? []) : [];
   const legalEntityId = identity.legalEntityId ?? "";
 
   return (
@@ -135,6 +145,26 @@ async function WriteForms() {
             <p className="text-sm text-slate-500 dark:text-slate-400">Nothing to change yet.</p>
           ) : (
             <UpdateRoleForm roles={roles} legalEntityId={legalEntityId} />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Edit or detach a permission bundle</CardTitle>
+          <CardDescription>
+            Change what an attached bundle permits, or withdraw it from its role. Both propagate to
+            authorization-svc in the same request and fail closed — so a state shown here is a
+            state the platform is actually enforcing.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {bundles.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              No permission bundles to manage yet. Attach one above first.
+            </p>
+          ) : (
+            <ManageBundleForms roles={roles} bundles={bundles} legalEntityId={legalEntityId} />
           )}
         </CardContent>
       </Card>

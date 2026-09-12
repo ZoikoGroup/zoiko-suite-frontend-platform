@@ -23,7 +23,9 @@ import {
   explainPayableError,
   isInvoiceAction,
   NEXT_STEP,
+  type CreateInvoiceLineInput,
   type InvoiceAction,
+  type VendorInvoice,
 } from "@/lib/api/accounts-payable";
 import {
   createJournal,
@@ -64,7 +66,10 @@ import {
   sendCustomerInvoice,
   markCustomerInvoiceOverdue,
   receiveCustomerInvoicePayment,
+  getCustomerInvoice,
   explainAccountsReceivableError,
+  type CreateCustomerInvoiceLineInput,
+  type CustomerInvoice,
 } from "@/lib/api/accounts-receivable";
 import { formatMoney } from "@/lib/format";
 import type { LookupState } from "@/components/admin/shared/lookup";
@@ -102,6 +107,12 @@ const EXPIRED: PayableActionState = {
 /**
  * Record a vendor invoice from the intake form. It lands RECEIVED.
  *
+ * AP-05's required business/source inputs are all here — vendor, invoice
+ * number, currency, the three calendar dates, and the line items the invoice
+ * balances against. The service refuses to store the invoice unless the gross
+ * amount equals the lines' net plus tax to the cent, so the amount is derived
+ * from the lines, never typed.
+ *
  * 201 means an invoice was created. 200 means the service recognised the request
  * as a replay and wrote nothing — reported as such rather than as a second
  * successful intake, because a duplicated liability is what the idempotency is
@@ -120,9 +131,13 @@ export async function recordVendorInvoice(
 
   const vendorId = String(formData.get("vendor_id") ?? "").trim();
   const invoiceNumber = String(formData.get("invoice_number") ?? "").trim();
-  const amountRaw = String(formData.get("amount") ?? "").trim();
   const currencyCode = String(formData.get("currency_code") ?? "").trim();
   const dueDateRaw = String(formData.get("due_date") ?? "").trim();
+  const invoiceDateRaw = String(formData.get("invoice_date") ?? "").trim();
+  const supplyDateRaw = String(formData.get("supply_date") ?? "").trim();
+  const purchaseOrderId = String(formData.get("purchase_order_id") ?? "").trim();
+  const goodsReceiptRef = String(formData.get("goods_receipt_ref") ?? "").trim();
+  const invoiceDocumentId = String(formData.get("invoice_document_id") ?? "").trim();
 
   if (!vendorId) {
     return {
@@ -134,22 +149,123 @@ export async function recordVendorInvoice(
   if (!invoiceNumber) {
     return { status: "error", message: "The vendor's invoice number is required." };
   }
-
-  const amount = Number(amountRaw);
-  if (amountRaw === "" || !Number.isFinite(amount) || amount <= 0) {
-    return { status: "error", message: "Amount must be a number greater than zero." };
-  }
   if (!currencyCode) return { status: "error", message: "Currency is required." };
 
-  // The service now accepts a bare "2026-09-01" as well as RFC3339 — due_date is
-  // a DATE column, so a day is the honest unit. This still sends the explicit
-  // instant: it pins the value to UTC midnight rather than relying on the
-  // service's parsing, and a date input is validated here anyway so a direct POST
-  // is held to the same contract.
+  // The service now accepts a bare "2026-09-01" as well as RFC3339 for all
+  // three dates — they are DATE columns, so a day is the honest unit. This
+  // still sends the explicit instant: it pins the value to UTC midnight rather
+  // than relying on the service's parsing, and a date input is validated here
+  // anyway so a direct POST is held to the same contract.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDateRaw)) {
+    return {
+      status: "error",
+      message:
+        "An invoice date is required, as YYYY-MM-DD — the date printed on the supplier's document.",
+    };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(supplyDateRaw)) {
+    return {
+      status: "error",
+      message:
+        "A supply date is required, as YYYY-MM-DD — the tax point, which can differ from the invoice date, and which decides the tax period the invoice lands in.",
+    };
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateRaw)) {
     return { status: "error", message: "A due date is required, as YYYY-MM-DD." };
   }
   const dueDate = `${dueDateRaw}T00:00:00Z`;
+  const invoiceDate = `${invoiceDateRaw}T00:00:00Z`;
+  const supplyDate = `${supplyDateRaw}T00:00:00Z`;
+
+  // ── AP-05 line items ──────────────────────────────────────────────────────
+  //
+  // The lines arrive as four parallel FormData arrays (line_description[],
+  // line_quantity[], line_unit_price[], line_tax_amount[], line_tax_code[])
+  // because the form lets an operator add and remove rows. They are zipped
+  // back together here, missing a quantity defaults to 1, and the net amount
+  // is derived as quantity × unit price — never typed, which is what keeps the
+  // invoice balancing to the cent on both sides.
+
+  const descriptions = formData.getAll("line_description").map((value) => String(value));
+  const quantities = formData.getAll("line_quantity").map((value) => String(value));
+  const unitPrices = formData.getAll("line_unit_price").map((value) => String(value));
+  const taxAmounts = formData.getAll("line_tax_amount").map((value) => String(value));
+  const taxCodes = formData.getAll("line_tax_code").map((value) => String(value));
+
+  const lines: CreateInvoiceLineInput[] = [];
+  for (let i = 0; i < descriptions.length; i += 1) {
+    const description = descriptions[i]?.trim() ?? "";
+    const quantityRaw = quantities[i]?.trim() ?? "";
+    const unitPriceRaw = unitPrices[i]?.trim() ?? "";
+    const taxRaw = taxAmounts[i]?.trim() ?? "";
+    const taxCode = taxCodes[i]?.trim() ?? "";
+
+    // An empty slot is the operator not using a row, not an error — the form
+    // pre-renders a handful of empty rows.
+    if (!description && !unitPriceRaw && !taxRaw) continue;
+
+    const rowLabel = `Line ${i + 1}`;
+    if (!description) {
+      return { status: "error", message: `${rowLabel}: a description is required.` };
+    }
+
+    const quantity = quantityRaw === "" ? 1 : Number(quantityRaw);
+    const unitPrice = unitPriceRaw === "" ? 0 : Number(unitPriceRaw);
+    const taxAmount = taxRaw === "" ? 0 : Number(taxRaw);
+
+    if (!Number.isFinite(quantity) || !Number.isFinite(unitPrice) || !Number.isFinite(taxAmount)) {
+      return {
+        status: "error",
+        message: `${rowLabel}: quantities, prices and tax amounts must be numbers.`,
+      };
+    }
+    if (quantity <= 0 || unitPrice < 0) {
+      return {
+        status: "error",
+        message: `${rowLabel}: quantity must be greater than zero and unit price cannot be negative. For a lump sum, leave quantity at 1 and put the whole sum in the unit price.`,
+      };
+    }
+    if (taxAmount < 0) {
+      return { status: "error", message: `${rowLabel}: tax cannot be negative.` };
+    }
+
+    // The service accounts for the invoice in whole minor units
+    // (domain.Balances compares cents), so net is cut to two decimals before
+    // it is sent — a 2dp value summed is a value that balances to the cent.
+    const netAmount = Math.round(quantity * unitPrice * 100) / 100;
+    if (netAmount <= 0) {
+      return {
+        status: "error",
+        message: `${rowLabel}: quantity times unit price is zero, so the line carries no value. Check the unit price.`,
+      };
+    }
+
+    lines.push({
+      description,
+      quantity,
+      unit_price: unitPrice,
+      net_amount: netAmount,
+      tax_amount: Math.round(taxAmount * 100) / 100,
+      tax_code: taxCode || undefined,
+    });
+  }
+
+  if (lines.length === 0) {
+    return {
+      status: "error",
+      message: "An invoice needs at least one line — the service refuses a document with nothing on it.",
+    };
+  }
+
+  // Gross is derived, never typed. Derive it on the way out the same way the
+  // service does on the way in (sum, then round to the cent) so the amount the
+  // invoice is booked for is exactly the amount its lines account for.
+  const netTotal = Math.round(lines.reduce((sum, line) => sum + line.net_amount, 0) * 100) / 100;
+  const taxTotal = Math.round(lines.reduce((sum, line) => sum + line.tax_amount, 0) * 100) / 100;
+  const amount = Math.round((netTotal + taxTotal) * 100) / 100;
+  if (amount <= 0) {
+    return { status: "error", message: "The invoice's gross total must be greater than zero." };
+  }
 
   const result = await createVendorInvoice({
     identity,
@@ -158,6 +274,12 @@ export async function recordVendorInvoice(
     amount,
     currencyCode,
     dueDate,
+    invoiceDate,
+    supplyDate,
+    lines,
+    purchaseOrderId: purchaseOrderId || undefined,
+    goodsReceiptRef: goodsReceiptRef || undefined,
+    invoiceDocumentId: invoiceDocumentId || undefined,
   });
 
   if (!result.ok) {
@@ -178,13 +300,17 @@ export async function recordVendorInvoice(
 
   const invoice = result.data;
   const money = formatMoney(invoice.amount, invoice.currency_code);
+  const lineCount = invoice.lines?.length ?? lines.length;
+  const lineNote = invoice.invoice_document_id
+    ? ` The document reference was recorded, so validation can be passed next.`
+    : ` No document reference was recorded — validate will refuse it until one exists.`;
 
   return result.status === 201
     ? {
         status: "recorded",
         invoiceId: invoice.invoice_id,
         stage: invoice.status,
-        message: `Invoice ${invoice.invoice_number} recorded for ${money}, status ${invoice.status} — ID ${invoice.invoice_id}. It authorises no payment: validation, approval, and a payment request are three further steps, each a separate grant.`,
+        message: `Invoice ${invoice.invoice_number} recorded for ${money} across ${lineCount} ${lineCount === 1 ? "line" : "lines"}, status ${invoice.status} — ID ${invoice.invoice_id}. It authorises no payment: validation, approval, and a payment request are three further steps, each a separate grant.${lineNote}`,
       }
     : {
         status: "replayed",
@@ -231,6 +357,20 @@ export async function advanceInvoice(
   const result = await advanceVendorInvoice(invoiceId, action, identity);
 
   if (!result.ok) {
+    // Two refusals are facts about a rule rather than failures of the attempt,
+    // so each gets its own banner instead of a red error: a 403 because the
+    // recorder tried to approve their own invoice (segregation of duties), and
+    // a 422 because the evidence check refuses a documentless invoice.
+    if (result.error.message.includes("self_approval_not_allowed")) {
+      return { status: "self-approval", invoiceId, message: explainPayableError(result.error.message) };
+    }
+    if (result.error.message.includes("invoice_document_required")) {
+      return {
+        status: "document-required",
+        invoiceId,
+        message: explainPayableError(result.error.message),
+      };
+    }
     if (result.error.status === 422) {
       return { status: "out-of-sequence", message: explainPayableError(result.error.message) };
     }
@@ -261,9 +401,9 @@ export async function advanceInvoice(
  * its events elsewhere in the suite.
  */
 export async function lookupVendorInvoice(
-  _previous: LookupState,
+  _previous: LookupState<VendorInvoice>,
   formData: FormData,
-): Promise<LookupState> {
+): Promise<LookupState<VendorInvoice>> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -1236,9 +1376,14 @@ export async function issueCustomerInvoiceAction(
 
   const customerId = String(formData.get("customer_id") ?? "").trim();
   const invoiceNumber = String(formData.get("invoice_number") ?? "").trim();
-  const amountRaw = String(formData.get("amount") ?? "").trim();
   const currencyCode = String(formData.get("currency_code") ?? "").trim();
   const dueDateRaw = String(formData.get("due_date") ?? "").trim();
+  // AR-05's two further dates, plus the optional references.
+  const invoiceDateRaw = String(formData.get("invoice_date") ?? "").trim();
+  const supplyDateRaw = String(formData.get("supply_date") ?? "").trim();
+  const salesOrderId = String(formData.get("sales_order_id") ?? "").trim();
+  const customerBillingRef = String(formData.get("customer_billing_ref") ?? "").trim();
+  const invoiceDocumentId = String(formData.get("invoice_document_id") ?? "").trim();
   // One fresh idempotency key per submission.
   //
   // It keys the service's partial unique index on (tenant_id, correlation_id), so
@@ -1261,12 +1406,97 @@ export async function issueCustomerInvoiceAction(
   if (!invoiceNumber) {
     return { status: "error", message: "An invoice number is required." };
   }
-
-  const amount = Number(amountRaw);
-  if (amountRaw === "" || !Number.isFinite(amount) || amount <= 0) {
-    return { status: "error", message: "Amount must be a number greater than zero." };
-  }
   if (!currencyCode) return { status: "error", message: "Currency is required." };
+
+  // ── AR-05 line items ──────────────────────────────────────────────────────
+  //
+  // The lines arrive as four parallel FormData arrays (line_description[],
+  // line_quantity[], line_unit_price[], line_tax_amount[], line_tax_code[])
+  // because the form lets an operator add and remove rows. They are zipped
+  // back together here, missing a quantity defaults to 1, and the net amount
+  // is derived as quantity × unit price — never typed, which is what keeps the
+  // invoice balancing to the cent on both sides.
+
+  const descriptions = formData.getAll("line_description").map((value) => String(value));
+  const quantities = formData.getAll("line_quantity").map((value) => String(value));
+  const unitPrices = formData.getAll("line_unit_price").map((value) => String(value));
+  const taxAmounts = formData.getAll("line_tax_amount").map((value) => String(value));
+  const taxCodes = formData.getAll("line_tax_code").map((value) => String(value));
+
+  const lines: CreateCustomerInvoiceLineInput[] = [];
+  for (let i = 0; i < descriptions.length; i += 1) {
+    const description = descriptions[i]?.trim() ?? "";
+    const quantityRaw = quantities[i]?.trim() ?? "";
+    const unitPriceRaw = unitPrices[i]?.trim() ?? "";
+    const taxRaw = taxAmounts[i]?.trim() ?? "";
+    const taxCode = taxCodes[i]?.trim() ?? "";
+
+    // An empty slot is the operator not using a row, not an error — the form
+    // pre-renders a handful of empty rows.
+    if (!description && !unitPriceRaw && !taxRaw) continue;
+
+    const rowLabel = `Line ${i + 1}`;
+    if (!description) {
+      return { status: "error", message: `${rowLabel}: a description is required.` };
+    }
+
+    const quantity = quantityRaw === "" ? 1 : Number(quantityRaw);
+    const unitPrice = unitPriceRaw === "" ? 0 : Number(unitPriceRaw);
+    const taxAmount = taxRaw === "" ? 0 : Number(taxRaw);
+
+    if (!Number.isFinite(quantity) || !Number.isFinite(unitPrice) || !Number.isFinite(taxAmount)) {
+      return {
+        status: "error",
+        message: `${rowLabel}: quantities, prices and tax amounts must be numbers.`,
+      };
+    }
+    if (quantity <= 0 || unitPrice < 0) {
+      return {
+        status: "error",
+        message: `${rowLabel}: quantity must be greater than zero and unit price cannot be negative. For a lump sum, leave quantity at 1 and put the whole sum in the unit price.`,
+      };
+    }
+    if (taxAmount < 0) {
+      return { status: "error", message: `${rowLabel}: tax cannot be negative.` };
+    }
+
+    // The service accounts for the invoice in whole minor units
+    // (domain.Balances compares cents), so net is cut to two decimals before
+    // it is sent — a 2dp value summed is a value that balances to the cent.
+    const netAmount = Math.round(quantity * unitPrice * 100) / 100;
+    if (netAmount <= 0) {
+      return {
+        status: "error",
+        message: `${rowLabel}: quantity times unit price is zero, so the line carries no value. Check the unit price.`,
+      };
+    }
+
+    lines.push({
+      description,
+      quantity,
+      unit_price: unitPrice,
+      net_amount: netAmount,
+      tax_amount: Math.round(taxAmount * 100) / 100,
+      tax_code: taxCode || undefined,
+    });
+  }
+
+  if (lines.length === 0) {
+    return {
+      status: "error",
+      message: "An invoice needs at least one line — the service refuses a document with nothing on it.",
+    };
+  }
+
+  // Gross is derived, never typed. Derive it on the way out the same way the
+  // service does on the way in (sum, then round to the cent) so the amount the
+  // invoice is booked for is exactly the amount its lines account for.
+  const netTotal = Math.round(lines.reduce((sum, line) => sum + line.net_amount, 0) * 100) / 100;
+  const taxTotal = Math.round(lines.reduce((sum, line) => sum + line.tax_amount, 0) * 100) / 100;
+  const amount = Math.round((netTotal + taxTotal) * 100) / 100;
+  if (amount <= 0) {
+    return { status: "error", message: "The invoice's gross total must be greater than zero." };
+  }
 
   // due_date is a DATE column, so a day is the honest unit; the explicit instant
   // pins it to UTC midnight rather than relying on the service's parsing. It is
@@ -1275,7 +1505,23 @@ export async function issueCustomerInvoiceAction(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateRaw)) {
     return { status: "error", message: "A due date is required, as YYYY-MM-DD." };
   }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDateRaw)) {
+    return {
+      status: "error",
+      message:
+        "An invoice date is required, as YYYY-MM-DD — the date printed on the document you issued, which can differ from the due date.",
+    };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(supplyDateRaw)) {
+    return {
+      status: "error",
+      message:
+        "A supply date is required, as YYYY-MM-DD — the date the supply took place (the tax point), which can differ from the invoice date.",
+    };
+  }
   const dueDate = `${dueDateRaw}T00:00:00Z`;
+  const invoiceDate = `${invoiceDateRaw}T00:00:00Z`;
+  const supplyDate = `${supplyDateRaw}T00:00:00Z`;
 
   const result = await issueCustomerInvoice({
     identity,
@@ -1285,6 +1531,12 @@ export async function issueCustomerInvoiceAction(
     amount,
     currencyCode,
     dueDate,
+    invoiceDate,
+    supplyDate,
+    lines,
+    salesOrderId: salesOrderId || undefined,
+    customerBillingRef: customerBillingRef || undefined,
+    invoiceDocumentId: invoiceDocumentId || undefined,
     correlationId,
   });
 
@@ -1313,13 +1565,22 @@ export async function issueCustomerInvoiceAction(
 
   const invoice = result.data;
   const money = formatMoney(invoice.amount, invoice.currency_code);
+  const lineCount = invoice.lines?.length ?? lines.length;
+  const lineNote = lineCount === 1 ? "1 line" : `${lineCount} lines`;
+  const netTaxNote =
+    invoice.net_amount != null
+      ? ` (net ${formatMoney(invoice.net_amount, invoice.currency_code)} plus tax ${formatMoney(invoice.tax_amount ?? 0, invoice.currency_code)})`
+      : "";
+  const docNote = invoice.invoice_document_id
+    ? ` The document reference was recorded, so it can be sent next.`
+    : ` No document reference was recorded — sending will be refused until one is.`;
 
   return result.status === 201
     ? {
         status: "issued",
         invoiceId: invoice.invoice_id,
         stage: invoice.status,
-        message: `Invoice ${invoice.invoice_number} issued to ${invoice.customer_id} for ${money}, status ${invoice.status} — ID ${invoice.invoice_id}. It is not yet a claim on the customer: sending it, declaring it late and recording payment are three further steps, each a separate grant.`,
+        message: `Invoice ${invoice.invoice_number} issued to ${invoice.customer_id} for ${money}${netTaxNote} across ${lineNote}, status ${invoice.status} — ID ${invoice.invoice_id}. It is not yet a claim on the customer: sending it, declaring it late and recording payment are three further steps, each a separate grant.${docNote}`,
       }
     : {
         status: "replayed",
@@ -1361,17 +1622,52 @@ export async function advanceCustomerInvoice(
     return { status: "error", message: "Unrecognised transition." };
   }
 
+  // AR-08 cash-application payload, recorded only on the pay hop. Both fields
+  // optional — a payment with neither is still a payment — and a payment_date
+  // that is present is held to the same YYYY-MM-DD contract as every other date
+  // field, so a half-typed value becomes a named error instead of a date the
+  // service parses as something else.
+  const paymentDateRaw = String(formData.get("payment_date") ?? "").trim();
+  const paymentReference = String(formData.get("payment_reference") ?? "").trim();
+  if (rawHop === "pay") {
+    if (paymentDateRaw && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDateRaw)) {
+      return { status: "error", message: "The payment date, if given, must be YYYY-MM-DD." };
+    }
+    if (paymentReference.length > 200) {
+      return {
+        status: "error",
+        message: "The payment reference must be 200 characters or fewer.",
+      };
+    }
+  }
+
   const result =
     rawHop === "send"
       ? await sendCustomerInvoice({ identity, invoiceId })
       : rawHop === "overdue"
         ? await markCustomerInvoiceOverdue({ identity, invoiceId })
-        : await receiveCustomerInvoicePayment({ identity, invoiceId });
+        : await receiveCustomerInvoicePayment({
+            identity,
+            invoiceId,
+            ...(paymentDateRaw ? { paymentDate: paymentDateRaw } : {}),
+            ...(paymentReference ? { paymentReference } : {}),
+          });
 
   if (!result.ok) {
     const { status, message } = result.error;
     const explained = explainAccountsReceivableError(message);
 
+    // Two refusals are facts about a rule rather than failures of the attempt,
+    // so each gets its own banner instead of a red error: a 403 because the
+    // issuer tried to record their own invoice's payment (segregation of
+    // duties), and a 422 because the evidence gate refuses to send a
+    // documentless invoice.
+    if (message.includes("self_payment_not_allowed")) {
+      return { status: "self-payment", message: explained, invoiceId };
+    }
+    if (message.includes("invoice_document_required")) {
+      return { status: "document-required", message: explained, invoiceId };
+    }
     // 400 ledger_verification_failed is the outcome an operator will meet most
     // often on the payment hop, and it is not a fault: the books hold no
     // finalized journal for this invoice yet. Given its own state so the banner
@@ -1408,7 +1704,11 @@ export async function advanceCustomerInvoice(
       ? `${invoice.invoice_number} is now SENT to ${invoice.customer_id} and attributed to you. It becomes overdue only after ${new Date(invoice.due_date).toLocaleDateString()}.`
       : invoice.status === "OVERDUE"
         ? `${invoice.invoice_number} is now OVERDUE, attributed to you. receivable.overdue has been published — aging and impairment downstream count this, so it is a statement about the customer, not a display change. Payment can still be recorded.`
-        : `${invoice.invoice_number} is PAID for ${money}, attributed to you. Terminal: payment.received has been published and no further transition is possible. The payment was accepted only because general-ledger-svc holds a FINALIZED journal for this invoice.`;
+        : `${invoice.invoice_number} is PAID for ${money}, attributed to you. Terminal: payment.received has been published and no further transition is possible. The payment was accepted only because general-ledger-svc holds a FINALIZED journal for this invoice.${
+            invoice.payment_date
+              ? ` The customer's own citation is on the record — received ${invoice.payment_date.slice(0, 10)}${invoice.payment_reference ? `, reference ${invoice.payment_reference}` : ""}.`
+              : ""
+          }`;
 
   return {
     status: "advanced",
@@ -1416,4 +1716,44 @@ export async function advanceCustomerInvoice(
     stage: invoice.status,
     message: detail,
   };
+}
+
+/**
+ * Read one customer invoice by id.
+ *
+ * The full record, which the register's bounded list does not carry: the AR-05
+ * line items, the supply date, the customer-side references, and any AR-08
+ * cash-application payload, plus every actor and timestamp along the lifecycle.
+ */
+export async function lookupCustomerInvoice(
+  _previous: LookupState<CustomerInvoice>,
+  formData: FormData,
+): Promise<LookupState<CustomerInvoice>> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const invoiceId = String(formData.get("lookup_invoice_id") ?? "").trim();
+  if (!invoiceId) return { status: "error", message: "Enter an invoice ID." };
+  if (!isUuid(invoiceId)) {
+    return { status: "error", message: "An invoice ID must be a UUID." };
+  }
+
+  const result = await getCustomerInvoice({ identity, invoiceId });
+
+  if (!result.ok) {
+    if (result.error.status === 404) {
+      return {
+        status: "missing",
+        message:
+          "No invoice with that id exists for this tenant. Two other things read identically: an invoice belonging to another tenant, and a request that carried no tenant scope at all — the store resolves tenant from the X-Tenant-Id header and returns nothing when it is absent.",
+      };
+    }
+    return { status: "error", message: explainAccountsReceivableError(result.error.message) };
+  }
+
+  return { status: "found", record: result.data, message: "" };
 }

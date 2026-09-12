@@ -81,13 +81,27 @@ function StageMeter({ status }: { status: InvoiceStatus }) {
  * That also means this row cannot act on a stale reading. If the register is out
  * of date, the derived action is the wrong one and the service refuses it — which
  * is why a 422 is rendered as "not from here" rather than as a failure.
+ *
+ * Two rules are surfaced BEFORE a round trip rather than after one, because the
+ * service will refuse them and there is no point sending a request the server is
+ * certain to answer with a refusal:
+ *  - Segregation of duties (§12.3): the recorder may not approve their own
+ *    invoice. The row knows who recorded it, and this row knows who is asking,
+ *    so a VALIDATED invoice the current principal recorded gets the explanation
+ *    instead of an Approve button.
+ *  - The evidence check: VALIDATE refuses an invoice with no document of record,
+ *    and the row can see whether one was recorded.
  */
 export function InvoiceRow({
   invoice,
   columnCount,
+  currentPrincipalId,
 }: {
   invoice: VendorInvoice;
   columnCount: number;
+  /** The session's principal, passed down so the row can name "you" when the
+   *  current operator is the one the governance rule applies to. */
+  currentPrincipalId?: string;
 }) {
   const [state, action, pending] = useActionState<PayableActionState, FormData>(
     advanceInvoice,
@@ -96,6 +110,12 @@ export function InvoiceRow({
 
   const next = NEXT_STEP[invoice.status];
   const overdue = isOverdue(invoice);
+  const selfApprovalRefused =
+    invoice.status === "VALIDATED" && invoice.created_by_principal_id === currentPrincipalId;
+  // A RECEIVED invoice recorded without a document reference cannot be validated
+  // — the evidence check refuses it — so the row says so beside the button.
+  const validationBlockedByDocument =
+    invoice.status === "RECEIVED" && !invoice.invoice_document_id;
 
   // Who last moved it, and when. The lifecycle stamps a separate actor column per
   // stage, so the most recent one is the furthest along that is populated.
@@ -113,7 +133,9 @@ export function InvoiceRow({
   const feedback =
     state.status === "error"
       ? { tone: "error" as const, message: state.message }
-      : state.status === "out-of-sequence"
+      : state.status === "out-of-sequence" ||
+          state.status === "self-approval" ||
+          state.status === "document-required"
         ? { tone: "warning" as const, message: state.message }
         : state.status === "advanced"
           ? { tone: "success" as const, message: state.message }
@@ -127,6 +149,25 @@ export function InvoiceRow({
           <span className="mt-0.5 block break-words text-xs text-slate-500 dark:text-slate-400">
             {invoice.vendor_id}
           </span>
+          <span className="mt-0.5 block text-[11px] text-slate-400 dark:text-slate-500">
+            Document {formatDate(formatDueDate(invoice.invoice_date))} · Supply{" "}
+            {formatDate(formatDueDate(invoice.supply_date))}
+          </span>
+          {invoice.purchase_order_id && (
+            <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+              PO {invoice.purchase_order_id}
+            </span>
+          )}
+          {invoice.goods_receipt_ref && (
+            <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+              GRN {invoice.goods_receipt_ref}
+            </span>
+          )}
+          {invoice.invoice_document_id && (
+            <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+              Doc {invoice.invoice_document_id}
+            </span>
+          )}
           <CopyableId value={invoice.invoice_id} className="mt-0.5" />
         </td>
 
@@ -137,6 +178,11 @@ export function InvoiceRow({
           )}
         >
           {formatMoney(invoice.amount, invoice.currency_code)}
+          <span className="mt-0.5 block text-[11px] tabular-nums text-slate-400 dark:text-slate-500">
+            net {formatMoney(invoice.net_amount, invoice.currency_code)} · tax{" "}
+            {formatMoney(invoice.tax_amount, invoice.currency_code)}
+            {invoice.lines.length > 0 && ` · ${invoice.lines.length} ${invoice.lines.length === 1 ? "line" : "lines"}`}
+          </span>
         </td>
 
         <td className={cn(CELL, "whitespace-nowrap text-slate-500 dark:text-slate-400")}>
@@ -165,25 +211,41 @@ export function InvoiceRow({
 
         <td className={cn(CELL, "text-right")}>
           {next ? (
-            <form action={action} className="inline-flex">
-              <input type="hidden" name="invoice_id" value={invoice.invoice_id} />
-              <input type="hidden" name="action" value={next.action} />
-              <Button
-                type="submit"
-                size="sm"
-                variant="secondary"
-                loading={pending}
-                aria-label={`${next.label} invoice ${invoice.invoice_number}`}
-                className="shrink-0"
-              >
-                {next.label}
-                {!pending && <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />}
-              </Button>
-            </form>
+            selfApprovalRefused ? (
+              // Segregation of duties (§12.3 of the design): the recorder may not
+              // approve their own submission. The service enforces it with a 403;
+              // this row spares the round trip and explains the rule in place of
+              // the button it would refuse.
+              <span className="block max-w-44 text-right text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                You recorded this invoice — approval must come from a different
+                principal (segregation of duties)
+              </span>
+            ) : (
+              <form action={action} className="inline-flex">
+                <input type="hidden" name="invoice_id" value={invoice.invoice_id} />
+                <input type="hidden" name="action" value={next.action} />
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="secondary"
+                  loading={pending}
+                  aria-label={`${next.label} invoice ${invoice.invoice_number}`}
+                  className="shrink-0"
+                >
+                  {next.label}
+                  {!pending && <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />}
+                </Button>
+              </form>
+            )
           ) : (
             <span className="text-xs text-slate-400 dark:text-slate-500">
               Terminal — handed to Treasury
             </span>
+          )}
+          {validationBlockedByDocument && (
+            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+              No document recorded — validate will refuse until one exists
+            </p>
           )}
         </td>
       </tr>

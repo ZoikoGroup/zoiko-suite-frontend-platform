@@ -29,6 +29,7 @@
 // the platform is still enforcing the role.
 
 import {
+  apiDelete,
   apiGet,
   apiPatch,
   apiPost,
@@ -52,6 +53,9 @@ export type RoleDefinition = {
   role_scope_type: RoleScopeType;
   status: RoleStatus;
   created_by_principal_id: string;
+  /** The principal who last changed this def, when a change has happened.
+   *  Present only after an update — creation stamps created_by_principal_id. */
+  updated_by_principal_id?: string;
   correlation_id: string;
   created_at: string;
   updated_at: string;
@@ -64,6 +68,8 @@ export type PermissionBundleDef = {
   bundle_code: string;
   permitted_actions: string[];
   active_flag: boolean;
+  /** The principal who last changed this def, when a change has happened. */
+  updated_by_principal_id?: string;
   correlation_id: string;
   created_at: string;
   updated_at: string;
@@ -73,6 +79,18 @@ const SERVICE = "accessControl" as const;
 const BASE = "/v1/role-definitions";
 
 // ── reads ────────────────────────────────────────────────────────────────────
+
+/** Narrowing and paging for a role-catalogue read. Every field is optional and
+ *  omitted filters are simply not applied — this service never silently
+ *  truncates: a limit below 1 means "no cap", and a caller asks for paging. */
+export type RoleListOptions = {
+  status?: RoleStatus;
+  scopeType?: RoleScopeType;
+  /** A code/name substring search, matched case-insensitively. */
+  search?: string;
+  limit?: number;
+  offset?: number;
+};
 
 /**
  * The role catalogue for the caller's tenant.
@@ -87,11 +105,17 @@ const BASE = "/v1/role-definitions";
  */
 export async function listRoleDefinitions(
   identity?: Identity,
-  options?: { status?: RoleStatus },
+  options?: RoleListOptions,
 ): Promise<ApiResult<RoleDefinition[]>> {
   return apiGet<RoleDefinition[]>(SERVICE, `${BASE}/`, {
     identity,
-    query: options?.status ? { status: options.status } : undefined,
+    query: {
+      status: options?.status,
+      scope_type: options?.scopeType,
+      search: options?.search,
+      limit: options?.limit,
+      offset: options?.offset,
+    },
   });
 }
 
@@ -114,6 +138,59 @@ export async function listPermissionBundles(
     `${BASE}/${encodeURIComponent(roleDefinitionId)}/permission-bundles`,
     { identity },
   );
+}
+
+/**
+ * One permission bundle by id, resolved under its role.
+ *
+ * The bundle is matched under the role specifically: a bundle that exists on
+ * another role reads as "not found" here (the service splits the two on
+ * purpose, so a probe cannot confirm a foreign bundle id).
+ */
+export async function getPermissionBundle(
+  roleDefinitionId: string,
+  bundleId: string,
+  identity?: Identity,
+): Promise<ApiResult<PermissionBundleDef>> {
+  return apiGet<PermissionBundleDef>(
+    SERVICE,
+    `${BASE}/${encodeURIComponent(roleDefinitionId)}/permission-bundles/${encodeURIComponent(bundleId)}`,
+    { identity },
+  );
+}
+
+/** Narrowing and paging for the flat permission-bundle catalogue. */
+export type BundleListOptions = {
+  roleId?: string;
+  activeFlag?: boolean;
+  /** A bundle-code substring search, matched case-insensitively. */
+  search?: string;
+  limit?: number;
+  offset?: number;
+};
+
+/**
+ * The tenant's whole permission-bundle catalogue in one read.
+ *
+ * This is the flat listing the role-scoped /permission-bundles route cannot
+ * give: every role's bundles at once. A dashboard that shows bundles across
+ * roles previously had to fan out one request per role; this is the endpoint
+ * that read was written to avoid.
+ */
+export async function listAllPermissionBundles(
+  identity?: Identity,
+  options?: BundleListOptions,
+): Promise<ApiResult<PermissionBundleDef[]>> {
+  return apiGet<PermissionBundleDef[]>(SERVICE, "/v1/permission-bundles/", {
+    identity,
+    query: {
+      role_id: options?.roleId,
+      active_flag: options?.activeFlag === undefined ? undefined : String(options.activeFlag),
+      search: options?.search,
+      limit: options?.limit,
+      offset: options?.offset,
+    },
+  });
 }
 
 // ── writes ───────────────────────────────────────────────────────────────────
@@ -230,6 +307,88 @@ export async function createPermissionBundle(
   );
 }
 
+export type UpdateBundleInput = {
+  identity: Identity & { principalId: string; tenantId: string };
+  /** Authorized against this entity, like every other write on this service. */
+  legalEntityId: string;
+  roleDefinitionId: string;
+  bundleId: string;
+  /** Omit to leave the actions alone. Supplying them is what propagates to
+   *  authorization-svc as an upsert-replace, editing the granted actions. */
+  permittedActions?: string[];
+  /** Omit to leave the active state alone. A change is propagated to
+   *  authorization-svc's retire/reactivate endpoints before it is recorded. */
+  activeFlag?: boolean;
+  correlationId?: string;
+};
+
+/**
+ * Edit one permission bundle: its permitted actions and/or its active state.
+ *
+ * This is a partial update — an omitted field means "leave it alone", matching
+ * how the service's role PATCH already behaves. Only the real transitions are
+ * propagated: changing the actions upsert-replaces the bundle in
+ * authorization-svc, changing the active state retires or reactivates it, and
+ * a submission that changes nothing is answered with the current record and
+ * makes no remote call.
+ *
+ * A bundle_code is intentionally not editable — authorization-svc has no
+ * rename, so a rename here could only be a local label on a differently-enforced
+ * reality. Detach and re-attach under a new code is the supported rename.
+ */
+export async function updatePermissionBundle(
+  input: UpdateBundleInput,
+): Promise<ApiWriteResult<PermissionBundleDef>> {
+  const body: Record<string, unknown> = { legal_entity_id: input.legalEntityId };
+  if (input.permittedActions !== undefined) body.permitted_actions = input.permittedActions;
+  if (input.activeFlag !== undefined) body.active_flag = input.activeFlag;
+  if (input.correlationId) body.correlation_id = input.correlationId;
+
+  return apiPatch<PermissionBundleDef>(
+    SERVICE,
+    `${BASE}/${encodeURIComponent(input.roleDefinitionId)}/permission-bundles/${encodeURIComponent(input.bundleId)}`,
+    body,
+    { identity: input.identity },
+  );
+}
+
+export type DetachBundleInput = {
+  identity: Identity & { principalId: string; tenantId: string };
+  legalEntityId: string;
+  roleDefinitionId: string;
+  bundleId: string;
+  correlationId?: string;
+};
+
+/**
+ * Detach one bundle from its role: retire it in authorization-svc by resolving
+ * its code to the remote id, and clear its active flag here.
+ *
+ * Fail-closed and idempotent. A retirement that cannot be propagated refuses
+ * the request, so a detached row here always means a withdrawn bundle there;
+ * and a second detach of an already-detached bundle returns the current record
+ * unchanged rather than erroring — the operator's intent is already satisfied.
+ *
+ * Nothing is hard-deleted, matching authorization-svc's own retire posture: a
+ * grant recorded as "rbac:role=<code>" stays explainable only while the actions
+ * that role once held remain readable.
+ */
+export async function detachPermissionBundle(
+  input: DetachBundleInput,
+): Promise<ApiWriteResult<PermissionBundleDef>> {
+  return apiDelete<PermissionBundleDef>(
+    SERVICE,
+    `${BASE}/${encodeURIComponent(input.roleDefinitionId)}/permission-bundles/${encodeURIComponent(input.bundleId)}`,
+    {
+      identity: input.identity,
+      query: {
+        legal_entity_id: input.legalEntityId,
+        correlation_id: input.correlationId,
+      },
+    },
+  );
+}
+
 /**
  * Turn a service refusal into something an operator can act on.
  *
@@ -257,6 +416,24 @@ export function explainAccessControlError(message: string): string {
   }
   if (message.includes("role definition not found")) {
     return "No role definition with that id in this tenant.";
+  }
+  if (message.includes("permission bundle not found")) {
+    return "No permission bundle with that id on that role in this tenant. A bundle belonging to a different role reads exactly the same way — that is deliberate.";
+  }
+  if (message.includes("nothing_to_update")) {
+    return "Nothing to change — supply permitted actions, a change to active state, or both.";
+  }
+  if (message.includes("empty_actions")) {
+    return "A bundle must name at least one action. To withdraw every grant a bundle makes, detach it — emptying it would leave a row that looks like a control while granting nothing.";
+  }
+  if (message.includes("invalid_active_flag")) {
+    return "The active-state filter must be true or false.";
+  }
+  if (message.includes("invalid_status")) {
+    return "A role definition is either ACTIVE or RETIRED.";
+  }
+  if (message.includes("invalid_scope_type")) {
+    return "The scope filter must be LEGAL_ENTITY or TENANT.";
   }
   if (message.includes("caller identity missing")) {
     return "The request carried no verified principal. Sign in again.";

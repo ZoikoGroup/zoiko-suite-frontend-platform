@@ -242,7 +242,7 @@ export async function AccountsReceivablePanel({
         </span>
       </div>
 
-      <ReceivablesTable invoices={invoices} />
+      <ReceivablesTable invoices={invoices} currentPrincipalId={session.principalId} />
     </div>
   );
 }

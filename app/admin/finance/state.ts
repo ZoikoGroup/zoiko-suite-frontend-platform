@@ -31,6 +31,19 @@ import type { JournalStatus } from "@/lib/api/general-ledger";
  * invoice under this number — and has a remedy the operator can act on. It only
  * became expressible once the service stopped reporting the collision as 503
  * `store_unavailable`, which was indistinguishable from a dead database.
+ *
+ * Two refusal outcomes are deliberately not `error`, because each names a rule
+ * the service is correctly enforcing and each has a human remedy:
+ *
+ *  - `self-approval` — the invoice was approved by the very principal who
+ *    recorded it, and the service refused with 403 `self_approval_not_allowed`
+ *    (segregation of duties, §12.3 of the design). Nothing failed; the approval
+ *    must simply be taken by a different principal, so the banner guides the
+ *    reader there instead of reading as a malfunction.
+ *  - `document-required` — VALIDATE was refused because the invoice has no
+ *    invoice_document_id (422 `invoice_document_required`). The evidence check
+ *    will not pass a documentless invoice toward payment, and the remedy is to
+ *    record the document against the invoice.
  */
 export type PayableActionState = {
   status:
@@ -40,6 +53,8 @@ export type PayableActionState = {
     | "advanced"
     | "out-of-sequence"
     | "duplicate"
+    | "self-approval"
+    | "document-required"
     | "error";
   message: string;
   /** Echoed back so the UI can name what was acted on, and so the operator has
@@ -215,6 +230,14 @@ export const IDLE_RECONCILIATION_STATE: ReconciliationActionState = { status: "i
  *  - `entity-refused` — the legal entity is not in the caller's tenant, or is not
  *    ACTIVE. A governance answer about attribution, not a fault, and never rendered
  *    red: the control is working.
+ *  - `self-payment` — the invoice was issued by the very principal who tried to
+ *    record its payment, and the service refused with 403 `self_payment_not_allowed`
+ *    (segregation of duties, §12.3 of the design). Nothing failed; the cash step
+ *    must be taken by a different principal.
+ *  - `document-required` — SEND was refused because the invoice has no
+ *    invoice_document_id (422 `invoice_document_required`). The evidence gate will
+ *    not pass a documentless invoice to the customer, and the remedy is to record
+ *    the document.
  */
 export type ReceivableActionState = {
   status:
@@ -226,6 +249,8 @@ export type ReceivableActionState = {
     | "unledgered"
     | "unbalanced"
     | "entity-refused"
+    | "self-payment"
+    | "document-required"
     | "out-of-sequence"
     | "duplicate"
     | "error";
@@ -260,3 +285,10 @@ export function isReceivableHop(value: string): value is ReceivableHop {
  *  make has at least a debit and a credit. The cap is a form limit, not a
  *  service one — the service accepts any number of lines. */
 export const JOURNAL_LINE_SLOTS = { initial: 2, max: 10 } as const;
+
+/** How many line rows the record-invoice form starts with and allows.
+ *
+ *  One line is all the service requires — a lump sum sits on a single row with
+ *  quantity 1 — and two lets an invoice use the form's own running totals on the
+ *  first render. The cap is a form limit, not a service one. */
+export const INVOICE_LINE_SLOTS = { initial: 2, max: 6 } as const;

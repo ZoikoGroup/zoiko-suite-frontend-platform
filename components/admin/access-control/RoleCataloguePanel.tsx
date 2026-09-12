@@ -1,7 +1,7 @@
 import { KeySquare, ShieldOff, ShieldCheck } from "lucide-react";
 import { CopyableId, PanelEmptyState } from "@/components/admin/shared";
 import {
-  listPermissionBundles,
+  listAllPermissionBundles,
   listRoleDefinitions,
   summariseRoles,
   type PermissionBundleDef,
@@ -12,20 +12,20 @@ import type { Identity } from "@/lib/api/client";
 /**
  * The role catalogue, with each role's permission bundles inline.
  *
- * Bundles are fetched per role rather than in one call because the service has
- * no endpoint that returns them across roles — /permission-bundles is nested
- * under a role id. That is N+1 reads by construction, which is acceptable here
- * because a tenant's role catalogue is a governance artefact numbering in the
- * tens, not a transactional table. If it ever is not, the fix belongs in the
- * service as a flat list endpoint, not in a client-side fan-out that hides the
- * cost.
- *
- * A bundle read that fails degrades that one row to "could not read", not the
- * whole panel to empty. A role whose bundles are unknown is still a real role,
- * and hiding it would understate what the tenant has defined.
+ * Bundles come from the flat endpoint — /v1/permission-bundles returns every
+ * bundle across roles in one tenant-scoped read. The role-scoped
+ * /permission-bundles route cannot give that (it is nested under a role id),
+ * and the earlier version of this panel fanned out one request per role to
+ * make up for it. One flat read is the shape the service added the endpoint
+ * for. If the flat read fails, the roles still render with the bundles column
+ * degraded to "could not be read" — roles that exist are still real roles, and
+ * hiding them would understate what the tenant has defined.
  */
 export async function RoleCataloguePanel({ identity }: { identity: Identity }) {
-  const rolesResult = await listRoleDefinitions(identity);
+  const [rolesResult, bundlesResult] = await Promise.all([
+    listRoleDefinitions(identity),
+    listAllPermissionBundles(identity),
+  ]);
 
   if (!rolesResult.ok) {
     return (
@@ -49,13 +49,17 @@ export async function RoleCataloguePanel({ identity }: { identity: Identity }) {
     );
   }
 
+  // null means the bundle read failed — the whole flat read, not one role.
   const bundlesByRole = new Map<string, PermissionBundleDef[] | null>();
-  await Promise.all(
-    roles.map(async (role) => {
-      const res = await listPermissionBundles(role.role_definition_id, identity);
-      bundlesByRole.set(role.role_definition_id, res.ok ? (res.data ?? []) : null);
-    }),
-  );
+  if (bundlesResult.ok) {
+    for (const bundle of bundlesResult.data ?? []) {
+      const existing = bundlesByRole.get(bundle.role_definition_id) ?? [];
+      existing.push(bundle);
+      bundlesByRole.set(bundle.role_definition_id, existing);
+    }
+  } else {
+    for (const role of roles) bundlesByRole.set(role.role_definition_id, null);
+  }
 
   const stats = summariseRoles(roles);
 

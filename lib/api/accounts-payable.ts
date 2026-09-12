@@ -28,6 +28,21 @@ import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } f
 
 export type InvoiceStatus = "RECEIVED" | "VALIDATED" | "APPROVED" | "PAYMENT_REQUESTED";
 
+/** One line of the supplier's document. The service requires at least one and
+ *  balances the whole invoice against them: amount must equal Σ(net) + Σ(tax). */
+export type InvoiceLine = {
+  invoice_line_id: string;
+  invoice_id: string;
+  line_number: number;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  net_amount: number;
+  tax_code?: string | null;
+  tax_amount: number;
+  po_line_reference?: string | null;
+};
+
 /** Wire shape. Field names match the Go json tags exactly. */
 export type VendorInvoice = {
   invoice_id: string;
@@ -35,6 +50,9 @@ export type VendorInvoice = {
   legal_entity_id: string;
   vendor_id: string;
   invoice_number: string;
+  /** Gross total. The service refuses to record an invoice whose lines do not
+   *  roll up to exactly this figure — see explainPayableError on
+   *  invoice_does_not_balance. */
   amount: number;
   currency_code: string;
   /** DATE column, so this is a calendar date carried as an RFC3339 instant at
@@ -42,6 +60,19 @@ export type VendorInvoice = {
    *  Greenwich — see formatDueDate. */
   due_date: string;
   status: InvoiceStatus;
+  /** The date printed on the supplier's document. Same DATE-as-RFC3339 shape
+   *  as due_date; the service takes the date part only. */
+  invoice_date: string;
+  /** The tax point — when the supply took place — and the date that decides
+   *  which tax period the invoice lands in. */
+  supply_date: string;
+  net_amount: number;
+  tax_amount: number;
+  lines: InvoiceLine[];
+  purchase_order_id?: string | null;
+  goods_receipt_ref?: string | null;
+  po_vendor_profile_id?: string | null;
+  invoice_document_id?: string | null;
   created_by_principal_id: string;
   validated_by_principal_id?: string | null;
   approved_by_principal_id?: string | null;
@@ -95,7 +126,22 @@ export type ListInvoicesInput = {
   legalEntityId?: string;
   vendorId?: string;
   status?: InvoiceStatus;
+  limit?: number;
+  offset?: number;
 };
+
+/**
+ * How many invoices the register asks for.
+ *
+ * ListInvoices is now BOUNDED at the service, matching accounts-receivable-svc
+ * on the other side of the ledger: an unbounded read used to hand back every
+ * invoice a tenant had ever recorded on every dashboard load. The service's
+ * own default is no bound, the console's is this page — deliberately under the
+ * service's cap of 500, which refuses rather than clamps — and a full page is
+ * reported as possibly-truncated (see AccountsPayablePanel) instead of passing
+ * for the whole register.
+ */
+export const REGISTER_PAGE_SIZE = 400;
 
 /**
  * List vendor invoices for the caller's tenant, newest first.
@@ -106,7 +152,9 @@ export type ListInvoicesInput = {
  * comes back as a 503 rather than a 400.
  *
  * All three optional filters are applied by the service and compose with AND.
- * Ordering is the service's (`ORDER BY created_at DESC`), not re-done here.
+ * Ordering is the service's (`ORDER BY created_at DESC`), not re-done here. A
+ * limit of 500 or more, or a negative limit, is refused with a 400 — the
+ * service does not silently clamp.
  */
 export async function listVendorInvoices(
   input: ListInvoicesInput,
@@ -117,6 +165,8 @@ export async function listVendorInvoices(
       legal_entity_id: input.legalEntityId,
       vendor_id: input.vendorId,
       status: input.status,
+      limit: input.limit,
+      offset: input.offset,
     },
     identity: input.identity,
   });
@@ -153,16 +203,42 @@ export async function getVendorInvoice(
   return apiGet<VendorInvoice>("accountsPayable", `/v1/invoices/${invoiceId}`, { identity });
 }
 
+/** One line, as the form sends it. net_amount is computed client-side as
+ *  quantity × unit_price (the form's read-only net per line); the service
+ *  balances the whole invoice, so a line that does not add up is refused. */
+export type CreateInvoiceLineInput = {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  net_amount: number;
+  tax_code?: string;
+  tax_amount: number;
+};
+
 export type CreateInvoiceInput = {
   identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
   vendorId: string;
   invoiceNumber: string;
+  /** Gross total = lines' net + lines' tax. The service refuses to store the
+   *  invoice until exactly that holds, so the form derives it before sending. */
   amount: number;
   currencyCode: string;
   /** RFC3339. The Go field is a time.Time, so a bare "2026-09-01" fails to
    *  unmarshal and answers 400 `invalid_json` — the action converts the date
    *  input before it gets here. */
   dueDate: string;
+  /** AP-05 required business/source inputs: the date on the supplier's
+   *  document, the tax point, and at least one line. */
+  invoiceDate: string;
+  supplyDate: string;
+  lines: CreateInvoiceLineInput[];
+  /** Optional. When present, the service verifies it against purchase-order-svc
+   *  before anything is written — an unknown or closed PO is refused. */
+  purchaseOrderId?: string;
+  goodsReceiptRef?: string;
+  /** Required before VALIDATE will accept the invoice; recorded here so the
+   *  same form can drive the whole way to the register. */
+  invoiceDocumentId?: string;
 };
 
 /**
@@ -188,6 +264,19 @@ export async function createVendorInvoice(
       amount: input.amount,
       currency_code: input.currencyCode,
       due_date: input.dueDate,
+      invoice_date: input.invoiceDate,
+      supply_date: input.supplyDate,
+      lines: input.lines.map((line) => ({
+        description: line.description,
+        quantity: line.quantity,
+        unit_price: line.unit_price,
+        net_amount: line.net_amount,
+        tax_amount: line.tax_amount,
+        tax_code: line.tax_code || undefined,
+      })),
+      purchase_order_id: input.purchaseOrderId || undefined,
+      goods_receipt_ref: input.goodsReceiptRef || undefined,
+      invoice_document_id: input.invoiceDocumentId || undefined,
       correlation_id: crypto.randomUUID(),
     },
     { identity: input.identity },
@@ -303,6 +392,43 @@ export function explainPayableError(message: string): string {
   if (message.includes("authorization_denied")) {
     return "Authorization denied — this principal does not hold the required permission on this legal entity. Recording, validating, approving, and requesting payment are four separate grants (AP_INVOICE_CREATE, AP_INVOICE_VALIDATE, AP_INVOICE_APPROVE, AP_PAYMENT_REQUEST), so holding one does not imply the next.";
   }
+  if (message.includes("self_approval_not_allowed")) {
+    return "You cannot approve an invoice you recorded. Segregation of duties (§12.3 of the design) requires the approval step to be taken by a different principal — switch to someone who did not record this invoice, or it stays VALIDATED until they do.";
+  }
+  if (message.includes("invoice_document_required")) {
+    return "This invoice cannot be validated without its document. Validation is the evidence check — the service refuses to pass an invoice toward payment with no document of record. Record an invoice_document_id (or repost the invoice with one) and try again.";
+  }
+  if (message.includes("invoice_does_not_balance")) {
+    return "The invoice does not balance. The service requires the gross amount to equal the lines' total exactly — net + tax — and stores nothing until it does. The detail above shows the net and tax the lines roll up to versus the amount sent.";
+  }
+  if (message.includes("no_lines")) {
+    return "The invoice has no lines. AP-05 requires at least one line item — a document with nothing on it would let a gross amount ride on thin air. Add a line and try again.";
+  }
+  if (message.includes("invalid_line")) {
+    return "A line was rejected — it needs a description, a non-negative net amount, and a non-negative tax amount. The detail above names the offending line.";
+  }
+  if (message.includes("purchase_order_unverifiable")) {
+    return "The purchase order reference could not be verified because purchase-order-svc is unreachable. This is a fail-closed refusal — nothing was recorded — not a finding that the PO is invalid. Retry once the PO service is back.";
+  }
+  if (message.includes("purchase_order_closed")) {
+    return "The referenced purchase order is closed, so goods against it can no longer be invoiced. Nothing was recorded.";
+  }
+  if (message.includes("purchase_order_unknown")) {
+    return "No purchase order with that id exists for this tenant and legal entity, so the invoice was refused rather than recorded against a PO that cannot validate it.";
+  }
+  if (
+    message.includes("limit must be a positive integer") ||
+    message.includes("limit may not exceed") ||
+    message.includes("offset must be a non-negative integer")
+  ) {
+    return "The register read asked for an out-of-range page. limit must be 1–500 and offset must not be negative — the service refuses rather than silently clamping.";
+  }
+  if (message.includes("tenant_scope_mismatch")) {
+    return "The tenant named in the request does not match your verified identity scope. Nothing was read or written.";
+  }
+  if (message.includes("tenant_scope_missing")) {
+    return "No tenant scope reached the service, so it failed closed. Sign in again.";
+  }
   if (message.includes("authorization_service_unavailable")) {
     return "Could not verify authorization, so the action was refused. authorization-svc is unreachable — this is a fail-closed refusal, not a denial.";
   }
@@ -316,7 +442,7 @@ export function explainPayableError(message: string): string {
     return "No invoice with that id exists for this tenant. An invoice belonging to another tenant reads as absent in exactly the same way.";
   }
   if (message.includes("missing_field")) {
-    return `A required field was empty: ${message.split("missing_field").pop()?.replace(/[^a-z_ ]/gi, " ").trim() || "check the form"}.`;
+    return `A required field was empty: ${message.split("missing_field").pop()?.replace(/[^a-z_ ]/gi, " ").trim() || "check the form"}. Some are easy to miss: invoice_date and supply_date are both required, and supply_date (the tax point) can differ from invoice_date.`;
   }
   if (message.includes("invalid_field")) {
     return `That value was rejected: ${message.split("invalid_field").pop()?.replace(/["{}:,]/g, " ").trim() || "check the form"}.`;
