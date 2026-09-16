@@ -251,6 +251,76 @@ export async function raisePayrollException(
   );
 }
 
+// ─── Convenience aliases for the service-inputs POST handler ─────────────────
+
+/** Create (initiate) a payroll run — maps service-inputs payload to the svc contract. */
+export async function createPayrollRun(
+  body: {
+    pay_period_code?: string;
+    period_start_date: string;
+    period_end_date: string;
+    payment_date: string;
+    total_employee_count?: number;
+    total_gross_pay?: number;
+    total_net_pay?: number;
+    total_tax_deductions?: number;
+    status?: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<PayrollRun>> {
+  return fetchDomainServicePost<{ payroll_run: PayrollRun }, PayrollRun>(
+    `${payrollRunUrl()}/v1/payroll-runs`,
+    payrollRunUrl(),
+    "payroll-run-svc",
+    body,
+    identity,
+    (d) => d.payroll_run,
+  );
+}
+
+/** Enroll a new benefit plan. */
+export async function createBenefitPlan(
+  body: {
+    name: string;
+    type?: string;
+    provider?: string;
+    employer_contribution_pct?: number;
+    enrolled_count?: number;
+  },
+  identity?: Identity,
+): Promise<ApiResult<BenefitPlan>> {
+  return fetchDomainServicePost<{ plan: BenefitPlan }, BenefitPlan>(
+    `${benefitsUrl()}/v1/benefits/plans`,
+    benefitsUrl(),
+    "benefits-svc",
+    body,
+    identity,
+    (d) => d.plan,
+  );
+}
+
+/** Raise a payroll exception — direct alias with service-inputs field names. */
+export async function createPayrollException(
+  body: {
+    employee_id: string;
+    type?: string;
+    severity: string;
+    period?: string;
+    description: string;
+    status?: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<PayrollException>> {
+  return fetchDomainServicePost<{ exception: PayrollException }, PayrollException>(
+    `${payrollExceptionsUrl()}/v1/payroll-exceptions`,
+    payrollExceptionsUrl(),
+    "payroll-exceptions-svc",
+    body,
+    identity,
+    (d) => d.exception,
+  );
+}
+
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
 
 /**
@@ -347,7 +417,7 @@ async function fetchDomainServicePost<TRaw, TOut>(
       method: "POST",
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1200)),
     });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
@@ -356,7 +426,7 @@ async function fetchDomainServicePost<TRaw, TOut>(
       error: {
         kind: isTimeout ? "timeout" : "unreachable",
         message: isTimeout
-          ? `${serviceName} did not respond within 3000ms`
+          ? `${serviceName} timed out`
           : `${serviceName} is unreachable at ${base}`,
       },
     };

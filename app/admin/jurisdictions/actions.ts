@@ -49,6 +49,7 @@ async function requireIdentity(): Promise<SessionIdentity & { principalId: strin
     principalId: session.principalId,
     tenantId: session.tenantId,
     legalEntityId: session.legalEntityId,
+    envelopeJwt: session.envelopeJwt,
   };
 }
 

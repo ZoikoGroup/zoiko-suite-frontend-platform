@@ -35,15 +35,27 @@ import {
   type CreateFilingDraftInput,
   type CreateTaxAuthorityInput,
 } from "@/lib/api/tax";
-import { listContracts, listClauses, listObligations, listBoardMeetings, listBoardResolutions, listCorporateActions, listCounterparties } from "@/lib/api/legal";
+import {
+  listContracts, listClauses, listObligations, listBoardMeetings, listBoardResolutions, listCorporateActions, listCounterparties,
+  createContract, createClause, createObligation, createCorporateAction, createBoardMeeting,
+} from "@/lib/api/legal";
 import { listCashPositions, getFinanceSummaryStats } from "@/lib/api/finance";
 import { listFiscalPeriods } from "@/lib/api/financial-close";
-import { listJournals } from "@/lib/api/general-ledger";
+import { listJournals, createJournalEntry } from "@/lib/api/general-ledger";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
-import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions } from "@/lib/api/payroll";
-import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts, listReviews, listReviewCycles } from "@/lib/api/hr";
-import { listFilingRequirements, listComplianceEvaluations, listEscalatedExceptions } from "@/lib/api/compliance";
-import { getAuditEvents } from "@/lib/api/audit-events";
+import {
+  listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions,
+  createPayrollRun, createCompensationStructure, createBenefitPlan, createPayrollException,
+} from "@/lib/api/payroll";
+import {
+  listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts, listReviews, listReviewCycles,
+  createEmployee, submitLeaveRequest, createDepartment, createWorkforceAlert,
+} from "@/lib/api/hr";
+import {
+  listFilingRequirements, listComplianceEvaluations, listEscalatedExceptions,
+  createFilingRequirement, createEscalation,
+} from "@/lib/api/compliance";
+import { getAuditEvents, ingestAuditEvent } from "@/lib/api/audit-events";
 import { listPurchaseRequests } from "@/lib/api/purchase-requests";
 import { listEvidenceRequirements } from "@/lib/api/evidence";
 import { listVendorChecks } from "@/lib/api/vendor-due-diligence";
@@ -606,68 +618,119 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     }, { status: 200 });
   }
 
+  const mockFallback = process.env.NEXT_PUBLIC_ENABLE_BACKEND_MOCK_FALLBACK === "true";
+
   // ── Legal Domain POST Handlers ──────────────────────────────────────────────
   if (endpoint === "contracts") {
-    return NextResponse.json({
-      contract_id: `c-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      legal_entity_id: identity.legalEntityId,
-      status: "DRAFT",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createContract(body as Parameters<typeof createContract>[0], identity);
+    if (res.ok) return NextResponse.json({ contract: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        contract: {
+          contract_id: `c-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          legal_entity_id: identity.legalEntityId,
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "clauses") {
-    return NextResponse.json({
-      clause_id: `cl-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      status: "APPROVED",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createClause(body as Parameters<typeof createClause>[0], identity);
+    if (res.ok) return NextResponse.json({ clause: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        clause: {
+          clause_id: `cl-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "obligations") {
-    return NextResponse.json({
-      obligation_id: `ob-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      status: "PENDING",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createObligation(body as Parameters<typeof createObligation>[0], identity);
+    if (res.ok) return NextResponse.json({ obligation: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        obligation: {
+          obligation_id: `ob-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "meetings") {
-    return NextResponse.json({
-      meeting_id: `m-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      status: "SCHEDULED",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const meetingBody = body as Record<string, unknown>;
+    const res = await createBoardMeeting({
+      identity: {
+        ...identity,
+        principalId: identity.principalId ?? "system",
+        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
+        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
+      },
+      title: String(meetingBody.title ?? "Untitled Meeting"),
+      scheduledAt: String(meetingBody.scheduled_date ?? new Date().toISOString()),
+      location: meetingBody.location ? String(meetingBody.location) : undefined,
+      effectiveFrom: String(meetingBody.scheduled_date ?? new Date().toISOString()),
+    });
+    if (res.ok) return NextResponse.json({ meeting: res.data }, { status: res.status });
+    if (mockFallback) {
+      return NextResponse.json({
+        meeting: {
+          meeting_id: `bm-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "corporate-actions") {
-    return NextResponse.json({
-      action_id: `ca-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      status: "PROPOSED",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createCorporateAction(body as Parameters<typeof createCorporateAction>[0], identity);
+    if (res.ok) return NextResponse.json({ action: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        action: {
+          action_id: `ca-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   // ── Finance & Commercial Ops POST Handlers ──────────────────────────────────
   if (endpoint === "journal-entries") {
-    return NextResponse.json({
-      entry_id: `je-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      legal_entity_id: identity.legalEntityId,
-      status: "POSTED",
-      posted_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createJournalEntry(body as Parameters<typeof createJournalEntry>[0], identity);
+    if (res.ok) return NextResponse.json({ journal: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        journal: {
+          journal_id: `je-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "purchase-orders") {
@@ -701,109 +764,175 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
 
   // ── HR & Workforce POST Handlers ─────────────────────────────────────────────
   if (endpoint === "employees") {
-    return NextResponse.json({
-      employee_id: `emp-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      status: "ACTIVE",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createEmployee(body as Parameters<typeof createEmployee>[0], identity);
+    if (res.ok) return NextResponse.json({ employee: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        employee: {
+          employee_id: `emp-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "leave/requests") {
-    return NextResponse.json({
-      request_id: `lr-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      status: "SUBMITTED",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await submitLeaveRequest(body as Parameters<typeof submitLeaveRequest>[0], identity);
+    if (res.ok) return NextResponse.json({ leave_request: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        leave_request: {
+          request_id: `lr-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "org/departments") {
-    return NextResponse.json({
-      dept_id: `dept-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createDepartment(body as Parameters<typeof createDepartment>[0], identity);
+    if (res.ok) return NextResponse.json({ department: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        department: {
+          department_id: `dept-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "compliance/alerts") {
-    return NextResponse.json({
-      alert_id: `wa-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      status: "OPEN",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createWorkforceAlert(body as Parameters<typeof createWorkforceAlert>[0], identity);
+    if (res.ok) return NextResponse.json({ alert: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        alert: {
+          alert_id: `wfa-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   // ── Payroll POST Handlers ───────────────────────────────────────────────────
   if (endpoint === "payroll-runs") {
-    return NextResponse.json({
-      payroll_run_id: `pr-${Date.now()}`,
-      tenant_id: identity.tenantId,
-      legal_entity_id: identity.legalEntityId,
-      status: "CALCULATED",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createPayrollRun(body as Parameters<typeof createPayrollRun>[0], identity);
+    if (res.ok) return NextResponse.json({ payroll_run: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        payroll_run: {
+          payroll_run_id: `pr-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "compensation/structures") {
-    return NextResponse.json({
-      structure_id: `sg-${Date.now()}`,
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createCompensationStructure(body as Parameters<typeof createCompensationStructure>[0], identity);
+    if (res.ok) return NextResponse.json({ structure: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        structure: {
+          structure_id: `sg-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "benefits/plans") {
-    return NextResponse.json({
-      plan_id: `bp-${Date.now()}`,
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createBenefitPlan(body as Parameters<typeof createBenefitPlan>[0], identity);
+    if (res.ok) return NextResponse.json({ plan: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        plan: {
+          plan_id: `bp-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "payroll-exceptions") {
-    return NextResponse.json({
-      exception_id: `pe-${Date.now()}`,
-      status: "OPEN",
-      raised_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createPayrollException(body as Parameters<typeof createPayrollException>[0], identity);
+    if (res.ok) return NextResponse.json({ exception: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        exception: {
+          exception_id: `pe-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   // ── Compliance & Risk POST Handlers ─────────────────────────────────────────
   if (endpoint === "filing-tracker/requirements") {
-    return NextResponse.json({
-      req_id: `ft-${Date.now()}`,
-      status: "PENDING",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createFilingRequirement(body as Parameters<typeof createFilingRequirement>[0], identity);
+    if (res.ok) return NextResponse.json({ requirement: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        requirement: {
+          req_id: `ft-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   if (endpoint === "exception-escalation/exceptions") {
-    return NextResponse.json({
-      exception_id: `ee-${Date.now()}`,
-      status: "ESCALATED",
-      escalated_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createEscalation(body as Parameters<typeof createEscalation>[0], identity);
+    if (res.ok) return NextResponse.json({ exception: res.data }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({
+        exception: {
+          exception_id: `ee-${Date.now()}`,
+          tenant_id: identity.tenantId,
+          created_at: new Date().toISOString(),
+          ...body,
+        },
+      }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 502 });
   }
 
   // ── Audit Event Store POST Handlers ─────────────────────────────────────────
   if (endpoint === "audit/events") {
-    return NextResponse.json({
-      event_id: `ae-${Date.now()}`,
-      outcome: "SUCCESS",
-      hash: "e7b8c9d0123456789abcdef...",
-      occurred_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await ingestAuditEvent(body as Parameters<typeof ingestAuditEvent>[0]);
+    if (res.ok) return NextResponse.json({ event_id: res.eventId, status: "INGESTED" }, { status: 201 });
+    if (mockFallback) {
+      return NextResponse.json({ event_id: `ae-${Date.now()}`, status: "INGESTED", ...body }, { status: 201 });
+    }
+    return NextResponse.json({ error: res.error }, { status: 502 });
   }
 
   // Generic fallback for any other write
@@ -981,6 +1110,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
     status: "DELETED",
   }, { status: 200 });
 }
+
 
 /**
  * The caller's identity, prioritizing verified session cookie with fallback
