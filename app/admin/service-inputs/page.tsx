@@ -32,1057 +32,2613 @@ export type ServiceDefinition = {
 };
 
 const DOMAIN_HREFS: Record<string, string> = {
-  "Tax Governance": "/admin/tax",
-  "AI Governance": "/admin/governance",
-  "Legal & Contracts": "/admin/legal",
-  "Jurisdictions & Rules": "/admin/jurisdictions",
-  "Document Vault": "/admin/documents",
-  "Finance": "/admin/finance",
-  "Commercial Ops": "/admin/commercial-ops",
-  "HR & Workforce": "/admin/hr",
-  "Payroll": "/admin/payroll",
-  "Compliance & Risk": "/admin/compliance",
-  "Audit Event Store": "/admin/audit-events",
+  "Legal, Corporate & Commercial": "/admin/commercial-ops",
+  "Tax & Compliance": "/admin/tax",
+  "Intelligence & Reporting": "/admin/governance",
+  "Security & Trust": "/admin/audit-events",
+  "Integration & Extensibility": "/admin/settings"
 };
 
 export const SERVICES: ServiceDefinition[] = [
-  // ── 1. TAX GOVERNANCE (7 Services) ──────────────────────────────────────────
   {
-    id: 1,
-    domain: "Tax Governance",
-    name: "Tax Rules Engine",
-    port: 8125,
-    method: "POST",
-    path: "/api/v1/tax-rules",
-    description: "Register a new statutory tax rate rule for a jurisdiction",
-    presentationText: "Registers an authoritative statutory tax rate rule for an official tax jurisdiction (e.g. HMRC UK, IRS US, IRAS SG). Inputs configure the tax classification category, percentage rate, exemptions in structured JSON, standard deductions, and legal in-force validity dates.",
-    fieldDocs: [
-      { field: "jurisdiction_id", type: "string (ISO-3166)", required: true, description: "Official sovereign jurisdiction code", example: "GB" },
-      { field: "rule_code", type: "string", required: true, description: "Unique regulatory rule identifier", example: "UK-VAT-REDUCED-5" },
-      { field: "name", type: "string", required: true, description: "Official statutory tax rule name", example: "UK Domestic Energy Reduced Rate 5%" },
-      { field: "category", type: "enum", required: true, description: "Tax category (VAT | GST | SALES_TAX | CORPORATE_INCOME)", example: "VAT" },
-      { field: "tax_rate_percentage", type: "number (float)", required: true, description: "Statutory percentage tax rate to apply", example: 5.0 },
-      { field: "standard_deductions", type: "number", required: false, description: "Statutory base deduction before tax computation", example: 0 },
-      { field: "exemptions_json", type: "string (JSON)", required: false, description: "Conditional exemption criteria in JSON format", example: '{"domestic_energy":true}' },
-      { field: "status", type: "enum", required: true, description: "Regulatory rule state (ACTIVE | DRAFT | DEPRECATED)", example: "ACTIVE" },
-      { field: "version", type: "number", required: true, description: "Monotonically increasing rule version number", example: 1 },
-      { field: "effective_from", type: "string (ISO-8601)", required: true, description: "UTC timestamp from which this tax rule is in effect", example: "2026-09-01T00:00:00Z" },
+    "id": 1,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "contract-lifecycle-svc",
+    "port": 8119,
+    "method": "POST",
+    "path": "/api/v1/contracts",
+    "description": "Draft a new binding commercial contract in the lifecycle system",
+    "presentationText": "Initiates a formal contract record in the digital contract management pipeline. Inputs establish contract title, commercial agreement type, counterparty entity details, total committed value, and validity window.",
+    "fieldDocs": [
+      {
+        "field": "title",
+        "type": "string",
+        "required": true,
+        "description": "Official commercial title of the agreement",
+        "example": "Enterprise Master Services Agreement — GlobalCloud Inc"
+      },
+      {
+        "field": "contract_type",
+        "type": "enum",
+        "required": true,
+        "description": "Contract classification (MSA | SLA | NDA | VENDOR)",
+        "example": "MSA"
+      },
+      {
+        "field": "counterparty_id",
+        "type": "string",
+        "required": true,
+        "description": "KYC-verified counterparty identity code",
+        "example": "cp-globalcloud-01"
+      },
+      {
+        "field": "counterparty_name",
+        "type": "string",
+        "required": true,
+        "description": "Legal entity name of counterparty",
+        "example": "GlobalCloud Inc"
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Contract financial valuation currency",
+        "example": "GBP"
+      },
+      {
+        "field": "total_value",
+        "type": "number",
+        "required": true,
+        "description": "Total committed commercial value of contract",
+        "example": 320000
+      },
+      {
+        "field": "effective_from",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Date when contract terms become legally binding",
+        "example": "2026-10-01T00:00:00Z"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Lifecycle stage (DRAFT | PENDING_APPROVAL | ACTIVE)",
+        "example": "DRAFT"
+      }
     ],
-    input: {
-      jurisdiction_id: "GB",
-      rule_code: "UK-VAT-REDUCED-5",
-      name: "UK Domestic Energy Reduced Rate 5%",
-      category: "VAT",
-      tax_rate_percentage: 5.0,
-      standard_deductions: 0,
-      exemptions_json: '{"domestic_energy":true}',
-      status: "ACTIVE",
-      version: 1,
-      effective_from: "2026-09-01T00:00:00Z"
+    "input": {
+      "title": "Enterprise Master Services Agreement — GlobalCloud Inc",
+      "contract_type": "MSA",
+      "counterparty_id": "cp-globalcloud-01",
+      "counterparty_name": "GlobalCloud Inc",
+      "currency": "GBP",
+      "total_value": 320000,
+      "effective_from": "2026-10-01T00:00:00Z",
+      "status": "DRAFT"
     }
   },
   {
-    id: 2,
-    domain: "Tax Governance",
-    name: "Tax Determination Engine",
-    port: 8126,
-    method: "POST",
-    path: "/api/v1/tax-determinations",
-    description: "Evaluate applicable tax and calculate liabilities on a transaction",
-    presentationText: "Evaluates an accounts payable invoice, sales receipt, or purchase order against active jurisdiction tax rules. Computes net taxable base, applicable tax liability, and line-item tax breakdown.",
-    fieldDocs: [
-      { field: "transaction_id", type: "string", required: true, description: "Upstream commercial transaction reference identifier", example: "tx-inv-2026-8841" },
-      { field: "source_module", type: "enum", required: true, description: "Originating ERP module (ACCOUNTS_PAYABLE | SALES | GL)", example: "ACCOUNTS_PAYABLE" },
-      { field: "legal_entity_id", type: "string (UUID)", required: true, description: "UUID of the reporting legal entity", example: "22222222-2222-2222-2222-222222222222" },
-      { field: "jurisdiction_id", type: "string", required: true, description: "Jurisdiction code where tax nexus applies", example: "GB" },
-      { field: "tax_category", type: "enum", required: true, description: "Target tax category to evaluate against", example: "VAT" },
-      { field: "gross_amount", type: "number (float)", required: true, description: "Total invoice gross commercial value", example: 150000.0 },
-      { field: "taxable_amount", type: "number (float)", required: true, description: "Portion of gross amount subject to tax", example: 150000.0 },
-      { field: "currency", type: "string (ISO-4217)", required: true, description: "Three-letter settlement currency code", example: "GBP" },
-      { field: "status", type: "enum", required: true, description: "Determination state (CALCULATED | COMMITTED)", example: "CALCULATED" },
+    "id": 2,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "clause-template-svc",
+    "port": 8120,
+    "method": "POST",
+    "path": "/api/v1/clauses",
+    "description": "Register a new approved standard legal clause template",
+    "presentationText": "Registers an approved standard boilerplate legal clause template (e.g. GDPR Data Processing, Indemnity, Force Majeure, IP Ownership) for automated contract authoring.",
+    "fieldDocs": [
+      {
+        "field": "title",
+        "type": "string",
+        "required": true,
+        "description": "Descriptive name of standard clause",
+        "example": "UK GDPR Standard Model Clauses 2026"
+      },
+      {
+        "field": "category",
+        "type": "enum",
+        "required": true,
+        "description": "Legal area (DATA_PROTECTION | LIABILITY | CONFIDENTIALITY)",
+        "example": "DATA_PROTECTION"
+      },
+      {
+        "field": "body",
+        "type": "string",
+        "required": true,
+        "description": "Full authoritative legal clause text",
+        "example": "The Data Processor shall process personal data solely in accordance with documented instructions..."
+      },
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Governing legal jurisdiction",
+        "example": "GB"
+      },
+      {
+        "field": "is_standard",
+        "type": "boolean",
+        "required": true,
+        "description": "Whether this clause is an approved company standard",
+        "example": true
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Governance approval status (APPROVED | PENDING)",
+        "example": "APPROVED"
+      }
     ],
-    input: {
-      transaction_id: "tx-inv-2026-8841",
-      source_module: "ACCOUNTS_PAYABLE",
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
-      jurisdiction_id: "GB",
-      tax_category: "VAT",
-      gross_amount: 150000.0,
-      taxable_amount: 150000.0,
-      currency: "GBP",
-      status: "CALCULATED"
+    "input": {
+      "title": "UK GDPR Standard Model Clauses 2026",
+      "category": "DATA_PROTECTION",
+      "body": "The Data Processor shall process personal data solely in accordance with documented instructions of the Data Controller.",
+      "jurisdiction_id": "GB",
+      "is_standard": true,
+      "status": "APPROVED"
     }
   },
   {
-    id: 3,
-    domain: "Tax Governance",
-    name: "VAT / GST Return Service (vat-gst-svc)",
-    port: 8127,
-    method: "POST",
-    path: "/api/v1/vat-returns",
-    description: "Submit a VAT/GST statutory periodic return filing",
-    presentationText: "Prepares and submits statutory periodic VAT/GST filings (e.g. HMRC VAT 100 quarterly return). Aggregates gross sales, allowable purchases, output tax collected, and input tax paid to compute net payable/reclaimable tax.",
-    fieldDocs: [
-      { field: "jurisdiction_id", type: "string", required: true, description: "Filing jurisdiction country code", example: "GB" },
-      { field: "tax_registration_number", type: "string", required: true, description: "Corporate VAT/GST identification number", example: "GB998877665" },
-      { field: "tax_period", type: "string", required: true, description: "Filing accounting quarter or month", example: "2026-Q3" },
-      { field: "total_sales_amount", type: "number", required: true, description: "Total taxable sales during period (Box 6)", example: 520000.0 },
-      { field: "total_purchase_amount", type: "number", required: true, description: "Total purchases excluding VAT (Box 7)", example: 210000.0 },
-      { field: "output_tax_amount", type: "number", required: true, description: "VAT charged on sales (Box 1)", example: 104000.0 },
-      { field: "input_tax_amount", type: "number", required: true, description: "VAT reclaimed on purchases (Box 4)", example: 42000.0 },
-      { field: "net_tax_payable", type: "number", required: true, description: "Net VAT to be paid or reclaimed (Box 5)", example: 62000.0 },
-      { field: "currency", type: "string", required: true, description: "Settlement currency of tax authority", example: "GBP" },
-      { field: "status", type: "enum", required: true, description: "Filing status (DRAFT | SUBMITTED | ACCEPTED)", example: "DRAFT" },
+    "id": 3,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "obligation-tracking-svc",
+    "port": 8121,
+    "method": "POST",
+    "path": "/api/v1/obligations",
+    "description": "Track a binding contractual obligation with deadline and risk level",
+    "presentationText": "Registers and tracks compliance with binding contractual deliverables, audit deliverables, insurance renewals, and service level agreements (SLAs).",
+    "fieldDocs": [
+      {
+        "field": "contract_id",
+        "type": "string",
+        "required": true,
+        "description": "Associated contract reference ID",
+        "example": "c-001"
+      },
+      {
+        "field": "title",
+        "type": "string",
+        "required": true,
+        "description": "Milestone or obligation summary",
+        "example": "Annual ISO 27001 SOC-2 Type II Audit Certification"
+      },
+      {
+        "field": "description",
+        "type": "string",
+        "required": false,
+        "description": "Detailed fulfillment instructions and criteria",
+        "example": "Deliver renewed SOC-2 Type II certification report"
+      },
+      {
+        "field": "due_date",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Contractual delivery deadline",
+        "example": "2026-12-15T00:00:00Z"
+      },
+      {
+        "field": "risk_level",
+        "type": "enum",
+        "required": true,
+        "description": "Breach impact severity (HIGH | MEDIUM | LOW)",
+        "example": "HIGH"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Fulfillment state (PENDING | MET | BREACHED)",
+        "example": "PENDING"
+      }
     ],
-    input: {
-      jurisdiction_id: "GB",
-      tax_registration_number: "GB998877665",
-      tax_period: "2026-Q3",
-      total_sales_amount: 520000.0,
-      total_purchase_amount: 210000.0,
-      output_tax_amount: 104000.0,
-      input_tax_amount: 42000.0,
-      net_tax_payable: 62000.0,
-      currency: "GBP",
-      status: "DRAFT"
+    "input": {
+      "contract_id": "c-001",
+      "title": "Annual ISO 27001 SOC-2 Type II Audit Certification",
+      "description": "Deliver renewed SOC-2 Type II certification report to counterparty legal department",
+      "due_date": "2026-12-15T00:00:00Z",
+      "risk_level": "HIGH",
+      "status": "PENDING"
     }
   },
   {
-    id: 4,
-    domain: "Tax Governance",
-    name: "Corporate Tax Service",
-    port: 8128,
-    method: "POST",
-    path: "/api/v1/corporate-tax-returns",
-    description: "Submit annual corporate income tax computations and return",
-    presentationText: "Submits annual corporate income tax calculations (e.g. UK CT600, US Form 1120). Reconciles annual revenues, allowable business expenses, taxable corporate profits, tax credits, and statutory liabilities.",
-    fieldDocs: [
-      { field: "jurisdiction_id", type: "string", required: true, description: "Incorporation tax jurisdiction", example: "GB" },
-      { field: "tax_registration_number", type: "string", required: true, description: "Unique Taxpayer Reference (UTR)", example: "GB-CT-443322" },
-      { field: "fiscal_year", type: "number", required: true, description: "Tax accounting fiscal year", example: 2026 },
-      { field: "accounting_period_start", type: "string (YYYY-MM-DD)", required: true, description: "Start of corporate accounting period", example: "2026-01-01" },
-      { field: "accounting_period_end", type: "string (YYYY-MM-DD)", required: true, description: "End of corporate accounting period", example: "2026-12-31" },
-      { field: "gross_revenue", type: "number", required: true, description: "Consolidated gross turnover", example: 3500000.0 },
-      { field: "allowable_deductions", type: "number", required: true, description: "Statutory allowable operating expenses", example: 2100000.0 },
-      { field: "taxable_income", type: "number", required: true, description: "Taxable trading profit", example: 1400000.0 },
-      { field: "tax_rate_percent", type: "number", required: true, description: "Statutory main corporate tax rate", example: 25.0 },
-      { field: "gross_tax_liability", type: "number", required: true, description: "Calculated tax before relief/credits", example: 350000.0 },
-      { field: "tax_credits", type: "number", required: true, description: "R&D tax credits and relief deductions", example: 25000.0 },
-      { field: "net_tax_payable", type: "number", required: true, description: "Final payable corporate income tax", example: 325000.0 },
-      { field: "currency", type: "string", required: true, description: "Corporate reporting currency", example: "GBP" },
-      { field: "status", type: "enum", required: true, description: "Submission status (DRAFT | REVIEWED | FILED)", example: "DRAFT" },
+    "id": 4,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "board-resolutions-svc",
+    "port": 8122,
+    "method": "POST",
+    "path": "/api/v1/meetings",
+    "description": "Schedule a board meeting or audit committee assembly",
+    "presentationText": "Registers and schedules formal corporate governance meetings of the Board of Directors or Audit Committee, configuring quorum requirements, agenda topics, and location.",
+    "fieldDocs": [
+      {
+        "field": "meeting_type",
+        "type": "enum",
+        "required": true,
+        "description": "Meeting category (BOARD_OF_DIRECTORS | AUDIT_COMMITTEE | AGM)",
+        "example": "BOARD_OF_DIRECTORS"
+      },
+      {
+        "field": "title",
+        "type": "string",
+        "required": true,
+        "description": "Official meeting agenda title",
+        "example": "Q3 2026 Strategic Expansion & Subsidiary Funding Meeting"
+      },
+      {
+        "field": "scheduled_date",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Scheduled meeting start time",
+        "example": "2026-09-25T14:00:00Z"
+      },
+      {
+        "field": "location",
+        "type": "string",
+        "required": false,
+        "description": "Physical room or encrypted video assembly link",
+        "example": "London HQ / Virtual Boardroom"
+      },
+      {
+        "field": "quorum_required",
+        "type": "number",
+        "required": true,
+        "description": "Minimum number of voting directors needed",
+        "example": 3
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Meeting status (SCHEDULED | ADJOURNED)",
+        "example": "SCHEDULED"
+      }
     ],
-    input: {
-      jurisdiction_id: "GB",
-      tax_registration_number: "GB-CT-443322",
-      fiscal_year: 2026,
-      accounting_period_start: "2026-01-01",
-      accounting_period_end: "2026-12-31",
-      gross_revenue: 3500000.0,
-      allowable_deductions: 2100000.0,
-      taxable_income: 1400000.0,
-      tax_rate_percent: 25.0,
-      gross_tax_liability: 350000.0,
-      tax_credits: 25000.0,
-      net_tax_payable: 325000.0,
-      currency: "GBP",
-      status: "DRAFT"
+    "input": {
+      "meeting_type": "BOARD_OF_DIRECTORS",
+      "title": "Q3 2026 Strategic Expansion & Subsidiary Funding Meeting",
+      "scheduled_date": "2026-09-25T14:00:00Z",
+      "location": "London HQ / Virtual Boardroom",
+      "quorum_required": 3,
+      "status": "SCHEDULED"
     }
   },
   {
-    id: 5,
-    domain: "Tax Governance",
-    name: "Withholding Tax Service",
-    port: 8129,
-    method: "POST",
-    path: "/api/v1/withholding-tax",
-    description: "Create a withholding tax obligation on a cross-border payment",
-    presentationText: "Computes and creates withholding tax (WHT) obligations on cross-border payments (royalties, software licenses, consulting, dividends) according to bilateral double-taxation relief treaties.",
-    fieldDocs: [
-      { field: "jurisdiction_id", type: "string", required: true, description: "Recipient counterparty tax residency country", example: "DE" },
-      { field: "counterparty_id", type: "string", required: true, description: "Payee entity KYC reference", example: "cp-acme-gmbh-01" },
-      { field: "payment_reference", type: "string", required: true, description: "Downstream accounts payable disbursement ref", example: "PAY-DE-2026-09" },
-      { field: "payment_type", type: "enum", required: true, description: "Nature of payment (ROYALTIES | DIVIDENDS | SERVICES)", example: "ROYALTIES" },
-      { field: "gross_payment_amount", type: "number", required: true, description: "Full payment amount before withholding", example: 85000.0 },
-      { field: "taxable_base_amount", type: "number", required: true, description: "Treaty-adjusted taxable base amount", example: 85000.0 },
-      { field: "withholding_rate_percent", type: "number", required: true, description: "Applicable bilateral treaty tax rate", example: 15.0 },
-      { field: "withheld_amount", type: "number", required: true, description: "Amount retained to remit to local revenue service", example: 12750.0 },
-      { field: "currency", type: "string", required: true, description: "Settlement currency", example: "EUR" },
-      { field: "status", type: "enum", required: true, description: "Obligation status (CALCULATED | SETTLED)", example: "CALCULATED" },
+    "id": 5,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "corporate-actions-svc",
+    "port": 8123,
+    "method": "POST",
+    "path": "/api/v1/corporate-actions",
+    "description": "Execute a statutory corporate action (dividend, share grant, restructuring)",
+    "presentationText": "Records authorized corporate governance capital allocations, dividend disbursements, director appointments, or statutory filings requiring formal minute references.",
+    "fieldDocs": [
+      {
+        "field": "action_type",
+        "type": "enum",
+        "required": true,
+        "description": "Corporate action category (DIVIDEND | EQUITY_INCENTIVE_GRANT | CAPITAL_INCREASE)",
+        "example": "EQUITY_INCENTIVE_GRANT"
+      },
+      {
+        "field": "description",
+        "type": "string",
+        "required": true,
+        "description": "Summary of transaction and corporate purpose",
+        "example": "Series-B Executive Long-Term Equity Incentive Plan Allocation"
+      },
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Governing jurisdiction",
+        "example": "GB"
+      },
+      {
+        "field": "effective_date",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Statutory effective execution date",
+        "example": "2026-10-01T00:00:00Z"
+      },
+      {
+        "field": "requires_board_approval",
+        "type": "boolean",
+        "required": true,
+        "description": "Whether explicit board resolution quorum is required",
+        "example": true
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Governance progress (PENDING_APPROVAL | EXECUTED)",
+        "example": "PENDING_APPROVAL"
+      }
     ],
-    input: {
-      jurisdiction_id: "DE",
-      counterparty_id: "cp-acme-gmbh-01",
-      payment_reference: "PAY-DE-2026-09",
-      payment_type: "ROYALTIES",
-      gross_payment_amount: 85000.0,
-      taxable_base_amount: 85000.0,
-      withholding_rate_percent: 15.0,
-      withheld_amount: 12750.0,
-      currency: "EUR",
-      status: "CALCULATED"
+    "input": {
+      "action_type": "EQUITY_INCENTIVE_GRANT",
+      "description": "Series-B Executive Long-Term Equity Incentive Plan Allocation",
+      "jurisdiction_id": "GB",
+      "effective_date": "2026-10-01T00:00:00Z",
+      "requires_board_approval": true,
+      "status": "PENDING_APPROVAL"
     }
   },
   {
-    id: 6,
-    domain: "Tax Governance",
-    name: "Filing Preparation Service",
-    port: 8130,
-    method: "POST",
-    path: "/api/v1/filing-preparation/drafts",
-    description: "Create a structured draft for an upcoming regulatory filing",
-    presentationText: "Assembles regulatory filing payloads into structured schema-validated draft objects for electronic submission to national revenue authorities.",
-    fieldDocs: [
-      { field: "return_type", type: "enum", required: true, description: "Statutory filing return type", example: "VAT_RETURN" },
-      { field: "jurisdiction_id", type: "string", required: true, description: "Filing country jurisdiction", example: "GB" },
-      { field: "tax_period", type: "string", required: true, description: "Filing period code", example: "2026-Q3" },
-      { field: "source_return_id", type: "string", required: true, description: "Underlying VAT or Corporate Tax Return ID", example: "vr-003" },
-      { field: "form_data_json", type: "string (JSON)", required: true, description: "Schema-validated form boxes in JSON", example: '{"box1":104000,"box4":42000,"box5":62000}' },
-      { field: "validation_status", type: "enum", required: true, description: "Draft validation state (DRAFT | VALIDATED)", example: "DRAFT" },
+    "id": 6,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "counterparty-management-svc",
+    "port": 8124,
+    "method": "POST",
+    "path": "/api/v1/counterparties",
+    "description": "Register a KYC-verified enterprise commercial counterparty",
+    "presentationText": "Registers and maintains legal verification, jurisdictional nexus, and AML/KYC validation for commercial trading partners, clients, and corporate suppliers.",
+    "fieldDocs": [
+      {
+        "field": "legal_name",
+        "type": "string",
+        "required": true,
+        "description": "Registered legal business entity name",
+        "example": "Apex Networks Global GmbH"
+      },
+      {
+        "field": "country_code",
+        "type": "string (ISO-3166)",
+        "required": true,
+        "description": "Incorporation jurisdiction code",
+        "example": "DE"
+      },
+      {
+        "field": "entity_type",
+        "type": "enum",
+        "required": true,
+        "description": "Corporate formation type (CORPORATION | LLC | PARTNERSHIP)",
+        "example": "CORPORATION"
+      },
+      {
+        "field": "kyc_status",
+        "type": "enum",
+        "required": true,
+        "description": "Due diligence verification state (VERIFIED | PENDING | REJECTED)",
+        "example": "VERIFIED"
+      },
+      {
+        "field": "risk_rating",
+        "type": "enum",
+        "required": true,
+        "description": "Counterparty risk classification (LOW | MEDIUM | HIGH)",
+        "example": "LOW"
+      },
+      {
+        "field": "registered_address",
+        "type": "string",
+        "required": true,
+        "description": "Official corporate statutory seat",
+        "example": "Friedrichstraße 42, 10117 Berlin, Germany"
+      }
     ],
-    input: {
-      return_type: "VAT_RETURN",
-      jurisdiction_id: "GB",
-      tax_period: "2026-Q3",
-      source_return_id: "vr-003",
-      form_data_json: '{"box1":104000,"box4":42000,"box5":62000}',
-      validation_status: "DRAFT"
+    "input": {
+      "legal_name": "Apex Networks Global GmbH",
+      "country_code": "DE",
+      "entity_type": "CORPORATION",
+      "kyc_status": "VERIFIED",
+      "risk_rating": "LOW",
+      "registered_address": "Friedrichstraße 42, 10117 Berlin, Germany"
     }
   },
   {
-    id: 7,
-    domain: "Tax Governance",
-    name: "Tax Authority Interface",
-    port: 8147,
-    method: "POST",
-    path: "/api/v1/tax-authority/interfaces",
-    description: "Register an e-filing API connection to a tax authority gateway",
-    presentationText: "Registers an authenticated, encrypted electronic gateway connection to a government tax authority API (such as HMRC Making Tax Digital or Singapore IRAS).",
-    fieldDocs: [
-      { field: "jurisdiction_id", type: "string", required: true, description: "Target sovereign jurisdiction", example: "GB" },
-      { field: "authority_name", type: "string", required: true, description: "Official tax authority gateway name", example: "HMRC Making Tax Digital (MTD)" },
-      { field: "protocol", type: "enum", required: true, description: "API communication protocol (REST_OAUTH2 | AS4 | SFTP)", example: "REST_OAUTH2" },
-      { field: "endpoint_url", type: "string (URL)", required: true, description: "Production / Sandbox e-filing API endpoint", example: "https://api.service.hmrc.gov.uk/organisations/vat" },
-      { field: "auth_scheme", type: "enum", required: true, description: "Authentication scheme (BEARER_TOKEN | MTLS | API_KEY)", example: "BEARER_TOKEN" },
-      { field: "status", type: "enum", required: true, description: "Interface connectivity status", example: "ACTIVE" },
+    "id": 7,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "purchase-request-svc",
+    "port": 8100,
+    "method": "POST",
+    "path": "/api/v1/purchase-requests",
+    "description": "Submit a commercial purchase requisition with budget approval parameters",
+    "presentationText": "Submits an authoritative purchase requisition into the procurement pipeline upstream of the purchase order lifecycle. Configures legal entity, amount, currency, and justification awaiting dual-quorum approval.",
+    "fieldDocs": [
+      {
+        "field": "legal_entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "UUID of the procuring legal entity",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "description",
+        "type": "string",
+        "required": true,
+        "description": "Commercial business description & purpose",
+        "example": "Enterprise Cloud Infrastructure & High-Performance Compute Cluster Q3-2026"
+      },
+      {
+        "field": "amount",
+        "type": "number (float)",
+        "required": true,
+        "description": "Requisition commitment value",
+        "example": 45000
+      },
+      {
+        "field": "currency_code",
+        "type": "string (ISO-4217)",
+        "required": true,
+        "description": "Procurement budget currency",
+        "example": "GBP"
+      },
+      {
+        "field": "department",
+        "type": "string",
+        "required": false,
+        "description": "Originating internal department",
+        "example": "Engineering & IT Infrastructure"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Initial lifecycle state (PENDING | APPROVED)",
+        "example": "PENDING"
+      }
     ],
-    input: {
-      jurisdiction_id: "GB",
-      authority_name: "HMRC Making Tax Digital (MTD)",
-      protocol: "REST_OAUTH2",
-      endpoint_url: "https://api.service.hmrc.gov.uk/organisations/vat",
-      auth_scheme: "BEARER_TOKEN",
-      status: "ACTIVE"
-    }
-  },
-
-  // ── 2. AI GOVERNANCE (1 Service) ────────────────────────────────────────────
-  {
-    id: 8,
-    domain: "AI Governance",
-    name: "AI Governance Engine",
-    port: 8146,
-    method: "GET",
-    path: "/api/v1/ai-governance",
-    description: "Audit registered AI model providers, risk tiers, and kill-switch states",
-    presentationText: "Queries verified enterprise LLM/AI model providers, EU AI Act risk tier classifications, verification statuses, and automated model safety gates.",
-    fieldDocs: [
-      { field: "status", type: "string (query)", required: false, description: "Filter by verification status (VERIFIED | PENDING)", example: "VERIFIED" },
-      { field: "risk_tier", type: "string (query)", required: false, description: "Filter by EU AI Act risk tier (TIER_1 | TIER_2 | TIER_3)", example: "TIER_2" },
-      { field: "limit", type: "number (query)", required: false, description: "Maximum model audit entries to return", example: 50 },
-    ],
-    input: null,
-    queryParams: { status: "VERIFIED", limit: "50" }
-  },
-
-  // ── 3. LEGAL & CONTRACTS (6 Services) ───────────────────────────────────────
-  {
-    id: 9,
-    domain: "Legal & Contracts",
-    name: "Contract Lifecycle Service",
-    port: 8119,
-    method: "POST",
-    path: "/api/v1/contracts",
-    description: "Draft a new binding commercial agreement in the lifecycle system",
-    presentationText: "Initiates a formal contract record in the digital contract management pipeline. Inputs establish contract title, commercial agreement type, counterparty entity details, total committed value, and validity window.",
-    fieldDocs: [
-      { field: "title", type: "string", required: true, description: "Official commercial title of the agreement", example: "Enterprise Master Services Agreement — GlobalCloud Inc" },
-      { field: "contract_type", type: "enum", required: true, description: "Contract classification (MSA | SLA | NDA | VENDOR)", example: "MSA" },
-      { field: "counterparty_id", type: "string", required: true, description: "KYC-verified counterparty identity code", example: "cp-globalcloud-01" },
-      { field: "counterparty_name", type: "string", required: true, description: "Legal entity name of counterparty", example: "GlobalCloud Inc" },
-      { field: "currency", type: "string", required: true, description: "Contract financial valuation currency", example: "GBP" },
-      { field: "total_value", type: "number", required: true, description: "Total committed commercial value of contract", example: 320000.0 },
-      { field: "effective_from", type: "string (ISO-8601)", required: true, description: "Date when contract terms become legally binding", example: "2026-10-01T00:00:00Z" },
-      { field: "status", type: "enum", required: true, description: "Lifecycle stage (DRAFT | PENDING_APPROVAL | ACTIVE)", example: "DRAFT" },
-    ],
-    input: {
-      title: "Enterprise Master Services Agreement — GlobalCloud Inc",
-      contract_type: "MSA",
-      counterparty_id: "cp-globalcloud-01",
-      counterparty_name: "GlobalCloud Inc",
-      currency: "GBP",
-      total_value: 320000.0,
-      effective_from: "2026-10-01T00:00:00Z",
-      status: "DRAFT"
+    "input": {
+      "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+      "description": "Enterprise Cloud Infrastructure & High-Performance Compute Cluster Q3-2026",
+      "amount": 45000,
+      "currency_code": "GBP",
+      "department": "Engineering & IT Infrastructure",
+      "status": "PENDING"
     }
   },
   {
-    id: 10,
-    domain: "Legal & Contracts",
-    name: "Clause & Template Library",
-    port: 8120,
-    method: "POST",
-    path: "/api/v1/clauses",
-    description: "Register a new approved standard legal clause template",
-    presentationText: "Registers an approved standard boilerplate legal clause template (e.g. GDPR Data Processing, Indemnity, Force Majeure, IP Ownership) for automated contract authoring.",
-    fieldDocs: [
-      { field: "title", type: "string", required: true, description: "Descriptive name of standard clause", example: "UK GDPR Standard Model Clauses 2026" },
-      { field: "category", type: "enum", required: true, description: "Legal area (DATA_PROTECTION | LIABILITY | CONFIDENTIALITY)", example: "DATA_PROTECTION" },
-      { field: "body", type: "string", required: true, description: "Full authoritative legal clause text", example: "The Data Processor shall process personal data solely in accordance with documented instructions..." },
-      { field: "jurisdiction_id", type: "string", required: true, description: "Governing legal jurisdiction", example: "GB" },
-      { field: "is_standard", type: "boolean", required: true, description: "Whether this clause is an approved company standard", example: true },
-      { field: "status", type: "enum", required: true, description: "Governance approval status (APPROVED | PENDING)", example: "APPROVED" },
+    "id": 8,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "purchase-order-svc",
+    "port": 8129,
+    "method": "POST",
+    "path": "/api/v1/purchase-orders",
+    "description": "Issue a binding purchase order against an approved supplier requisition",
+    "presentationText": "Creates a formal commercial purchase order committed against an approved requisition, vendor identity, agreed delivery timeline, and billing currency.",
+    "fieldDocs": [
+      {
+        "field": "supplier_name",
+        "type": "string",
+        "required": true,
+        "description": "Approved commercial supplier legal entity name",
+        "example": "Global Datacenters Ltd"
+      },
+      {
+        "field": "vendor_id",
+        "type": "string",
+        "required": true,
+        "description": "Supplier reference code in vendor ledger",
+        "example": "v-gdc-01"
+      },
+      {
+        "field": "po_number",
+        "type": "string",
+        "required": true,
+        "description": "Unique tracking purchase order reference",
+        "example": "PO-2026-09-001"
+      },
+      {
+        "field": "total_amount",
+        "type": "number",
+        "required": true,
+        "description": "Committed monetary value of purchase order",
+        "example": 75000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Purchase order billing currency",
+        "example": "GBP"
+      },
+      {
+        "field": "delivery_date",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Contractual delivery fulfillment deadline",
+        "example": "2026-11-15T00:00:00Z"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "PO lifecycle state (DRAFT | ISSUED | FULFILLED)",
+        "example": "ISSUED"
+      }
     ],
-    input: {
-      title: "UK GDPR Standard Model Clauses 2026",
-      category: "DATA_PROTECTION",
-      body: "The Data Processor shall process personal data solely in accordance with documented instructions of the Data Controller.",
-      jurisdiction_id: "GB",
-      is_standard: true,
-      status: "APPROVED"
+    "input": {
+      "supplier_name": "Global Datacenters Ltd",
+      "vendor_id": "v-gdc-01",
+      "po_number": "PO-2026-09-001",
+      "total_amount": 75000,
+      "currency": "GBP",
+      "delivery_date": "2026-11-15T00:00:00Z",
+      "status": "ISSUED"
     }
   },
   {
-    id: 11,
-    domain: "Legal & Contracts",
-    name: "Obligation Tracking Service",
-    port: 8121,
-    method: "POST",
-    path: "/api/v1/obligations",
-    description: "Track a binding contractual obligation with deadline and risk level",
-    presentationText: "Registers and tracks compliance with binding contractual deliverables, audit deliverables, insurance renewals, and service level agreements (SLAs).",
-    fieldDocs: [
-      { field: "contract_id", type: "string", required: true, description: "Associated contract reference ID", example: "c-001" },
-      { field: "title", type: "string", required: true, description: "Milestone or obligation summary", example: "Annual ISO 27001 SOC-2 Type II Audit Certification" },
-      { field: "description", type: "string", required: false, description: "Detailed fulfillment instructions and criteria", example: "Deliver renewed SOC-2 Type II certification report" },
-      { field: "due_date", type: "string (ISO-8601)", required: true, description: "Contractual delivery deadline", example: "2026-12-15T00:00:00Z" },
-      { field: "risk_level", type: "enum", required: true, description: "Breach impact severity (HIGH | MEDIUM | LOW)", example: "HIGH" },
-      { field: "status", type: "enum", required: true, description: "Fulfillment state (PENDING | MET | BREACHED)", example: "PENDING" },
+    "id": 9,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "spend-controls-svc",
+    "port": 8131,
+    "method": "POST",
+    "path": "/api/v1/spend-controls/limits",
+    "description": "Configure statutory departmental spend limits and policy thresholds",
+    "presentationText": "Establishes budget ceiling constraints, warning notification margins, and hard automated cut-offs for departmental or cost-center operational expenditure.",
+    "fieldDocs": [
+      {
+        "field": "legal_entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "Entity to which the spend policy applies",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "category",
+        "type": "enum",
+        "required": true,
+        "description": "Expenditure classification category",
+        "example": "IT_INFRASTRUCTURE"
+      },
+      {
+        "field": "period",
+        "type": "enum",
+        "required": true,
+        "description": "Budget tracking frequency (MONTHLY | QUARTERLY | ANNUAL)",
+        "example": "QUARTERLY"
+      },
+      {
+        "field": "limit_amount",
+        "type": "number",
+        "required": true,
+        "description": "Authorized expenditure cap",
+        "example": 250000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Operating currency code",
+        "example": "GBP"
+      },
+      {
+        "field": "threshold_warning_percentage",
+        "type": "number",
+        "required": true,
+        "description": "Threshold percentage to trigger advisory warning",
+        "example": 85
+      },
+      {
+        "field": "hard_stop_enforced",
+        "type": "boolean",
+        "required": true,
+        "description": "Whether transactions exceeding cap are rejected automatically",
+        "example": true
+      }
     ],
-    input: {
-      contract_id: "c-001",
-      title: "Annual ISO 27001 SOC-2 Type II Audit Certification",
-      description: "Deliver renewed SOC-2 Type II certification report to counterparty legal department",
-      due_date: "2026-12-15T00:00:00Z",
-      risk_level: "HIGH",
-      status: "PENDING"
+    "input": {
+      "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+      "category": "IT_INFRASTRUCTURE",
+      "period": "QUARTERLY",
+      "limit_amount": 250000,
+      "currency": "GBP",
+      "threshold_warning_percentage": 85,
+      "hard_stop_enforced": true
     }
   },
   {
-    id: 12,
-    domain: "Legal & Contracts",
-    name: "Board Governance & Resolutions Service",
-    port: 8121,
-    method: "POST",
-    path: "/api/v1/meetings",
-    description: "Schedule a board meeting or audit committee assembly",
-    presentationText: "Registers and schedules formal corporate governance meetings of the Board of Directors or Audit Committee, configuring quorum requirements, agenda topics, and location.",
-    fieldDocs: [
-      { field: "meeting_type", type: "enum", required: true, description: "Meeting category (BOARD_OF_DIRECTORS | AUDIT_COMMITTEE | AGM)", example: "BOARD_OF_DIRECTORS" },
-      { field: "title", type: "string", required: true, description: "Official meeting agenda title", example: "Q3 2026 Strategic Expansion & Subsidiary Funding Meeting" },
-      { field: "scheduled_date", type: "string (ISO-8601)", required: true, description: "Scheduled meeting start time", example: "2026-09-25T14:00:00Z" },
-      { field: "location", type: "string", required: false, description: "Physical room or encrypted video assembly link", example: "London HQ / Virtual Boardroom" },
-      { field: "quorum_required", type: "number", required: true, description: "Minimum number of voting directors needed", example: 3 },
-      { field: "status", type: "enum", required: true, description: "Meeting status (SCHEDULED | ADJOURNED)", example: "SCHEDULED" },
+    "id": 10,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "vendor-due-diligence-svc",
+    "port": 8132,
+    "method": "POST",
+    "path": "/api/v1/vendor-due-diligence/checks",
+    "description": "Run comprehensive AML, sanctions, and financial due diligence check on a vendor",
+    "presentationText": "Executes automated anti-money-laundering (AML), politically exposed persons (PEP), and OFAC/EU sanctions screening against international supplier rosters.",
+    "fieldDocs": [
+      {
+        "field": "vendor_id",
+        "type": "string",
+        "required": true,
+        "description": "Identifier of target vendor under review",
+        "example": "v-apex-01"
+      },
+      {
+        "field": "vendor_name",
+        "type": "string",
+        "required": true,
+        "description": "Legal name of supplier",
+        "example": "Apex Networks Global GmbH"
+      },
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Vendor registration country",
+        "example": "DE"
+      },
+      {
+        "field": "check_type",
+        "type": "enum",
+        "required": true,
+        "description": "Screening tier (STANDARD_KYC | ENHANCED_DUE_DILIGENCE)",
+        "example": "ENHANCED_DUE_DILIGENCE"
+      },
+      {
+        "field": "sanctions_screening",
+        "type": "boolean",
+        "required": true,
+        "description": "Screen against UN, OFAC, and EU sanctions lists",
+        "example": true
+      },
+      {
+        "field": "risk_tier",
+        "type": "enum",
+        "required": true,
+        "description": "Expected baseline risk (LOW | MEDIUM | HIGH)",
+        "example": "LOW"
+      }
     ],
-    input: {
-      meeting_type: "BOARD_OF_DIRECTORS",
-      title: "Q3 2026 Strategic Expansion & Subsidiary Funding Meeting",
-      scheduled_date: "2026-09-25T14:00:00Z",
-      location: "London HQ / Virtual Boardroom",
-      quorum_required: 3,
-      status: "SCHEDULED"
+    "input": {
+      "vendor_id": "v-apex-01",
+      "vendor_name": "Apex Networks Global GmbH",
+      "jurisdiction_id": "DE",
+      "check_type": "ENHANCED_DUE_DILIGENCE",
+      "sanctions_screening": true,
+      "risk_tier": "LOW"
     }
   },
   {
-    id: 13,
-    domain: "Legal & Contracts",
-    name: "Corporate Actions Service",
-    port: 8123,
-    method: "POST",
-    path: "/api/v1/corporate-actions",
-    description: "Propose a corporate action such as share issuance or dividend grant",
-    presentationText: "Proposes and logs statutory corporate transactions, capital allotments, stock option pool expansions, or executive share grants requiring board governance approval.",
-    fieldDocs: [
-      { field: "action_type", type: "enum", required: true, description: "Corporate action type (EQUITY_INCENTIVE_GRANT | DIVIDEND)", example: "EQUITY_INCENTIVE_GRANT" },
-      { field: "description", type: "string", required: true, description: "Business purpose and legal summary of action", example: "Approve 2026 Employee Stock Option Scheme Allotment" },
-      { field: "authorized_shares", type: "number", required: false, description: "Quantity of shares authorized or issued", example: 250000 },
-      { field: "share_class", type: "string", required: false, description: "Share capital class (ORDINARY_A | ORDINARY_B | PREFERRED)", example: "ORDINARY_B" },
-      { field: "status", type: "enum", required: true, description: "Action workflow status (PROPOSED | APPROVED | EXECUTED)", example: "PROPOSED" },
+    "id": 11,
+    "domain": "Legal, Corporate & Commercial",
+    "name": "procurement-workflow-svc",
+    "port": 8134,
+    "method": "POST",
+    "path": "/api/v1/procurement-workflows",
+    "description": "Initiate an automated multi-tier procurement approval & governance workflow",
+    "presentationText": "Initiates an automated procurement approval pipeline enforcing dual-quorum thresholds, spend policy validation, segregation of duties, and vendor compliance checks.",
+    "fieldDocs": [
+      {
+        "field": "workflow_name",
+        "type": "string",
+        "required": true,
+        "description": "Name of the procurement workflow execution",
+        "example": "Q3-2026 Enterprise Hardware Procurement Approval"
+      },
+      {
+        "field": "purchase_request_id",
+        "type": "string",
+        "required": true,
+        "description": "Associated purchase request identifier",
+        "example": "preq-2026-9912"
+      },
+      {
+        "field": "approval_tier",
+        "type": "enum",
+        "required": true,
+        "description": "Threshold tier (TIER_1_STANDARD | TIER_2_EXECUTIVE | TIER_3_BOARD)",
+        "example": "TIER_2_EXECUTIVE"
+      },
+      {
+        "field": "threshold_amount",
+        "type": "number",
+        "required": true,
+        "description": "Escalation ceiling amount",
+        "example": 50000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Operating transaction currency",
+        "example": "GBP"
+      },
+      {
+        "field": "sod_enforced",
+        "type": "boolean",
+        "required": true,
+        "description": "Enforce strict Segregation of Duties",
+        "example": true
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Workflow execution status (IN_PROGRESS | APPROVED)",
+        "example": "IN_PROGRESS"
+      }
     ],
-    input: {
-      action_type: "EQUITY_INCENTIVE_GRANT",
-      description: "Approve 2026 Employee Stock Option Scheme Allotment",
-      authorized_shares: 250000,
-      share_class: "ORDINARY_B",
-      status: "PROPOSED"
+    "input": {
+      "workflow_name": "Q3-2026 Enterprise Hardware Procurement Approval",
+      "purchase_request_id": "preq-2026-9912",
+      "approval_tier": "TIER_2_EXECUTIVE",
+      "threshold_amount": 50000,
+      "currency": "GBP",
+      "sod_enforced": true,
+      "status": "IN_PROGRESS"
     }
   },
   {
-    id: 14,
-    domain: "Legal & Contracts",
-    name: "Counterparty Management",
-    port: 8124,
-    method: "GET",
-    path: "/api/v1/counterparties",
-    description: "List all KYC-verified corporate counterparties and suppliers",
-    presentationText: "Queries verified institutional counterparties, validating corporate registration, jurisdiction residency, anti-money laundering checks, and sanctions screening status.",
-    fieldDocs: [
-      { field: "kyc_status", type: "string (query)", required: false, description: "Filter by KYC state (VERIFIED | PENDING)", example: "VERIFIED" },
-      { field: "limit", type: "number (query)", required: false, description: "Page limit of records", example: 50 },
+    "id": 12,
+    "domain": "Tax & Compliance",
+    "name": "tax-rules-svc",
+    "port": 8125,
+    "method": "POST",
+    "path": "/api/v1/tax-rules",
+    "description": "Register a statutory tax rate rule for a jurisdiction",
+    "presentationText": "Registers an authoritative statutory tax rate rule for an official tax jurisdiction (e.g. HMRC UK, IRS US, IRAS SG). Inputs configure classification, percentage rate, exemptions, and validity dates.",
+    "fieldDocs": [
+      {
+        "field": "jurisdiction_id",
+        "type": "string (ISO-3166)",
+        "required": true,
+        "description": "Official sovereign jurisdiction code",
+        "example": "GB"
+      },
+      {
+        "field": "rule_code",
+        "type": "string",
+        "required": true,
+        "description": "Unique regulatory rule identifier",
+        "example": "UK-VAT-REDUCED-5"
+      },
+      {
+        "field": "name",
+        "type": "string",
+        "required": true,
+        "description": "Official statutory tax rule name",
+        "example": "UK Domestic Energy Reduced Rate 5%"
+      },
+      {
+        "field": "category",
+        "type": "enum",
+        "required": true,
+        "description": "Tax category (VAT | GST | SALES_TAX | CORPORATE_INCOME)",
+        "example": "VAT"
+      },
+      {
+        "field": "tax_rate_percentage",
+        "type": "number (float)",
+        "required": true,
+        "description": "Statutory percentage tax rate to apply",
+        "example": 5
+      },
+      {
+        "field": "standard_deductions",
+        "type": "number",
+        "required": false,
+        "description": "Statutory base deduction before tax computation",
+        "example": 0
+      },
+      {
+        "field": "exemptions_json",
+        "type": "string (JSON)",
+        "required": false,
+        "description": "Conditional exemption criteria in JSON format",
+        "example": "{\"domestic_energy\":true}"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Regulatory rule state (ACTIVE | DRAFT | DEPRECATED)",
+        "example": "ACTIVE"
+      },
+      {
+        "field": "version",
+        "type": "number",
+        "required": true,
+        "description": "Monotonically increasing rule version number",
+        "example": 1
+      },
+      {
+        "field": "effective_from",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "UTC timestamp from which this tax rule is in effect",
+        "example": "2026-09-01T00:00:00Z"
+      }
     ],
-    input: null,
-    queryParams: { kyc_status: "VERIFIED", limit: "50" }
-  },
-
-  // ── 4. FINANCE (3 Services) ─────────────────────────────────────────────────
-  {
-    id: 15,
-    domain: "Finance",
-    name: "General Ledger Engine",
-    port: 8098,
-    method: "POST",
-    path: "/api/v1/journal-entries",
-    description: "Post a balanced double-entry accounting journal to the general ledger",
-    presentationText: "Posts balanced double-entry journal transactions into the immutable financial ledger. Validates debit and credit equality, chart of accounts codes, and currency denomination.",
-    fieldDocs: [
-      { field: "reference_code", type: "string", required: true, description: "Unique general ledger journal entry reference code", example: "JE-2026-09-001" },
-      { field: "description", type: "string", required: true, description: "Commercial narrative describing the accounting posting", example: "September Intercompany Management Service Fee Accrual" },
-      { field: "debit_account", type: "string", required: true, description: "Debit chart-of-accounts code", example: "7001-MGMT-FEES" },
-      { field: "credit_account", type: "string", required: true, description: "Credit chart-of-accounts code", example: "2050-INTERCO-PAYABLE" },
-      { field: "amount", type: "number", required: true, description: "Transaction value (debit equals credit)", example: 45000.0 },
-      { field: "currency", type: "string", required: true, description: "ISO-4217 financial currency", example: "GBP" },
-      { field: "status", type: "enum", required: true, description: "Posting state (POSTED | DRAFT)", example: "POSTED" },
-    ],
-    input: {
-      reference_code: "JE-2026-09-001",
-      description: "September Intercompany Management Service Fee Accrual",
-      debit_account: "7001-MGMT-FEES",
-      credit_account: "2050-INTERCO-PAYABLE",
-      amount: 45000.0,
-      currency: "GBP",
-      status: "POSTED"
+    "input": {
+      "jurisdiction_id": "GB",
+      "rule_code": "UK-VAT-REDUCED-5",
+      "name": "UK Domestic Energy Reduced Rate 5%",
+      "category": "VAT",
+      "tax_rate_percentage": 5,
+      "standard_deductions": 0,
+      "exemptions_json": "{\"domestic_energy\":true}",
+      "status": "ACTIVE",
+      "version": 1,
+      "effective_from": "2026-09-01T00:00:00Z"
     }
   },
   {
-    id: 16,
-    domain: "Finance",
-    name: "Treasury & Cash Engine",
-    port: 8103,
-    method: "GET",
-    path: "/api/v1/cash-positions",
-    description: "Retrieve multi-currency liquidity and real-time cash balances",
-    presentationText: "Retrieves consolidated multi-currency treasury positions across tier-1 banking institutions, calculating liquid reserves, working capital, and FX exposure.",
-    fieldDocs: [
-      { field: "currency", type: "string (query)", required: false, description: "Filter by reporting currency (GBP | EUR | USD)", example: "GBP" },
+    "id": 13,
+    "domain": "Tax & Compliance",
+    "name": "tax-determination-svc",
+    "port": 8126,
+    "method": "POST",
+    "path": "/api/v1/tax-determinations",
+    "description": "Evaluate applicable tax and calculate liabilities on a commercial invoice",
+    "presentationText": "Evaluates an accounts payable invoice, sales receipt, or purchase order against active jurisdiction tax rules. Computes net taxable base, applicable tax liability, and line-item tax breakdown.",
+    "fieldDocs": [
+      {
+        "field": "transaction_id",
+        "type": "string",
+        "required": true,
+        "description": "Upstream commercial transaction reference identifier",
+        "example": "tx-inv-2026-8841"
+      },
+      {
+        "field": "source_module",
+        "type": "enum",
+        "required": true,
+        "description": "Originating ERP module (ACCOUNTS_PAYABLE | SALES | GL)",
+        "example": "ACCOUNTS_PAYABLE"
+      },
+      {
+        "field": "legal_entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "UUID of the reporting legal entity",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Jurisdiction code where tax nexus applies",
+        "example": "GB"
+      },
+      {
+        "field": "tax_category",
+        "type": "enum",
+        "required": true,
+        "description": "Target tax category to evaluate against",
+        "example": "VAT"
+      },
+      {
+        "field": "gross_amount",
+        "type": "number (float)",
+        "required": true,
+        "description": "Total invoice gross commercial value",
+        "example": 150000
+      },
+      {
+        "field": "taxable_amount",
+        "type": "number (float)",
+        "required": true,
+        "description": "Portion of gross amount subject to tax",
+        "example": 150000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Invoice denomination currency",
+        "example": "GBP"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Determination state (CALCULATED | COMMITTED)",
+        "example": "CALCULATED"
+      }
     ],
-    input: null,
-    queryParams: { currency: "GBP" }
-  },
-  {
-    id: 17,
-    domain: "Finance",
-    name: "Financial Reporting Engine",
-    port: 8104,
-    method: "GET",
-    path: "/api/v1/finance/summary",
-    description: "Fetch consolidated financial summary statistics and balance figures",
-    presentationText: "Queries consolidated corporate financial metrics including monthly turnover, gross margin, operating EBITDA, accounts receivable aged debt, and close status.",
-    fieldDocs: [
-      { field: "period", type: "string (query)", required: false, description: "Financial fiscal period code", example: "2026-Q3" },
-    ],
-    input: null,
-    queryParams: { period: "2026-Q3" }
-  },
-
-  // ── 5. COMMERCIAL OPS (3 Services) ──────────────────────────────────────────
-  {
-    id: 18,
-    domain: "Commercial Ops",
-    name: "Purchase Order Management",
-    port: 8139,
-    method: "POST",
-    path: "/api/v1/purchase-orders",
-    description: "Raise an approved purchase order for an enterprise supplier",
-    presentationText: "Generates an authorized binding purchase order (PO) issued to a validated supplier, locking spend against allocated budgets and triggering invoice 3-way matching.",
-    fieldDocs: [
-      { field: "po_number", type: "string", required: true, description: "Unique purchase order identifier", example: "PO-2026-089" },
-      { field: "vendor_name", type: "string", required: true, description: "Accredited supplier business name", example: "CloudVault Ltd" },
-      { field: "description", type: "string", required: true, description: "Procurement line description of goods/services", example: "Annual Enterprise Multi-Region Cloud Storage Infrastructure" },
-      { field: "amount", type: "number", required: true, description: "Contractual purchase order value", example: 96000.0 },
-      { field: "currency", type: "string", required: true, description: "Purchase order currency", example: "GBP" },
-      { field: "status", type: "enum", required: true, description: "PO authorization status (APPROVED | ISSUED)", example: "APPROVED" },
-    ],
-    input: {
-      po_number: "PO-2026-089",
-      vendor_name: "CloudVault Ltd",
-      description: "Annual Enterprise Multi-Region Cloud Storage Infrastructure",
-      amount: 96000.0,
-      currency: "GBP",
-      status: "APPROVED"
+    "input": {
+      "transaction_id": "tx-inv-2026-8841",
+      "source_module": "ACCOUNTS_PAYABLE",
+      "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+      "jurisdiction_id": "GB",
+      "tax_category": "VAT",
+      "gross_amount": 150000,
+      "taxable_amount": 150000,
+      "currency": "GBP",
+      "status": "CALCULATED"
     }
   },
   {
-    id: 19,
-    domain: "Commercial Ops",
-    name: "Spend Controls Service",
-    port: 8131,
-    method: "POST",
-    path: "/api/v1/spend-controls/limits",
-    description: "Set a departmental annual spend limit and approval threshold",
-    presentationText: "Establishes governed expenditure ceilings per department or cost category, requiring secondary VP approval for any purchase requisition exceeding the threshold.",
-    fieldDocs: [
-      { field: "category", type: "string", required: true, description: "Spend classification category", example: "Information Technology & Software Infrastructure" },
-      { field: "department", type: "string", required: true, description: "Target organizational department", example: "Engineering" },
-      { field: "annual_limit_amount", type: "number", required: true, description: "Maximum allowable annual budget", example: 350000.0 },
-      { field: "currency", type: "string", required: true, description: "Budget currency", example: "GBP" },
-      { field: "approval_threshold", type: "number", required: true, description: "Amount above which executive escalation is required", example: 25000.0 },
-      { field: "period", type: "string", required: true, description: "Budget fiscal period identifier", example: "2026-FY" },
+    "id": 14,
+    "domain": "Tax & Compliance",
+    "name": "vat-gst-svc",
+    "port": 8127,
+    "method": "POST",
+    "path": "/api/v1/vat-returns",
+    "description": "Compile and file statutory periodic VAT / GST return",
+    "presentationText": "Aggregates sales output VAT and purchase input VAT across general ledger transactions for an accounting period. Computes net statutory liability or reclaim due.",
+    "fieldDocs": [
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Filing jurisdiction authority",
+        "example": "GB"
+      },
+      {
+        "field": "tax_registration_number",
+        "type": "string",
+        "required": true,
+        "description": "Corporate VAT registration number",
+        "example": "GB998877665"
+      },
+      {
+        "field": "tax_period",
+        "type": "string",
+        "required": true,
+        "description": "Statutory filing quarter / month (e.g. 2026-Q2)",
+        "example": "2026-Q2"
+      },
+      {
+        "field": "total_sales_amount",
+        "type": "number (float)",
+        "required": true,
+        "description": "Total commercial sales subject to VAT",
+        "example": 500000
+      },
+      {
+        "field": "total_purchase_amount",
+        "type": "number (float)",
+        "required": true,
+        "description": "Allowable purchases subject to input VAT reclaim",
+        "example": 200000
+      },
+      {
+        "field": "output_tax_amount",
+        "type": "number (float)",
+        "required": true,
+        "description": "Total VAT collected on sales",
+        "example": 100000
+      },
+      {
+        "field": "input_tax_amount",
+        "type": "number (float)",
+        "required": true,
+        "description": "Total VAT paid on allowable expenses",
+        "example": 40000
+      },
+      {
+        "field": "net_tax_payable",
+        "type": "number (float)",
+        "required": true,
+        "description": "Net payable to revenue authority (output - input)",
+        "example": 60000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Filing currency denomination",
+        "example": "GBP"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Return lifecycle (DRAFT | SUBMITTED | ACCEPTED)",
+        "example": "DRAFT"
+      }
     ],
-    input: {
-      category: "Information Technology & Software Infrastructure",
-      department: "Engineering",
-      annual_limit_amount: 350000.0,
-      currency: "GBP",
-      approval_threshold: 25000.0,
-      period: "2026-FY"
+    "input": {
+      "jurisdiction_id": "GB",
+      "tax_registration_number": "GB998877665",
+      "tax_period": "2026-Q2",
+      "total_sales_amount": 500000,
+      "total_purchase_amount": 200000,
+      "output_tax_amount": 100000,
+      "input_tax_amount": 40000,
+      "net_tax_payable": 60000,
+      "currency": "GBP",
+      "status": "DRAFT"
     }
   },
   {
-    id: 20,
-    domain: "Commercial Ops",
-    name: "Vendor Due Diligence",
-    port: 8135,
-    method: "GET",
-    path: "/api/v1/vendors",
-    description: "List all approved vendors with risk tier and accreditation status",
-    presentationText: "Queries verified third-party suppliers, inspecting ESG compliance, security certifications (ISO 27001), credit risk ratings, and compliance audit history.",
-    fieldDocs: [
-      { field: "risk_tier", type: "string (query)", required: false, description: "Filter by risk classification (LOW | MEDIUM | HIGH)", example: "LOW" },
+    "id": 15,
+    "domain": "Tax & Compliance",
+    "name": "corporate-tax-svc",
+    "port": 8128,
+    "method": "POST",
+    "path": "/api/v1/corporate-tax-returns",
+    "description": "Submit annual statutory corporate income tax assessment (Form 1120 / CT600)",
+    "presentationText": "Computes and archives annual corporate income tax returns (such as UK HMRC CT600 or US IRS Form 1120). Balances gross revenue against allowable deductions to compute net tax liability.",
+    "fieldDocs": [
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Tax filing country",
+        "example": "GB"
+      },
+      {
+        "field": "tax_registration_number",
+        "type": "string",
+        "required": true,
+        "description": "Unique Taxpayer Reference (UTR / EIN)",
+        "example": "GB-CT-443322"
+      },
+      {
+        "field": "fiscal_year",
+        "type": "number",
+        "required": true,
+        "description": "Filing accounting fiscal year",
+        "example": 2026
+      },
+      {
+        "field": "accounting_period_start",
+        "type": "string (date)",
+        "required": true,
+        "description": "Beginning date of reporting fiscal window",
+        "example": "2026-01-01"
+      },
+      {
+        "field": "accounting_period_end",
+        "type": "string (date)",
+        "required": true,
+        "description": "Ending date of reporting fiscal window",
+        "example": "2026-12-31"
+      },
+      {
+        "field": "gross_revenue",
+        "type": "number",
+        "required": true,
+        "description": "Total recognized commercial entity revenue",
+        "example": 3500000
+      },
+      {
+        "field": "allowable_deductions",
+        "type": "number",
+        "required": true,
+        "description": "Total recognized statutory business deductions",
+        "example": 2100000
+      },
+      {
+        "field": "taxable_income",
+        "type": "number",
+        "required": true,
+        "description": "Net taxable profit before tax credits",
+        "example": 1400000
+      },
+      {
+        "field": "tax_rate_percent",
+        "type": "number",
+        "required": true,
+        "description": "Statutory corporate tax percentage rate applied",
+        "example": 25
+      },
+      {
+        "field": "gross_tax_liability",
+        "type": "number",
+        "required": true,
+        "description": "Computed gross tax liability",
+        "example": 350000
+      },
+      {
+        "field": "tax_credits",
+        "type": "number",
+        "required": false,
+        "description": "Allowable R&D or investment tax credits",
+        "example": 25000
+      },
+      {
+        "field": "net_tax_payable",
+        "type": "number",
+        "required": true,
+        "description": "Final statutory amount due to revenue authority",
+        "example": 325000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Filing corporate tax currency",
+        "example": "GBP"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Filing state (DRAFT | PENDING_REVIEW | SUBMITTED)",
+        "example": "DRAFT"
+      }
     ],
-    input: null,
-    queryParams: { risk_tier: "LOW" }
-  },
-
-  // ── 6. HR & WORKFORCE (5 Services) ──────────────────────────────────────────
-  {
-    id: 21,
-    domain: "HR & Workforce",
-    name: "Employee Master Directory",
-    port: 8108,
-    method: "POST",
-    path: "/api/v1/employees",
-    description: "Onboard a new employee into the master workforce identity system",
-    presentationText: "Registers an employee identity record in the central HR master directory, provisioning department assignments, job roles, worker classification, and start dates.",
-    fieldDocs: [
-      { field: "first_name", type: "string", required: true, description: "Legal first name", example: "Alexander" },
-      { field: "last_name", type: "string", required: true, description: "Legal family name", example: "Wright" },
-      { field: "email", type: "string (email)", required: true, description: "Corporate corporate email address", example: "alexander.wright@zoikogroup.com" },
-      { field: "job_title", type: "string", required: true, description: "Official employment position title", example: "Principal Infrastructure Engineer" },
-      { field: "worker_type", type: "enum", required: true, description: "Employment relationship (FULL_TIME | CONTRACTOR | PART_TIME)", example: "FULL_TIME" },
-      { field: "hire_date", type: "string (YYYY-MM-DD)", required: true, description: "Contractual employment start date", example: "2026-09-01" },
-      { field: "department_id", type: "string", required: true, description: "Assigned departmental cost-center ID", example: "dept-001" },
-      { field: "status", type: "enum", required: true, description: "Workforce status (ACTIVE | ONBOARDING)", example: "ACTIVE" },
-    ],
-    input: {
-      first_name: "Alexander",
-      last_name: "Wright",
-      email: "alexander.wright@zoikogroup.com",
-      job_title: "Principal Infrastructure Engineer",
-      worker_type: "FULL_TIME",
-      hire_date: "2026-09-01",
-      department_id: "dept-001",
-      status: "ACTIVE"
+    "input": {
+      "jurisdiction_id": "GB",
+      "tax_registration_number": "GB-CT-443322",
+      "fiscal_year": 2026,
+      "accounting_period_start": "2026-01-01",
+      "accounting_period_end": "2026-12-31",
+      "gross_revenue": 3500000,
+      "allowable_deductions": 2100000,
+      "taxable_income": 1400000,
+      "tax_rate_percent": 25,
+      "gross_tax_liability": 350000,
+      "tax_credits": 25000,
+      "net_tax_payable": 325000,
+      "currency": "GBP",
+      "status": "DRAFT"
     }
   },
   {
-    id: 22,
-    domain: "HR & Workforce",
-    name: "Leave & Attendance Engine",
-    port: 8115,
-    method: "POST",
-    path: "/api/v1/leave/requests",
-    description: "Submit an employee paid or statutory leave request for approval",
-    presentationText: "Submits formal employee leave requests (annual holiday, sickness, parental) checking remaining allowances, public holidays, and triggering team manager sign-off.",
-    fieldDocs: [
-      { field: "employee_id", type: "string", required: true, description: "Applicant employee identifier", example: "emp-001" },
-      { field: "leave_type_id", type: "enum", required: true, description: "Category of absence (ANNUAL_LEAVE | SICK_LEAVE | PARENTAL)", example: "ANNUAL_LEAVE" },
-      { field: "start_date", type: "string (YYYY-MM-DD)", required: true, description: "First day of absence", example: "2026-10-12" },
-      { field: "end_date", type: "string (YYYY-MM-DD)", required: true, description: "Final day of absence", example: "2026-10-16" },
-      { field: "total_hours", type: "number", required: true, description: "Total working hours requested off", example: 40 },
-      { field: "reason", type: "string", required: false, description: "Optional narrative justification", example: "Autumn Family Holiday" },
-      { field: "status", type: "enum", required: true, description: "Approval workflow state", example: "SUBMITTED" },
+    "id": 16,
+    "domain": "Tax & Compliance",
+    "name": "withholding-tax-svc",
+    "port": 8129,
+    "method": "POST",
+    "path": "/api/v1/withholding-tax",
+    "description": "Register cross-border withholding tax obligations (WHT on royalties/dividends)",
+    "presentationText": "Evaluates international double taxation treaties (DTA) and registers statutory withholding tax obligations on outbound IP royalties, consulting fees, and shareholder dividend payments.",
+    "fieldDocs": [
+      {
+        "field": "legal_entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "UUID of the remitting legal entity",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "recipient_jurisdiction",
+        "type": "string",
+        "required": true,
+        "description": "Beneficiary tax residency jurisdiction",
+        "example": "US"
+      },
+      {
+        "field": "recipient_name",
+        "type": "string",
+        "required": true,
+        "description": "Beneficial owner entity legal name",
+        "example": "CloudTech IP Holdings Delaware LLC"
+      },
+      {
+        "field": "payment_type",
+        "type": "enum",
+        "required": true,
+        "description": "Classification of payment (ROYALTIES | DIVIDENDS | SERVICES)",
+        "example": "ROYALTIES"
+      },
+      {
+        "field": "gross_payment_amount",
+        "type": "number",
+        "required": true,
+        "description": "Total remittance amount before tax withholding",
+        "example": 100000
+      },
+      {
+        "field": "treaty_rate_percent",
+        "type": "number",
+        "required": true,
+        "description": "Applicable DTA treaty withholding rate percent",
+        "example": 15
+      },
+      {
+        "field": "withholding_tax_amount",
+        "type": "number",
+        "required": true,
+        "description": "Calculated statutory tax withheld for domestic revenue",
+        "example": 15000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Remittance contract currency",
+        "example": "GBP"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Obligation state (DRAFT | WITHHELD | REMITTED)",
+        "example": "DRAFT"
+      }
     ],
-    input: {
-      employee_id: "emp-001",
-      leave_type_id: "ANNUAL_LEAVE",
-      start_date: "2026-10-12",
-      end_date: "2026-10-16",
-      total_hours: 40,
-      reason: "Autumn Family Holiday",
-      status: "SUBMITTED"
+    "input": {
+      "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+      "recipient_jurisdiction": "US",
+      "recipient_name": "CloudTech IP Holdings Delaware LLC",
+      "payment_type": "ROYALTIES",
+      "gross_payment_amount": 100000,
+      "treaty_rate_percent": 15,
+      "withholding_tax_amount": 15000,
+      "currency": "GBP",
+      "status": "DRAFT"
     }
   },
   {
-    id: 23,
-    domain: "HR & Workforce",
-    name: "Org Structure Governance",
-    port: 8116,
-    method: "POST",
-    path: "/api/v1/org/departments",
-    description: "Create a new department in the corporate organizational hierarchy",
-    presentationText: "Establishes a new organizational business unit or department, defining budget allocations, leadership responsibility, and organizational cost-center codes.",
-    fieldDocs: [
-      { field: "code", type: "string", required: true, description: "Short department cost center code", example: "CC-SEC" },
-      { field: "name", type: "string", required: true, description: "Full department name", example: "Cybersecurity & Governance" },
-      { field: "head", type: "string", required: true, description: "Department head leader name", example: "Alexander Wright" },
-      { field: "budget_gbp", type: "number", required: true, description: "Annual operational budget allocated in GBP", example: 750000.0 },
+    "id": 17,
+    "domain": "Tax & Compliance",
+    "name": "filing-preparation-svc",
+    "port": 8130,
+    "method": "POST",
+    "path": "/api/v1/filing-preparation/drafts",
+    "description": "Compile and stage comprehensive audit evidence tax return package",
+    "presentationText": "Assembles line-item transaction evidence, reconciliation workpapers, and jurisdiction calculation schedules into an immutable audit-ready tax filing draft.",
+    "fieldDocs": [
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Target statutory tax authority jurisdiction",
+        "example": "GB"
+      },
+      {
+        "field": "filing_type",
+        "type": "enum",
+        "required": true,
+        "description": "Statutory filing classification (VAT_RETURN | CORP_TAX | WHT)",
+        "example": "VAT_RETURN"
+      },
+      {
+        "field": "tax_period",
+        "type": "string",
+        "required": true,
+        "description": "Accounting calendar period under review",
+        "example": "2026-Q3"
+      },
+      {
+        "field": "entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "UUID of the filing corporate subsidiary",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "prepared_by",
+        "type": "string",
+        "required": true,
+        "description": "Tax manager or CPA officer username",
+        "example": "lead.tax.cpa@zoiko.internal"
+      },
+      {
+        "field": "notes",
+        "type": "string",
+        "required": false,
+        "description": "Audit commentary and material variance explanations",
+        "example": "Includes cross-border cloud software sales VAT adjustments under HMRC rules"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Draft preparation stage (DRAFT | AUDIT_VERIFIED | READY_TO_FILE)",
+        "example": "DRAFT"
+      }
     ],
-    input: {
-      code: "CC-SEC",
-      name: "Cybersecurity & Governance",
-      head: "Alexander Wright",
-      budget_gbp: 750000.0
+    "input": {
+      "jurisdiction_id": "GB",
+      "filing_type": "VAT_RETURN",
+      "tax_period": "2026-Q3",
+      "entity_id": "22222222-2222-2222-2222-222222222222",
+      "prepared_by": "lead.tax.cpa@zoiko.internal",
+      "notes": "Includes cross-border cloud software sales VAT adjustments under HMRC rules",
+      "status": "DRAFT"
     }
   },
   {
-    id: 24,
-    domain: "HR & Workforce",
-    name: "Workforce Compliance Alerts",
-    port: 8118,
-    method: "POST",
-    path: "/api/v1/compliance/alerts",
-    description: "Raise a workforce statutory compliance alert for an employee",
-    presentationText: "Raises critical statutory workforce alerts regarding right-to-work visa expirations, mandatory safety certifications, or working-time limit breaches.",
-    fieldDocs: [
-      { field: "employee_id", type: "string", required: true, description: "Affected employee reference ID", example: "emp-004" },
-      { field: "alert_type", type: "enum", required: true, description: "Type of compliance alert (VISA_RENEWAL | TRAINING_LAPSE)", example: "VISA_RENEWAL_REQUIRED" },
-      { field: "severity", type: "enum", required: true, description: "Risk urgency (HIGH | MEDIUM | LOW)", example: "HIGH" },
-      { field: "description", type: "string", required: true, description: "Actionable alert explanation", example: "UK Skilled Worker Visa renewal window opens 60 days before expiry" },
-      { field: "status", type: "enum", required: true, description: "Resolution state (OPEN | RESOLVED)", example: "OPEN" },
+    "id": 18,
+    "domain": "Tax & Compliance",
+    "name": "filing-tracker-svc",
+    "port": 8131,
+    "method": "POST",
+    "path": "/api/v1/filing-tracker/requirements",
+    "description": "Register a statutory filing deadline and regulatory calendar milestone",
+    "presentationText": "Maintains an authoritative regulatory filing calendar across jurisdictions, tracking mandatory due dates, responsible departments, and penalty escalation rules.",
+    "fieldDocs": [
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Sovereign jurisdiction code",
+        "example": "GB"
+      },
+      {
+        "field": "filing_name",
+        "type": "string",
+        "required": true,
+        "description": "Statutory return name",
+        "example": "HMRC MTD VAT Return Q3 2026"
+      },
+      {
+        "field": "statutory_deadline",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Hard regulatory filing cutoff deadline",
+        "example": "2026-11-07T23:59:59Z"
+      },
+      {
+        "field": "frequency",
+        "type": "enum",
+        "required": true,
+        "description": "Filing frequency (MONTHLY | QUARTERLY | ANNUAL)",
+        "example": "QUARTERLY"
+      },
+      {
+        "field": "reporting_entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "Legal entity responsible for filing",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Filing status (PENDING | IN_PROGRESS | SUBMITTED)",
+        "example": "PENDING"
+      }
     ],
-    input: {
-      employee_id: "emp-004",
-      alert_type: "VISA_RENEWAL_REQUIRED",
-      severity: "HIGH",
-      description: "UK Skilled Worker Visa renewal window opens 60 days before expiry",
-      status: "OPEN"
+    "input": {
+      "jurisdiction_id": "GB",
+      "filing_name": "HMRC MTD VAT Return Q3 2026",
+      "statutory_deadline": "2026-11-07T23:59:59Z",
+      "frequency": "QUARTERLY",
+      "reporting_entity_id": "22222222-2222-2222-2222-222222222222",
+      "status": "PENDING"
     }
   },
   {
-    id: 25,
-    domain: "HR & Workforce",
-    name: "Talent & Review Cycles",
-    port: 8139,
-    method: "GET",
-    path: "/api/v1/talent",
-    description: "Fetch performance reviews and active annual review cycles",
-    presentationText: "Queries active employee performance review cycles, 360-degree feedback reviews, and competency evaluations across all business units.",
-    fieldDocs: [
-      { field: "cycle_code", type: "string (query)", required: false, description: "Filter by review cycle code", example: "2026-H2" },
+    "id": 19,
+    "domain": "Tax & Compliance",
+    "name": "compliance-status-svc",
+    "port": 8132,
+    "method": "POST",
+    "path": "/api/v1/compliance-status/evaluations",
+    "description": "Submit an automated corporate compliance & audit-readiness health evaluation",
+    "presentationText": "Evaluates comprehensive organizational posture against statutory criteria, producing composite readiness grades and highlighting open regulatory findings.",
+    "fieldDocs": [
+      {
+        "field": "domain",
+        "type": "enum",
+        "required": true,
+        "description": "Governance domain evaluated (TAX | WORKFORCE | PAYROLL | FINANCE)",
+        "example": "TAX"
+      },
+      {
+        "field": "legal_entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "UUID of the evaluated corporate entity",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "evaluation_scope",
+        "type": "string",
+        "required": true,
+        "description": "Scope and criteria checklist evaluated",
+        "example": "Statutory VAT Nexus & International Withholding Tax Audit Readiness"
+      },
+      {
+        "field": "audit_readiness_score",
+        "type": "number",
+        "required": true,
+        "description": "Composite audit preparedness percentage (0-100)",
+        "example": 96.5
+      },
+      {
+        "field": "unresolved_findings",
+        "type": "number",
+        "required": true,
+        "description": "Number of open regulatory findings",
+        "example": 0
+      },
+      {
+        "field": "compliance_grade",
+        "type": "enum",
+        "required": true,
+        "description": "Assigned grade (GRADE_A | GRADE_B | GRADE_C)",
+        "example": "GRADE_A"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Evaluation state (COMPLETED | IN_REVIEW)",
+        "example": "COMPLETED"
+      }
     ],
-    input: null,
-    queryParams: { cycle_code: "2026-H2" }
-  },
-
-  // ── 7. PAYROLL (5 Services) ─────────────────────────────────────────────────
-  {
-    id: 26,
-    domain: "Payroll",
-    name: "Payroll Processing Engine",
-    port: 8110,
-    method: "POST",
-    path: "/api/v1/payroll-runs",
-    description: "Initiate a monthly gross-to-net payroll computation run",
-    presentationText: "Executes periodic gross-to-net payroll calculations for all active personnel in an entity, reconciling gross wages, tax withholdings, pension deductions, and net disbursements.",
-    fieldDocs: [
-      { field: "pay_period_code", type: "string", required: true, description: "Monthly pay period code", example: "2026-10-M" },
-      { field: "period_start_date", type: "string (YYYY-MM-DD)", required: true, description: "Start date of pay cycle", example: "2026-10-01" },
-      { field: "period_end_date", type: "string (YYYY-MM-DD)", required: true, description: "End date of pay cycle", example: "2026-10-31" },
-      { field: "payment_date", type: "string (YYYY-MM-DD)", required: true, description: "Direct deposit / BACS disbursement date", example: "2026-10-28" },
-      { field: "total_employee_count", type: "number", required: true, description: "Total workforce count included in run", example: 76 },
-      { field: "total_gross_pay", type: "number", required: true, description: "Aggregated gross salaries", example: 428000.0 },
-      { field: "total_net_pay", type: "number", required: true, description: "Aggregated net pay to transfer", example: 299000.0 },
-      { field: "total_tax_deductions", type: "number", required: true, description: "Total PAYE and National Insurance deductions", example: 129000.0 },
-      { field: "status", type: "enum", required: true, description: "Execution status (CALCULATING | FINALIZED)", example: "CALCULATING" },
-    ],
-    input: {
-      pay_period_code: "2026-10-M",
-      period_start_date: "2026-10-01",
-      period_end_date: "2026-10-31",
-      payment_date: "2026-10-28",
-      total_employee_count: 76,
-      total_gross_pay: 428000.0,
-      total_net_pay: 299000.0,
-      total_tax_deductions: 129000.0,
-      status: "CALCULATING"
+    "input": {
+      "domain": "TAX",
+      "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+      "evaluation_scope": "Statutory VAT Nexus & International Withholding Tax Audit Readiness",
+      "audit_readiness_score": 96.5,
+      "unresolved_findings": 0,
+      "compliance_grade": "GRADE_A",
+      "status": "COMPLETED"
     }
   },
   {
-    id: 27,
-    domain: "Payroll",
-    name: "Compensation Structures",
-    port: 8111,
-    method: "POST",
-    path: "/api/v1/compensation/structures",
-    description: "Define an official compensation grade, salary band, or wage benchmark",
-    presentationText: "Defines standardized salary structures, compensation bands, and base wage levels corresponding to professional job levels and regional benchmark brackets.",
-    fieldDocs: [
-      { field: "title", type: "string", required: true, description: "Job title and career level tier", example: "Staff Security Architect (L5)" },
-      { field: "wage_type", type: "enum", required: true, description: "Remuneration type (SALARY | HOURLY)", example: "SALARY" },
-      { field: "base_pay", type: "number", required: true, description: "Benchmark annual base salary", example: 125000.0 },
-      { field: "currency", type: "string", required: true, description: "Compensation currency", example: "GBP" },
-      { field: "pay_frequency", type: "enum", required: true, description: "Frequency of payment (MONTHLY | BIWEEKLY)", example: "MONTHLY" },
+    "id": 20,
+    "domain": "Tax & Compliance",
+    "name": "exception-escalation-svc",
+    "port": 8133,
+    "method": "POST",
+    "path": "/api/v1/exception-escalation/exceptions",
+    "description": "Escalate a compliance breach or governance policy violation",
+    "presentationText": "Dispatches high-priority governance alerts when automated threshold monitors detect policy drift, unauthorized approvals, or missed statutory deadlines.",
+    "fieldDocs": [
+      {
+        "field": "title",
+        "type": "string",
+        "required": true,
+        "description": "Summary headline of compliance incident",
+        "example": "Cross-Border Tax Nexus Withholding Rate Discrepancy"
+      },
+      {
+        "field": "domain",
+        "type": "enum",
+        "required": true,
+        "description": "Associated governance domain",
+        "example": "TAX"
+      },
+      {
+        "field": "severity",
+        "type": "enum",
+        "required": true,
+        "description": "Incident severity (CRITICAL | HIGH | MEDIUM)",
+        "example": "HIGH"
+      },
+      {
+        "field": "triggering_event_id",
+        "type": "string",
+        "required": true,
+        "description": "Reference ID of transaction or audit log that caused escalation",
+        "example": "evt-tax-nexus-8812"
+      },
+      {
+        "field": "escalated_to_role",
+        "type": "string",
+        "required": true,
+        "description": "Role accountable for resolving breach",
+        "example": "Chief Compliance Officer"
+      },
+      {
+        "field": "assigned_investigator",
+        "type": "string",
+        "required": false,
+        "description": "Investigating officer email or username",
+        "example": "lead.auditor@zoiko.internal"
+      },
+      {
+        "field": "action_required",
+        "type": "string",
+        "required": true,
+        "description": "Mandatory remediation action",
+        "example": "Recalculate WHT under US-UK DTA treaty Article 12 and update ledger"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Escalation lifecycle state (OPEN | UNDER_REVIEW | RESOLVED)",
+        "example": "OPEN"
+      }
     ],
-    input: {
-      title: "Staff Security Architect (L5)",
-      wage_type: "SALARY",
-      base_pay: 125000.0,
-      currency: "GBP",
-      pay_frequency: "MONTHLY"
+    "input": {
+      "title": "Cross-Border Tax Nexus Withholding Rate Discrepancy",
+      "domain": "TAX",
+      "severity": "HIGH",
+      "triggering_event_id": "evt-tax-nexus-8812",
+      "escalated_to_role": "Chief Compliance Officer",
+      "assigned_investigator": "lead.auditor@zoiko.internal",
+      "action_required": "Recalculate WHT under US-UK DTA treaty Article 12 and update ledger",
+      "status": "OPEN"
     }
   },
   {
-    id: 28,
-    domain: "Payroll",
-    name: "Benefits Engine",
-    port: 8112,
-    method: "POST",
-    path: "/api/v1/benefits/plans",
-    description: "Register a new corporate employee benefit or insurance plan",
-    presentationText: "Registers corporate employee benefit schemes (private healthcare, dental, pension sacrifice, life cover), tracking employer contribution rates and enrollment counts.",
-    fieldDocs: [
-      { field: "name", type: "string", required: true, description: "Benefit program scheme name", example: "Comprehensive Dental & Optical Plan" },
-      { field: "type", type: "enum", required: true, description: "Benefit category (DENTAL | HEALTH | PENSION | LIFE)", example: "DENTAL" },
-      { field: "provider", type: "string", required: true, description: "Commercial benefit underwriting provider", example: "Bupa DentalCare" },
-      { field: "employer_contribution_pct", type: "number", required: true, description: "Percentage subsidized by the enterprise", example: 100 },
-      { field: "enrolled_count", type: "number", required: true, description: "Current count of active enrolled employees", example: 65 },
+    "id": 21,
+    "domain": "Intelligence & Reporting",
+    "name": "anomaly-detection-svc",
+    "port": 8134,
+    "method": "POST",
+    "path": "/api/v1/intelligence/anomalies/detect",
+    "description": "Execute machine-learning anomaly detection scan across transaction streams",
+    "presentationText": "Runs unsupervised statistical algorithms across accounts payable, journal entries, and payroll disbursements to isolate statistical outliers and fraudulent spikes.",
+    "fieldDocs": [
+      {
+        "field": "domain",
+        "type": "enum",
+        "required": true,
+        "description": "Target transaction domain (ACCOUNTS_PAYABLE | PAYROLL | TREASURY)",
+        "example": "ACCOUNTS_PAYABLE"
+      },
+      {
+        "field": "source_module",
+        "type": "string",
+        "required": true,
+        "description": "Originating ledger subsystem",
+        "example": "INVOICE_PROCESSING"
+      },
+      {
+        "field": "sampling_window_days",
+        "type": "number",
+        "required": true,
+        "description": "Historical baseline sampling window",
+        "example": 90
+      },
+      {
+        "field": "sensitivity_threshold",
+        "type": "number (float)",
+        "required": true,
+        "description": "Statistical standard deviation sensitivity (e.g. 3.0 sigma)",
+        "example": 3
+      },
+      {
+        "field": "scan_type",
+        "type": "enum",
+        "required": true,
+        "description": "Algorithm profile (ISOLATION_FOREST | Z_SCORE | AUTOENCODER)",
+        "example": "ISOLATION_FOREST"
+      },
+      {
+        "field": "flag_outliers_only",
+        "type": "boolean",
+        "required": true,
+        "description": "Suppress standard baseline items in output",
+        "example": true
+      }
     ],
-    input: {
-      name: "Comprehensive Dental & Optical Plan",
-      type: "DENTAL",
-      provider: "Bupa DentalCare",
-      employer_contribution_pct: 100,
-      enrolled_count: 65
+    "input": {
+      "domain": "ACCOUNTS_PAYABLE",
+      "source_module": "INVOICE_PROCESSING",
+      "sampling_window_days": 90,
+      "sensitivity_threshold": 3,
+      "scan_type": "ISOLATION_FOREST",
+      "flag_outliers_only": true
     }
   },
   {
-    id: 29,
-    domain: "Payroll",
-    name: "Payroll Tax Compliance",
-    port: 8113,
-    method: "GET",
-    path: "/api/v1/payroll-tax/profiles",
-    description: "Retrieve all employee PAYE, NI, and statutory tax profiles",
-    presentationText: "Audits individual employee tax code configurations (e.g. 1257L), National Insurance categories (Category A), year-to-date tax paid, and student loan deductions.",
-    fieldDocs: [
-      { field: "tax_code", type: "string (query)", required: false, description: "Filter by HMRC statutory tax code", example: "1257L" },
+    "id": 22,
+    "domain": "Intelligence & Reporting",
+    "name": "forecasting-svc",
+    "port": 8135,
+    "method": "POST",
+    "path": "/api/v1/intelligence/forecasts",
+    "description": "Generate predictive cash runway and statutory tax liability forecasts",
+    "presentationText": "Projects multi-quarter financial trajectories incorporating seasonality, recurring vendor obligations, statutory tax dead-lines, and payroll commitments.",
+    "fieldDocs": [
+      {
+        "field": "entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "Legal entity under forecasting review",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "metric",
+        "type": "enum",
+        "required": true,
+        "description": "Target metric (TAX_LIABILITY | CASH_RUNWAY | OPEX_DISBURSEMENT)",
+        "example": "TAX_LIABILITY"
+      },
+      {
+        "field": "horizon_months",
+        "type": "number",
+        "required": true,
+        "description": "Forward forecast horizon in months",
+        "example": 12
+      },
+      {
+        "field": "confidence_interval_percent",
+        "type": "number",
+        "required": true,
+        "description": "Statistical confidence interval band (95%)",
+        "example": 95
+      },
+      {
+        "field": "seasonality_adjusted",
+        "type": "boolean",
+        "required": true,
+        "description": "Adjust for quarter-end fiscal spikes",
+        "example": true
+      },
+      {
+        "field": "model_type",
+        "type": "enum",
+        "required": true,
+        "description": "Predictive model (ARIMA_BAYESIAN | PROPHET | LINEAR_REGRESSION)",
+        "example": "ARIMA_BAYESIAN"
+      }
     ],
-    input: null,
-    queryParams: { tax_code: "1257L" }
-  },
-  {
-    id: 30,
-    domain: "Payroll",
-    name: "Payroll Exception Engine",
-    port: 8114,
-    method: "POST",
-    path: "/api/v1/payroll-exceptions",
-    description: "Raise a payroll calculation exception for manual payroll officer review",
-    presentationText: "Logs payroll anomalies such as expense cap violations, negative net pay projections, or unexpected tax code changes that halt automated disbursements.",
-    fieldDocs: [
-      { field: "employee_id", type: "string", required: true, description: "Subject employee identifier", example: "emp-002" },
-      { field: "type", type: "enum", required: true, description: "Discrepancy category", example: "EXPENSE_REIMBURSEMENT_CAP_BREACH" },
-      { field: "severity", type: "enum", required: true, description: "Urgency (HIGH | MEDIUM | LOW)", example: "MEDIUM" },
-      { field: "period", type: "string", required: true, description: "Pay period affected", example: "2026-09" },
-      { field: "description", type: "string", required: true, description: "Factual explanation of why payroll was blocked", example: "Overseas client travel meal expense exceeds policy limit by £84" },
-      { field: "status", type: "enum", required: true, description: "Investigation status (OPEN | RESOLVED)", example: "OPEN" },
-    ],
-    input: {
-      employee_id: "emp-002",
-      type: "EXPENSE_REIMBURSEMENT_CAP_BREACH",
-      severity: "MEDIUM",
-      period: "2026-09",
-      description: "Overseas client travel meal expense exceeds policy limit by GBP 84",
-      status: "OPEN"
-    }
-  },
-
-  // ── 8. COMPLIANCE & RISK (3 Services) ───────────────────────────────────────
-  {
-    id: 31,
-    domain: "Compliance & Risk",
-    name: "Filing Requirements Tracker",
-    port: 8136,
-    method: "POST",
-    path: "/api/v1/filing-tracker/requirements",
-    description: "Register a statutory filing requirement and regulatory deadline",
-    presentationText: "Registers mandatory statutory filings (e.g. Gender Pay Gap Reporting, Modern Slavery Statement, Annual Accounts) tracking statutory deadlines and authority bodies.",
-    fieldDocs: [
-      { field: "obligation", type: "string", required: true, description: "Statutory filing requirement title", example: "UK Gender Pay Gap Reporting 2026" },
-      { field: "jurisdiction", type: "string", required: true, description: "Enforcing sovereign jurisdiction", example: "GB" },
-      { field: "authority", type: "string", required: true, description: "Government regulatory authority", example: "Government Equalities Office" },
-      { field: "due_date", type: "string (YYYY-MM-DD)", required: true, description: "Statutory filing cutoff date", example: "2027-04-04" },
-      { field: "status", type: "enum", required: true, description: "Tracking status (PENDING | FILED)", example: "PENDING" },
-    ],
-    input: {
-      obligation: "UK Gender Pay Gap Reporting 2026",
-      jurisdiction: "GB",
-      authority: "Government Equalities Office",
-      due_date: "2027-04-04",
-      status: "PENDING"
+    "input": {
+      "entity_id": "22222222-2222-2222-2222-222222222222",
+      "metric": "TAX_LIABILITY",
+      "horizon_months": 12,
+      "confidence_interval_percent": 95,
+      "seasonality_adjusted": true,
+      "model_type": "ARIMA_BAYESIAN"
     }
   },
   {
-    id: 32,
-    domain: "Compliance & Risk",
-    name: "Compliance Evaluation Engine",
-    port: 8137,
-    method: "GET",
-    path: "/api/v1/compliance-status",
-    description: "Get real-time compliance evaluation scores across all business domains",
-    presentationText: "Evaluates automated compliance scores across Tax, Finance, HR, Legal, and IT, surfacing domain compliance percentages and high-risk gaps.",
-    fieldDocs: [
-      { field: "domain", type: "string (query)", required: false, description: "Filter by target operational domain", example: "TAX" },
+    "id": 23,
+    "domain": "Intelligence & Reporting",
+    "name": "compliance-risk-scoring-svc",
+    "port": 8136,
+    "method": "POST",
+    "path": "/api/v1/intelligence/risk-scores",
+    "description": "Compute entity-wide composite regulatory compliance risk score",
+    "presentationText": "Evaluates multi-domain regulatory factors (tax filings, employee certifications, contract obligations, spend limits) to determine entity-level risk tiers.",
+    "fieldDocs": [
+      {
+        "field": "legal_entity_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "Target legal entity identifier",
+        "example": "22222222-2222-2222-2222-222222222222"
+      },
+      {
+        "field": "jurisdiction_code",
+        "type": "string (ISO-3166)",
+        "required": true,
+        "description": "Governing sovereign jurisdiction",
+        "example": "GB"
+      },
+      {
+        "field": "evaluation_date",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Timestamp of risk calculation run",
+        "example": "2026-09-17T00:00:00Z"
+      },
+      {
+        "field": "include_prior_penalties",
+        "type": "boolean",
+        "required": true,
+        "description": "Weight historical authority audit penalties",
+        "example": true
+      },
+      {
+        "field": "weighting_profile",
+        "type": "enum",
+        "required": true,
+        "description": "Factor weighting profile (STATUTORY_TAX_HEAVY | BALANCED | LABOR_HEAVY)",
+        "example": "STATUTORY_TAX_HEAVY"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Run status (ACTIVE | SIMULATION)",
+        "example": "ACTIVE"
+      }
     ],
-    input: null,
-    queryParams: { domain: "TAX" }
-  },
-  {
-    id: 33,
-    domain: "Compliance & Risk",
-    name: "Exception Escalation Engine",
-    port: 8138,
-    method: "POST",
-    path: "/api/v1/exception-escalation/exceptions",
-    description: "Escalate a compliance violation or sanctions match to an owner",
-    presentationText: "Escalates compliance violations, sanctioned entity screening hits, or statutory SLA breaches to designated compliance officers with binding resolution deadlines.",
-    fieldDocs: [
-      { field: "domain", type: "enum", required: true, description: "Breach domain (COMMERCIAL_OPS | TAX | HR)", example: "COMMERCIAL_OPS" },
-      { field: "type", type: "string", required: true, description: "Violation classification type", example: "SANCTIONED_ENTITY_SCREENING_FLAG" },
-      { field: "severity", type: "enum", required: true, description: "Urgency level (CRITICAL | HIGH | MEDIUM)", example: "HIGH" },
-      { field: "assigned_to", type: "string", required: true, description: "Designated executive compliance owner", example: "James Okonkwo" },
-      { field: "sla_breach_at", type: "string (ISO-8601)", required: true, description: "Mandatory SLA resolution cutoff", example: "2026-09-05T17:00:00Z" },
-      { field: "status", type: "enum", required: true, description: "Escalation state (ESCALATED | RESOLVED)", example: "ESCALATED" },
-    ],
-    input: {
-      domain: "COMMERCIAL_OPS",
-      type: "SANCTIONED_ENTITY_SCREENING_FLAG",
-      severity: "HIGH",
-      assigned_to: "James Okonkwo",
-      sla_breach_at: "2026-09-05T17:00:00Z",
-      status: "ESCALATED"
-    }
-  },
-
-  // ── 9. AUDIT EVENT STORE (4 Services) ───────────────────────────────────────
-  {
-    id: 34,
-    domain: "Audit Event Store",
-    name: "Audit Event Ingestion",
-    port: 8084,
-    method: "POST",
-    path: "/api/v1/audit/events",
-    description: "Ingest an immutable, cryptographically signed audit trail event",
-    presentationText: "Ingests an append-only audit event into the tamper-evident cryptographic chain, calculating a SHA-256 block hash for non-repudiation and compliance reporting.",
-    fieldDocs: [
-      { field: "actor", type: "string (email)", required: true, description: "User or automated service executing the event", example: "vasu@zoikogroup.com" },
-      { field: "action", type: "string", required: true, description: "Machine-readable action identifier", example: "MANUAL_E2E_SERVICE_TEST_EXECUTION" },
-      { field: "resource", type: "string", required: true, description: "Target resource URI or component", example: "microservices/all-37" },
-      { field: "outcome", type: "enum", required: true, description: "Action outcome (SUCCESS | DENIED | ESCALATED)", example: "SUCCESS" },
-      { field: "details", type: "string", required: false, description: "Human-readable context narrative", example: "Dispatched manual input test payloads across all 37 microservices" },
-    ],
-    input: {
-      actor: "vasu@zoikogroup.com",
-      action: "MANUAL_E2E_SERVICE_TEST_EXECUTION",
-      resource: "microservices/all-37",
-      outcome: "SUCCESS",
-      details: "Dispatched manual input test payloads across all 37 microservices"
+    "input": {
+      "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+      "jurisdiction_code": "GB",
+      "evaluation_date": "2026-09-17T00:00:00Z",
+      "include_prior_penalties": true,
+      "weighting_profile": "STATUTORY_TAX_HEAVY",
+      "status": "ACTIVE"
     }
   },
   {
-    id: 35,
-    domain: "Audit Event Store",
-    name: "Audit Log Query Engine",
-    port: 8084,
-    method: "GET",
-    path: "/api/v1/audit/logs",
-    description: "Query the verified immutable audit log ledger and block chain",
-    presentationText: "Queries the immutable append-only audit log, verifying SHA-256 block sequences, cryptographic parent hash links, and actor authorization timestamps.",
-    fieldDocs: [
-      { field: "limit", type: "number (query)", required: false, description: "Maximum audit log entries to return", example: 50 },
+    "id": 24,
+    "domain": "Intelligence & Reporting",
+    "name": "reconciliation-intelligence-svc",
+    "port": 8137,
+    "method": "POST",
+    "path": "/api/v1/intelligence/reconciliations",
+    "description": "Trigger autonomous intelligent bank statement & ledger journal matching",
+    "presentationText": "Applies heuristic and vector embedding pattern matching to reconcile complex multi-currency bank statement feeds against general ledger journal entries.",
+    "fieldDocs": [
+      {
+        "field": "account_id",
+        "type": "string",
+        "required": true,
+        "description": "Treasury operating bank account reference",
+        "example": "ba-hsbc-gbp-01"
+      },
+      {
+        "field": "statement_period",
+        "type": "string",
+        "required": true,
+        "description": "Reporting period to reconcile",
+        "example": "2026-08"
+      },
+      {
+        "field": "tolerance_cents",
+        "type": "number",
+        "required": true,
+        "description": "Permitted FX roundoff tolerance in cents",
+        "example": 50
+      },
+      {
+        "field": "match_algorithm",
+        "type": "enum",
+        "required": true,
+        "description": "Matching technique (FUZZY_HEURISTIC | VECTOR_SEMANTIC | EXACT)",
+        "example": "FUZZY_HEURISTIC"
+      },
+      {
+        "field": "auto_post_variance",
+        "type": "boolean",
+        "required": true,
+        "description": "Automatically post variance under tolerance to rounding expense",
+        "example": true
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Reconciliation mode (AUTO_MATCH | DRY_RUN)",
+        "example": "AUTO_MATCH"
+      }
     ],
-    input: null,
-    queryParams: { limit: "50" }
-  },
-  {
-    id: 36,
-    domain: "Audit Event Store",
-    name: "Tamper Detection Engine",
-    port: 8085,
-    method: "GET",
-    path: "/api/v1/tamper/alerts",
-    description: "Retrieve tamper alerts, hash-chain anomalies, and sequence gaps",
-    presentationText: "Scans the cryptographic audit chain for hash mismatches, sequence skips, unauthorized write attempts, or block tampering.",
-    fieldDocs: [
-      { field: "severity", type: "string (query)", required: false, description: "Alert severity filter (CRITICAL | HIGH)", example: "HIGH" },
-    ],
-    input: null,
-    queryParams: { severity: "HIGH" }
-  },
-  {
-    id: 37,
-    domain: "Audit Event Store",
-    name: "Evidence Verification Engine",
-    port: 8095,
-    method: "GET",
-    path: "/api/v1/evidence/requirements",
-    description: "Verify digital signature evidence and audit manifests",
-    presentationText: "Inspects evidentiary documents, cryptographic proof manifests, and auditor digital signatures validating fulfillment of statutory governance obligations.",
-    fieldDocs: [
-      { field: "status", type: "string (query)", required: false, description: "Evidence requirement status (MET | PENDING)", example: "MET" },
-    ],
-    input: null,
-    queryParams: { status: "MET" }
-  },
-
-  // ── 10. JURISDICTIONS & RULES (3 Services) ──────────────────────────────────
-  {
-    id: 38,
-    domain: "Jurisdictions & Rules",
-    name: "Jurisdiction Registration Service",
-    port: 8082,
-    method: "POST",
-    path: "/api/v1/admin/jurisdictions",
-    description: "Register a sovereign or sub-sovereign legal tax jurisdiction",
-    presentationText: "Registers an official sovereign legal jurisdiction (e.g. GB, DE, SG, US) in the master governance engine. Sets authoritative tax bodies, legal jurisdiction code, classification type, and effective dates.",
-    fieldDocs: [
-      { field: "jurisdiction_code", type: "string (ISO-3166)", required: true, description: "Two-letter ISO country code or regional identifier", example: "GB" },
-      { field: "jurisdiction_name", type: "string", required: true, description: "Official sovereign territory or state name", example: "United Kingdom" },
-      { field: "jurisdiction_type", type: "enum", required: true, description: "Jurisdiction tier (SOVEREIGN | SUB_SOVEREIGN | ECONOMIC_ZONE)", example: "SOVEREIGN" },
-      { field: "authority_type", type: "string", required: true, description: "Primary statutory revenue/governance authority", example: "HMRC" },
-      { field: "effective_from", type: "string (ISO-8601)", required: true, description: "Date when jurisdiction governance takes effect", example: "2026-01-01T00:00:00Z" },
-    ],
-    input: {
-      jurisdiction_code: "GB",
-      jurisdiction_name: "United Kingdom",
-      jurisdiction_type: "SOVEREIGN",
-      authority_type: "HMRC",
-      effective_from: "2026-01-01T00:00:00Z"
+    "input": {
+      "account_id": "ba-hsbc-gbp-01",
+      "statement_period": "2026-08",
+      "tolerance_cents": 50,
+      "match_algorithm": "FUZZY_HEURISTIC",
+      "auto_post_variance": true,
+      "status": "AUTO_MATCH"
     }
   },
   {
-    id: 39,
-    domain: "Jurisdictions & Rules",
-    name: "Statutory Rule Creation Engine",
-    port: 8082,
-    method: "POST",
-    path: "/api/v1/admin/jurisdictions/rules",
-    description: "Create an authoritative statutory rule against a jurisdiction",
-    presentationText: "Binds an in-force legal rule or statutory rate parameter to a sovereign jurisdiction. Configures rule domains (TAX, PAYROLL, EMPLOYMENT, FILING), rule code, and effective dates.",
-    fieldDocs: [
-      { field: "jurisdiction_id", type: "string", required: true, description: "Target jurisdiction ISO code or UUID", example: "GB" },
-      { field: "rule_domain", type: "enum", required: true, description: "Regulatory domain (TAX | PAYROLL | EMPLOYMENT | FILING)", example: "TAX" },
-      { field: "rule_code", type: "string", required: true, description: "Unique regulatory rule identifier", example: "GB-VAT-STD-2026" },
-      { field: "rule_name", type: "string", required: true, description: "Official statutory rule name", example: "UK Standard Value Added Tax 20%" },
-      { field: "effective_from", type: "string (ISO-8601)", required: true, description: "UTC timestamp rule becomes active", example: "2026-01-01T00:00:00Z" },
-      { field: "rule_status", type: "enum", required: true, description: "Rule state (ACTIVE | DRAFT)", example: "ACTIVE" },
+    "id": 25,
+    "domain": "Intelligence & Reporting",
+    "name": "reporting-orchestration-svc",
+    "port": 8138,
+    "method": "POST",
+    "path": "/api/v1/intelligence/reports/orchestrate",
+    "description": "Orchestrate automated regulatory, executive, and board reporting pack generation",
+    "presentationText": "Aggregates verified data from across all microservices to generate auditable executive PDF and XBRL regulatory reporting packages.",
+    "fieldDocs": [
+      {
+        "field": "report_title",
+        "type": "string",
+        "required": true,
+        "description": "Official governance reporting package title",
+        "example": "Q3 2026 Board Governance & Statutory Compliance Pack"
+      },
+      {
+        "field": "template_code",
+        "type": "string",
+        "required": true,
+        "description": "Standard corporate reporting template",
+        "example": "TPL-EXEC-GOVERNANCE-V2"
+      },
+      {
+        "field": "target_entities_json",
+        "type": "string (JSON)",
+        "required": true,
+        "description": "Entities included in consolidated report",
+        "example": "[\"22222222-2222-2222-2222-222222222222\"]"
+      },
+      {
+        "field": "reporting_quarter",
+        "type": "string",
+        "required": true,
+        "description": "Quarterly accounting period",
+        "example": "2026-Q3"
+      },
+      {
+        "field": "export_formats",
+        "type": "string",
+        "required": true,
+        "description": "Output format options (PDF, XBRL, JSON)",
+        "example": "PDF,XBRL"
+      },
+      {
+        "field": "include_audit_trail",
+        "type": "boolean",
+        "required": true,
+        "description": "Embed SHA-256 cryptographic audit verification appendix",
+        "example": true
+      }
     ],
-    input: {
-      jurisdiction_id: "GB",
-      rule_domain: "TAX",
-      rule_code: "GB-VAT-STD-2026",
-      rule_name: "UK Standard Value Added Tax 20%",
-      effective_from: "2026-01-01T00:00:00Z",
-      rule_status: "ACTIVE"
+    "input": {
+      "report_title": "Q3 2026 Board Governance & Statutory Compliance Pack",
+      "template_code": "TPL-EXEC-GOVERNANCE-V2",
+      "target_entities_json": "[\"22222222-2222-2222-2222-222222222222\"]",
+      "reporting_quarter": "2026-Q3",
+      "export_formats": "PDF,XBRL",
+      "include_audit_trail": true
     }
   },
   {
-    id: 40,
-    domain: "Jurisdictions & Rules",
-    name: "Jurisdiction & Rule Pack Query",
-    port: 8082,
-    method: "GET",
-    path: "/api/v1/jurisdictions",
-    description: "Query sovereign jurisdictions and resolve active statutory rule packs",
-    presentationText: "Queries all active and historical jurisdictions, evaluating applicable rule sets, regulatory drift detections, and authority links across the platform.",
-    fieldDocs: [
-      { field: "active_only", type: "string (query)", required: false, description: "Filter by active status (true | false)", example: "true" },
-      { field: "domain", type: "string (query)", required: false, description: "Filter rules by domain (TAX | PAYROLL | FILING)", example: "TAX" },
+    "id": 26,
+    "domain": "Intelligence & Reporting",
+    "name": "decision-support-svc",
+    "port": 8138,
+    "method": "POST",
+    "path": "/api/v1/intelligence/decision-support",
+    "description": "Evaluate high-value commercial action with multi-factor AI governance decision support",
+    "presentationText": "Evaluates proposed commercial disbursements, supplier contracts, and entity restructurings against active governance policies, providing structured risk recommendation.",
+    "fieldDocs": [
+      {
+        "field": "case_type",
+        "type": "enum",
+        "required": true,
+        "description": "Decision domain (COMMERCIAL_DISBURSEMENT | VENDOR_APPROVAL | CONTRACT_SIGNING)",
+        "example": "COMMERCIAL_DISBURSEMENT"
+      },
+      {
+        "field": "subject_id",
+        "type": "string",
+        "required": true,
+        "description": "Target document or transaction identifier",
+        "example": "po-2026-09-001"
+      },
+      {
+        "field": "requested_amount",
+        "type": "number",
+        "required": true,
+        "description": "Financial commitment amount",
+        "example": 75000
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Operating currency",
+        "example": "GBP"
+      },
+      {
+        "field": "risk_tier",
+        "type": "enum",
+        "required": true,
+        "description": "Underlying risk classification",
+        "example": "MEDIUM"
+      },
+      {
+        "field": "governance_policy_code",
+        "type": "string",
+        "required": true,
+        "description": "Governing policy rule applied",
+        "example": "POL-SPEND-GLOBAL-01"
+      }
     ],
-    input: null,
-    queryParams: { active_only: "true", domain: "TAX" }
-  },
-
-  // ── 11. DOCUMENT VAULT (2 Services) ─────────────────────────────────────────
-  {
-    id: 41,
-    domain: "Document Vault",
-    name: "Document Vault Filing Engine",
-    port: 8094,
-    method: "POST",
-    path: "/api/v1/documents",
-    description: "File an immutable governed document with inline base64 content and SHA-256 verification",
-    presentationText: "Stores evidentiary documents in the immutable append-only Document Vault. Calculates SHA-256 checksum on write, sets classification, and enforces data retention policies.",
-    fieldDocs: [
-      { field: "legal_entity_id", type: "string (UUID)", required: true, description: "Owning corporate legal entity ID", example: "22222222-2222-2222-2222-222222222222" },
-      { field: "title", type: "string", required: true, description: "Document title and descriptive metadata", example: "Q3 2026 Statutory VAT Return Verification Evidence" },
-      { field: "classification", type: "enum", required: true, description: "Security classification (PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED)", example: "CONFIDENTIAL" },
-      { field: "content_type", type: "string (MIME)", required: true, description: "MIME content type format", example: "application/pdf" },
-      { field: "retention_policy", type: "string", required: true, description: "Enforced compliance retention duration", example: "7_YEAR_STATUTORY" },
-      { field: "residency_region_code", type: "string", required: false, description: "Data sovereignty residency region", example: "eu-west-2" },
-      { field: "content_base64", type: "string (Base64)", required: true, description: "Inline Base64 encoded payload of the file", example: "SGVsbG8gWm9pa28gRG9jdW1lbnQgVmF1bHQgQXVkaXQgRXZpZGVuY2U=" },
-    ],
-    input: {
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
-      title: "Q3 2026 Statutory VAT Return Verification Evidence",
-      classification: "CONFIDENTIAL",
-      content_type: "application/pdf",
-      retention_policy: "7_YEAR_STATUTORY",
-      residency_region_code: "eu-west-2",
-      content_base64: "SGVsbG8gWm9pa28gRG9jdW1lbnQgVmF1bHQgQXVkaXQgRXZpZGVuY2U="
+    "input": {
+      "case_type": "COMMERCIAL_DISBURSEMENT",
+      "subject_id": "po-2026-09-001",
+      "requested_amount": 75000,
+      "currency": "GBP",
+      "risk_tier": "MEDIUM",
+      "governance_policy_code": "POL-SPEND-GLOBAL-01"
     }
   },
   {
-    id: 42,
-    domain: "Document Vault",
-    name: "Document Register & Access Log Query",
-    port: 8094,
-    method: "GET",
-    path: "/api/v1/documents",
-    description: "Query filed documents and verified SHA-256 access audit trails",
-    presentationText: "Queries registered corporate documents and their immutable cryptographic access audit trail, ensuring full traceability of every read, download, or version bump.",
-    fieldDocs: [
-      { field: "legal_entity_id", type: "string (query)", required: true, description: "Legal entity filter for document scope", example: "22222222-2222-2222-2222-222222222222" },
-      { field: "limit", type: "number (query)", required: false, description: "Maximum document records to retrieve", example: 50 },
+    "id": 27,
+    "domain": "Intelligence & Reporting",
+    "name": "migration-integrity-svc",
+    "port": 8139,
+    "method": "POST",
+    "path": "/api/v1/intelligence/migration-integrity/verify",
+    "description": "Verify cryptographic integrity and balance consistency of migrated historical data",
+    "presentationText": "Validates record counts, SHA-256 ledger checksums, and debit/credit balances across migrated database shards or ERP cutover batches.",
+    "fieldDocs": [
+      {
+        "field": "migration_batch_id",
+        "type": "string",
+        "required": true,
+        "description": "Batch execution tracking identifier",
+        "example": "mig-batch-2026-09-alpha"
+      },
+      {
+        "field": "source_system",
+        "type": "string",
+        "required": true,
+        "description": "Legacy source system name",
+        "example": "SAP_ECC_6"
+      },
+      {
+        "field": "target_table",
+        "type": "string",
+        "required": true,
+        "description": "Target platform store table",
+        "example": "general_ledger_entries"
+      },
+      {
+        "field": "record_count",
+        "type": "number",
+        "required": true,
+        "description": "Total records transferred in batch",
+        "example": 45000
+      },
+      {
+        "field": "checksum_algorithm",
+        "type": "enum",
+        "required": true,
+        "description": "Verification hash algorithm (SHA256 | BLAKE3)",
+        "example": "SHA256"
+      },
+      {
+        "field": "audit_sample_percent",
+        "type": "number",
+        "required": true,
+        "description": "Percentage of records deep-verified",
+        "example": 100
+      }
     ],
-    input: null,
-    queryParams: { legal_entity_id: "22222222-2222-2222-2222-222222222222", limit: "50" }
+    "input": {
+      "migration_batch_id": "mig-batch-2026-09-alpha",
+      "source_system": "SAP_ECC_6",
+      "target_table": "general_ledger_entries",
+      "record_count": 45000,
+      "checksum_algorithm": "SHA256",
+      "audit_sample_percent": 100
+    }
   },
+  {
+    "id": 28,
+    "domain": "Security & Trust",
+    "name": "mtls-management-svc",
+    "port": 8140,
+    "method": "POST",
+    "path": "/api/v1/security/mtls/certificates",
+    "description": "Issue and register an internal mutual-TLS (mTLS) microservice certificate",
+    "presentationText": "Manages the zero-trust public key infrastructure (PKI) layer, generating, rotating, and validating mutual-TLS X.509 certificates for service-to-service encryption.",
+    "fieldDocs": [
+      {
+        "field": "common_name",
+        "type": "string",
+        "required": true,
+        "description": "Certificate subject CN",
+        "example": "general-ledger-svc.internal.zoikosuite.local"
+      },
+      {
+        "field": "service_identifier",
+        "type": "string",
+        "required": true,
+        "description": "Microservice name",
+        "example": "general-ledger-svc"
+      },
+      {
+        "field": "key_algorithm",
+        "type": "enum",
+        "required": true,
+        "description": "Cryptographic key algorithm (RSA_4096 | ECDSA_P384 | ED25519)",
+        "example": "ECDSA_P384"
+      },
+      {
+        "field": "validity_days",
+        "type": "number",
+        "required": true,
+        "description": "Certificate lifetime in days before rotation",
+        "example": 90
+      },
+      {
+        "field": "auto_rotate",
+        "type": "boolean",
+        "required": true,
+        "description": "Enable automated zero-downtime rotation",
+        "example": true
+      },
+      {
+        "field": "ca_bundle",
+        "type": "string",
+        "required": true,
+        "description": "Issuing Certificate Authority tier",
+        "example": "ZOIKO_INTERNAL_ROOT_CA_V1"
+      }
+    ],
+    "input": {
+      "common_name": "general-ledger-svc.internal.zoikosuite.local",
+      "service_identifier": "general-ledger-svc",
+      "key_algorithm": "ECDSA_P384",
+      "validity_days": 90,
+      "auto_rotate": true,
+      "ca_bundle": "ZOIKO_INTERNAL_ROOT_CA_V1"
+    }
+  },
+  {
+    "id": 29,
+    "domain": "Security & Trust",
+    "name": "siem-integration-svc",
+    "port": 8141,
+    "method": "POST",
+    "path": "/api/v1/security/siem/events",
+    "description": "Forward governed platform audit event to enterprise SIEM (Splunk / Sentinel)",
+    "presentationText": "Enforces security compliance by streaming real-time security events, authentication anomalies, and privileged access grants into enterprise SIEM platforms.",
+    "fieldDocs": [
+      {
+        "field": "event_name",
+        "type": "string",
+        "required": true,
+        "description": "Security incident or access action name",
+        "example": "PRIVILEGED_ROOT_KEY_ROTATION"
+      },
+      {
+        "field": "severity",
+        "type": "enum",
+        "required": true,
+        "description": "Incident classification (INFO | WARNING | ALERT | CRITICAL)",
+        "example": "ALERT"
+      },
+      {
+        "field": "source_component",
+        "type": "string",
+        "required": true,
+        "description": "Emitting microservice or gateway",
+        "example": "secret-vault-svc"
+      },
+      {
+        "field": "principal_id",
+        "type": "string (UUID)",
+        "required": true,
+        "description": "Acting administrator principal UUID",
+        "example": "33333333-3333-3333-3333-333333333333"
+      },
+      {
+        "field": "ip_address",
+        "type": "string",
+        "required": true,
+        "description": "Originating network address",
+        "example": "10.240.12.84"
+      },
+      {
+        "field": "event_payload_json",
+        "type": "string (JSON)",
+        "required": true,
+        "description": "Structured event context and affected resources",
+        "example": "{\"target_key\":\"kms-master-01\",\"reason\":\"scheduled_quarterly_rotation\"}"
+      }
+    ],
+    "input": {
+      "event_name": "PRIVILEGED_ROOT_KEY_ROTATION",
+      "severity": "ALERT",
+      "source_component": "secret-vault-svc",
+      "principal_id": "33333333-3333-3333-3333-333333333333",
+      "ip_address": "10.240.12.84",
+      "event_payload_json": "{\"target_key\":\"kms-master-01\",\"reason\":\"scheduled_quarterly_rotation\"}"
+    }
+  },
+  {
+    "id": 30,
+    "domain": "Security & Trust",
+    "name": "carta-svc",
+    "port": 8142,
+    "method": "POST",
+    "path": "/api/v1/security/carta/captable",
+    "description": "Sync and record statutory equity grant or cap table transaction with Carta",
+    "presentationText": "Bridges corporate resolutions and option pool allocations to cap-table management systems (Carta / Pulley), maintaining shareholder registers and vesting schedules.",
+    "fieldDocs": [
+      {
+        "field": "shareholder_id",
+        "type": "string",
+        "required": true,
+        "description": "Shareholder or optionee reference ID",
+        "example": "sh-exec-041"
+      },
+      {
+        "field": "share_class",
+        "type": "enum",
+        "required": true,
+        "description": "Share classification (COMMON | PREFERRED_SERIES_A | PREFERRED_SERIES_B | OPTIONS)",
+        "example": "PREFERRED_SERIES_B"
+      },
+      {
+        "field": "number_of_shares",
+        "type": "number",
+        "required": true,
+        "description": "Total shares or options allocated",
+        "example": 25000
+      },
+      {
+        "field": "issue_price_per_share",
+        "type": "number",
+        "required": true,
+        "description": "Agreed issue or strike price",
+        "example": 4.8
+      },
+      {
+        "field": "currency",
+        "type": "string",
+        "required": true,
+        "description": "Currency denomination",
+        "example": "GBP"
+      },
+      {
+        "field": "grant_date",
+        "type": "string (date)",
+        "required": true,
+        "description": "Board approved grant date",
+        "example": "2026-09-01"
+      },
+      {
+        "field": "board_approval_ref",
+        "type": "string",
+        "required": true,
+        "description": "Board resolution minute reference code",
+        "example": "RES-2026-08-04"
+      }
+    ],
+    "input": {
+      "shareholder_id": "sh-exec-041",
+      "share_class": "PREFERRED_SERIES_B",
+      "number_of_shares": 25000,
+      "issue_price_per_share": 4.8,
+      "currency": "GBP",
+      "grant_date": "2026-09-01",
+      "board_approval_ref": "RES-2026-08-04"
+    }
+  },
+  {
+    "id": 31,
+    "domain": "Security & Trust",
+    "name": "key-management-svc",
+    "port": 8143,
+    "method": "POST",
+    "path": "/api/v1/security/kms/keys",
+    "description": "Provision a hardware-backed HSM cryptographic master encryption key",
+    "presentationText": "Provisions and configures FIPS 140-2 Level 3 Hardware Security Module (HSM) master encryption keys for document sealing, database encryption, and signature generation.",
+    "fieldDocs": [
+      {
+        "field": "key_alias",
+        "type": "string",
+        "required": true,
+        "description": "Human-readable KMS key identifier",
+        "example": "kms-master-ledger-encryption-2026"
+      },
+      {
+        "field": "key_usage",
+        "type": "enum",
+        "required": true,
+        "description": "Key function (ENCRYPT_DECRYPT | SIGN_VERIFY)",
+        "example": "ENCRYPT_DECRYPT"
+      },
+      {
+        "field": "algorithm",
+        "type": "enum",
+        "required": true,
+        "description": "Symmetric / Asymmetric algorithm",
+        "example": "AES_256_GCM"
+      },
+      {
+        "field": "rotation_interval_days",
+        "type": "number",
+        "required": true,
+        "description": "Automated rotation cycle in days",
+        "example": 365
+      },
+      {
+        "field": "hsm_backing",
+        "type": "boolean",
+        "required": true,
+        "description": "Enforce dedicated CloudHSM hardware isolation",
+        "example": true
+      },
+      {
+        "field": "policy_id",
+        "type": "string",
+        "required": true,
+        "description": "Access policy governing who may invoke key",
+        "example": "pol-kms-finance-restricted"
+      }
+    ],
+    "input": {
+      "key_alias": "kms-master-ledger-encryption-2026",
+      "key_usage": "ENCRYPT_DECRYPT",
+      "algorithm": "AES_256_GCM",
+      "rotation_interval_days": 365,
+      "hsm_backing": true,
+      "policy_id": "pol-kms-finance-restricted"
+    }
+  },
+  {
+    "id": 32,
+    "domain": "Integration & Extensibility",
+    "name": "connectivity-api-bridge-svc",
+    "port": 8144,
+    "method": "POST",
+    "path": "/api/v1/integrations/api-bridge/routes",
+    "description": "Register an external enterprise ERP API integration gateway route",
+    "presentationText": "Configures secure bi-directional API gateway routing, rate-limiting, and payload transformation between ZoikoSuite microservices and external legacy ERPs.",
+    "fieldDocs": [
+      {
+        "field": "bridge_name",
+        "type": "string",
+        "required": true,
+        "description": "Descriptive route name",
+        "example": "SAP-S4HANA-Accounts-Payable-Bridge"
+      },
+      {
+        "field": "source_protocol",
+        "type": "enum",
+        "required": true,
+        "description": "Source data format (REST_JSON | ODATA | SOAP_XML)",
+        "example": "REST_JSON"
+      },
+      {
+        "field": "destination_endpoint",
+        "type": "string (URL)",
+        "required": true,
+        "description": "Target ERP API endpoint",
+        "example": "https://erp.enterprise.internal/api/v2/invoices"
+      },
+      {
+        "field": "rate_limit_rpm",
+        "type": "number",
+        "required": true,
+        "description": "Requests per minute rate limit ceiling",
+        "example": 5000
+      },
+      {
+        "field": "auth_mechanism",
+        "type": "enum",
+        "required": true,
+        "description": "Authentication scheme (OAUTH2_MUTUAL_TLS | API_KEY)",
+        "example": "OAUTH2_MUTUAL_TLS"
+      },
+      {
+        "field": "retry_policy",
+        "type": "enum",
+        "required": true,
+        "description": "Exponential backoff retry behavior",
+        "example": "EXPONENTIAL_BACKOFF_3_RETRIES"
+      }
+    ],
+    "input": {
+      "bridge_name": "SAP-S4HANA-Accounts-Payable-Bridge",
+      "source_protocol": "REST_JSON",
+      "destination_endpoint": "https://erp.enterprise.internal/api/v2/invoices",
+      "rate_limit_rpm": 5000,
+      "auth_mechanism": "OAUTH2_MUTUAL_TLS",
+      "retry_policy": "EXPONENTIAL_BACKOFF_3_RETRIES"
+    }
+  },
+  {
+    "id": 33,
+    "domain": "Integration & Extensibility",
+    "name": "banking-connector-svc",
+    "port": 8145,
+    "method": "POST",
+    "path": "/api/v1/integrations/banking/connect",
+    "description": "Establish automated Open Banking ISO 20022 direct bank connection",
+    "presentationText": "Establishes secure, regulated Open Banking or SWIFT connectivity to major corporate banking institutions for direct statement retrieval and SEPA/Bacs payment initiation.",
+    "fieldDocs": [
+      {
+        "field": "bank_name",
+        "type": "string",
+        "required": true,
+        "description": "Financial institution name",
+        "example": "HSBC Corporate Banking UK"
+      },
+      {
+        "field": "bic_swift_code",
+        "type": "string",
+        "required": true,
+        "description": "Bank SWIFT / BIC identifier",
+        "example": "HBUKGB4140"
+      },
+      {
+        "field": "connection_protocol",
+        "type": "enum",
+        "required": true,
+        "description": "Integration standard (ISO_20022_CAMT053 | OPEN_BANKING_UK | EBICS)",
+        "example": "ISO_20022_CAMT053"
+      },
+      {
+        "field": "client_id",
+        "type": "string",
+        "required": true,
+        "description": "Corporate banking client ID",
+        "example": "corp-zoiko-uk-8821"
+      },
+      {
+        "field": "environment",
+        "type": "enum",
+        "required": true,
+        "description": "Connection tier (SANDBOX | PRODUCTION)",
+        "example": "PRODUCTION"
+      },
+      {
+        "field": "auto_sync_statements",
+        "type": "boolean",
+        "required": true,
+        "description": "Enable continuous daily statement fetching",
+        "example": true
+      }
+    ],
+    "input": {
+      "bank_name": "HSBC Corporate Banking UK",
+      "bic_swift_code": "HBUKGB4140",
+      "connection_protocol": "ISO_20022_CAMT053",
+      "client_id": "corp-zoiko-uk-8821",
+      "environment": "PRODUCTION",
+      "auto_sync_statements": true
+    }
+  },
+  {
+    "id": 34,
+    "domain": "Integration & Extensibility",
+    "name": "hris-connector-svc",
+    "port": 8146,
+    "method": "POST",
+    "path": "/api/v1/integrations/hris/sync",
+    "description": "Trigger bidirectional HRIS employee & organization synchronization",
+    "presentationText": "Synchronizes worker master directories, leave allocations, job hierarchy, and compensation tiers with external human capital systems (Workday, BambooHR, HiBob).",
+    "fieldDocs": [
+      {
+        "field": "provider",
+        "type": "enum",
+        "required": true,
+        "description": "External HRIS provider (WORKDAY | BAMBOOHR | HIBOB | RIPPLING)",
+        "example": "WORKDAY"
+      },
+      {
+        "field": "tenant_identifier",
+        "type": "string",
+        "required": true,
+        "description": "External provider tenant organization ID",
+        "example": "zoiko_workday_prod_01"
+      },
+      {
+        "field": "sync_scope",
+        "type": "enum",
+        "required": true,
+        "description": "Sync scope (FULL_DIRECTORY | COMPENSATION_ONLY | DEPARTMENTS)",
+        "example": "FULL_DIRECTORY"
+      },
+      {
+        "field": "auto_provision_accounts",
+        "type": "boolean",
+        "required": true,
+        "description": "Automatically provision ZoikoSuite identity on new hires",
+        "example": true
+      },
+      {
+        "field": "last_sync_timestamp",
+        "type": "string (ISO-8601)",
+        "required": true,
+        "description": "Timestamp of previous sync benchmark",
+        "example": "2026-09-16T00:00:00Z"
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Sync state (EXECUTE_NOW | SCHEDULED)",
+        "example": "EXECUTE_NOW"
+      }
+    ],
+    "input": {
+      "provider": "WORKDAY",
+      "tenant_identifier": "zoiko_workday_prod_01",
+      "sync_scope": "FULL_DIRECTORY",
+      "auto_provision_accounts": true,
+      "last_sync_timestamp": "2026-09-16T00:00:00Z",
+      "status": "EXECUTE_NOW"
+    }
+  },
+  {
+    "id": 35,
+    "domain": "Integration & Extensibility",
+    "name": "tax-authority-interface-svc",
+    "port": 8147,
+    "method": "POST",
+    "path": "/api/v1/tax-authority/interfaces",
+    "description": "Register direct sovereign revenue authority submission gateway interface",
+    "presentationText": "Configures certified protocol adapters (e.g. HMRC Making Tax Digital REST API, Germany ELSTER ERiC, US IRS MeF) for electronic statutory tax filing.",
+    "fieldDocs": [
+      {
+        "field": "authority_code",
+        "type": "string",
+        "required": true,
+        "description": "Regulatory agency identifier (HMRC | IRS | ELSTER | IRAS)",
+        "example": "HMRC"
+      },
+      {
+        "field": "jurisdiction_id",
+        "type": "string",
+        "required": true,
+        "description": "Sovereign jurisdiction code",
+        "example": "GB"
+      },
+      {
+        "field": "protocol",
+        "type": "enum",
+        "required": true,
+        "description": "Direct submission protocol (REST_OAUTH2 | AS4 | SFTP_ENCRYPTED)",
+        "example": "REST_OAUTH2"
+      },
+      {
+        "field": "auth_scheme",
+        "type": "enum",
+        "required": true,
+        "description": "Authentication scheme (BEARER_TOKEN | MTLS | CLIENT_CREDENTIALS)",
+        "example": "BEARER_TOKEN"
+      },
+      {
+        "field": "endpoint_url",
+        "type": "string (URL)",
+        "required": true,
+        "description": "Live authority submission API gateway URL",
+        "example": "https://api.service.hmrc.gov.uk/organisations/vat"
+      },
+      {
+        "field": "test_mode",
+        "type": "boolean",
+        "required": true,
+        "description": "Send to government sandbox environment",
+        "example": false
+      },
+      {
+        "field": "status",
+        "type": "enum",
+        "required": true,
+        "description": "Interface connection state (ACTIVE | MAINTENANCE)",
+        "example": "ACTIVE"
+      }
+    ],
+    "input": {
+      "authority_code": "HMRC",
+      "jurisdiction_id": "GB",
+      "protocol": "REST_OAUTH2",
+      "auth_scheme": "BEARER_TOKEN",
+      "endpoint_url": "https://api.service.hmrc.gov.uk/organisations/vat",
+      "test_mode": false,
+      "status": "ACTIVE"
+    }
+  },
+  {
+    "id": 36,
+    "domain": "Integration & Extensibility",
+    "name": "esignature-integration-svc",
+    "port": 8148,
+    "method": "POST",
+    "path": "/api/v1/integrations/esignature/envelopes",
+    "description": "Create and dispatch legally binding e-Signature envelope (DocuSign / AdobeSign)",
+    "presentationText": "Dispatches governed agreements for cryptographic digital signature under eIDAS and ESIGN Act standards, tracking recipient signing progress and audit certificates.",
+    "fieldDocs": [
+      {
+        "field": "document_title",
+        "type": "string",
+        "required": true,
+        "description": "Commercial agreement title",
+        "example": "Enterprise MSA — GlobalCloud Inc Executed Copy"
+      },
+      {
+        "field": "provider",
+        "type": "enum",
+        "required": true,
+        "description": "Electronic signature provider (DOCUSIGN | ADOBE_SIGN | ZOIKO_NATIVE)",
+        "example": "DOCUSIGN"
+      },
+      {
+        "field": "recipient_email",
+        "type": "string",
+        "required": true,
+        "description": "Authorized counterparty signatory email",
+        "example": "legal.signatory@globalcloud.com"
+      },
+      {
+        "field": "recipient_name",
+        "type": "string",
+        "required": true,
+        "description": "Legal signatory full name",
+        "example": "Sarah Jenkins"
+      },
+      {
+        "field": "signer_role",
+        "type": "enum",
+        "required": true,
+        "description": "Signer capacity (COUNTERPARTY_EXEC | INTERNAL_DIRECTOR)",
+        "example": "COUNTERPARTY_EXEC"
+      },
+      {
+        "field": "expiry_days",
+        "type": "number",
+        "required": true,
+        "description": "Envelope signing expiration deadline in days",
+        "example": 14
+      },
+      {
+        "field": "requires_id_verification",
+        "type": "boolean",
+        "required": true,
+        "description": "Require passport / digital ID verification before signing",
+        "example": true
+      }
+    ],
+    "input": {
+      "document_title": "Enterprise MSA — GlobalCloud Inc Executed Copy",
+      "provider": "DOCUSIGN",
+      "recipient_email": "legal.signatory@globalcloud.com",
+      "recipient_name": "Sarah Jenkins",
+      "signer_role": "COUNTERPARTY_EXEC",
+      "expiry_days": 14,
+      "requires_id_verification": true
+    }
+  },
+  {
+    "id": 37,
+    "domain": "Integration & Extensibility",
+    "name": "external-data-feed-svc",
+    "port": 8149,
+    "method": "POST",
+    "path": "/api/v1/integrations/data-feeds/subscribe",
+    "description": "Subscribe to authoritative foreign exchange rates & market data feed",
+    "presentationText": "Streams daily authoritative statutory foreign exchange fixing rates (European Central Bank / Bank of England) for automated multi-currency ledger consolidation.",
+    "fieldDocs": [
+      {
+        "field": "feed_name",
+        "type": "string",
+        "required": true,
+        "description": "Data feed subscription title",
+        "example": "ECB Official Daily Currency Reference Fixings"
+      },
+      {
+        "field": "feed_type",
+        "type": "enum",
+        "required": true,
+        "description": "Market data category (FX_RATES | COMMODITY_INDEX | INFLATION_INDEX)",
+        "example": "FX_RATES"
+      },
+      {
+        "field": "provider",
+        "type": "string",
+        "required": true,
+        "description": "Data provider authority",
+        "example": "EUROPEAN_CENTRAL_BANK"
+      },
+      {
+        "field": "update_frequency_minutes",
+        "type": "number",
+        "required": true,
+        "description": "Polling or streaming interval in minutes",
+        "example": 60
+      },
+      {
+        "field": "currency_pairs_json",
+        "type": "string (JSON)",
+        "required": true,
+        "description": "Subscribed ISO currency pairs",
+        "example": "[\"GBP/EUR\",\"GBP/USD\",\"EUR/USD\",\"GBP/SGD\"]"
+      },
+      {
+        "field": "alert_threshold_variance",
+        "type": "number",
+        "required": true,
+        "description": "Volatility alert threshold percentage",
+        "example": 2.5
+      }
+    ],
+    "input": {
+      "feed_name": "ECB Official Daily Currency Reference Fixings",
+      "feed_type": "FX_RATES",
+      "provider": "EUROPEAN_CENTRAL_BANK",
+      "update_frequency_minutes": 60,
+      "currency_pairs_json": "[\"GBP/EUR\",\"GBP/USD\",\"EUR/USD\",\"GBP/SGD\"]",
+      "alert_threshold_variance": 2.5
+    }
+  }
 ];
 
 const DOMAIN_META: Record<string, { color: string; bg: string; border: string; dot: string }> = {
-  "Tax Governance":       { color: "text-violet-700 dark:text-violet-300", bg: "bg-violet-50 dark:bg-violet-900/20", border: "border-violet-200 dark:border-violet-500/30", dot: "bg-violet-500" },
-  "AI Governance":        { color: "text-fuchsia-700 dark:text-fuchsia-300", bg: "bg-fuchsia-50 dark:bg-fuchsia-900/20", border: "border-fuchsia-200 dark:border-fuchsia-500/30", dot: "bg-fuchsia-500" },
-  "Legal & Contracts":    { color: "text-blue-700 dark:text-blue-300", bg: "bg-blue-50 dark:bg-blue-900/20", border: "border-blue-200 dark:border-blue-500/30", dot: "bg-blue-500" },
-  "Jurisdictions & Rules": { color: "text-indigo-700 dark:text-indigo-300", bg: "bg-indigo-50 dark:bg-indigo-900/20", border: "border-indigo-200 dark:border-indigo-500/30", dot: "bg-indigo-500" },
-  "Document Vault":       { color: "text-teal-700 dark:text-teal-300", bg: "bg-teal-50 dark:bg-teal-900/20", border: "border-teal-200 dark:border-teal-500/30", dot: "bg-teal-500" },
-  "Finance":              { color: "text-emerald-700 dark:text-emerald-300", bg: "bg-emerald-50 dark:bg-emerald-900/20", border: "border-emerald-200 dark:border-emerald-500/30", dot: "bg-emerald-500" },
-  "Commercial Ops":       { color: "text-amber-700 dark:text-amber-300", bg: "bg-amber-50 dark:bg-amber-900/20", border: "border-amber-200 dark:border-amber-500/30", dot: "bg-amber-500" },
-  "HR & Workforce":       { color: "text-cyan-700 dark:text-cyan-300", bg: "bg-cyan-50 dark:bg-cyan-900/20", border: "border-cyan-200 dark:border-cyan-500/30", dot: "bg-cyan-500" },
-  "Payroll":              { color: "text-rose-700 dark:text-rose-300", bg: "bg-rose-50 dark:bg-rose-900/20", border: "border-rose-200 dark:border-rose-500/30", dot: "bg-rose-500" },
-  "Compliance & Risk":    { color: "text-orange-700 dark:text-orange-300", bg: "bg-orange-50 dark:bg-orange-900/20", border: "border-orange-200 dark:border-orange-500/30", dot: "bg-orange-500" },
-  "Audit Event Store":    { color: "text-slate-700 dark:text-slate-300", bg: "bg-slate-50 dark:bg-slate-800/50", border: "border-slate-200 dark:border-slate-600/30", dot: "bg-slate-500" },
+  "Legal, Corporate & Commercial": {
+    "color": "text-blue-700 dark:text-blue-300",
+    "bg": "bg-blue-50 dark:bg-blue-900/20",
+    "border": "border-blue-200 dark:border-blue-500/30",
+    "dot": "bg-blue-500"
+  },
+  "Tax & Compliance": {
+    "color": "text-violet-700 dark:text-violet-300",
+    "bg": "bg-violet-50 dark:bg-violet-900/20",
+    "border": "border-violet-200 dark:border-violet-500/30",
+    "dot": "bg-violet-500"
+  },
+  "Intelligence & Reporting": {
+    "color": "text-amber-700 dark:text-amber-300",
+    "bg": "bg-amber-50 dark:bg-amber-900/20",
+    "border": "border-amber-200 dark:border-amber-500/30",
+    "dot": "bg-amber-500"
+  },
+  "Security & Trust": {
+    "color": "text-emerald-700 dark:text-emerald-300",
+    "bg": "bg-emerald-50 dark:bg-emerald-900/20",
+    "border": "border-emerald-200 dark:border-emerald-500/30",
+    "dot": "bg-emerald-500"
+  },
+  "Integration & Extensibility": {
+    "color": "text-cyan-700 dark:text-cyan-300",
+    "bg": "bg-cyan-50 dark:bg-cyan-900/20",
+    "border": "border-cyan-200 dark:border-cyan-500/30",
+    "dot": "bg-cyan-500"
+  }
 };
 
 const METHOD_BADGE: Record<string, string> = {
@@ -1102,41 +2658,14 @@ export type Result = { ok: boolean; status: number; ms: number; data: unknown; e
 
 function getTargetLink(svc: ServiceDefinition, data: unknown): { href: string; label: string } {
   const baseHref = DOMAIN_HREFS[svc.domain] ?? "/admin";
-  if (!data || typeof data !== "object") {
-    return { href: baseHref, label: `Open in ${svc.domain} Console` };
-  }
-  const obj = data as Record<string, unknown>;
-  const record = (obj.contract ?? obj.data ?? obj.record ?? obj) as Record<string, unknown>;
-  const contractId = (record.contract_id ?? record.id) as string | undefined;
-  if (svc.id === 9 && contractId && typeof contractId === "string") {
-    return { href: `/admin/legal/${encodeURIComponent(contractId)}`, label: `View Contract ${contractId} in Legal` };
-  }
-  if (svc.id === 11) {
-    return { href: `/admin/obligations`, label: `View in Obligations Register` };
-  }
-  if (svc.id === 18) {
-    const poNum = (record.po_number ?? record.poNumber) as string | undefined;
-    return {
-      href: poNum ? `/admin/commercial-ops?po=${encodeURIComponent(poNum)}` : `/admin/commercial-ops`,
-      label: `View Purchase Order in Commercial Ops`,
-    };
-  }
-  if (svc.id === 34 || svc.id === 35 || svc.id === 36) {
-    return { href: `/admin/audit-events`, label: `View in Audit Event Store` };
-  }
-  if (svc.id === 37) {
-    return { href: `/admin/evidence`, label: `View in Evidence Registry` };
-  }
-  if (svc.domain === "Jurisdictions & Rules" || svc.id === 38 || svc.id === 39 || svc.id === 40) {
-    return { href: `/admin/jurisdictions`, label: `Open Jurisdictions & Rules Console` };
-  }
-  if (svc.domain === "Document Vault" || svc.id === 41 || svc.id === 42) {
-    return { href: `/admin/documents`, label: `Open Document Vault Store of Record` };
-  }
-  if (svc.domain === "Tax Governance") return { href: `/admin/tax`, label: `Open Tax Governance Console` };
-  if (svc.domain === "Payroll") return { href: `/admin/payroll`, label: `Open Payroll Console` };
-  if (svc.domain === "HR & Workforce") return { href: `/admin/hr`, label: `Open HR & Workforce Directory` };
-  if (svc.domain === "Finance") return { href: `/admin/finance`, label: `Open Finance & General Ledger` };
+  if (svc.id === 1) return { href: "/admin/legal", label: "View in Legal Contracts Console" };
+  if (svc.id === 3) return { href: "/admin/obligations", label: "View in Obligations Register" };
+  if (svc.id === 7) return { href: "/admin/purchase-requests", label: "View in Purchase Requests" };
+  if (svc.id === 8) return { href: "/admin/commercial-ops", label: "View Purchase Order" };
+  if (svc.id >= 12 && svc.id <= 20) return { href: "/admin/tax", label: "View in Tax Governance" };
+  if (svc.id >= 21 && svc.id <= 27) return { href: "/admin/governance", label: "View in Intelligence & Governance" };
+  if (svc.id >= 28 && svc.id <= 31) return { href: "/admin/audit-events", label: "View in Security & Audit" };
+  if (svc.id >= 32 && svc.id <= 37) return { href: "/admin/settings", label: "View in Integration Settings" };
   return { href: baseHref, label: `Open in ${svc.domain} Console` };
 }
 
@@ -1149,303 +2678,624 @@ export type PresetScenario = {
 };
 
 export const SERVICE_PRESETS: Record<number, PresetScenario[]> = {
-  1: [
+  "1": [
     {
-      label: "🇬🇧 UK Domestic Energy (5%)",
-      badge: "UK Reduced",
-      description: "HMRC 5% statutory reduced rate for domestic residential energy in the UK",
-      payload: {
-        jurisdiction_id: "GB",
-        rule_code: "UK-VAT-REDUCED-5",
-        name: "UK Domestic Energy Reduced Rate 5%",
-        category: "VAT",
-        tax_rate_percentage: 5.0,
-        standard_deductions: 0,
-        exemptions_json: '{"domestic_energy":true}',
-        status: "ACTIVE",
-        version: 1,
-        effective_from: "2026-09-01T00:00:00Z"
+      "label": "GlobalCloud Enterprise MSA (£320k)",
+      "badge": "MSA",
+      "description": "Binding Master Services Agreement for multi-region cloud infrastructure",
+      "payload": {
+        "title": "Enterprise Master Services Agreement — GlobalCloud Inc",
+        "contract_type": "MSA",
+        "counterparty_id": "cp-globalcloud-01",
+        "counterparty_name": "GlobalCloud Inc",
+        "currency": "GBP",
+        "total_value": 320000,
+        "effective_from": "2026-10-01T00:00:00Z",
+        "status": "DRAFT"
       }
     },
     {
-      label: "🇩🇪 Germany Standard (19%)",
-      badge: "DE Standard",
-      description: "Federal Republic of Germany 19% standard VAT rate (Umsatzsteuer)",
-      payload: {
-        jurisdiction_id: "DE",
-        rule_code: "DE-VAT-STD-19",
-        name: "Germany Standard VAT Rate 19%",
-        category: "VAT",
-        tax_rate_percentage: 19.0,
-        standard_deductions: 0,
-        exemptions_json: '{"medical_exempt":false}',
-        status: "ACTIVE",
-        version: 1,
-        effective_from: "2026-01-01T00:00:00Z"
-      }
-    },
-    {
-      label: "🇸🇬 Singapore GST (9%)",
-      badge: "SG GST",
-      description: "Inland Revenue Authority of Singapore 9% Goods and Services Tax",
-      payload: {
-        jurisdiction_id: "SG",
-        rule_code: "SG-GST-STD-9",
-        name: "Singapore Standard GST Rate 9%",
-        category: "GST",
-        tax_rate_percentage: 9.0,
-        standard_deductions: 0,
-        exemptions_json: '{"financial_services":true}',
-        status: "ACTIVE",
-        version: 1,
-        effective_from: "2026-01-01T00:00:00Z"
+      "label": "Apex Networks SLA (€180k)",
+      "badge": "SLA",
+      "description": "Service Level Agreement covering 24/7 dedicated network transit",
+      "payload": {
+        "title": "Mission-Critical Tier-4 SLA — Apex Networks GmbH",
+        "contract_type": "SLA",
+        "counterparty_id": "cp-apex-01",
+        "counterparty_name": "Apex Networks GmbH",
+        "currency": "EUR",
+        "total_value": 180000,
+        "effective_from": "2026-11-01T00:00:00Z",
+        "status": "ACTIVE"
       }
     }
   ],
-  2: [
+  "2": [
     {
-      label: "🇬🇧 AP Invoice (£150,000)",
-      badge: "UK AP",
-      description: "Calculates £30,000 standard 20% VAT on corporate supplier invoice",
-      payload: {
-        transaction_id: "tx-inv-2026-8841",
-        source_module: "ACCOUNTS_PAYABLE",
-        legal_entity_id: "22222222-2222-2222-2222-222222222222",
-        jurisdiction_id: "GB",
-        tax_category: "VAT",
-        gross_amount: 150000.0,
-        taxable_amount: 150000.0,
-        currency: "GBP",
-        status: "CALCULATED"
-      }
-    },
-    {
-      label: "🇩🇪 Cross-Border Royalty (€85,000)",
-      badge: "DE Royalty",
-      description: "Evaluates cross-border IP licensing payment to German counterparty",
-      payload: {
-        transaction_id: "tx-lic-de-2026-01",
-        source_module: "ACCOUNTS_PAYABLE",
-        legal_entity_id: "22222222-2222-2222-2222-222222222222",
-        jurisdiction_id: "DE",
-        tax_category: "VAT",
-        gross_amount: 85000.0,
-        taxable_amount: 85000.0,
-        currency: "EUR",
-        status: "CALCULATED"
-      }
-    },
-    {
-      label: "🇺🇸 High-Volume Sales Order ($500,000)",
-      badge: "US Sales Tax",
-      description: "Direct sales order nexus determination for corporate enterprise client",
-      payload: {
-        transaction_id: "tx-so-us-9912",
-        source_module: "SALES",
-        legal_entity_id: "22222222-2222-2222-2222-222222222222",
-        jurisdiction_id: "US",
-        tax_category: "SALES_TAX",
-        gross_amount: 500000.0,
-        taxable_amount: 500000.0,
-        currency: "USD",
-        status: "CALCULATED"
+      "label": "UK GDPR Standard Clauses",
+      "badge": "Data Protection",
+      "description": "Approved UK model clauses for third-party processors",
+      "payload": {
+        "title": "UK GDPR Standard Model Clauses 2026",
+        "category": "DATA_PROTECTION",
+        "body": "The Data Processor shall process personal data solely in accordance with documented instructions of the Data Controller.",
+        "jurisdiction_id": "GB",
+        "is_standard": true,
+        "status": "APPROVED"
       }
     }
   ],
-  3: [
+  "3": [
     {
-      label: "🇬🇧 UK HMRC VAT 100 (£60k Net Payable)",
-      badge: "UK Q2 2026",
-      description: "Sales: £500,000, Purchases: £200,000, Output Tax: £100,000, Input Tax: £40,000 -> Net Payable: £60,000 GBP",
-      payload: {
-        jurisdiction_id: "GB",
-        tax_registration_number: "GB998877665",
-        tax_period: "2026-Q2",
-        total_sales_amount: 500000.0,
-        total_purchase_amount: 200000.0,
-        output_tax_amount: 100000.0,
-        input_tax_amount: 40000.0,
-        net_tax_payable: 60000.0,
-        currency: "GBP",
-        status: "DRAFT"
-      }
-    },
-    {
-      label: "🇩🇪 Germany Elster Q3 (€38k Net Payable)",
-      badge: "DE Q3 2026",
-      description: "Sales: €850,000, Purchases: €650,000, Output: €161,500, Input: €123,500 -> Net Payable: €38,000 EUR",
-      payload: {
-        jurisdiction_id: "DE",
-        tax_registration_number: "DE-123456789",
-        tax_period: "2026-Q3",
-        total_sales_amount: 850000.0,
-        total_purchase_amount: 650000.0,
-        output_tax_amount: 161500.0,
-        input_tax_amount: 123500.0,
-        net_tax_payable: 38000.0,
-        currency: "EUR",
-        status: "DRAFT"
-      }
-    },
-    {
-      label: "🇦🇪 UAE FTA 201 (-$9,000 Refund Reclaim)",
-      badge: "UAE Q1 Refund",
-      description: "Output Tax ($21.5k) < Input Tax ($30.5k) -> Eligible for $9,000 corporate refund from tax authority",
-      payload: {
-        jurisdiction_id: "AE",
-        tax_registration_number: "AE-100200300",
-        tax_period: "2026-Q1",
-        total_sales_amount: 430000.0,
-        total_purchase_amount: 610000.0,
-        output_tax_amount: 21500.0,
-        input_tax_amount: 30500.0,
-        net_tax_payable: -9000.0,
-        currency: "USD",
-        status: "DRAFT"
+      "label": "Annual ISO 27001 Audit SLA",
+      "badge": "High Risk",
+      "description": "Deliver certified SOC-2 Type II audit report to counterparty",
+      "payload": {
+        "contract_id": "c-001",
+        "title": "Annual ISO 27001 SOC-2 Type II Audit Certification",
+        "description": "Deliver renewed SOC-2 Type II certification report to counterparty legal department",
+        "due_date": "2026-12-15T00:00:00Z",
+        "risk_level": "HIGH",
+        "status": "PENDING"
       }
     }
   ],
-  4: [
+  "4": [
     {
-      label: "🇬🇧 UK CT600 Annual (25% Main Rate)",
-      badge: "UK CT600",
-      description: "Revenue: £3.5M, Allowable Deductions: £2.1M, Taxable Profit: £1.4M, Net tax: £325,000",
-      payload: {
-        jurisdiction_id: "GB",
-        tax_registration_number: "GB-CT-443322",
-        fiscal_year: 2026,
-        accounting_period_start: "2026-01-01",
-        accounting_period_end: "2026-12-31",
-        gross_revenue: 3500000.0,
-        allowable_deductions: 2100000.0,
-        taxable_income: 1400000.0,
-        tax_rate_percent: 25.0,
-        gross_tax_liability: 350000.0,
-        tax_credits: 25000.0,
-        net_tax_payable: 325000.0,
-        currency: "GBP",
-        status: "DRAFT"
-      }
-    },
-    {
-      label: "🇺🇸 US Form 1120 (21% Federal Corp Tax)",
-      badge: "US Form 1120",
-      description: "Gross Revenue: $5.2M, Deductions: $3.1M, Taxable: $2.1M, Net payable: $441,000",
-      payload: {
-        jurisdiction_id: "US",
-        tax_registration_number: "US-EIN-987654321",
-        fiscal_year: 2026,
-        accounting_period_start: "2026-01-01",
-        accounting_period_end: "2026-12-31",
-        gross_revenue: 5200000.0,
-        allowable_deductions: 3100000.0,
-        taxable_income: 2100000.0,
-        tax_rate_percent: 21.0,
-        gross_tax_liability: 441000.0,
-        tax_credits: 0.0,
-        net_tax_payable: 441000.0,
-        currency: "USD",
-        status: "DRAFT"
+      "label": "Q3 Strategic Board Assembly",
+      "badge": "Board Quorum",
+      "description": "Formal board of directors meeting with 3 voting directors",
+      "payload": {
+        "meeting_type": "BOARD_OF_DIRECTORS",
+        "title": "Q3 2026 Strategic Expansion & Subsidiary Funding Meeting",
+        "scheduled_date": "2026-09-25T14:00:00Z",
+        "location": "London HQ / Virtual Boardroom",
+        "quorum_required": 3,
+        "status": "SCHEDULED"
       }
     }
   ],
-  9: [
+  "5": [
     {
-      label: "GlobalCloud Enterprise MSA (£320,000)",
-      badge: "MSA",
-      description: "Binding Master Services Agreement for multi-region cloud infrastructure",
-      payload: {
-        title: "Enterprise Master Services Agreement — GlobalCloud Inc",
-        contract_type: "MSA",
-        counterparty_id: "cp-globalcloud-01",
-        counterparty_name: "GlobalCloud Inc",
-        currency: "GBP",
-        total_value: 320000.0,
-        effective_from: "2026-10-01T00:00:00Z",
-        status: "DRAFT"
-      }
-    },
-    {
-      label: "Apex Networks 99.99% SLA (€180,000)",
-      badge: "SLA",
-      description: "Service Level Agreement covering 24/7 dedicated network transit",
-      payload: {
-        title: "Mission-Critical Tier-4 SLA — Apex Networks GmbH",
-        contract_type: "SLA",
-        counterparty_id: "cp-apex-01",
-        counterparty_name: "Apex Networks GmbH",
-        currency: "EUR",
-        total_value: 180000.0,
-        effective_from: "2026-11-01T00:00:00Z",
-        status: "ACTIVE"
+      "label": "Executive Equity Incentive Grant",
+      "badge": "Series B",
+      "description": "Board-authorized stock options grant for key personnel",
+      "payload": {
+        "action_type": "EQUITY_INCENTIVE_GRANT",
+        "description": "Series-B Executive Long-Term Equity Incentive Plan Allocation",
+        "jurisdiction_id": "GB",
+        "effective_date": "2026-10-01T00:00:00Z",
+        "requires_board_approval": true,
+        "status": "PENDING_APPROVAL"
       }
     }
   ],
-  38: [
+  "6": [
     {
-      label: "🇬🇧 United Kingdom (HMRC Sovereign)",
-      badge: "GB Sovereign",
-      description: "Registers United Kingdom sovereign jurisdiction with HMRC authority",
-      payload: {
-        jurisdiction_code: "GB",
-        jurisdiction_name: "United Kingdom",
-        jurisdiction_type: "SOVEREIGN",
-        authority_type: "HMRC",
-        effective_from: "2026-01-01T00:00:00Z"
-      }
-    },
-    {
-      label: "🇩🇪 Federal Republic of Germany",
-      badge: "DE Sovereign",
-      description: "Registers Federal Republic of Germany with BZSt revenue authority",
-      payload: {
-        jurisdiction_code: "DE",
-        jurisdiction_name: "Federal Republic of Germany",
-        jurisdiction_type: "SOVEREIGN",
-        authority_type: "BZSt",
-        effective_from: "2026-01-01T00:00:00Z"
-      }
-    },
-    {
-      label: "🇸🇬 Republic of Singapore",
-      badge: "SG Sovereign",
-      description: "Registers Republic of Singapore with IRAS revenue authority",
-      payload: {
-        jurisdiction_code: "SG",
-        jurisdiction_name: "Republic of Singapore",
-        jurisdiction_type: "SOVEREIGN",
-        authority_type: "IRAS",
-        effective_from: "2026-01-01T00:00:00Z"
+      "label": "German Tech Supplier (Apex GmbH)",
+      "badge": "Verified KYC",
+      "description": "Verified German corporate partner with Low risk rating",
+      "payload": {
+        "legal_name": "Apex Networks Global GmbH",
+        "country_code": "DE",
+        "entity_type": "CORPORATION",
+        "kyc_status": "VERIFIED",
+        "risk_rating": "LOW",
+        "registered_address": "Friedrichstraße 42, 10117 Berlin, Germany"
       }
     }
   ],
-  41: [
+  "7": [
     {
-      label: "Confidential VAT Audit Proof (PDF)",
-      badge: "VAT Proof",
-      description: "Files statutory VAT calculation proof with 7-year statutory retention",
-      payload: {
-        legal_entity_id: "22222222-2222-2222-2222-222222222222",
-        title: "Q3 2026 Statutory VAT Return Verification Evidence",
-        classification: "CONFIDENTIAL",
-        content_type: "application/pdf",
-        retention_policy: "7_YEAR_STATUTORY",
-        residency_region_code: "eu-west-2",
-        content_base64: "SGVsbG8gWm9pa28gRG9jdW1lbnQgVmF1bHQgQXVkaXQgRXZpZGVuY2U="
+      "label": "Cloud GPU Cluster Requisition (£45k)",
+      "badge": "IT Requisition",
+      "description": "High-performance compute requisition awaiting approval",
+      "payload": {
+        "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+        "description": "Enterprise Cloud Infrastructure & High-Performance Compute Cluster Q3-2026",
+        "amount": 45000,
+        "currency_code": "GBP",
+        "department": "Engineering & IT Infrastructure",
+        "status": "PENDING"
+      }
+    }
+  ],
+  "8": [
+    {
+      "label": "Datacenter Hardware PO (£75k)",
+      "badge": "Committed PO",
+      "description": "Direct purchase order issued against approved requisition",
+      "payload": {
+        "supplier_name": "Global Datacenters Ltd",
+        "vendor_id": "v-gdc-01",
+        "po_number": "PO-2026-09-001",
+        "total_amount": 75000,
+        "currency": "GBP",
+        "delivery_date": "2026-11-15T00:00:00Z",
+        "status": "ISSUED"
+      }
+    }
+  ],
+  "9": [
+    {
+      "label": "Quarterly IT Spend Cap (£250k)",
+      "badge": "Hard Stop",
+      "description": "Quarterly ceiling with 85% warning threshold and hard cut-off",
+      "payload": {
+        "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+        "category": "IT_INFRASTRUCTURE",
+        "period": "QUARTERLY",
+        "limit_amount": 250000,
+        "currency": "GBP",
+        "threshold_warning_percentage": 85,
+        "hard_stop_enforced": true
+      }
+    }
+  ],
+  "10": [
+    {
+      "label": "Enhanced Vendor Sanctions Check",
+      "badge": "AML/PEP",
+      "description": "OFAC, EU & UN sanctions screening for German vendor",
+      "payload": {
+        "vendor_id": "v-apex-01",
+        "vendor_name": "Apex Networks Global GmbH",
+        "jurisdiction_id": "DE",
+        "check_type": "ENHANCED_DUE_DILIGENCE",
+        "sanctions_screening": true,
+        "risk_tier": "LOW"
+      }
+    }
+  ],
+  "11": [
+    {
+      "label": "Dual-Quorum Approval Workflow (£50k)",
+      "badge": "Executive Tier",
+      "description": "Automated dual-quorum pipeline for large enterprise requisitions",
+      "payload": {
+        "workflow_name": "Q3-2026 Enterprise Hardware Procurement Approval",
+        "purchase_request_id": "preq-2026-9912",
+        "approval_tier": "TIER_2_EXECUTIVE",
+        "threshold_amount": 50000,
+        "currency": "GBP",
+        "sod_enforced": true,
+        "status": "IN_PROGRESS"
+      }
+    }
+  ],
+  "12": [
+    {
+      "label": "UK Domestic Energy (5%)",
+      "badge": "UK Reduced",
+      "description": "HMRC 5% statutory reduced rate for domestic residential energy in the UK",
+      "payload": {
+        "jurisdiction_id": "GB",
+        "rule_code": "UK-VAT-REDUCED-5",
+        "name": "UK Domestic Energy Reduced Rate 5%",
+        "category": "VAT",
+        "tax_rate_percentage": 5,
+        "standard_deductions": 0,
+        "exemptions_json": "{\"domestic_energy\":true}",
+        "status": "ACTIVE",
+        "version": 1,
+        "effective_from": "2026-09-01T00:00:00Z"
       }
     },
     {
-      label: "Restricted Board Resolution Package",
-      badge: "Board Minutes",
-      description: "Files immutable board director strategic authorization minutes",
-      payload: {
-        legal_entity_id: "22222222-2222-2222-2222-222222222222",
-        title: "Board Resolution — Q3 Strategic Capital Authorization",
-        classification: "RESTRICTED",
-        content_type: "application/pdf",
-        retention_policy: "PERMANENT",
-        residency_region_code: "eu-west-2",
-        content_base64: "Qm9hcmQgUmVzb2x1dGlvbiBBdXRob3JpemF0aW9uIDIwMjY="
+      "label": "Germany Standard (19%)",
+      "badge": "DE Standard",
+      "description": "Federal Republic of Germany 19% standard VAT rate (Umsatzsteuer)",
+      "payload": {
+        "jurisdiction_id": "DE",
+        "rule_code": "DE-VAT-STD-19",
+        "name": "Germany Standard VAT Rate 19%",
+        "category": "VAT",
+        "tax_rate_percentage": 19,
+        "standard_deductions": 0,
+        "exemptions_json": "{\"medical_exempt\":false}",
+        "status": "ACTIVE",
+        "version": 1,
+        "effective_from": "2026-01-01T00:00:00Z"
+      }
+    }
+  ],
+  "13": [
+    {
+      "label": "UK AP Invoice (£150,000)",
+      "badge": "UK AP",
+      "description": "Calculates £30,000 standard 20% VAT on corporate supplier invoice",
+      "payload": {
+        "transaction_id": "tx-inv-2026-8841",
+        "source_module": "ACCOUNTS_PAYABLE",
+        "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+        "jurisdiction_id": "GB",
+        "tax_category": "VAT",
+        "gross_amount": 150000,
+        "taxable_amount": 150000,
+        "currency": "GBP",
+        "status": "CALCULATED"
+      }
+    }
+  ],
+  "14": [
+    {
+      "label": "UK HMRC VAT 100 (£60k Net Payable)",
+      "badge": "UK Q2",
+      "description": "Sales: £500k, Purchases: £200k, Net Payable: £60,000 GBP",
+      "payload": {
+        "jurisdiction_id": "GB",
+        "tax_registration_number": "GB998877665",
+        "tax_period": "2026-Q2",
+        "total_sales_amount": 500000,
+        "total_purchase_amount": 200000,
+        "output_tax_amount": 100000,
+        "input_tax_amount": 40000,
+        "net_tax_payable": 60000,
+        "currency": "GBP",
+        "status": "DRAFT"
+      }
+    }
+  ],
+  "15": [
+    {
+      "label": "UK CT600 Annual (25% Rate)",
+      "badge": "UK CT600",
+      "description": "Revenue: £3.5M, Deductions: £2.1M, Net Tax: £325,000",
+      "payload": {
+        "jurisdiction_id": "GB",
+        "tax_registration_number": "GB-CT-443322",
+        "fiscal_year": 2026,
+        "accounting_period_start": "2026-01-01",
+        "accounting_period_end": "2026-12-31",
+        "gross_revenue": 3500000,
+        "allowable_deductions": 2100000,
+        "taxable_income": 1400000,
+        "tax_rate_percent": 25,
+        "gross_tax_liability": 350000,
+        "tax_credits": 25000,
+        "net_tax_payable": 325000,
+        "currency": "GBP",
+        "status": "DRAFT"
+      }
+    }
+  ],
+  "16": [
+    {
+      "label": "US-UK Treaty Royalty WHT (15%)",
+      "badge": "US WHT",
+      "description": "Outbound IP licensing remittance with 15% DTA treaty rate",
+      "payload": {
+        "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+        "recipient_jurisdiction": "US",
+        "recipient_name": "CloudTech IP Holdings Delaware LLC",
+        "payment_type": "ROYALTIES",
+        "gross_payment_amount": 100000,
+        "treaty_rate_percent": 15,
+        "withholding_tax_amount": 15000,
+        "currency": "GBP",
+        "status": "DRAFT"
+      }
+    }
+  ],
+  "17": [
+    {
+      "label": "Audit Tax Package (Q3 VAT)",
+      "badge": "Audit Evidence",
+      "description": "Staged reconciliation pack with cross-border cloud sales evidence",
+      "payload": {
+        "jurisdiction_id": "GB",
+        "filing_type": "VAT_RETURN",
+        "tax_period": "2026-Q3",
+        "entity_id": "22222222-2222-2222-2222-222222222222",
+        "prepared_by": "lead.tax.cpa@zoiko.internal",
+        "notes": "Includes cross-border cloud software sales VAT adjustments under HMRC rules",
+        "status": "DRAFT"
+      }
+    }
+  ],
+  "18": [
+    {
+      "label": "HMRC Q3 Deadline Tracker",
+      "badge": "Quarterly Deadline",
+      "description": "Tracking statutory HMRC MTD cutoff date for Q3 2026",
+      "payload": {
+        "jurisdiction_id": "GB",
+        "filing_name": "HMRC MTD VAT Return Q3 2026",
+        "statutory_deadline": "2026-11-07T23:59:59Z",
+        "frequency": "QUARTERLY",
+        "reporting_entity_id": "22222222-2222-2222-2222-222222222222",
+        "status": "PENDING"
+      }
+    }
+  ],
+  "19": [
+    {
+      "label": "Tax Domain Grade A Evaluation",
+      "badge": "96.5% Prepared",
+      "description": "Full statutory compliance evaluation producing Grade A rating",
+      "payload": {
+        "domain": "TAX",
+        "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+        "evaluation_scope": "Statutory VAT Nexus & International Withholding Tax Audit Readiness",
+        "audit_readiness_score": 96.5,
+        "unresolved_findings": 0,
+        "compliance_grade": "GRADE_A",
+        "status": "COMPLETED"
+      }
+    }
+  ],
+  "20": [
+    {
+      "label": "High-Priority Tax Nexus Escalation",
+      "badge": "High Severity",
+      "description": "Escalation to CCO regarding cross-border withholding variance",
+      "payload": {
+        "title": "Cross-Border Tax Nexus Withholding Rate Discrepancy",
+        "domain": "TAX",
+        "severity": "HIGH",
+        "triggering_event_id": "evt-tax-nexus-8812",
+        "escalated_to_role": "Chief Compliance Officer",
+        "assigned_investigator": "lead.auditor@zoiko.internal",
+        "action_required": "Recalculate WHT under US-UK DTA treaty Article 12 and update ledger",
+        "status": "OPEN"
+      }
+    }
+  ],
+  "21": [
+    {
+      "label": "AP Invoice 3-Sigma Outlier Scan",
+      "badge": "Isolation Forest",
+      "description": "Detects disbursement spikes over 90 days sampling",
+      "payload": {
+        "domain": "ACCOUNTS_PAYABLE",
+        "source_module": "INVOICE_PROCESSING",
+        "sampling_window_days": 90,
+        "sensitivity_threshold": 3,
+        "scan_type": "ISOLATION_FOREST",
+        "flag_outliers_only": true
+      }
+    }
+  ],
+  "22": [
+    {
+      "label": "12-Month Tax Runway Prediction",
+      "badge": "Bayesian ARIMA",
+      "description": "Projects 95% confidence tax liabilities for next 4 quarters",
+      "payload": {
+        "entity_id": "22222222-2222-2222-2222-222222222222",
+        "metric": "TAX_LIABILITY",
+        "horizon_months": 12,
+        "confidence_interval_percent": 95,
+        "seasonality_adjusted": true,
+        "model_type": "ARIMA_BAYESIAN"
+      }
+    }
+  ],
+  "23": [
+    {
+      "label": "UK Sovereign Entity Risk Scoring",
+      "badge": "Tax Heavy",
+      "description": "Multi-factor score assessing statutory exposure and filings",
+      "payload": {
+        "legal_entity_id": "22222222-2222-2222-2222-222222222222",
+        "jurisdiction_code": "GB",
+        "evaluation_date": "2026-09-17T00:00:00Z",
+        "include_prior_penalties": true,
+        "weighting_profile": "STATUTORY_TAX_HEAVY",
+        "status": "ACTIVE"
+      }
+    }
+  ],
+  "24": [
+    {
+      "label": "HSBC Daily Auto-Reconciliation",
+      "badge": "Fuzzy Heuristic",
+      "description": "Reconciles statement feeds with 50-cent FX tolerance",
+      "payload": {
+        "account_id": "ba-hsbc-gbp-01",
+        "statement_period": "2026-08",
+        "tolerance_cents": 50,
+        "match_algorithm": "FUZZY_HEURISTIC",
+        "auto_post_variance": true,
+        "status": "AUTO_MATCH"
+      }
+    }
+  ],
+  "25": [
+    {
+      "label": "Consolidated Executive Board Pack",
+      "badge": "PDF + XBRL",
+      "description": "Generates board pack with cryptographic audit appendix",
+      "payload": {
+        "report_title": "Q3 2026 Board Governance & Statutory Compliance Pack",
+        "template_code": "TPL-EXEC-GOVERNANCE-V2",
+        "target_entities_json": "[\"22222222-2222-2222-2222-222222222222\"]",
+        "reporting_quarter": "2026-Q3",
+        "export_formats": "PDF,XBRL",
+        "include_audit_trail": true
+      }
+    }
+  ],
+  "26": [
+    {
+      "label": "Disbursement Governance Decision",
+      "badge": "Spend Policy",
+      "description": "Evaluates £75,000 procurement commitment against policy limits",
+      "payload": {
+        "case_type": "COMMERCIAL_DISBURSEMENT",
+        "subject_id": "po-2026-09-001",
+        "requested_amount": 75000,
+        "currency": "GBP",
+        "risk_tier": "MEDIUM",
+        "governance_policy_code": "POL-SPEND-GLOBAL-01"
+      }
+    }
+  ],
+  "27": [
+    {
+      "label": "SAP ECC-6 Ledger Verification",
+      "badge": "SHA-256 100%",
+      "description": "Audits 45,000 migrated historical entries against source hashes",
+      "payload": {
+        "migration_batch_id": "mig-batch-2026-09-alpha",
+        "source_system": "SAP_ECC_6",
+        "target_table": "general_ledger_entries",
+        "record_count": 45000,
+        "checksum_algorithm": "SHA256",
+        "audit_sample_percent": 100
+      }
+    }
+  ],
+  "28": [
+    {
+      "label": "General Ledger mTLS Certificate",
+      "badge": "ECDSA P-384",
+      "description": "Issues 90-day mutual TLS certificate with auto-rotation",
+      "payload": {
+        "common_name": "general-ledger-svc.internal.zoikosuite.local",
+        "service_identifier": "general-ledger-svc",
+        "key_algorithm": "ECDSA_P384",
+        "validity_days": 90,
+        "auto_rotate": true,
+        "ca_bundle": "ZOIKO_INTERNAL_ROOT_CA_V1"
+      }
+    }
+  ],
+  "29": [
+    {
+      "label": "Root Key Rotation SIEM Alert",
+      "badge": "Splunk Forwarding",
+      "description": "Streams privileged KMS rotation event to enterprise SIEM",
+      "payload": {
+        "event_name": "PRIVILEGED_ROOT_KEY_ROTATION",
+        "severity": "ALERT",
+        "source_component": "secret-vault-svc",
+        "principal_id": "33333333-3333-3333-3333-333333333333",
+        "ip_address": "10.240.12.84",
+        "event_payload_json": "{\"target_key\":\"kms-master-01\",\"reason\":\"scheduled_quarterly_rotation\"}"
+      }
+    }
+  ],
+  "30": [
+    {
+      "label": "Series B Preferred Share Issue",
+      "badge": "25,000 Shares",
+      "description": "Records 25,000 Series B shares on Carta with board reference",
+      "payload": {
+        "shareholder_id": "sh-exec-041",
+        "share_class": "PREFERRED_SERIES_B",
+        "number_of_shares": 25000,
+        "issue_price_per_share": 4.8,
+        "currency": "GBP",
+        "grant_date": "2026-09-01",
+        "board_approval_ref": "RES-2026-08-04"
+      }
+    }
+  ],
+  "31": [
+    {
+      "label": "FIPS 140-2 Level 3 Master Key",
+      "badge": "CloudHSM AES-256",
+      "description": "Provisions hardware-backed master key for financial database",
+      "payload": {
+        "key_alias": "kms-master-ledger-encryption-2026",
+        "key_usage": "ENCRYPT_DECRYPT",
+        "algorithm": "AES_256_GCM",
+        "rotation_interval_days": 365,
+        "hsm_backing": true,
+        "policy_id": "pol-kms-finance-restricted"
+      }
+    }
+  ],
+  "32": [
+    {
+      "label": "SAP S/4HANA Invoices Bridge",
+      "badge": "5000 RPM",
+      "description": "Secure mTLS REST gateway route to enterprise SAP ERP",
+      "payload": {
+        "bridge_name": "SAP-S4HANA-Accounts-Payable-Bridge",
+        "source_protocol": "REST_JSON",
+        "destination_endpoint": "https://erp.enterprise.internal/api/v2/invoices",
+        "rate_limit_rpm": 5000,
+        "auth_mechanism": "OAUTH2_MUTUAL_TLS",
+        "retry_policy": "EXPONENTIAL_BACKOFF_3_RETRIES"
+      }
+    }
+  ],
+  "33": [
+    {
+      "label": "HSBC Corporate CAMT.053 Feed",
+      "badge": "Production SWIFT",
+      "description": "Direct Open Banking connection for continuous statements",
+      "payload": {
+        "bank_name": "HSBC Corporate Banking UK",
+        "bic_swift_code": "HBUKGB4140",
+        "connection_protocol": "ISO_20022_CAMT053",
+        "client_id": "corp-zoiko-uk-8821",
+        "environment": "PRODUCTION",
+        "auto_sync_statements": true
+      }
+    }
+  ],
+  "34": [
+    {
+      "label": "Workday Enterprise Directory Sync",
+      "badge": "Full Sync",
+      "description": "Auto-provisions worker accounts and organizational structure",
+      "payload": {
+        "provider": "WORKDAY",
+        "tenant_identifier": "zoiko_workday_prod_01",
+        "sync_scope": "FULL_DIRECTORY",
+        "auto_provision_accounts": true,
+        "last_sync_timestamp": "2026-09-16T00:00:00Z",
+        "status": "EXECUTE_NOW"
+      }
+    }
+  ],
+  "35": [
+    {
+      "label": "HMRC MTD Direct Production API",
+      "badge": "OAuth2 Bearer",
+      "description": "Certified production gateway for electronic VAT submissions",
+      "payload": {
+        "authority_code": "HMRC",
+        "jurisdiction_id": "GB",
+        "protocol": "REST_OAUTH2",
+        "auth_scheme": "BEARER_TOKEN",
+        "endpoint_url": "https://api.service.hmrc.gov.uk/organisations/vat",
+        "test_mode": false,
+        "status": "ACTIVE"
+      }
+    }
+  ],
+  "36": [
+    {
+      "label": "DocuSign Enterprise MSA Envelope",
+      "badge": "14-Day Expiry",
+      "description": "Dispatches contract with mandatory passport ID verification",
+      "payload": {
+        "document_title": "Enterprise MSA — GlobalCloud Inc Executed Copy",
+        "provider": "DOCUSIGN",
+        "recipient_email": "legal.signatory@globalcloud.com",
+        "recipient_name": "Sarah Jenkins",
+        "signer_role": "COUNTERPARTY_EXEC",
+        "expiry_days": 14,
+        "requires_id_verification": true
+      }
+    }
+  ],
+  "37": [
+    {
+      "label": "European Central Bank FX Feed",
+      "badge": "Hourly Fixings",
+      "description": "Streams GBP/EUR, GBP/USD, EUR/USD benchmark fixings",
+      "payload": {
+        "feed_name": "ECB Official Daily Currency Reference Fixings",
+        "feed_type": "FX_RATES",
+        "provider": "EUROPEAN_CENTRAL_BANK",
+        "update_frequency_minutes": 60,
+        "currency_pairs_json": "[\"GBP/EUR\",\"GBP/USD\",\"EUR/USD\",\"GBP/SGD\"]",
+        "alert_threshold_variance": 2.5
       }
     }
   ]

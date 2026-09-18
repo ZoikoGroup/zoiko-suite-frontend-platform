@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
-import { Wallet, ShoppingCart } from "lucide-react";
+import { Wallet, ShoppingCart, GitBranch } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader, LookupById } from "@/components/admin/shared";
 import {
@@ -20,6 +20,7 @@ import {
   CommercialOpsSummaryBar,
   CommercialOpsProcessTimeline,
   PurchaseRequestLookup,
+  ProcurementWorkflowPanel,
 } from "@/components/admin/commercial-ops";
 import { DOMAINS } from "@/lib/constants";
 import type { OrderStatusFilter } from "@/lib/api/purchase-orders";
@@ -728,6 +729,19 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <PurchaseOrdersAndSpendPanel />
+          </Suspense>
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard
+          icon={GitBranch}
+          title="Procurement Lifecycle Workflows"
+          subtitle="procurement-workflow-svc — end-to-end procurement orchestrations, step transitions, and approvals"
+          ports="8134"
+        >
+          <Suspense fallback={<PanelSkeleton rows={4} />}>
+            <ProcurementWorkflowPanel />
           </Suspense>
         </SectionCard>
       </div>

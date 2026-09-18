@@ -1,9 +1,7 @@
 
-# ── Shared build context for all 37 mock microservices ────────────────────────
+# ── Shared build context for all mock microservices ──────────────────────────
 x-mock-svc: &mock-svc
-  build:
-    context: ./mock-backend
-    dockerfile: Dockerfile.mock
+  image: zoiko-mock-svc:latest
   restart: unless-stopped
   networks:
     - zoiko-net
@@ -25,7 +23,21 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-      # ── Tax Domain ─────────────────────────────────────────────────────────
+      # ── Group 6 · Legal, Corporate & Commercial ─────────────────────────────
+      - ZOIKO_CONTRACT_LIFECYCLE_URL=http://contract-lifecycle-svc:8119
+      - ZOIKO_CONTRACTS_URL=http://contract-lifecycle-svc:8119
+      - ZOIKO_CLAUSE_TEMPLATE_URL=http://clause-template-svc:8120
+      - ZOIKO_OBLIGATION_TRACKING_URL=http://obligation-tracking-svc:8121
+      - ZOIKO_BOARD_RESOLUTIONS_URL=http://board-resolutions-svc:8122
+      - ZOIKO_CORPORATE_ACTIONS_URL=http://corporate-actions-svc:8123
+      - ZOIKO_COUNTERPARTY_MANAGEMENT_URL=http://counterparty-management-svc:8124
+      - ZOIKO_COUNTERPARTY_URL=http://counterparty-management-svc:8124
+      - ZOIKO_PURCHASE_REQUEST_URL=http://purchase-request-svc:8100
+      - ZOIKO_PURCHASE_ORDER_URL=http://purchase-order-svc:8150
+      - ZOIKO_SPEND_CONTROLS_URL=http://spend-controls-svc:8131
+      - ZOIKO_VENDOR_DUE_DILIGENCE_URL=http://vendor-due-diligence-svc:8132
+      - ZOIKO_PROCUREMENT_WORKFLOW_URL=http://procurement-workflow-svc:8134
+      # ── Group 7 · Tax & Compliance ─────────────────────────────────────────
       - ZOIKO_TAX_RULES_URL=http://tax-rules-svc:8125
       - ZOIKO_TAX_DETERMINATION_URL=http://tax-determination-svc:8126
       - ZOIKO_VAT_GST_URL=http://vat-gst-svc:8127
@@ -33,126 +45,88 @@ services:
       - ZOIKO_WITHHOLDING_TAX_URL=http://withholding-tax-svc:8129
       - ZOIKO_FILING_PREPARATION_URL=http://filing-preparation-svc:8130
       - ZOIKO_EVIDENCE_URL=http://filing-preparation-svc:8130
+      - ZOIKO_FILING_TRACKER_URL=http://filing-tracker-svc:8151
+      - ZOIKO_COMPLIANCE_STATUS_URL=http://compliance-status-svc:8152
+      - ZOIKO_EXCEPTION_ESCALATION_URL=http://exception-escalation-svc:8133
       - ZOIKO_TAX_AUTHORITY_INTERFACE_URL=http://tax-authority-svc:8147
-      # ── Legal Domain ───────────────────────────────────────────────────────
-      - ZOIKO_CONTRACT_LIFECYCLE_URL=http://contract-lifecycle-svc:8119
-      - ZOIKO_CONTRACTS_URL=http://contract-lifecycle-svc:8119
-      - ZOIKO_CLAUSE_TEMPLATE_URL=http://clause-template-svc:8120
-      - ZOIKO_OBLIGATION_TRACKING_URL=http://obligation-tracking-svc:8121
-      - ZOIKO_OBLIGATIONS_URL=http://obligation-tracking-svc:8088
-      - ZOIKO_BOARD_RESOLUTIONS_URL=http://board-resolutions-svc:8122
-      - ZOIKO_CORPORATE_ACTIONS_URL=http://corporate-actions-svc:8123
-      - ZOIKO_COUNTERPARTY_MANAGEMENT_URL=http://counterparty-management-svc:8124
-      - ZOIKO_COUNTERPARTY_URL=http://counterparty-management-svc:8124
-      # ── Finance Domain ─────────────────────────────────────────────────────
-      - ZOIKO_GENERAL_LEDGER_URL=http://general-ledger-svc:8098
-      - ZOIKO_ACCOUNTS_PAYABLE_URL=http://accounts-payable-svc:8099
-      - ZOIKO_ACCOUNTS_RECEIVABLE_URL=http://accounts-receivable-svc:8101
-      - ACCOUNTS_RECEIVABLE_SVC_URL=http://accounts-receivable-svc:8101
-      - ZOIKO_BANK_RECONCILIATION_URL=http://bank-reconciliation-svc:8102
-      - ZOIKO_TREASURY_URL=http://treasury-svc:8103
-      - ZOIKO_FINANCIAL_CLOSE_URL=http://financial-close-svc:8104
-      - FINANCIAL_CLOSE_SVC_URL=http://financial-close-svc:8104
-      # ── Commercial Ops Domain ──────────────────────────────────────────────
-      - ZOIKO_PURCHASE_REQUEST_URL=http://purchase-request-svc:8100
-      - ZOIKO_PURCHASE_ORDER_URL=http://purchase-order-svc:8139
-      - ZOIKO_SPEND_CONTROLS_URL=http://spend-controls-svc:8131
-      - ZOIKO_VENDOR_DUE_DILIGENCE_URL=http://vendor-due-diligence-svc:8135
-      # ── HR Domain ──────────────────────────────────────────────────────────
-      - ZOIKO_EMPLOYEE_MASTER_URL=http://employee-master-svc:8108
-      - ZOIKO_LEAVE_ABSENCE_URL=http://leave-absence-svc:8115
-      - ZOIKO_ORG_STRUCTURE_URL=http://org-structure-svc:8116
-      - ZOIKO_WORKFORCE_COMPLIANCE_URL=http://workforce-compliance-svc:8118
-      # ── Payroll Domain ─────────────────────────────────────────────────────
-      - ZOIKO_PAYROLL_RUN_URL=http://payroll-run-svc:8110
-      - ZOIKO_COMPENSATION_URL=http://compensation-svc:8111
-      - ZOIKO_BENEFITS_URL=http://benefits-svc:8112
-      - ZOIKO_PAYROLL_TAX_URL=http://payroll-tax-svc:8113
-      - ZOIKO_PAYROLL_EXCEPTIONS_URL=http://payroll-exceptions-svc:8114
-      # ── Compliance Domain ──────────────────────────────────────────────────
-      - ZOIKO_FILING_TRACKER_URL=http://filing-tracker-svc:8136
-      - ZOIKO_COMPLIANCE_STATUS_URL=http://compliance-status-svc:8137
-      - ZOIKO_EXCEPTION_ESCALATION_URL=http://exception-escalation-svc:8138
-      # ── Governance / Core Domain ───────────────────────────────────────────
-      - ZOIKO_GOVERNANCE_URL=http://governance-decision-svc:8083
-      - ZOIKO_AUDIT_EVENT_STORE_URL=http://audit-event-store-svc:8084
-      - AUDIT_EVENT_STORE_SVC_URL=http://audit-event-store-svc:8084
-      - ZOIKO_POLICY_URL=http://policy-svc:8085
-      - ZOIKO_CONFIGURATION_URL=http://configuration-svc:8086
-      - ZOIKO_SECRET_VAULT_URL=http://secret-vault-svc:8087
-      - ZOIKO_TENANT_REGISTRY_URL=http://tenant-entity-registry-svc:8081
-      - TENANT_ENTITY_REGISTRY_SVC_URL=http://tenant-entity-registry-svc:8081
-      - ZOIKO_JURISDICTION_RULES_URL=http://jurisdiction-rules-svc:8082
-      - ZOIKO_SCHEMA_REGISTRY_URL=http://schema-registry-svc:8093
+      # ── Group 8 · Intelligence & Reporting ─────────────────────────────────
+      - ZOIKO_ANOMALY_DETECTION_URL=http://anomaly-detection-svc:8153
+      - ZOIKO_FORECASTING_URL=http://forecasting-svc:8135
+      - ZOIKO_COMPLIANCE_RISK_SCORING_URL=http://compliance-risk-scoring-svc:8136
+      - ZOIKO_RECONCILIATION_INTELLIGENCE_URL=http://reconciliation-intelligence-svc:8137
+      - ZOIKO_REPORTING_ORCHESTRATION_URL=http://reporting-orchestration-svc:8138
+      - ZOIKO_DECISION_SUPPORT_URL=http://decision-support-svc:8154
+      - ZOIKO_MIGRATION_INTEGRITY_URL=http://migration-integrity-svc:8139
+      # ── Group 9 · Security & Trust ─────────────────────────────────────────
+      - ZOIKO_MTLS_MANAGEMENT_URL=http://mtls-management-svc:8140
+      - ZOIKO_SIEM_INTEGRATION_URL=http://siem-integration-svc:8141
+      - ZOIKO_CARTA_URL=http://carta-svc:8142
+      - ZOIKO_KEY_MANAGEMENT_URL=http://key-management-svc:8143
+      # ── Group 10 · Integration & Extensibility ──────────────────────────────
+      - ZOIKO_CONNECTIVITY_API_BRIDGE_URL=http://connectivity-api-bridge-svc:8144
+      - ZOIKO_BANKING_CONNECTOR_URL=http://banking-connector-svc:8145
+      - ZOIKO_HRIS_CONNECTOR_URL=http://hris-connector-svc:8146
+      - ZOIKO_ESIGNATURE_INTEGRATION_URL=http://esignature-integration-svc:8148
+      - ZOIKO_EXTERNAL_DATA_FEED_URL=http://external-data-feed-svc:8149
+      # ── Misc ───────────────────────────────────────────────────────────────
       - NEXT_PUBLIC_DEFAULT_TENANT_ID=tenant-zoiko-dev-01
       - NEXT_PUBLIC_ENABLE_BACKEND_MOCK_FALLBACK=false
     depends_on:
       - tax-rules-svc
-      - audit-event-store-svc
-      - governance-decision-svc
+      - contract-lifecycle-svc
     restart: unless-stopped
 
   # ───────────────────────────────────────────────────────────────────────────
-  # TAX DOMAIN  (8125–8130, 8147)
+  # INFRASTRUCTURE
   # ───────────────────────────────────────────────────────────────────────────
-  tax-rules-svc:
-    <<: *mock-svc
-    container_name: tax-rules-svc
-    ports: ["8125:8125"]
+  zoiko-postgres:
+    image: postgres:16-alpine
+    platform: linux/amd64
+    container_name: zoiko-postgres
+    ports:
+      - "5432:5432"
     environment:
-      SERVICE_NAME: tax-rules-svc
-      SERVICE_PORT: "8125"
+      POSTGRES_USER: zoiko
+      POSTGRES_PASSWORD: zoiko_dev
+      POSTGRES_DB: zoiko_platform
+    networks:
+      - zoiko-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zoiko"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  tax-determination-svc:
-    <<: *mock-svc
-    container_name: tax-determination-svc
-    ports: ["8126:8126"]
+  zoiko-kafka:
+    image: apache/kafka:latest
+    container_name: zoiko-kafka
+    ports:
+      - "9092:9092"
     environment:
-      SERVICE_NAME: tax-determination-svc
-      SERVICE_PORT: "8126"
-
-  vat-gst-svc:
-    <<: *mock-svc
-    container_name: vat-gst-svc
-    ports: ["8127:8127"]
-    environment:
-      SERVICE_NAME: vat-gst-svc
-      SERVICE_PORT: "8127"
-
-  corporate-tax-svc:
-    <<: *mock-svc
-    container_name: corporate-tax-svc
-    ports: ["8128:8128"]
-    environment:
-      SERVICE_NAME: corporate-tax-svc
-      SERVICE_PORT: "8128"
-
-  withholding-tax-svc:
-    <<: *mock-svc
-    container_name: withholding-tax-svc
-    ports: ["8129:8129"]
-    environment:
-      SERVICE_NAME: withholding-tax-svc
-      SERVICE_PORT: "8129"
-
-  filing-preparation-svc:
-    <<: *mock-svc
-    container_name: filing-preparation-svc
-    ports: ["8130:8130"]
-    environment:
-      SERVICE_NAME: filing-preparation-svc
-      SERVICE_PORT: "8130"
-
-  tax-authority-svc:
-    <<: *mock-svc
-    container_name: tax-authority-svc
-    ports: ["8147:8147"]
-    environment:
-      SERVICE_NAME: tax-authority-svc
-      SERVICE_PORT: "8147"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@zoiko-kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://zoiko-kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    networks:
+      - zoiko-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 0"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
   # ───────────────────────────────────────────────────────────────────────────
-  # LEGAL & CONTRACTS DOMAIN  (8119–8124)
+  # GROUP 6 · LEGAL, CORPORATE & COMMERCIAL  (8119–8124, 8100, 8131, 8132, 8134, 8150)
   # ───────────────────────────────────────────────────────────────────────────
   contract-lifecycle-svc:
     <<: *mock-svc
@@ -202,60 +176,6 @@ services:
       SERVICE_NAME: counterparty-management-svc
       SERVICE_PORT: "8124"
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # FINANCE DOMAIN  (8098–8104)
-  # ───────────────────────────────────────────────────────────────────────────
-  general-ledger-svc:
-    <<: *mock-svc
-    container_name: general-ledger-svc
-    ports: ["8098:8098"]
-    environment:
-      SERVICE_NAME: general-ledger-svc
-      SERVICE_PORT: "8098"
-
-  accounts-payable-svc:
-    <<: *mock-svc
-    container_name: accounts-payable-svc
-    ports: ["8099:8099"]
-    environment:
-      SERVICE_NAME: accounts-payable-svc
-      SERVICE_PORT: "8099"
-
-  accounts-receivable-svc:
-    <<: *mock-svc
-    container_name: accounts-receivable-svc
-    ports: ["8101:8101"]
-    environment:
-      SERVICE_NAME: accounts-receivable-svc
-      SERVICE_PORT: "8101"
-
-  bank-reconciliation-svc:
-    <<: *mock-svc
-    container_name: bank-reconciliation-svc
-    ports: ["8102:8102"]
-    environment:
-      SERVICE_NAME: bank-reconciliation-svc
-      SERVICE_PORT: "8102"
-
-  treasury-svc:
-    <<: *mock-svc
-    container_name: treasury-svc
-    ports: ["8103:8103"]
-    environment:
-      SERVICE_NAME: treasury-svc
-      SERVICE_PORT: "8103"
-
-  financial-close-svc:
-    <<: *mock-svc
-    container_name: financial-close-svc
-    ports: ["8104:8104"]
-    environment:
-      SERVICE_NAME: financial-close-svc
-      SERVICE_PORT: "8104"
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # COMMERCIAL OPS DOMAIN  (8100, 8131, 8135, 8139)
-  # ───────────────────────────────────────────────────────────────────────────
   purchase-request-svc:
     <<: *mock-svc
     container_name: purchase-request-svc
@@ -264,13 +184,14 @@ services:
       SERVICE_NAME: purchase-request-svc
       SERVICE_PORT: "8100"
 
+  # Port 8129 conflict resolved: purchase-order-svc → 8150
   purchase-order-svc:
     <<: *mock-svc
     container_name: purchase-order-svc
-    ports: ["8139:8139"]
+    ports: ["8150:8150"]
     environment:
       SERVICE_NAME: purchase-order-svc
-      SERVICE_PORT: "8139"
+      SERVICE_PORT: "8150"
 
   spend-controls-svc:
     <<: *mock-svc
@@ -280,185 +201,263 @@ services:
       SERVICE_NAME: spend-controls-svc
       SERVICE_PORT: "8131"
 
+  # Port 8135 → 8132 (spec port)
   vendor-due-diligence-svc:
     <<: *mock-svc
     container_name: vendor-due-diligence-svc
-    ports: ["8135:8135"]
+    ports: ["8132:8132"]
     environment:
       SERVICE_NAME: vendor-due-diligence-svc
-      SERVICE_PORT: "8135"
+      SERVICE_PORT: "8132"
+
+  procurement-workflow-svc:
+    <<: *mock-svc
+    container_name: procurement-workflow-svc
+    ports: ["8134:8134"]
+    environment:
+      SERVICE_NAME: procurement-workflow-svc
+      SERVICE_PORT: "8134"
 
   # ───────────────────────────────────────────────────────────────────────────
-  # HR DOMAIN  (8108, 8115–8118)
+  # GROUP 7 · TAX & COMPLIANCE  (8125–8130, 8133, 8151, 8152)
   # ───────────────────────────────────────────────────────────────────────────
-  employee-master-svc:
+  tax-rules-svc:
     <<: *mock-svc
-    container_name: employee-master-svc
-    ports: ["8108:8108"]
+    container_name: tax-rules-svc
+    ports: ["8125:8125"]
     environment:
-      SERVICE_NAME: employee-master-svc
-      SERVICE_PORT: "8108"
+      SERVICE_NAME: tax-rules-svc
+      SERVICE_PORT: "8125"
 
-  leave-absence-svc:
+  tax-determination-svc:
     <<: *mock-svc
-    container_name: leave-absence-svc
-    ports: ["8115:8115"]
+    container_name: tax-determination-svc
+    ports: ["8126:8126"]
     environment:
-      SERVICE_NAME: leave-absence-svc
-      SERVICE_PORT: "8115"
+      SERVICE_NAME: tax-determination-svc
+      SERVICE_PORT: "8126"
 
-  org-structure-svc:
+  vat-gst-svc:
     <<: *mock-svc
-    container_name: org-structure-svc
-    ports: ["8116:8116"]
+    container_name: vat-gst-svc
+    ports: ["8127:8127"]
     environment:
-      SERVICE_NAME: org-structure-svc
-      SERVICE_PORT: "8116"
+      SERVICE_NAME: vat-gst-svc
+      SERVICE_PORT: "8127"
 
-  workforce-compliance-svc:
+  corporate-tax-svc:
     <<: *mock-svc
-    container_name: workforce-compliance-svc
-    ports: ["8118:8118"]
+    container_name: corporate-tax-svc
+    ports: ["8128:8128"]
     environment:
-      SERVICE_NAME: workforce-compliance-svc
-      SERVICE_PORT: "8118"
+      SERVICE_NAME: corporate-tax-svc
+      SERVICE_PORT: "8128"
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # PAYROLL DOMAIN  (8110–8114)
-  # ───────────────────────────────────────────────────────────────────────────
-  payroll-run-svc:
+  withholding-tax-svc:
     <<: *mock-svc
-    container_name: payroll-run-svc
-    ports: ["8110:8110"]
+    container_name: withholding-tax-svc
+    ports: ["8129:8129"]
     environment:
-      SERVICE_NAME: payroll-run-svc
-      SERVICE_PORT: "8110"
+      SERVICE_NAME: withholding-tax-svc
+      SERVICE_PORT: "8129"
 
-  compensation-svc:
+  filing-preparation-svc:
     <<: *mock-svc
-    container_name: compensation-svc
-    ports: ["8111:8111"]
+    container_name: filing-preparation-svc
+    ports: ["8130:8130"]
     environment:
-      SERVICE_NAME: compensation-svc
-      SERVICE_PORT: "8111"
+      SERVICE_NAME: filing-preparation-svc
+      SERVICE_PORT: "8130"
 
-  benefits-svc:
-    <<: *mock-svc
-    container_name: benefits-svc
-    ports: ["8112:8112"]
-    environment:
-      SERVICE_NAME: benefits-svc
-      SERVICE_PORT: "8112"
-
-  payroll-tax-svc:
-    <<: *mock-svc
-    container_name: payroll-tax-svc
-    ports: ["8113:8113"]
-    environment:
-      SERVICE_NAME: payroll-tax-svc
-      SERVICE_PORT: "8113"
-
-  payroll-exceptions-svc:
-    <<: *mock-svc
-    container_name: payroll-exceptions-svc
-    ports: ["8114:8114"]
-    environment:
-      SERVICE_NAME: payroll-exceptions-svc
-      SERVICE_PORT: "8114"
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # COMPLIANCE & RISK DOMAIN  (8136–8138)
-  # ───────────────────────────────────────────────────────────────────────────
+  # Port 8136 → 8151 (conflict resolved)
   filing-tracker-svc:
     <<: *mock-svc
     container_name: filing-tracker-svc
-    ports: ["8136:8136"]
+    ports: ["8151:8151"]
     environment:
       SERVICE_NAME: filing-tracker-svc
-      SERVICE_PORT: "8136"
+      SERVICE_PORT: "8151"
 
+  # Port 8137 → 8152 (conflict resolved)
   compliance-status-svc:
     <<: *mock-svc
     container_name: compliance-status-svc
-    ports: ["8137:8137"]
+    ports: ["8152:8152"]
     environment:
       SERVICE_NAME: compliance-status-svc
-      SERVICE_PORT: "8137"
+      SERVICE_PORT: "8152"
 
+  # Port 8138 → 8133 (spec port)
   exception-escalation-svc:
     <<: *mock-svc
     container_name: exception-escalation-svc
-    ports: ["8138:8138"]
+    ports: ["8133:8133"]
     environment:
       SERVICE_NAME: exception-escalation-svc
+      SERVICE_PORT: "8133"
+
+  # Alias: tax-authority-interface-svc
+  tax-authority-svc:
+    <<: *mock-svc
+    container_name: tax-authority-svc
+    ports: ["8147:8147"]
+    environment:
+      SERVICE_NAME: tax-authority-svc
+      SERVICE_PORT: "8147"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # GROUP 8 · INTELLIGENCE & REPORTING  (8135–8139, 8153, 8154)
+  # ───────────────────────────────────────────────────────────────────────────
+
+  # Port 8160 → 8153 (conflict resolved: 8134 taken by procurement-workflow)
+  anomaly-detection-svc:
+    <<: *mock-svc
+    container_name: anomaly-detection-svc
+    ports: ["8153:8153"]
+    environment:
+      SERVICE_NAME: anomaly-detection-svc
+      SERVICE_PORT: "8153"
+
+  # Port 8161 → 8135 (spec sequential, vendor-due-diligence vacated 8135)
+  forecasting-svc:
+    <<: *mock-svc
+    container_name: forecasting-svc
+    ports: ["8135:8135"]
+    environment:
+      SERVICE_NAME: forecasting-svc
+      SERVICE_PORT: "8135"
+
+  # Port 8162 → 8136 (filing-tracker vacated 8136)
+  compliance-risk-scoring-svc:
+    <<: *mock-svc
+    container_name: compliance-risk-scoring-svc
+    ports: ["8136:8136"]
+    environment:
+      SERVICE_NAME: compliance-risk-scoring-svc
+      SERVICE_PORT: "8136"
+
+  # Port 8163 → 8137 (compliance-status vacated 8137)
+  reconciliation-intelligence-svc:
+    <<: *mock-svc
+    container_name: reconciliation-intelligence-svc
+    ports: ["8137:8137"]
+    environment:
+      SERVICE_NAME: reconciliation-intelligence-svc
+      SERVICE_PORT: "8137"
+
+  # Port 8164 → 8138 (exception-escalation vacated 8138)
+  reporting-orchestration-svc:
+    <<: *mock-svc
+    container_name: reporting-orchestration-svc
+    ports: ["8138:8138"]
+    environment:
+      SERVICE_NAME: reporting-orchestration-svc
       SERVICE_PORT: "8138"
 
+  # Port 8165 → 8154 (conflict resolved: 8138 taken by reporting-orchestration)
+  decision-support-svc:
+    <<: *mock-svc
+    container_name: decision-support-svc
+    ports: ["8154:8154"]
+    environment:
+      SERVICE_NAME: decision-support-svc
+      SERVICE_PORT: "8154"
+
+  # Port 8166 → 8139 (purchase-order vacated 8139)
+  migration-integrity-svc:
+    <<: *mock-svc
+    container_name: migration-integrity-svc
+    ports: ["8139:8139"]
+    environment:
+      SERVICE_NAME: migration-integrity-svc
+      SERVICE_PORT: "8139"
+
   # ───────────────────────────────────────────────────────────────────────────
-  # GOVERNANCE / CORE PLATFORM  (8081–8087, 8084, 8093)
+  # GROUP 9 · SECURITY & TRUST  (8140–8143)
   # ───────────────────────────────────────────────────────────────────────────
-  governance-decision-svc:
+  mtls-management-svc:
     <<: *mock-svc
-    container_name: governance-decision-svc
-    ports: ["8083:8083"]
+    container_name: mtls-management-svc
+    ports: ["8140:8140"]
     environment:
-      SERVICE_NAME: governance-decision-svc
-      SERVICE_PORT: "8083"
+      SERVICE_NAME: mtls-management-svc
+      SERVICE_PORT: "8140"
 
-  audit-event-store-svc:
+  # Port 8167 → 8141 (spec port)
+  siem-integration-svc:
     <<: *mock-svc
-    container_name: audit-event-store-svc
-    ports: ["8084:8084"]
+    container_name: siem-integration-svc
+    ports: ["8141:8141"]
     environment:
-      SERVICE_NAME: audit-event-store-svc
-      SERVICE_PORT: "8084"
+      SERVICE_NAME: siem-integration-svc
+      SERVICE_PORT: "8141"
 
-  policy-svc:
+  # Port 8168 → 8142 (spec port)
+  carta-svc:
     <<: *mock-svc
-    container_name: policy-svc
-    ports: ["8085:8085"]
+    container_name: carta-svc
+    ports: ["8142:8142"]
     environment:
-      SERVICE_NAME: policy-svc
-      SERVICE_PORT: "8085"
+      SERVICE_NAME: carta-svc
+      SERVICE_PORT: "8142"
 
-  configuration-svc:
+  # Port 8169 → 8143 (spec port)
+  key-management-svc:
     <<: *mock-svc
-    container_name: configuration-svc
-    ports: ["8086:8086"]
+    container_name: key-management-svc
+    ports: ["8143:8143"]
     environment:
-      SERVICE_NAME: configuration-svc
-      SERVICE_PORT: "8086"
+      SERVICE_NAME: key-management-svc
+      SERVICE_PORT: "8143"
 
-  secret-vault-svc:
-    <<: *mock-svc
-    container_name: secret-vault-svc
-    ports: ["8087:8087"]
-    environment:
-      SERVICE_NAME: secret-vault-svc
-      SERVICE_PORT: "8087"
+  # ───────────────────────────────────────────────────────────────────────────
+  # GROUP 10 · INTEGRATION & EXTENSIBILITY  (8144–8149)
+  # ───────────────────────────────────────────────────────────────────────────
 
-  tenant-entity-registry-svc:
+  # Port 8170 → 8144 (spec port)
+  connectivity-api-bridge-svc:
     <<: *mock-svc
-    container_name: tenant-entity-registry-svc
-    ports: ["8081:8081"]
+    container_name: connectivity-api-bridge-svc
+    ports: ["8144:8144"]
     environment:
-      SERVICE_NAME: tenant-entity-registry-svc
-      SERVICE_PORT: "8081"
+      SERVICE_NAME: connectivity-api-bridge-svc
+      SERVICE_PORT: "8144"
 
-  jurisdiction-rules-svc:
+  # Port 8171 → 8145 (spec port)
+  banking-connector-svc:
     <<: *mock-svc
-    container_name: jurisdiction-rules-svc
-    ports: ["8082:8082"]
+    container_name: banking-connector-svc
+    ports: ["8145:8145"]
     environment:
-      SERVICE_NAME: jurisdiction-rules-svc
-      SERVICE_PORT: "8082"
+      SERVICE_NAME: banking-connector-svc
+      SERVICE_PORT: "8145"
 
-  schema-registry-svc:
+  # Port 8172 → 8146 (spec port)
+  hris-connector-svc:
     <<: *mock-svc
-    container_name: schema-registry-svc
-    ports: ["8093:8093"]
+    container_name: hris-connector-svc
+    ports: ["8146:8146"]
     environment:
-      SERVICE_NAME: schema-registry-svc
-      SERVICE_PORT: "8093"
+      SERVICE_NAME: hris-connector-svc
+      SERVICE_PORT: "8146"
+
+  # Port 8174 → 8148 (spec port)
+  esignature-integration-svc:
+    <<: *mock-svc
+    container_name: esignature-integration-svc
+    ports: ["8148:8148"]
+    environment:
+      SERVICE_NAME: esignature-integration-svc
+      SERVICE_PORT: "8148"
+
+  # Port 8175 → 8149 (spec port)
+  external-data-feed-svc:
+    <<: *mock-svc
+    container_name: external-data-feed-svc
+    ports: ["8149:8149"]
+    environment:
+      SERVICE_NAME: external-data-feed-svc
+      SERVICE_PORT: "8149"
 
 networks:
   zoiko-net:

@@ -191,6 +191,77 @@ function buildResponse(method, pathname, body) {
   if (svc.includes("bank-reconciliation")) return { reconciliations: [], total: 0 };
   if (svc.includes("accounts-payable") || svc.includes("accounts-receivable")) return { records: [], total: 0 };
 
+  if (svc.includes("procurement-workflow")) return method === "GET"
+    ? { workflows: [], total: 0 }
+    : { workflow: { workflow_id: id, tenant_id: TENANT_ID, legal_entity_id: ENTITY_ID, workflow_type: body.workflow_type || "STANDARD_PO", status: "IN_PROGRESS", initiated_by: "system", initiated_at: now(), steps_completed: 0, total_steps: 4, created_at: now() } };
+
+  // ── Group 8: Intelligence & Reporting ──────────────────────────────────────
+  if (svc.includes("anomaly-detection")) return method === "GET"
+    ? { anomalies: [], total: 0 }
+    : { anomaly: { anomaly_id: id, tenant_id: TENANT_ID, source_service: body.source_service || "general-ledger-svc", anomaly_type: body.anomaly_type || "THRESHOLD_BREACH", severity: body.severity || "MEDIUM", description: body.description || "Mock anomaly detected", status: "OPEN", detected_at: now(), created_at: now() } };
+
+  if (svc.includes("forecasting")) return method === "GET"
+    ? { forecasts: [], total: 0 }
+    : { forecast: { forecast_id: id, tenant_id: TENANT_ID, model_type: body.model_type || "LINEAR_REGRESSION", domain: body.domain || "FINANCE", period: body.period || "2026-Q4", accuracy_score: 0.87, status: "COMPLETED", generated_at: now(), created_at: now() } };
+
+  if (svc.includes("compliance-risk-scoring")) return method === "GET"
+    ? { scores: [], total: 0 }
+    : { score: { score_id: id, tenant_id: TENANT_ID, legal_entity_id: ENTITY_ID, risk_score: body.risk_score || 42, risk_level: body.risk_level || "MEDIUM", factors: [], evaluated_at: now(), valid_until: now(), created_at: now() } };
+
+  if (svc.includes("reconciliation-intelligence")) return method === "GET"
+    ? { reconciliations: [], total: 0 }
+    : { reconciliation: { reconciliation_id: id, tenant_id: TENANT_ID, source_a: body.source_a || "general-ledger-svc", source_b: body.source_b || "bank-reconciliation-svc", match_status: "MATCHED", discrepancy_amount: 0, currency: "GBP", resolved_at: now(), created_at: now() } };
+
+  if (svc.includes("reporting-orchestration")) return method === "GET"
+    ? { reports: [], total: 0 }
+    : { report: { report_id: id, tenant_id: TENANT_ID, report_type: body.report_type || "COMPLIANCE_SUMMARY", title: body.title || "Mock Report", status: "QUEUED", requested_by: "system", scheduled_at: now(), created_at: now() } };
+
+  if (svc.includes("decision-support")) return method === "GET"
+    ? { recommendations: [], total: 0 }
+    : { recommendation: { recommendation_id: id, tenant_id: TENANT_ID, domain: body.domain || "COMPLIANCE", action: body.action || "REVIEW_EXCEPTION", confidence: 0.91, rationale: "Mock decision support recommendation", status: "PENDING_REVIEW", created_at: now() } };
+
+  if (svc.includes("migration-integrity")) return method === "GET"
+    ? { jobs: [], total: 0 }
+    : { job: { job_id: id, tenant_id: TENANT_ID, source_system: body.source_system || "LEGACY_ERP", target_service: body.target_service || "general-ledger-svc", record_count: body.record_count || 0, validated_count: 0, failed_count: 0, status: "PENDING", started_at: now(), created_at: now() } };
+
+  // ── Group 9: Security & Trust ──────────────────────────────────────────────
+  if (svc.includes("mtls")) return method === "GET"
+    ? { certificates: [], total: 0 }
+    : { certificate: { cert_id: id, tenant_id: TENANT_ID, common_name: body.common_name || "api.zoiko.internal", status: "ACTIVE", issued_at: now(), expires_at: now(), fingerprint: "SHA256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069", created_at: now() } };
+
+  if (svc.includes("siem-integration") || svc.includes("siem")) return method === "GET"
+    ? { events: [], total: 0 }
+    : { event: { event_id: id, tenant_id: TENANT_ID, event_type: body.event_type || "AUTH_FAILURE", source_ip: body.source_ip || "0.0.0.0", severity: body.severity || "HIGH", description: body.description || "Mock SIEM event", siem_platform: body.platform || "SPLUNK", status: "INGESTED", occurred_at: now(), created_at: now() } };
+
+  if (svc.includes("carta")) return method === "GET"
+    ? { equity_grants: [], cap_table_entries: [], total: 0 }
+    : { equity_grant: { grant_id: id, tenant_id: TENANT_ID, legal_entity_id: ENTITY_ID, grantee_id: body.grantee_id || "emp-001", grant_type: body.grant_type || "ISO", shares: body.shares || 1000, strike_price: body.strike_price || 1.0, currency: "USD", vesting_schedule: "4Y_1Y_CLIFF", status: "GRANTED", granted_at: now(), created_at: now() } };
+
+  if (svc.includes("key-management")) return method === "GET"
+    ? { keys: [], total: 0 }
+    : { key: { key_id: id, tenant_id: TENANT_ID, key_type: body.key_type || "AES_256", purpose: body.purpose || "DATA_ENCRYPTION", algorithm: "AES-256-GCM", status: "ACTIVE", created_by: "system", expires_at: body.expires_at || now(), rotation_due_at: now(), created_at: now() } };
+
+  // ── Group 10: Integration & Extensibility ──────────────────────────────────
+  if (svc.includes("connectivity-api-bridge")) return method === "GET"
+    ? { connections: [], total: 0 }
+    : { connection: { connection_id: id, tenant_id: TENANT_ID, system_name: body.system_name || "MOCK_ERP", protocol: body.protocol || "REST", auth_type: body.auth_type || "OAUTH2", status: "ACTIVE", last_ping_at: now(), created_at: now() } };
+
+  if (svc.includes("banking-connector")) return method === "GET"
+    ? { connections: [], total: 0 }
+    : { connection: { connection_id: id, tenant_id: TENANT_ID, bank_name: body.bank_name || "Mock Bank", institution_code: body.institution_code || "MOCK001", protocol: body.protocol || "OPEN_BANKING", status: "CONNECTED", last_sync_at: now(), sync_lag_seconds: 0, created_at: now() } };
+
+  if (svc.includes("hris-connector")) return method === "GET"
+    ? { connections: [], total: 0 }
+    : { connection: { connection_id: id, tenant_id: TENANT_ID, hris_system: body.hris_system || "WORKDAY", sync_scope: body.sync_scope || "EMPLOYEES", status: "ACTIVE", last_sync_at: now(), records_synced: 0, sync_errors: 0, created_at: now() } };
+
+  if (svc.includes("esignature")) return method === "GET"
+    ? { envelopes: [], total: 0 }
+    : { envelope: { envelope_id: id, tenant_id: TENANT_ID, document_id: body.document_id || "doc-001", provider: body.provider || "DOCUSIGN", signatories: body.signatories || [], status: "SENT", sent_at: now(), completed_at: null, created_at: now() } };
+
+  if (svc.includes("external-data-feed")) return method === "GET"
+    ? { subscriptions: [], total: 0 }
+    : { subscription: { subscription_id: id, tenant_id: TENANT_ID, feed_name: body.feed_name || "Mock Feed", provider: body.provider || "REFINITIV", data_type: body.data_type || "FX_RATES", status: "ACTIVE", last_received_at: now(), created_at: now() } };
+
   return { service: svc, status: "ok", data: [], total: 0, timestamp: now() };
 }
 
