@@ -27,6 +27,9 @@ import {
   Bot,
   Layers,
   ArrowLeftRight,
+  BrainCircuit,
+  Shield,
+  Network,
 } from "lucide-react";
 
 export type DomainKey =
@@ -42,7 +45,10 @@ export type DomainKey =
   | "documents"
   | "commercial-ops"
   | "purchase-requests"
-  | "audit-events";
+  | "audit-events"
+  | "intelligence"
+  | "security-trust"
+  | "integration";
 
 export type DomainStatus = "operational" | "attention" | "action-required";
 
@@ -254,6 +260,55 @@ export const DOMAINS: Domain[] = [
       "Tamper Evidence Verifier",
     ],
   },
+  {
+    key: "intelligence",
+    label: "Intelligence & Reporting",
+    href: "/admin/intelligence",
+    icon: BrainCircuit,
+    purpose:
+      "Machine learning forecasting, automated reconciliation intelligence, risk scoring, and reporting orchestrations across all platform microservices.",
+    status: "operational",
+    coreServices: [
+      "anomaly-detection-svc",
+      "forecasting-svc",
+      "compliance-risk-scoring-svc",
+      "reconciliation-intelligence-svc",
+      "reporting-orchestration-svc",
+      "decision-support-svc",
+      "migration-integrity-svc",
+    ],
+  },
+  {
+    key: "security-trust",
+    label: "Security & Trust",
+    href: "/admin/security",
+    icon: Shield,
+    purpose:
+      "Cryptographic service identity, automated mutual TLS, SIEM forwarding, and hardware KMS key management.",
+    status: "operational",
+    coreServices: [
+      "mtls-management-svc",
+      "siem-integration-svc",
+      "carta-svc",
+      "key-management-svc",
+    ],
+  },
+  {
+    key: "integration",
+    label: "Integration & Extensibility",
+    href: "/admin/integration",
+    icon: Network,
+    purpose:
+      "External protocol adaptors, Open Banking feeds, HRIS synchronization, and digital signature pipelines.",
+    status: "operational",
+    coreServices: [
+      "connectivity-api-bridge-svc",
+      "banking-connector-svc",
+      "hris-connector-svc",
+      "esignature-integration-svc",
+      "external-data-feed-svc",
+    ],
+  },
 ];
 
 export const PRIMARY_NAV = [
@@ -391,5 +446,23 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   {
     title: "Notification & Communication",
     items: [{ label: "Notifications", href: "/admin/notifications", icon: Bell }],
+  },
+  {
+    title: "Intelligence & Analytics",
+    items: [
+      { label: "Intelligence & Reporting", href: "/admin/intelligence", icon: BrainCircuit },
+    ],
+  },
+  {
+    title: "Security & Zero Trust",
+    items: [
+      { label: "Security & Trust", href: "/admin/security", icon: Shield },
+    ],
+  },
+  {
+    title: "Integration & Extensibility",
+    items: [
+      { label: "Connectors & Feeds", href: "/admin/integration", icon: Network },
+    ],
   },
 ];

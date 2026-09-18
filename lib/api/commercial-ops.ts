@@ -5,7 +5,7 @@
 // - spend-controls-svc       (:8131)
 // - vendor-due-diligence-svc (:8135)
 
-import { type ApiResult, type Identity } from "./client";
+import { type ApiResult, type Identity, apiGet, apiPost } from "./client";
 import {
   listSpendPolicies,
   listPolicyUsage,
@@ -180,9 +180,63 @@ export async function listSpendLimits(identity?: Identity): Promise<ApiResult<Sp
 //
 // Real reads go through lib/api/client.ts, which returns a discriminated
 // `ApiResult` so a failure has to be handled rather than silently replaced.
-//
-// NOTE: the same helper shape still exists in lib/api/{compliance,hr,legal,
-// payroll,tax,finance}.ts, with roughly thirty MOCK_ constants behind it. Those
-// pages are not yet wired to live services, so the sample data is at least not
-// competing with real data — but the same silent substitution is waiting there for
-// whoever wires them, and the fallback should be removed as each one is.
+
+// ─── 3. Procurement Workflows (procurement-workflow-svc :8134) ──────────────
+
+export type ProcurementWorkflow = {
+  workflow_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  workflow_type: string;
+  status: "IN_PROGRESS" | "APPROVED" | "REJECTED" | "CANCELLED";
+  initiated_by: string;
+  initiated_at: string;
+  steps_completed: number;
+  total_steps: number;
+  created_at: string;
+};
+
+export type ProcurementWorkflowListResponse = {
+  workflows: ProcurementWorkflow[];
+  total: number;
+};
+
+export async function listProcurementWorkflows(identity?: Identity): Promise<ApiResult<ProcurementWorkflow[]>> {
+  if (!identity?.tenantId) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: 401,
+        message: "procurement-workflow-svc requires a tenant scope",
+      },
+    };
+  }
+  const res = await apiGet<ProcurementWorkflowListResponse>("procurementWorkflow", "/api/v1/workflows", {
+    query: { tenant_id: identity.tenantId },
+  });
+  if (!res.ok) return res;
+  return { ok: true, data: res.data.workflows ?? [] };
+}
+
+export async function createProcurementWorkflow(
+  body: { workflow_type: string },
+  identity?: Identity
+): Promise<ApiResult<{ workflow: ProcurementWorkflow }>> {
+  if (!identity?.tenantId) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: 401,
+        message: "procurement-workflow-svc requires a tenant scope",
+      },
+    };
+  }
+  return apiPost<{ workflow: ProcurementWorkflow }>("procurementWorkflow", "/api/v1/workflows", {
+    tenant_id: identity.tenantId,
+    legal_entity_id: identity.legalEntityId,
+    ...body,
+  });
+}
+
