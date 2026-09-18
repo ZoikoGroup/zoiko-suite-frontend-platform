@@ -28,6 +28,18 @@ import {
   TenantOverview,
   UpdateEntityForm,
   WorkspaceTable,
+  // ORG-02 §4.2 — named lifecycle commands, defaults, host bindings.
+  TenantCommandPanel,
+  TenantLifecycleHistory,
+  ChangeDefaultsForm,
+  BindHostForm,
+  HostBindingTable,
+  // ORG-03 §4.3 — profile versions, as-of, registry quarantine.
+  AmendProfileForm,
+  ProfileVersionTable,
+  EntityAsOfForm,
+  RegistryNumberSearchForm,
+  RegistryConflictPanel,
 } from "@/components/admin/tenants";
 import { SESSION_COOKIE, decodeSession, toIdentity, type SessionIdentity } from "@/lib/auth";
 import {
@@ -43,6 +55,16 @@ import {
   type ResolvedTenantRegion,
   type Workspace,
 } from "@/lib/api/tenants";
+import {
+  listEntityVersions,
+  listRegistryConflicts,
+  listTenantHostBindings,
+  listTenantLifecycleHistory,
+  type EntityRegistryConflict,
+  type LegalEntityProfileVersion,
+  type TenantHostBinding,
+  type TenantLifecycleEvent,
+} from "@/lib/api/tenants-org";
 
 export const metadata: Metadata = { title: "Tenants & Entities | Zoiko Suite" };
 
@@ -144,10 +166,181 @@ async function TenantPanel() {
     <div className="space-y-6">
       <TenantOverview tenant={tenantResult.data} region={region} />
       <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
-        <TenantLifecycleForm
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+          Lifecycle commands
+        </h3>
+        <TenantCommandPanel
           tenantId={tenantResult.data.tenant_id}
-          currentState={tenantResult.data.lifecycle_state}
+          lifecycleState={tenantResult.data.lifecycle_state}
+          recordVersion={tenantResult.data.record_version ?? 0}
         />
+      </div>
+
+      <details className="border-t border-slate-200 pt-5 dark:border-slate-800">
+        <summary className="cursor-pointer text-xs text-slate-500 dark:text-slate-400">
+          Generic lifecycle transition
+        </summary>
+        <div className="mt-3">
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            This route sets a target state without naming a command, so the lifecycle history records
+            where the tenant ended up but not which governance command put it there. Prefer the named
+            commands above wherever one applies.
+          </p>
+          <TenantLifecycleForm
+            tenantId={tenantResult.data.tenant_id}
+            currentState={tenantResult.data.lifecycle_state}
+          />
+        </div>
+      </details>
+
+      <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">Defaults</h3>
+        <ChangeDefaultsForm
+          tenantId={tenantResult.data.tenant_id}
+          currentLocale={tenantResult.data.primary_locale}
+          currentTimezone={tenantResult.data.primary_timezone}
+          recordVersion={tenantResult.data.record_version ?? 0}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Lifecycle evidence and hostname bindings.
+ *
+ * Together because both answer questions about the tenant rather than about its
+ * contents: what has happened to it, and which hostnames resolve to it.
+ */
+async function TenantEvidencePanel() {
+  const identity = await sessionIdentity();
+  if (!identity.tenantId) return null;
+
+  const [historyResult, bindingsResult] = await Promise.all([
+    listTenantLifecycleHistory(identity.tenantId, identity),
+    listTenantHostBindings(identity.tenantId, identity),
+  ]);
+
+  const history = unwrapList<TenantLifecycleEvent>(historyResult, "events");
+  const bindings = unwrapList<TenantHostBinding>(bindingsResult, "bindings");
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+          Lifecycle history
+        </h3>
+        {!historyResult.ok ? (
+          <PanelEmptyState
+            icon={Building2}
+            label="Lifecycle history unavailable"
+            hint={historyResult.error.message}
+            tone="warning"
+          />
+        ) : (
+          <TenantLifecycleHistory events={history} />
+        )}
+      </div>
+
+      <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">Hostnames</h3>
+        <HostBindingTable bindings={bindings} />
+        <div className="mt-4">
+          <BindHostForm tenantId={identity.tenantId} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ORG-03 profile versioning.
+ *
+ * Reads the version history of the first entity only. A tenant-wide version
+ * view would cost one request per entity, so the panel names the entity it is
+ * showing rather than presenting one entity history as the tenant one.
+ */
+async function ProfileVersionPanel() {
+  const identity = await sessionIdentity();
+  if (!identity.tenantId) return null;
+
+  const entitiesResult = await listEntities(identity.tenantId, identity);
+  const entities = unwrapList<LegalEntity>(entitiesResult, "entities");
+  if (entities.length === 0) return null;
+
+  const options = entities.map((e) => ({
+    legal_entity_id: e.legal_entity_id,
+    entity_code: e.entity_code,
+    legal_name: e.legal_name,
+  }));
+  const versionsByEntity: Record<string, number> = {};
+  for (const e of entities) versionsByEntity[e.legal_entity_id] = e.record_version ?? 0;
+
+  const first = entities[0];
+  const versionsResult = await listEntityVersions(first.legal_entity_id, identity);
+  const versions = unwrapList<LegalEntityProfileVersion>(versionsResult, "versions");
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+          Profile history &mdash; {first.entity_code}
+        </h3>
+        <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+          Showing {first.legal_name}. Amending a profile adds a version; it never edits one in place,
+          which is why a lookup as of a past date still returns the name that date was booked under.
+        </p>
+        <ProfileVersionTable versions={versions} />
+      </div>
+
+      <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+          Record a profile change
+        </h3>
+        <AmendProfileForm entities={options} entityVersions={versionsByEntity} />
+      </div>
+
+      <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+          Reconstruct as of a date
+        </h3>
+        <EntityAsOfForm entities={options} />
+      </div>
+    </div>
+  );
+}
+
+/** The NP5 quarantine, plus the registry search that helps avoid creating one. */
+async function RegistryIntegrityPanel() {
+  const identity = await sessionIdentity();
+  if (!identity.tenantId) return null;
+
+  const conflictsResult = await listRegistryConflicts(identity, true);
+  const conflicts = unwrapList<EntityRegistryConflict>(conflictsResult, "conflicts");
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+          Find an entity by registry number
+        </h3>
+        <RegistryNumberSearchForm />
+      </div>
+
+      <div className="border-t border-slate-200 pt-5 dark:border-slate-800">
+        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
+          Quarantined duplicates
+        </h3>
+        {!conflictsResult.ok ? (
+          <PanelEmptyState
+            icon={Layers}
+            label="Quarantine unavailable"
+            hint={conflictsResult.error.message}
+            tone="warning"
+          />
+        ) : (
+          <RegistryConflictPanel conflicts={conflicts} />
+        )}
       </div>
     </div>
   );
@@ -492,9 +685,63 @@ export default function TenantsPage() {
         </CardContent>
       </Card>
 
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Lifecycle evidence &amp; hostnames</CardTitle>
+            <CardDescription>
+              Every lifecycle change is recorded with the command that caused it, who made it, why, and
+              who approved it where a second approver was required. Hostnames bound here are what let the
+              registry refuse a request whose host and claimed tenant disagree.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<RegisterSkeleton />}>
+            <TenantEvidencePanel />
+          </Suspense>
+        </CardContent>
+      </Card>
+
       <Suspense fallback={<RegisterSkeleton />}>
         <EntityPanel />
       </Suspense>
+
+      <Card className="mb-6 mt-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Legal profile versions</CardTitle>
+            <CardDescription>
+              A legal entity name, registry identity and registered office are effective-dated. A change
+              creates a new version and closes the previous one; nothing is overwritten, so a historical
+              read still returns the identity that period was booked under.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<RegisterSkeleton />}>
+            <ProfileVersionPanel />
+          </Suspense>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Registry integrity</CardTitle>
+            <CardDescription>
+              Two active entities in one jurisdiction cannot hold the same registration number. An attempt
+              to create one is refused and quarantined with its details intact &mdash; never merged, and
+              never written and flagged afterwards.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<RegisterSkeleton />}>
+            <RegistryIntegrityPanel />
+          </Suspense>
+        </CardContent>
+      </Card>
 
       <Suspense fallback={<RegisterSkeleton />}>
         <HierarchyPanel />

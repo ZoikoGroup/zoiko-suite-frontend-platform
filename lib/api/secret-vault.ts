@@ -45,6 +45,36 @@ type CallerIdentity = Identity & { principalId: string; tenantId: string };
 
 /** Secret classes the console offers. Data-driven in the service; new classes
  *  need no code change there, so this list constrains only our own forms. */
+/**
+ * §4 purpose_context values this console asserts, one per kind of write.
+ *
+ * Not decoration and not optional: secret-vault-integration-svc marks
+ * purpose_context RequiredOnWrite — "required for governed sensitive access" —
+ * and refuses every write without it as 400 envelope_incomplete, before the
+ * request reaches a handler. Nothing here passed one, so every form on the
+ * Secret Vault page was refused: registering a path, activating a version,
+ * seeding material, brokering, revoking and rotating alike. Same defect, same
+ * fix as the governance decision register.
+ *
+ * Distinct values per operation rather than one blanket string, because the
+ * field records WHY privileged material is being touched and these are
+ * genuinely different reasons — provisioning material is not the same act as
+ * brokering it, and an auditor reading the service's audit log should be able
+ * to tell them apart without inferring it from the route.
+ */
+const PURPOSE = {
+  /** Registering a path, adding a version, activating one. */
+  policyAdministration: "SECRET_POLICY_ADMINISTRATION",
+  /** Seeding material into the vault backend. Administrative, never on the request path. */
+  materialProvisioning: "SECRET_MATERIAL_PROVISIONING",
+  /** Requesting a short-lived lease over material. */
+  brokerage: "SECRET_ACCESS_BROKERAGE",
+  /** Ending one lease early. */
+  leaseRevocation: "SECRET_LEASE_REVOCATION",
+  /** Replacing material, which invalidates every live lease on the path. */
+  rotation: "SECRET_ROTATION",
+} as const;
+
 export const SECRET_CLASSES = [
   "DATABASE_CREDENTIAL",
   "INTEGRATION_TOKEN",
@@ -169,7 +199,10 @@ export async function createSecretPolicy(
       created_by_principal_id: input.principalId,
       ...(input.dataClassification ? { data_classification: input.dataClassification } : {}),
     },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: PURPOSE.policyAdministration,
+    },
   );
 }
 
@@ -274,7 +307,10 @@ export async function createSecretPolicyVersion(
       ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
       created_by_principal_id: input.principalId,
     },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: PURPOSE.policyAdministration,
+    },
   );
 }
 
@@ -296,7 +332,10 @@ export async function activateSecretPolicyVersion(input: {
       input.secretPolicyId,
     )}/versions/${encodeURIComponent(input.versionId)}/activate`,
     { activated_by_principal_id: input.principalId },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: PURPOSE.policyAdministration,
+    },
   );
 }
 
@@ -326,7 +365,10 @@ export async function putSecretMaterial(input: {
     "secretVault",
     `/v1/secret-policies/${encodeURIComponent(input.secretPolicyId)}/material`,
     { material_base64: input.materialBase64 },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: PURPOSE.materialProvisioning,
+    },
   );
 }
 
@@ -362,6 +404,7 @@ export async function rotateSecret(input: {
     {
       correlationId: input.requestId,
       identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: PURPOSE.rotation,
     },
   );
 }
@@ -412,6 +455,7 @@ export async function brokerSecret(input: {
       // policy that decided the request, the lease it minted and the audit entry
       // it wrote could all belong to a tenant the caller merely named.
       identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: PURPOSE.brokerage,
     },
   );
 }
@@ -491,7 +535,7 @@ export async function revokeLease(
     "secretVault",
     `/v1/secrets/leases/${encodeURIComponent(leaseId)}/revoke`,
     {},
-    { identity },
+    { identity, purposeContext: PURPOSE.leaseRevocation },
   );
 }
 
@@ -671,6 +715,34 @@ export function explainSecretVaultError(message: string, subject?: VaultErrorSub
   }
   if (message.includes("store_unavailable")) {
     return "secret-vault-integration-svc could not reach its database. Nothing was written.";
+  }
+  // Checked before the generic tenant cases below: this one is about the shape
+  // of an id, not about scope. The service used to answer 503 store_unavailable
+  // for a malformed id -- a caller's own mistake reported as an outage -- and
+  // now names the offending parameter instead.
+  if (message.includes("invalid_path_parameter")) {
+    return "One of the IDs in that request is not a UUID. Check the ID fields above -- a truncated paste is the usual cause.";
+  }
+  if (message.includes("authorization_denied")) {
+    return "authorization-svc refused this action for your principal. You need the matching SECRET_* grant on the platform scope, not just access to this page.";
+  }
+  if (message.includes("authz_unavailable")) {
+    return "authorization-svc could not be reached, so the action was refused rather than allowed. This is a dependency outage, not a permissions problem -- nothing was written.";
+  }
+  if (message.includes("tenant_scope_mismatch")) {
+    return "The tenant in the request body is not the tenant you are signed in as. A version can only be published into your own tenant's scope.";
+  }
+  if (message.includes("tenant_scope_missing")) {
+    return "No tenant scope reached the service. The gateway sets it from a verified identity -- sign in again.";
+  }
+  if (message.includes("envelope_incomplete")) {
+    return "The request was missing a mandatory service-contract header and was refused before reaching a handler. Every write here needs a purpose, an idempotency key, and the caller's identity.";
+  }
+  if (message.includes("invalid_scope")) {
+    return "A global version (no tenant) cannot name a legal entity -- that scope would govern every tenant while naming an entity inside one of them. Set a tenant, or clear the legal entity.";
+  }
+  if (message.includes("request_too_large")) {
+    return "That request body exceeded the 256 KiB cap. Secret material is meant to be a credential, not a file.";
   }
   return message;
 }

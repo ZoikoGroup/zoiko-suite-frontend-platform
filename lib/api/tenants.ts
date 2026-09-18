@@ -57,6 +57,16 @@ export type Tenant = {
   primary_locale: string;
   default_data_residency_policy_id: string;
   lifecycle_state: string;
+  /**
+   * Optimistic-concurrency token. Post it back as `expected_version` on a
+   * command and the registry refuses the write if anything moved since this
+   * was read, instead of layering your change on top of someone else’s.
+   *
+   * Optional in the type because a record written before the column existed
+   * can still be read back; omitting it from a command is accepted and simply
+   * gives the weaker guarantee.
+   */
+  record_version?: number;
   created_at: string;
   updated_at: string;
   created_by_principal_id: string;
@@ -80,6 +90,16 @@ export type LegalEntity = {
   entity_status: string;
   primary_jurisdiction_id: string;
   data_residency_policy_id: string;
+  /**
+   * Optimistic-concurrency token. Post it back as `expected_version` on a
+   * command and the registry refuses the write if anything moved since this
+   * was read, instead of layering your change on top of someone else’s.
+   *
+   * Optional in the type because a record written before the column existed
+   * can still be read back; omitting it from a command is accepted and simply
+   * gives the weaker guarantee.
+   */
+  record_version?: number;
   created_at: string;
   updated_at: string;
   created_by_principal_id: string;

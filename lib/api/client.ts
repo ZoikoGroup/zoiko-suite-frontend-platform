@@ -253,18 +253,22 @@ export async function apiPatch<T>(
  * is removed — both set effective_to, per the no-hard-delete doctrine — and
  * both take the end date as a required `end_date` query parameter rather than
  * a body, which is why this takes `query` and no payload.
+ *
+ * identity-context-svc's revoke-support-context DELETE accepts an optional JSON
+ * body carrying the revocation reason (best-effort; the first reason stands).
+ * `data` is sent when present, omitted otherwise.
  */
 export async function apiDelete<T>(
   service: ServiceName,
   path: string,
-  options: WriteOptions & { query?: Record<string, string | number | undefined> } = {},
+  options: WriteOptions & { query?: Record<string, string | number | undefined>; data?: unknown } = {},
 ): Promise<ApiWriteResult<T>> {
   const url = new URL(serviceUrl(service) + path);
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value === undefined || value === "") continue;
     url.searchParams.set(key, String(value));
   }
-  return apiWrite<T>("DELETE", service, url.toString(), undefined, options, true);
+  return apiWrite<T>("DELETE", service, url.toString(), options.data, options, true);
 }
 
 async function apiWrite<T>(
