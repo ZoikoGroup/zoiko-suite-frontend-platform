@@ -3,7 +3,7 @@
 // One instance per service container — SERVICE_NAME and SERVICE_PORT from env.
 // Accepts any GET / POST / PATCH request and returns realistic JSON.
 
-const http = require("http");
+import http from "node:http";
 
 const SERVICE_NAME = process.env.SERVICE_NAME || "unknown-svc";
 const PORT = parseInt(process.env.SERVICE_PORT || process.env.PORT || "8080", 10);

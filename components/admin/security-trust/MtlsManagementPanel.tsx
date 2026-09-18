@@ -15,6 +15,15 @@ type MtlsCert = {
 export function MtlsManagementPanel() {
   const [certs, setCerts] = useState<MtlsCert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60_000);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   const fetchCerts = async () => {
     setLoading(true);
@@ -62,7 +71,7 @@ export function MtlsManagementPanel() {
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {certs.map((c) => {
-            const isExpiring = new Date(c.expires_at).getTime() - Date.now() < 30 * 86400000;
+            const isExpiring = new Date(c.expires_at).getTime() - currentTime < 30 * 86400000;
             return (
               <div key={c.cert_id} className="p-3.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                 <div className="flex items-center justify-between">
