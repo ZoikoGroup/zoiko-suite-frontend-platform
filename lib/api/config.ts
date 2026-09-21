@@ -143,6 +143,17 @@ const DEFAULTS = {
   // regenerated — the checked-in file was stale and this service was one of
   // seven with no prefix at all, so ZOIKO_USE_GATEWAY=true would have 404'd.
   retentionRegistry: "http://localhost:8148",
+  // 8096. search-indexer-svc is the secure search control plane
+  // (ZS-SVC-AB-001 ESR-01..ESR-05). It answers 206 Partial Content whenever a
+  // result set is not exhaustive, so lib/api/search.ts treats that as a
+  // SUCCESS carrying completeness_state rather than as an error — the results
+  // are real, they are simply not all of them.
+  //
+  // It is also the one service here that runs the canonical envelope in STRICT
+  // mode rather than write-strict: a search without a verified tenant is
+  // refused (ESR-001) instead of admitted, so every call from this console
+  // must carry the full §4 header set on reads as well as writes.
+  searchIndexer: "http://localhost:8096",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -198,6 +209,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   filingPreparation: "/filing-preparation-svc",
   taxAuthorityInterface: "/tax-authority-interface-svc",
   retentionRegistry: "/retention-registry-svc",
+  searchIndexer: "/search-indexer-svc",
   // Finance Domain extras
   treasury: "/treasury-svc",
   intercompanyAccounting: "/intercompany-accounting-svc",

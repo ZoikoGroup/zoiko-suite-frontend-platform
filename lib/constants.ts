@@ -26,6 +26,7 @@ import {
   Fingerprint,
   Bot,
   Layers,
+  Search,
 } from "lucide-react";
 
 export type DomainKey =
@@ -288,6 +289,13 @@ export const PLATFORM_NAV = [
   // Event contracts constrain every domain rather than belonging to one, so
   // this sits with the platform services and not under a business area.
   { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
+  // Search sits in the platform plane for the same reason event schemas do:
+  // a search contract decides what is discoverable across every domain, and a
+  // restriction applied here removes discoverability in Finance, HR, Legal and
+  // Tax alike. It is also the one page that shows BOTH planes of a service —
+  // the tenant-scoped search box and the platform-scoped registry — so filing
+  // it under a business domain would hide half of it.
+  { label: "Search", href: "/admin/search", icon: Search },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
   // Last, and in the platform plane rather than a domain, because it constrains
   // every service that owns deletable data rather than belonging to one: an
