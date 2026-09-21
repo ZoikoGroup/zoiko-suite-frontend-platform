@@ -1,5 +1,6 @@
 "use client";
 
+import { Children } from "react";
 import { AlertCircle, CheckCircle2, Info, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BANNER_ERROR, BANNER_NEUTRAL, BANNER_SUCCESS, BANNER_WARNING } from "./form";
@@ -30,13 +31,43 @@ export function ResultBanner({
   message,
   children,
   className,
+  testId,
 }: {
   tone: BannerTone;
   message?: string;
   children?: React.ReactNode;
   className?: string;
+  /**
+   * Stable hook for end-to-end tests.
+   *
+   * Every banner already carries role="status", which is right for screen
+   * readers and useless for a spec on a page with seven forms — they are all
+   * the same role and their text is written to be read by a person, so
+   * matching on it would couple the suite to prose. Optional: only surfaces
+   * that are actually driven by a spec pass one.
+   */
+  testId?: string;
 }) {
-  if (!message && !children) return null;
+  // Children.toArray, not a bare truthiness check on `children`.
+  //
+  // A caller writing two conditional children —
+  //
+  //     <ResultBanner ...>
+  //       {state.lease && <JsonBlock value={state.lease} />}
+  //       {state.tokenIssued && <p>…</p>}
+  //     </ResultBanner>
+  //
+  // hands us an ARRAY of [undefined, false] when neither condition holds, and an
+  // array is truthy. `!children` was therefore false and an empty bordered box
+  // rendered under the form before anything had been submitted. With a single
+  // conditional child the same code returned null correctly, which is why this
+  // survived: it was invisible on six of the seven forms using it and only
+  // showed on the one that happened to pass two.
+  //
+  // Children.toArray drops null, undefined and booleans, so this asks the
+  // question that was always meant: is there anything to render?
+  const renderable = Children.toArray(children).length > 0;
+  if (!message && !renderable) return null;
   const { className: toneClass, icon: Icon } = TONES[tone];
 
   return (
@@ -48,6 +79,7 @@ export function ResultBanner({
       )}
       role="status"
       aria-live="polite"
+      data-testid={testId}
     >
       <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1 space-y-2">
