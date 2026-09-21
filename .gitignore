@@ -54,3 +54,11 @@ scratch/*.log
 
 
 
+
+# playwright
+# Per-failure traces, screenshots and error contexts. Regenerated on every run
+# and can be tens of MB after a bad one.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

@@ -35,3 +35,50 @@ jobs:
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           NEXT_TELEMETRY_DISABLED: 1
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    # Hermetic: the suite runs against Node mocks of the backend services under
+    # e2e/mock/, started by playwright.config.ts's webServer block. No Postgres,
+    # Redis, Kafka or gateway, so this needs no service containers.
+    #
+    # A separate job rather than a step on `validate`: it is the slowest thing
+    # here by an order of magnitude, and keeping it parallel means a typecheck
+    # or lint failure still reports in under a minute.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # --with-deps, because the GitHub runner image does not carry Chromium's
+      # shared libraries and the browser fails to launch without them.
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end suite
+        run: npm run test:e2e
+        env:
+          # CI=true is what makes playwright.config.ts stop reusing an existing
+          # server and start its own, and turns on retries. Actions sets it
+          # already; naming it here keeps the dependency visible.
+          CI: true
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

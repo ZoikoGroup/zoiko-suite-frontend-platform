@@ -61,3 +61,105 @@ export async function createSessionViaConsole(page: Page): Promise<string> {
   expect(sessionId).toMatch(/^sess-/);
   return sessionId;
 }
+// ─── secret-vault-integration-svc mock ────────────────────────────────────────
+
+const SECRET_VAULT_MOCK_URL =
+  process.env.SECRET_VAULT_MOCK_URL ??
+  `http://localhost:${process.env.SECRET_VAULT_MOCK_PORT ?? 18087}`;
+
+/** Restore the secret-vault mock's pristine seed. Run alongside resetMock(). */
+export async function resetSecretVaultMock(): Promise<void> {
+  await fetch(`${SECRET_VAULT_MOCK_URL}/_e2e/reset`, { method: "POST" });
+}
+
+export type RecordedRequest = {
+  method: string;
+  path: string;
+  query: Record<string, string>;
+  headers: Record<string, string>;
+  /** Parsed JSON body, for asserts on what a write actually submitted. */
+  body?: unknown;
+};
+
+/**
+ * Requests the console actually sent to secret-vault-integration-svc, optionally
+ * filtered by method and path.
+ *
+ * Asserting on rendered output alone cannot catch a header defect: the console
+ * shipped for weeks sending none of the canonical §4 headers, and every page
+ * still rendered — it was every WRITE that answered 401. This is how a spec sees
+ * the wire.
+ */
+export async function secretVaultRequests(
+  method?: string,
+  path?: string,
+): Promise<RecordedRequest[]> {
+  const response = await fetch(`${SECRET_VAULT_MOCK_URL}/_e2e/requests`);
+  const all = (await response.json()) as RecordedRequest[];
+  return all.filter(
+    (r) => (method ? r.method === method : true) && (path ? r.path === path : true),
+  );
+}
+
+// ─── delegated-authority-svc mock ─────────────────────────────────────────────
+
+const DELEGATED_AUTHORITY_MOCK_URL =
+  process.env.DELEGATED_AUTHORITY_MOCK_URL ??
+  `http://localhost:${process.env.DELEGATED_AUTHORITY_MOCK_PORT ?? 18086}`;
+
+export { DELEGATED_AUTHORITY_MOCK_URL };
+
+/** Restore the delegated-authority mock's pristine seed. Run in beforeEach. */
+export async function resetDelegatedAuthorityMock(): Promise<void> {
+  await fetch(`${DELEGATED_AUTHORITY_MOCK_URL}/_e2e/reset`, { method: "POST" });
+}
+
+/**
+ * Requests the console actually sent to delegated-authority-svc, optionally
+ * filtered by method and path.
+ *
+ * Same purpose as secretVaultRequests: a header defect cannot be seen on the
+ * page — the console once shipped sending none of the canonical §4 headers and
+ * every panel still rendered, because it was every WRITE that answered 401
+ * once enforcement turned on. This is how a spec sees the wire.
+ */
+export async function delegatedAuthorityRequests(
+  method?: string,
+  path?: string,
+): Promise<RecordedRequest[]> {
+  const response = await fetch(`${DELEGATED_AUTHORITY_MOCK_URL}/_e2e/requests`);
+  const all = (await response.json()) as RecordedRequest[];
+  return all.filter(
+    (r) => (method ? r.method === method : true) && (path ? r.path === path : true),
+  );
+}
+
+// ─── tenant-entity-registry-svc mock (gateway-auth's frontend contract) ──────
+
+const TENANT_REGISTRY_MOCK_URL =
+  process.env.TENANT_REGISTRY_MOCK_URL ??
+  `http://localhost:${process.env.TENANT_REGISTRY_MOCK_PORT ?? 18081}`;
+
+/** Restore the registry mock's pristine seed, gateway mode included. */
+export async function resetTenantRegistryMock(): Promise<void> {
+  await fetch(`${TENANT_REGISTRY_MOCK_URL}/_e2e/reset`, { method: "POST" });
+}
+
+/**
+ * Put the simulated gateway into a refusal mode for subsequent requests.
+ *
+ * "denied" and "unresolved" are what gateway-auth-svc puts in X-Tenant-Context
+ * when GOV-01 resolution refuses or cannot complete. Traefik returns an
+ * unsuccessful ForwardAuth reply verbatim, so from the console's side they
+ * arrive on the response to whichever backend it was addressing — which is why
+ * the registry mock, not a gateway mock, is where this is injected.
+ */
+export async function setGatewayContext(
+  mode: "none" | "denied" | "unresolved",
+): Promise<void> {
+  await fetch(`${TENANT_REGISTRY_MOCK_URL}/_e2e/tenant-context`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+}
