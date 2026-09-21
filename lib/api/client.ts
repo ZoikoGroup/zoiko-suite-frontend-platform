@@ -171,12 +171,22 @@ export async function apiGet<T>(
  * `detail`, validation failures everywhere use `field`, and machine codes come
  * back under `error`. Collect all of them rather than picking one and silently
  * losing the others.
+ *
+ * delegated-authority-svc answers business refusals with `error_code` /
+ * `error_message` — the legacy handler dialect, distinct from the envelope
+ * middleware's `error`/`detail`. Without folding those, its refusals reach an
+ * @/lib/api/delegations explainDelegationError empty, and every refusal this
+ * register produces (self_dealing, delegator_mismatch,
+ * delegator_lacks_authority, terminal revoke) renders the bare status line
+ * instead of the sentence written for it.
  */
 async function readErrorDetail(response: Response): Promise<{ detail: string; body?: unknown }> {
   return response
     .json()
-    .then((body: { error?: string; field?: string; message?: string; detail?: string }) => ({
-      detail: [body.error, body.field, body.message, body.detail].filter(Boolean).join(": "),
+    .then((body: { error?: string; field?: string; message?: string; detail?: string; error_code?: string; error_message?: string }) => ({
+      detail: [body.error, body.field, body.message, body.detail, body.error_code, body.error_message]
+        .filter(Boolean)
+        .join(": "),
       // Returned alongside the folded string, not instead of it: a caller that
       // needs a structured member (schema-registry-svc's `violations`) reads it
       // here rather than trying to recover it from prose. See ApiError.body.
