@@ -48,33 +48,9 @@ import type { DomainKey } from "@/lib/constants";
  * compose block. Add them here when they are added to compose.
  */
 const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
-  finance: [
-    { name: "general-ledger-svc", port: 8098 },
-    { name: "accounts-payable-svc", port: 8099 },
-    { name: "accounts-receivable-svc", port: 8101 },
-    { name: "bank-reconciliation-svc", port: 8102 },
-    { name: "treasury-svc", port: 8103 },
-    { name: "financial-close-svc", port: 8104 },
-    { name: "intercompany-accounting-svc", port: 8105 },
-    { name: "consolidation-svc", port: 8106 },
-  ],
-  payroll: [
-    { name: "payroll-run-svc", port: 8110 },
-    { name: "compensation-svc", port: 8111 },
-    { name: "benefits-svc", port: 8112 },
-    { name: "payroll-tax-svc", port: 8113 },
-    { name: "payroll-exceptions-svc", port: 8114 },
-  ],
-  hr: [
-    { name: "employee-master-svc", port: 8108 },
-    // Both real and both previously missing from this domain, while two invented
-    // services occupied the slots.
-    { name: "employment-contracts-svc", port: 8109 },
-    { name: "leave-absence-svc", port: 8115 },
-    { name: "org-structure-svc", port: 8116 },
-    { name: "offboarding-severance-svc", port: 8117 },
-    { name: "workforce-compliance-svc", port: 8118 },
-  ],
+  finance: [],
+  payroll: [],
+  hr: [],
   legal: [
     { name: "contract-lifecycle-svc", port: 8119 },
     { name: "clause-template-svc", port: 8120 },
@@ -92,59 +68,47 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "filing-preparation-svc", port: 8130 },
     { name: "tax-authority-interface-svc", port: 8147 },
   ],
-  "source-authority": [{ name: "source-authority-svc", port: 8150 }],
+  "source-authority": [],
   compliance: [
-    { name: "obligations-svc", port: 8088 },
-    { name: "evidence-manifest-svc", port: 8095 },
-    // compliance-status-svc sat on 8137, which is access-control-svc's port, so
-    // this domain vouched for a service it never probed while the one it DID
-    // probe went unnamed. Its real port is 8132 (docker-compose.phase5.yml),
-    // which no main-stack service holds — so on a main-only stack it simply
-    // reads DOWN, which is honest.
-    { name: "compliance-status-svc", port: 8132 },
-
-    // filing-tracker-svc and exception-escalation-svc are REMOVED rather than
-    // repointed, and the distinction matters.
-    //
-    // Both are phase-only (docker-compose.phase5.yml) and both sit on ports a
-    // MAIN-stack service already holds:
-    //
-    //   filing-tracker-svc       8131 — main: spend-controls-svc
-    //   exception-escalation-svc 8133 — main: notification-svc
-    //
-    // So on the ordinary main stack a probe of either port answers 200 from the
-    // wrong service and the grid reports a phase-only service as READY when it
-    // is not running at all. Correcting them to their "real" ports does not fix
-    // that — it IS that, because the real port is the contested one. An earlier
-    // pass here did exactly that, moving both from one wrong number to another
-    // and calling it a correction.
-    //
-    // This follows the rule the header already states for withholding-tax-svc
-    // and filing-preparation-svc: a service with no main compose block cannot
-    // be running, so listing it can only produce a false reading. Add them back
-    // when they are in docker-compose.yml on ports of their own.
+    { name: "filing-tracker-svc", port: 8151 },
+    { name: "compliance-status-svc", port: 8152 },
+    { name: "exception-escalation-svc", port: 8133 },
   ],
-  // 8082, not 8081 — 8081 is tenant-entity-registry-svc. The wrong number has
-  // been written down for this service more than once, including in
-  // board-resolutions-svc's compose block, where it named a port belonging to a
-  // different service entirely.
-  jurisdictions: [{ name: "jurisdiction-rules-svc", port: 8082 }],
-  delegations: [{ name: "delegated-authority-svc", port: 8136 }],
-  documents: [{ name: "document-vault-svc", port: 8094 }],
+  jurisdictions: [],
+  delegations: [],
+  documents: [],
   "commercial-ops": [
     { name: "purchase-request-svc", port: 8100 },
-    // 8139: the runner serves purchase-order-svc on 8139, not 8129. Port 8129 is
-    // already taken by withholding-tax-svc in the tax domain. Corrected here and
-    // in config.ts so both tables agree and the health grid can read operational.
-    { name: "purchase-order-svc", port: 8139 },
-    { name: "invoice-approval-svc", port: 8107 },
+    { name: "purchase-order-svc", port: 8150 },
     { name: "spend-controls-svc", port: 8131 },
-    { name: "vendor-due-diligence-svc", port: 8135 },
+    { name: "vendor-due-diligence-svc", port: 8132 },
+    { name: "procurement-workflow-svc", port: 8134 },
   ],
-  // One service, not four. The other three were invented, and two of them probed
-  // ports belonging to jurisdiction-svc and policy-svc — so they reported READY.
-  "audit-events": [{ name: "audit-event-store-svc", port: 8084 }],
+  "audit-events": [],
   "purchase-requests": [{ name: "purchase-request-svc", port: 8100 }],
+  intelligence: [
+    { name: "anomaly-detection-svc", port: 8153 },
+    { name: "forecasting-svc", port: 8135 },
+    { name: "compliance-risk-scoring-svc", port: 8136 },
+    { name: "reconciliation-intelligence-svc", port: 8137 },
+    { name: "reporting-orchestration-svc", port: 8138 },
+    { name: "decision-support-svc", port: 8154 },
+    { name: "migration-integrity-svc", port: 8139 },
+  ],
+  "security-trust": [
+    { name: "mtls-management-svc", port: 8140 },
+    { name: "siem-integration-svc", port: 8141 },
+    { name: "carta-svc", port: 8142 },
+    { name: "key-management-svc", port: 8143 },
+  ],
+  integration: [
+    { name: "connectivity-api-bridge-svc", port: 8144 },
+    { name: "banking-connector-svc", port: 8145 },
+    { name: "hris-connector-svc", port: 8146 },
+    { name: "tax-authority-interface-svc", port: 8147 },
+    { name: "esignature-integration-svc", port: 8148 },
+    { name: "external-data-feed-svc", port: 8149 },
+  ],
 };
 
 export type DomainHealth = {

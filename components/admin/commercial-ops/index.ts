@@ -30,3 +30,5 @@ export { CommercialOpsProcessTimeline } from "./CommercialOpsProcessTimeline";
 // approver rather than a developer is the reader.
 export { PurchaseRequestSummary } from "./PurchaseRequestSummary";
 export { PurchaseRequestLookup } from "./PurchaseRequestLookup";
+export { ProcurementWorkflowPanel } from "./ProcurementWorkflowPanel";
+

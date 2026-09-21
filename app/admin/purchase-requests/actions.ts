@@ -112,15 +112,15 @@ export async function submitPurchaseRequest(
   // take it by hand, and there is no ID picker anywhere on this page.
   return result.status === 201
     ? {
-        status: "created",
-        requestId: request.request_id,
-        message: `Request raised for ${money}, status ${request.status} — ID ${request.request_id}. It authorises nothing until approved; an order cannot be issued against it yet.`,
-      }
+      status: "created",
+      requestId: request.request_id,
+      message: `Request raised for ${money}, status ${request.status} — ID ${request.request_id}. It authorises nothing until approved; an order cannot be issued against it yet.`,
+    }
     : {
-        status: "replayed",
-        requestId: request.request_id,
-        message: `No new request written — this replayed an existing one for ${money}, currently ${request.status}, ID ${request.request_id}. The service is idempotent on correlation ID, so a retried submit resolves to the original rather than duplicating it.`,
-      };
+      status: "replayed",
+      requestId: request.request_id,
+      message: `No new request written — this replayed an existing one for ${money}, currently ${request.status}, ID ${request.request_id}. The service is idempotent on correlation ID, so a retried submit resolves to the original rather than duplicating it.`,
+    };
 }
 
 /** Approve a PENDING request. Terminal. */
@@ -197,15 +197,15 @@ async function decideRequest(
   const request = result.data;
   return decision === "approve"
     ? {
-        status: "approved",
-        requestId: request.request_id,
-        message: `Request APPROVED and attributed to you. An order can now be issued against it — paste this ID into the issue form: ${request.request_id}`,
-      }
+      status: "approved",
+      requestId: request.request_id,
+      message: `Request APPROVED and attributed to you. An order can now be issued against it — paste this ID into the issue form: ${request.request_id}`,
+    }
     : {
-        status: "rejected",
-        requestId: request.request_id,
-        message: `Request REJECTED, with your reason stored on the record. No order can be issued against it.`,
-      };
+      status: "rejected",
+      requestId: request.request_id,
+      message: `Request REJECTED, with your reason stored on the record. No order can be issued against it.`,
+    };
 }
 
 /**

@@ -210,6 +210,24 @@ export async function listWorkforceAlerts(identity?: Identity): Promise<ApiResul
   return { ok: true, data: list };
 }
 
+export async function createWorkforceAlert(
+  body: {
+    employee_id: string;
+    alert_type: string;
+    severity: string;
+    description: string;
+    status?: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<ComplianceAlert>> {
+  const res = await apiPost<{ alert?: ComplianceAlert } | ComplianceAlert>(
+    "workforceCompliance", "/v1/compliance/alerts", body, { identity }
+  );
+  if (!res.ok) return res;
+  const alert = (res.data as { alert?: ComplianceAlert }).alert ?? (res.data as ComplianceAlert);
+  return { ok: true, data: alert };
+}
+
 // ─── 6. Offboarding & Severance ──────────────────────────────────────────────
 
 export async function initiateTermination(

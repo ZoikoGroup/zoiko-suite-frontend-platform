@@ -47,18 +47,22 @@ export function NotificationBell() {
   // asking.
   useEffect(() => {
     let cancelled = false;
-    void loadBell().then((s) => {
-      if (!cancelled) setState(s);
-    });
+    void loadBell()
+      .then((s) => {
+        if (!cancelled) setState(s);
+      })
+      .catch(() => {});
 
     const timer = window.setInterval(() => {
       // Skip the poll while the tab is hidden. A backgrounded dashboard left
       // open overnight would otherwise make ~500 pointless round trips before
       // anyone looked at it.
       if (document.visibilityState === "visible") {
-        void loadBell().then((s) => {
-          if (!cancelled) setState(s);
-        });
+        void loadBell()
+          .then((s) => {
+            if (!cancelled) setState(s);
+          })
+          .catch(() => {});
       }
     }, POLL_MS);
 

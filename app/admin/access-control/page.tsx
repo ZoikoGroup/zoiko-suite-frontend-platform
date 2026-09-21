@@ -77,7 +77,7 @@ async function WriteForms() {
   if (!identity) return null;
 
   const rolesResult = await listRoleDefinitions(identity);
-  const roles = rolesResult.ok ? (rolesResult.data ?? []) : [];
+  const roles = rolesResult.ok && Array.isArray(rolesResult.data) ? rolesResult.data : [];
   const legalEntityId = identity.legalEntityId ?? "";
 
   return (

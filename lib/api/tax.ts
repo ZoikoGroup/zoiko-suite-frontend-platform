@@ -847,7 +847,7 @@ export async function createVATReturn(
   identity?: Identity
 ): Promise<ApiResult<VATReturn>> {
   const base = vatGstUrl();
-  return fetchDomainServicePost<VATReturn, VATReturn>(
+  return fetchDomainServicePost<{ vat_return?: VATReturn } & Partial<VATReturn>, VATReturn>(
     `${base}/v1/vat-returns`,
     base,
     "vat-gst-svc",
@@ -857,7 +857,10 @@ export async function createVATReturn(
       tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
       created_by: identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
     },
-    (d) => d
+    // The mock service wraps the record: { vat_return: {...} }.
+    // A real backend may return the flat object directly — fall back to the
+    // raw response so both shapes work without a code change.
+    (d) => (d.vat_return ?? d) as VATReturn
   );
 }
 

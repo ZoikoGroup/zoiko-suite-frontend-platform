@@ -91,9 +91,11 @@ export async function createVatReturnAction(
   }
 
   revalidatePath("/admin/tax");
+  const netPayable = res.data.net_tax_payable ?? 0;
+  const displayCurrency = res.data.currency ?? currency;
   return {
     status: "success",
-    message: `VAT Return for ${taxPeriod} successfully registered in DRAFT state. Net tax payable: ${res.data.net_tax_payable.toLocaleString()} ${res.data.currency}.`,
+    message: `VAT Return for ${taxPeriod} successfully registered in DRAFT state. Net tax payable: ${netPayable.toLocaleString()} ${displayCurrency}`.trimEnd() + ".",
     returnId: res.data.return_id,
     vatReturn: res.data,
   };

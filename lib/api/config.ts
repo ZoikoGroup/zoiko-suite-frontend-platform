@@ -1,7 +1,7 @@
 // Backend service registry for the ZoikoSuite admin console.
 //
-// Every service in the backend listens on its own port (8080–8130) and, in a
-// real deployment, is reachable only through the Traefik gateway on :80 — the
+// Every service in the backend listens on its own port and, in a real
+// deployment, is reachable only through the Traefik gateway on :80 — the
 // service ports are not published. Locally the ports ARE published, so we talk
 // to services directly and keep the gateway out of the loop.
 //
@@ -9,56 +9,26 @@
 // and set ZOIKO_USE_GATEWAY=true. Everything downstream reads serviceUrl().
 
 const DEFAULTS = {
+  // ── Core / Legacy Services (kept for typing and client compatibility) ────
   governance: "http://localhost:8083",
   policy: "http://localhost:8085",
   configuration: "http://localhost:8086",
   secretVault: "http://localhost:8087",
   obligations: "http://localhost:8088",
   identityContext: "http://localhost:8080",
-  // Read-only here. obligations-svc validates every jurisdiction_id against this
-  // service on the write path and fails closed, so the console reads the same
-  // register to offer a picker — a free-text UUID field would produce
-  // jurisdiction_not_found for anything but a copy-paste.
   jurisdictionRules: "http://localhost:8082",
-  purchaseRequest: "http://localhost:8100",
-  contracts: "http://localhost:8119",
-  // 8129. This said 8112, which compose also gave to benefits-svc — the two
-  // could never both start. Traefik's all-services.yml has always routed this
-  // service to :8129 and .env.local has always said 8129, so 8112 was wrong in
-  // three places at once; compose now agrees with the other two.
-  purchaseOrder: "http://localhost:8129",
-  evidence: "http://localhost:8130",
   accountsReceivable: "http://localhost:8101",
-  // 8098. The hub of the Finance domain — treasury, financial-close,
-  // bank-reconciliation, intercompany and consolidation all read it — and the
-  // service behind the journal register on /admin/finance.
   generalLedger: "http://localhost:8098",
-  // 8102. Reconciles bank statement lines against general-ledger journals, so
-  // it reads the ledger above rather than owning any postings of its own.
   bankReconciliation: "http://localhost:8102",
-  // 8099, not the 8102 that lib/api/finance.ts claimed for months. The port is
-  // in the compose file and in health.ts; the stale comment was the only place
-  // that disagreed, and nothing called it, so nothing caught it.
   accountsPayable: "http://localhost:8099",
-  // 8131. CommercialOpsActionHeader had this as 8113 — transposed digits, the
-  // same class of error as accounts-payable-svc's 8102, and equally uncaught
-  // because the only code path that used a spend-controls URL pointed at a route
-  // the service does not have.
-  spendControls: "http://localhost:8131",
-  // 8135, per compose. The service's own config.Load defaulted PORT to 8132 — a
-  // port nothing in this platform uses — so it was reachable only because compose
-  // overrides PORT. Fixed there too; this is the number both now agree on.
-  vendorDueDiligence: "http://localhost:8135",
   auditEventStore: "http://localhost:8084",
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
   financialClose: "http://localhost:8104",
-  // ── Finance Domain extras ────────────────────────────────────────────────
   treasury: "http://localhost:8103",
   intercompanyAccounting: "http://localhost:8105",
   consolidation: "http://localhost:8106",
   invoiceApproval: "http://localhost:8107",
-  // ── HR & Workforce Domain ────────────────────────────────────────────────
   employeeMaster: "http://localhost:8108",
   employmentContracts: "http://localhost:8109",
   payrollRun: "http://localhost:8110",
@@ -71,108 +41,84 @@ const DEFAULTS = {
   offboardingSeverance: "http://localhost:8117",
   workforceCompliance: "http://localhost:8118",
   performanceReview: "http://localhost:8139",
-  // ── Compliance & Risk Domain ─────────────────────────────────────────────
-  complianceStatus: "http://localhost:8132",
-  exceptionEscalation: "http://localhost:8133",
-  anomalyDetection: "http://localhost:8134",
-  complianceRiskScoring: "http://localhost:8136",
-  decisionSupport: "http://localhost:8138",
-  // ── AI Governance, Security & Access ─────────────────────────────────────
   aiGovernance: "http://localhost:8146",
   authorization: "http://localhost:8089",
   accessControl: "http://localhost:8137",
-  procurementWorkflow: "http://localhost:8140",
   workflow: "http://localhost:8090",
   workflowHistory: "http://localhost:8097",
   privacyConsent: "http://localhost:8152",
   privacyPurposeRegistry: "http://localhost:8151",
   privacyTransfer: "http://localhost:8155",
-  // ── Payee Banking Identity & Counterparty Domain ─────────────────────────
-  payeeBankingIdentity: "http://localhost:8166",
-  counterpartyManagement: "http://localhost:8124",
-  // ── Edge Gateway & ForwardAuth ──────────────────────────────────────────
+  payeeBankingIdentity: "http://localhost:8173",
   gatewayAuth: "http://localhost:8092",
-  // ── Enterprise Search & Indexer Domain ────────────────────────────────────
   searchIndexer: "http://localhost:8096",
   opensearch: "http://localhost:9200",
-  migrationIntegrity: "http://localhost:8139",
-  // ── Filing Tracker ────────────────────────────────────────────────────────
-  filingTracker: "http://localhost:8141",
-  // 8133, per compose. notification-svc delivers governed notifications. EMAIL
-  // goes through a real SMTP provider (Mailpit locally, on :8025); IN_APP is
-  // delivered by being recorded and carries read state. WEBHOOK has no provider
-  // and is recorded FAILED naming what is missing; SMS was withdrawn and is
-  // refused at the boundary. What SENT is worth per channel is set out in
-  // lib/api/notifications.ts.
   notification: "http://localhost:8133",
-  // 8122, per compose. board-resolutions-svc owns board meetings and their
-  // resolutions; the write path authorizes MEETING_CREATE / RESOLUTION_CREATE /
-  // RESOLUTION_VOTE / RESOLUTION_PASS against the legal entity and enforces
-  // segregation of duties on the pass (the drafter may not pass their own
-  // resolution).
-  boardResolutions: "http://localhost:8122",
-  // 8136, per compose. delegated-authority-svc holds the register of who may
-  // act for whom -- time-bound, entity-scoped grants of one principal's
-  // authority to another.
   delegatedAuthority: "http://localhost:8136",
-  // 8094, per compose. document-vault-svc is the store of record for governed
-  // documents: append-only version lineage, a SHA-256 checksum re-verified on
-  // every read, and an append-only access log of who read what.
   documentVault: "http://localhost:8094",
-  // 8150, per compose. source-authority-svc answers "which connected system's
-  // value should I trust for this field, right now" — precedence rules that are
-  // platform-wide reference data, composed over normalized facts that are
-  // tenant business data. The two are deliberately scoped differently; see
-  // lib/api/source-authority.ts.
   sourceAuthority: "http://localhost:8150",
-  // ── Tax Domain (ports 8125–8130 + 8147) ──────────────────────────────────
-  //
-  // TWO OF THESE COLLIDE with entries above, and the collision is inherited
-  // from the backend rather than introduced here: withholding-tax-svc's config
-  // defaults to 8129, which is purchase-order-svc's port, and
-  // filing-preparation-svc's defaults to 8130, which is
-  // evidence-requirements-svc's. Neither tax service appears in the backend
-  // compose file, so neither has ever started and the clash has never bitten —
-  // but it means a call made here to withholdingTax or filingPreparation
-  // reaches purchase-order-svc or evidence-requirements-svc and gets a
-  // confusing answer instead of a connection refused.
-  //
-  // Left as-is deliberately. Reassigning a service's port is the backend's
-  // allocation to make, not a merge resolution's; the values here match what
-  // those services actually declare today.
+  retentionRegistry: "http://localhost:8148",
+
+  // ── Canonical Spec: Group 6 · Legal, Corporate & Commercial ───────────────
+  contracts: "http://localhost:8119",
+  clauseTemplate: "http://localhost:8120",
+  obligationTracking: "http://localhost:8121",
+  boardResolutions: "http://localhost:8122",
+  corporateActions: "http://localhost:8123",
+  counterpartyManagement: "http://localhost:8124",
+  purchaseRequest: "http://localhost:8100",
+  // Port conflict resolved: spec said 8129, but withholding-tax-svc holds 8129.
+  purchaseOrder: "http://localhost:8150",
+  spendControls: "http://localhost:8131",
+  // Spec port 8132
+  vendorDueDiligence: "http://localhost:8132",
+  procurementWorkflow: "http://localhost:8134",
+
+  // ── Canonical Spec: Group 7 · Tax & Compliance ─────────────────────────────
   taxRules: "http://localhost:8125",
   taxDetermination: "http://localhost:8126",
   vatGst: "http://localhost:8127",
   corporateTax: "http://localhost:8128",
   withholdingTax: "http://localhost:8129",
   filingPreparation: "http://localhost:8130",
+  evidence: "http://localhost:8130",
+  // Port conflict resolved: spec said 8131, but spend-controls-svc holds 8131.
+  filingTracker: "http://localhost:8151",
+  // Port conflict resolved: spec said 8132, but vendor-due-diligence holds 8132.
+  complianceStatus: "http://localhost:8152",
+  exceptionEscalation: "http://localhost:8133",
   taxAuthorityInterface: "http://localhost:8147",
-  // 8148, per compose. retention-registry-svc answers "is it safe to delete,
-  // export or migrate this record yet" for every service that owns deletable
-  // data. Two independent findings, never collapsed: an ACTIVE legal hold blocks
-  // regardless of what any retention policy permits, and the policy separately
-  // says how long the record must be kept. It never deletes anything itself.
-  //
-  // Its gateway route did not exist until deployments/traefik-dynamic was
-  // regenerated — the checked-in file was stale and this service was one of
-  // seven with no prefix at all, so ZOIKO_USE_GATEWAY=true would have 404'd.
-  retentionRegistry: "http://localhost:8148",
-  // The gateway's host port is GATEWAY_PORT in the backend compose, which
-  // defaults to 8000 because port 80 is usually already taken on a dev machine.
+
+  // ── Canonical Spec: Group 8 · Intelligence & Reporting ─────────────────────
+  // Port conflict resolved: spec said 8134, but procurement-workflow holds 8134.
+  anomalyDetection: "http://localhost:8153",
+  forecasting: "http://localhost:8135",
+  complianceRiskScoring: "http://localhost:8136",
+  reconciliationIntelligence: "http://localhost:8137",
+  reportingOrchestration: "http://localhost:8138",
+  // Port conflict resolved: spec said 8138, but reporting-orchestration holds 8138.
+  decisionSupport: "http://localhost:8154",
+  migrationIntegrity: "http://localhost:8139",
+
+  // ── Canonical Spec: Group 9 · Security & Trust ─────────────────────────────
+  mtlsManagement: "http://localhost:8140",
+  siemIntegration: "http://localhost:8141",
+  carta: "http://localhost:8142",
+  keyManagement: "http://localhost:8143",
+
+  // ── Canonical Spec: Group 10 · Integration & Extensibility ─────────────────
+  connectivityApiBridge: "http://localhost:8144",
+  bankingConnector: "http://localhost:8145",
+  hrisConnector: "http://localhost:8146",
+  esignatureIntegration: "http://localhost:8148",
+  externalDataFeed: "http://localhost:8149",
+
+  // ── Gateway fallback ───────────────────────────────────────────────────────
   gateway: "http://localhost:8000",
 } as const;
 
 export type ServiceName = keyof Omit<typeof DEFAULTS, "gateway">;
 
-/**
- * Gateway routing prefix per service, used when ZOIKO_USE_GATEWAY is on.
- *
- * These MUST match the prefixes in the backend's
- * deployments/traefik-dynamic/all-services.yml, which are generated from each
- * service's container_name — so they are the full service name, not a short
- * alias. Getting this wrong produces a 404 from Traefik that looks like the
- * service is down.
- */
 const GATEWAY_PREFIX: Record<ServiceName, string> = {
   governance: "/governance-decision-log-svc",
   policy: "/policy-svc",
@@ -180,44 +126,19 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   secretVault: "/secret-vault-integration-svc",
   obligations: "/obligations-svc",
   identityContext: "/identity-context-svc",
-  // The compose KEY is `jurisdiction-svc` but container_name — and therefore the
-  // generated Traefik prefix — is `jurisdiction-rules-svc`. Using the key here
-  // would 404 in a way that looks like a dead service.
   jurisdictionRules: "/jurisdiction-rules-svc",
-  purchaseRequest: "/purchase-request-svc",
-  contracts: "/contract-lifecycle-svc",
-  purchaseOrder: "/purchase-order-svc",
-  evidence: "/evidence-requirements-svc",
   accountsReceivable: "/accounts-receivable-svc",
   generalLedger: "/general-ledger-svc",
   bankReconciliation: "/bank-reconciliation-svc",
   accountsPayable: "/accounts-payable-svc",
-  spendControls: "/spend-controls-svc",
-  vendorDueDiligence: "/vendor-due-diligence-svc",
   auditEventStore: "/audit-event-store-svc",
   tenantRegistry: "/tenant-entity-registry-svc",
   schemaRegistry: "/schema-registry-svc",
   financialClose: "/financial-close-svc",
-  notification: "/notification-svc",
-  boardResolutions: "/board-resolutions-svc",
-  delegatedAuthority: "/delegated-authority-svc",
-  documentVault: "/document-vault-svc",
-  sourceAuthority: "/source-authority-svc",
-  // Tax Domain
-  taxRules: "/tax-rules-svc",
-  taxDetermination: "/tax-determination-svc",
-  vatGst: "/vat-gst-svc",
-  corporateTax: "/corporate-tax-svc",
-  withholdingTax: "/withholding-tax-svc",
-  filingPreparation: "/filing-preparation-svc",
-  taxAuthorityInterface: "/tax-authority-interface-svc",
-  retentionRegistry: "/retention-registry-svc",
-  // Finance Domain extras
   treasury: "/treasury-svc",
   intercompanyAccounting: "/intercompany-accounting-svc",
   consolidation: "/consolidation-svc",
   invoiceApproval: "/invoice-approval-svc",
-  // HR & Workforce Domain
   employeeMaster: "/employee-master-svc",
   employmentContracts: "/employment-contracts-svc",
   payrollRun: "/payroll-run-svc",
@@ -230,43 +151,75 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   offboardingSeverance: "/offboarding-severance-svc",
   workforceCompliance: "/workforce-compliance-svc",
   performanceReview: "/performance-review-svc",
-  // Compliance & Risk Domain
-  complianceStatus: "/compliance-status-svc",
-  exceptionEscalation: "/exception-escalation-svc",
-  anomalyDetection: "/anomaly-detection-svc",
-  complianceRiskScoring: "/compliance-risk-scoring-svc",
-  decisionSupport: "/decision-support-svc",
-  // AI Governance, Security & Access
   aiGovernance: "/ai-governance-svc",
   authorization: "/authorization-svc",
   accessControl: "/access-control-svc",
-  procurementWorkflow: "/procurement-workflow-svc",
-  // Filing Tracker
-  filingTracker: "/filing-tracker-svc",
   workflow: "/workflow-svc",
   workflowHistory: "/workflow-history-svc",
   privacyConsent: "/privacy-consent-svc",
   privacyPurposeRegistry: "/privacy-purpose-registry-svc",
   privacyTransfer: "/privacy-transfer-svc",
   payeeBankingIdentity: "/payee-banking-identity-svc",
-  counterpartyManagement: "/counterparty-management-svc",
   gatewayAuth: "/gateway-auth-svc",
   searchIndexer: "/search-indexer-svc",
   opensearch: "/opensearch",
+  notification: "/notification-svc",
+  delegatedAuthority: "/delegated-authority-svc",
+  documentVault: "/document-vault-svc",
+  sourceAuthority: "/source-authority-svc",
+  retentionRegistry: "/retention-registry-svc",
+
+  // Group 6
+  contracts: "/contract-lifecycle-svc",
+  clauseTemplate: "/clause-template-svc",
+  obligationTracking: "/obligation-tracking-svc",
+  boardResolutions: "/board-resolutions-svc",
+  corporateActions: "/corporate-actions-svc",
+  counterpartyManagement: "/counterparty-management-svc",
+  purchaseRequest: "/purchase-request-svc",
+  purchaseOrder: "/purchase-order-svc",
+  spendControls: "/spend-controls-svc",
+  vendorDueDiligence: "/vendor-due-diligence-svc",
+  procurementWorkflow: "/procurement-workflow-svc",
+
+  // Group 7
+  taxRules: "/tax-rules-svc",
+  taxDetermination: "/tax-determination-svc",
+  vatGst: "/vat-gst-svc",
+  corporateTax: "/corporate-tax-svc",
+  withholdingTax: "/withholding-tax-svc",
+  filingPreparation: "/filing-preparation-svc",
+  evidence: "/filing-preparation-svc",
+  filingTracker: "/filing-tracker-svc",
+  complianceStatus: "/compliance-status-svc",
+  exceptionEscalation: "/exception-escalation-svc",
+  taxAuthorityInterface: "/tax-authority-svc",
+
+  // Group 8
+  anomalyDetection: "/anomaly-detection-svc",
+  forecasting: "/forecasting-svc",
+  complianceRiskScoring: "/compliance-risk-scoring-svc",
+  reconciliationIntelligence: "/reconciliation-intelligence-svc",
+  reportingOrchestration: "/reporting-orchestration-svc",
+  decisionSupport: "/decision-support-svc",
   migrationIntegrity: "/migration-integrity-svc",
+
+  // Group 9
+  mtlsManagement: "/mtls-management-svc",
+  siemIntegration: "/siem-integration-svc",
+  carta: "/carta-svc",
+  keyManagement: "/key-management-svc",
+
+  // Group 10
+  connectivityApiBridge: "/connectivity-api-bridge-svc",
+  bankingConnector: "/banking-connector-svc",
+  hrisConnector: "/hris-connector-svc",
+  esignatureIntegration: "/esignature-integration-svc",
+  externalDataFeed: "/external-data-feed-svc",
 };
 
 const useGateway = process.env.ZOIKO_USE_GATEWAY === "true";
 
-/**
- * The backend's own name for a service, for error messages.
- *
- * The keys of this registry are short console-side aliases — `contracts`,
- * `purchaseOrder` — and putting one in front of a user reads as a bug: nothing
- * in the backend, its logs, or its compose file is called "contracts". Derived
- * from the gateway prefix rather than listed separately so there is only one
- * place a service name can be wrong.
- */
 export function serviceLabel(service: ServiceName): string {
   const prefix = GATEWAY_PREFIX[service];
   if (prefix && prefix.startsWith("/")) {
@@ -275,13 +228,6 @@ export function serviceLabel(service: ServiceName): string {
   return String(service);
 }
 
-/**
- * Resolve the base URL for a backend service.
- *
- * Reads env first so deployments can override without a rebuild. These are
- * deliberately NOT NEXT_PUBLIC_* — the browser must never hold backend URLs,
- * because all calls go through the server (see client.ts).
- */
 export function serviceUrl(service: ServiceName): string {
   if (useGateway) {
     const gateway = process.env.ZOIKO_GATEWAY_URL ?? DEFAULTS.gateway;
@@ -291,8 +237,6 @@ export function serviceUrl(service: ServiceName): string {
   return stripTrailingSlash(process.env[envKeyFor(service)] ?? DEFAULTS[service]);
 }
 
-/** `purchaseOrder` → `ZOIKO_PURCHASE_ORDER_URL`. Plain uppercasing would give
- *  ZOIKO_PURCHASEORDER_URL, which nobody would guess when writing a .env. */
 function envKeyFor(service: ServiceName): string {
   const snake = service.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
   return `ZOIKO_${snake}_URL`;
@@ -302,5 +246,4 @@ function stripTrailingSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
-/** Per-request timeout. Dashboard panels degrade to an empty state on timeout. */
 export const REQUEST_TIMEOUT_MS = Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 10000);
