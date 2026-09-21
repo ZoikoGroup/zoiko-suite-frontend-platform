@@ -162,7 +162,7 @@ export async function LeasePanel({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[52rem] border-collapse text-left">
+        <table data-testid="lease-table" className="w-full min-w-[52rem] border-collapse text-left">
           <thead className="border-b border-slate-200 dark:border-slate-800">
             <tr>
               <th scope="col" className={HEAD}>

@@ -159,7 +159,22 @@ export type SecretAuditEntry = {
   event_type: string;
   secret_class: string;
   secret_path: string;
+  /** The SUBJECT: whose access to the material this entry concerns. */
   requested_by_principal_id: string;
+  /**
+   * The ACTOR: the authenticated caller that performed the act.
+   *
+   * Equal to `requested_by_principal_id` for REQUESTED, GRANTED and DENIED,
+   * where a workload is asking for its own access. Genuinely different for
+   * REVOKED — an operator ending somebody else's lease — which is the case the
+   * column was added for: before it existed the log could say a lease was
+   * revoked and whose it was, but not who revoked it.
+   *
+   * null on rows written before the service captured it (migration 000004).
+   * Not backfilled: copying the subject across would be right for three event
+   * types and wrong for the one that matters.
+   */
+  acted_by_principal_id: string | null;
   tenant_id: string | null;
   legal_entity_id: string | null;
   /** null for REQUESTED and DENIED — nothing was granted to reference. */

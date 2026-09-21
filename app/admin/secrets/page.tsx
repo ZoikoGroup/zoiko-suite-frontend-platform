@@ -154,11 +154,14 @@ export default async function SecretsPage({ searchParams }: PageProps) {
             one — so a 404 from the broker means &ldquo;no policy&rdquo;, and only a 403 means
             &ldquo;policy said no&rdquo;. The two are kept apart everywhere below.{" "}
             <strong className="font-medium text-slate-800 dark:text-slate-100">
-              The admin routes here are not authorized
+              Two different things authorize here.
             </strong>{" "}
-            — registering, versioning, activating, seeding, and rotating are gated only by this
-            console&apos;s session. The broker route is the one that authorizes, and it authorizes
-            the requesting workload, not you.
+            Registering, versioning, activating, seeding, revoking, and rotating each require a
+            named <code className="font-mono text-xs">SECRET_*</code> action on your principal,
+            checked against authorization-svc — so a 403 on any of those is about{" "}
+            <em>your</em> grants. The broker route is the exception: it carries no action
+            requirement, because the version&apos;s allowed-workload list is its authorization. A
+            403 from the broker is about the requesting workload, not about you.
           </p>
         </CardContent>
       </Card>

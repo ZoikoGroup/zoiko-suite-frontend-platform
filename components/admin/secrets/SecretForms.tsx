@@ -78,7 +78,7 @@ export function RegisterSecretPolicyForm() {
   );
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} data-testid="register-policy-form" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="secret_class" className={LABEL}>
@@ -140,7 +140,7 @@ export function RegisterSecretPolicyForm() {
         </p>
       </div>
 
-      <ResultBanner tone={WRITE_TONE[state.status]} message={state.message}>
+      <ResultBanner testId="register-policy-result" tone={WRITE_TONE[state.status]} message={state.message}>
         {state.policy && (
           <JsonBlock
             value={{
@@ -162,7 +162,7 @@ export function CreateSecretVersionForm() {
   );
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} data-testid="create-version-form" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <label htmlFor="version_secret_policy_id" className={LABEL}>
@@ -227,7 +227,7 @@ export function CreateSecretVersionForm() {
         </p>
       </div>
 
-      <ResultBanner tone={WRITE_TONE[state.status]} message={state.message}>
+      <ResultBanner testId="create-version-result" tone={WRITE_TONE[state.status]} message={state.message}>
         {state.version && (
           <JsonBlock
             value={{
@@ -249,7 +249,7 @@ export function ActivateSecretVersionForm() {
   );
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} data-testid="activate-version-form" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="activate_secret_policy_id" className={LABEL}>
@@ -286,7 +286,7 @@ export function ActivateSecretVersionForm() {
         </p>
       </div>
 
-      <ResultBanner tone={WRITE_TONE[state.status]} message={state.message} />
+      <ResultBanner testId="activate-version-result" tone={WRITE_TONE[state.status]} message={state.message} />
     </form>
   );
 }
@@ -298,7 +298,7 @@ export function PutMaterialForm() {
   );
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} data-testid="put-material-form" className="space-y-4">
       <div className="grid grid-cols-1 gap-4">
         <div>
           <label htmlFor="material_secret_policy_id" className={LABEL}>
@@ -337,7 +337,7 @@ export function PutMaterialForm() {
         </p>
       </div>
 
-      <ResultBanner tone={WRITE_TONE[state.status]} message={state.message} />
+      <ResultBanner testId="put-material-result" tone={WRITE_TONE[state.status]} message={state.message} />
     </form>
   );
 }
@@ -349,7 +349,7 @@ export function BrokerForm() {
   );
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} data-testid="broker-form" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="sm:col-span-2">
           <label htmlFor="broker_secret_path" className={LABEL}>
@@ -388,7 +388,7 @@ export function BrokerForm() {
         </p>
       </div>
 
-      <ResultBanner tone={BROKER_TONE[state.status]} message={state.message}>
+      <ResultBanner testId="broker-result" tone={BROKER_TONE[state.status]} message={state.message}>
         {state.lease && <JsonBlock value={state.lease} />}
         {state.tokenIssued && (
           <p className="text-xs">
@@ -409,7 +409,7 @@ export function RevokeLeaseForm() {
   );
 
   return (
-    <form action={action} className="space-y-3">
+    <form action={action} data-testid="revoke-lease-form" className="space-y-3">
       <div>
         <label htmlFor="revoke_lease_id" className={LABEL}>
           Lease ID
@@ -432,7 +432,7 @@ export function RevokeLeaseForm() {
         </p>
       </div>
 
-      <ResultBanner tone={REVOKE_TONE[state.status]} message={state.message}>
+      <ResultBanner testId="revoke-lease-result" tone={REVOKE_TONE[state.status]} message={state.message}>
         {state.lease && (
           <JsonBlock
             value={{
@@ -454,7 +454,7 @@ export function RotateSecretForm() {
   );
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} data-testid="rotate-secret-form" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="rotate_secret_policy_id" className={LABEL}>
@@ -491,7 +491,7 @@ export function RotateSecretForm() {
         </p>
       </div>
 
-      <ResultBanner tone={ROTATE_TONE[state.status]} message={state.message}>
+      <ResultBanner testId="rotate-secret-result" tone={ROTATE_TONE[state.status]} message={state.message}>
         {state.result && <JsonBlock value={state.result} />}
       </ResultBanner>
     </form>
