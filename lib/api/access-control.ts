@@ -405,6 +405,18 @@ export function explainAccessControlError(message: string): string {
   if (message.includes("authorization-svc admin API unavailable")) {
     return "authorization-svc could not be reached, so nothing was changed. This matters more than a usual outage: a retirement recorded here without reaching authorization-svc would leave the role still granting every action it grants today, so the service refuses rather than recording a retirement it cannot enforce. Retry once authorization-svc is back.";
   }
+  if (
+    message.includes("role_code_exists") ||
+    message.includes("with that role_code already exists")
+  ) {
+    return "That role code is already defined in this tenant. Role codes are the strings every service's authz check names, so they are unique per tenant — reuse the existing definition, or pick a different code. Nothing was written, and nothing was provisioned into authorization-svc. (This used to arrive as a store outage, which sent people to look at a database that was working.)";
+  }
+  if (
+    message.includes("bundle_code_exists") ||
+    message.includes("with that bundle_code is already attached")
+  ) {
+    return "That bundle code is already attached to this role. authorization-svc identifies a bundle by role and code, and attaching replaces whatever that pair already holds — so a second bundle with the same code would silently overwrite the first one's actions there while both kept showing here, and detaching either would retire the single grant they shared. Edit the existing bundle instead, or choose another code.";
+  }
   if (message.includes("authorization denied for this access control action")) {
     return "You hold no ROLE_MANAGE grant on this legal entity. Role definitions are authorized per entity, not platform-wide — ask an access administrator for the grant on this entity specifically.";
   }
