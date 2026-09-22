@@ -163,3 +163,151 @@ export async function setGatewayContext(
     body: JSON.stringify({ mode }),
   });
 }
+
+// ─── access-control-svc mock ──────────────────────────────────────────────────
+
+const ACCESS_CONTROL_MOCK_URL =
+  process.env.ACCESS_CONTROL_MOCK_URL ??
+  `http://localhost:${process.env.ACCESS_CONTROL_MOCK_PORT ?? 18137}`;
+
+export { ACCESS_CONTROL_MOCK_URL };
+
+/** Restore the access-control mock's pristine seed. Run alongside resetMock(). */
+export async function resetAccessControlMock(): Promise<void> {
+  await fetch(`${ACCESS_CONTROL_MOCK_URL}/_e2e/reset`, { method: "POST" });
+}
+
+/**
+ * Make the access-control mock refuse the NEXT write, once.
+ *
+ * It exists so a spec can see how the console renders a refusal without making
+ * the refusal the mock's normal behaviour. The refusals worth arming are the
+ * ones the console cannot predict for itself — a 403 that depends on a grant
+ * only authorization-svc knows about, and the 503 that means a retirement did
+ * NOT reach the enforcement plane.
+ */
+export async function armAccessControlRefusal(refusal: {
+  status: number;
+  error_code: string;
+  error_message: string;
+}): Promise<void> {
+  await fetch(`${ACCESS_CONTROL_MOCK_URL}/_e2e/arm`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(refusal),
+  });
+}
+
+/**
+ * Make the next role create answer 200 with the role already holding roleCode —
+ * exactly what access-control-svc answers when a correlation id has already
+ * been used.
+ *
+ * Armed rather than driven from the browser because the browser cannot reach
+ * that path: the page mints a fresh correlation id on every server render and
+ * the hidden input carrying it is React-controlled, so a value written into the
+ * DOM is reconciled away before the submission is serialised. The service's own
+ * idempotency is proved in its Go suite and again live by scripts/audit.sh;
+ * what this arms is the half only the console can get wrong.
+ */
+export async function armAccessControlReplay(roleCode: string): Promise<void> {
+  await fetch(`${ACCESS_CONTROL_MOCK_URL}/_e2e/arm`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status: 200, replay_role_code: roleCode }),
+  });
+}
+
+// ─── notification-svc mock ────────────────────────────────────────────────────
+
+const NOTIFICATION_MOCK_URL =
+  process.env.NOTIFICATION_MOCK_URL ??
+  `http://localhost:${process.env.NOTIFICATION_MOCK_PORT ?? 18133}`;
+
+export { NOTIFICATION_MOCK_URL };
+
+/**
+ * Restore the notification mock's pristine seed.
+ *
+ * Needed in the beforeEach of EVERY spec that signs in, not only the
+ * notification one: the topbar bell polls the unread count and the unread list
+ * on every admin page, so a spec that leaves a notice marked read changes what
+ * the next spec's bell renders.
+ */
+export async function resetNotificationMock(): Promise<void> {
+  await fetch(`${NOTIFICATION_MOCK_URL}/_e2e/reset`, { method: "POST" });
+}
+
+/**
+ * Requests the console actually sent to notification-svc, optionally filtered by
+ * method and path.
+ *
+ * Same purpose as secretVaultRequests, and it matters more here than anywhere
+ * else in the suite. On this service almost every interesting outcome is a 2xx:
+ * a FAILED delivery answers 201 by design, and so does one rescheduled after a
+ * transient failure. Asserting on rendered output alone cannot see whether the
+ * console sent a template alongside a subject (which the service refuses), or
+ * whether it dropped the §4 headers on the write — the console once shipped
+ * sending none of them, and every page still rendered because only WRITES
+ * answered 401.
+ */
+export async function notificationRequests(
+  method?: string,
+  path?: string,
+): Promise<RecordedRequest[]> {
+  const response = await fetch(`${NOTIFICATION_MOCK_URL}/_e2e/requests`);
+  const all = (await response.json()) as RecordedRequest[];
+  return all.filter(
+    (r) => (method ? r.method === method : true) && (path ? r.path === path : true),
+  );
+}
+
+/**
+ * Make the notification mock refuse the NEXT request, once.
+ *
+ * `only` decides which: "write" (the default) arms the send, "any" arms the
+ * next request of either kind — which is how a spec reaches the register's
+ * unreachable-service state, since that is a READ failing.
+ *
+ * Armed rather than provoked from the browser because these are refusals the
+ * console cannot cause for itself: a 403 that depends on a NOTIFICATION_SEND
+ * grant only authorization-svc knows about, and the 503 that means the register
+ * could not be reached at all. Both have their own console copy, and both are
+ * wrong in a way a user would act on — a 503 rendered as "no notifications"
+ * tells an operator nothing was sent when nobody knows what was sent.
+ */
+export async function armNotificationRefusal(refusal: {
+  status: number;
+  error: string;
+  message?: string;
+  only?: "write" | "any";
+  /**
+   * Refuse only requests whose path starts with this. Not optional in
+   * practice: one page load makes several calls here — the template catalogue,
+   * the entity register, and the bell's count and list concurrently — so an
+   * untargeted arm is consumed by whichever arrives first, and the spec then
+   * asserts against a page where a different call failed.
+   */
+  path?: string;
+  /**
+   * Refuse only requests carrying this query parameter. It is what separates
+   * the two GET reads that share a path: the entity REGISTER read carries
+   * `legal_entity_id`, the bell's inbox read carries `unread_only`. Without it,
+   * a spec proving the register degrades cleanly also takes the bell down —
+   * intermittently, depending on which poll interleaved.
+   */
+  hasQuery?: string;
+  /**
+   * How many matching requests to refuse. More than one is usually right: the
+   * bell reads its count and its list concurrently, and React re-invokes a
+   * mount effect in development, so a single refusal is overwritten by the
+   * succeeding load that follows it.
+   */
+  times?: number;
+}): Promise<void> {
+  await fetch(`${NOTIFICATION_MOCK_URL}/_e2e/arm`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(refusal),
+  });
+}
