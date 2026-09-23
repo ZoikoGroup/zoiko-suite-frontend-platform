@@ -115,6 +115,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       await getSession({
         sessionContextId: rest[2],
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -127,6 +128,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
         sessionContextId: rest[2],
         asOf: req.nextUrl.searchParams.get("as_of") ?? undefined,
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -138,6 +140,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       await getSupportContext({
         supportContextId: rest[2],
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -149,6 +152,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       await getPrincipal({
         principalId: rest[1],
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -158,6 +162,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       await getPrincipalRoles({
         principalId: rest[1],
         callerTenantId: identity.tenantId,
+        // This helper names the field legalEntityId, not callerLegalEntityId —
+        // it filters role assignments BY entity as well as carrying the header.
+        legalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -167,6 +174,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       await getPrincipalDelegations({
         principalId: rest[1],
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -207,6 +215,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
         actorPrincipalId: identity.principalId,
         correlationId: String(body.correlation_id ?? crypto.randomUUID()),
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
       }),
     );
   }
@@ -217,6 +226,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
       await refreshTenantContextCache({
         request: body as RefreshCacheRequest,
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -228,6 +238,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
       await invalidateTenantContext({
         request: body as InvalidateTenantContextRequest,
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );
@@ -239,6 +250,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
       await attachSupportContext({
         request: body as AttachSupportContextRequest,
         supportPrincipalId: identity.principalId,
+        callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
       }),
       201,
     );
@@ -264,6 +277,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ path
         actorPrincipalId: identity.principalId,
         correlationId: String(body.correlation_id ?? crypto.randomUUID()),
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
       }),
     );
   }
@@ -286,6 +300,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ p
         reason: body.reason ? String(body.reason) : undefined,
         correlationId: body.correlation_id ? String(body.correlation_id) : crypto.randomUUID(),
         callerTenantId: identity.tenantId,
+        callerLegalEntityId: identity.legalEntityId,
         callerPrincipalId: identity.principalId,
       }),
     );

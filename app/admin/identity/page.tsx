@@ -143,6 +143,45 @@ function ResultBox({ title, value, testid }: { title: string; value: string; tes
   );
 }
 
+/**
+ * What just happened, in a sentence, above the identifiers it produced.
+ *
+ * The result panels on this page already carried sentence-case labels, but a
+ * grid of monospace ids answers "what was returned" and not "what did I just
+ * do" — which is the question an operator running break-glass or a tenant-wide
+ * revocation actually has. The ids stay exactly as they were underneath: per
+ * lib/humanize.ts, a readable summary must never be the only way to see what
+ * was stored, because the ids are the evidence and the sentence is only
+ * presentation.
+ */
+function Outcome({
+  headline,
+  detail,
+  tone = "ok",
+  testid,
+}: {
+  headline: string;
+  detail?: string;
+  tone?: "ok" | "warn";
+  testid?: string;
+}) {
+  const palette =
+    tone === "warn"
+      ? "bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-200"
+      : "bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-200";
+  return (
+    <div className={`p-3 border rounded space-y-1 ${palette}`} data-testid={testid}>
+      <p className="text-sm font-medium">{headline}</p>
+      {detail && <p className="text-xs opacity-90">{detail}</p>}
+    </div>
+  );
+}
+
+/** Minutes from now until `iso`, for "expires in ..." phrasing. */
+function minutesUntil(iso: string): number {
+  return Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
+}
+
 function ErrorNotice({ message }: { message: string }) {
   return (
     <div
@@ -298,6 +337,11 @@ function AuthenticateTab() {
 
       {result && (
         <div className="space-y-3" data-testid="authenticate-result">
+          <Outcome
+            testid="authenticate-outcome"
+            headline="Password accepted — this is not yet an identity envelope."
+            detail={`The token below proves only that this person knew the password. Exchange it on the Resolve tab for the signed envelope other services trust. It expires in ${Math.round(result.expires_in / 60)} minute${result.expires_in === 60 ? "" : "s"}.`}
+          />
           <div className="grid gap-3 md:grid-cols-4">
             <div className="p-3 bg-muted rounded">
               <p className="text-xs text-muted-foreground">Token type</p>
@@ -434,6 +478,11 @@ function ResolveTab() {
 
       {result.envelopeJwt && (
         <div className="space-y-4" data-testid="resolve-result">
+          <Outcome
+            testid="resolve-outcome"
+            headline="Identity context resolved — a signed envelope was issued."
+            detail={`All six dimensions passed: authenticated principal, tenant, legal entity, role profile, delegated authority and session trust. This envelope is what every downstream service trusts${result.expiresAt ? `, and it is valid until ${new Date(result.expiresAt * 1000).toLocaleTimeString()}` : ""}. Copy the Session Context ID below — the Sessions tab needs it.`}
+          />
           <div className="grid gap-3 md:grid-cols-3">
             {result.evidenceId && (
               <div className="p-3 bg-muted rounded" data-testid="resolve-evidence">
@@ -899,7 +948,16 @@ function SessionsTab() {
         </div>
       )}
 
-      {envelope && <ResultBox title="Session envelope JWT (same as issued, if still valid)" value={envelope} testid="session-envelope" />}
+      {envelope && (
+        <>
+          <Outcome
+            testid="session-outcome"
+            headline="Session is live — this is the credential it was issued with."
+            detail="The same signed envelope the session started with, re-read rather than re-minted. If this returns Not Found instead, the session has expired, been invalidated, or belongs to another tenant — all three answer the same way on purpose, so session ids cannot be probed."
+          />
+          <ResultBox title="Session envelope JWT (same as issued, if still valid)" value={envelope} testid="session-envelope" />
+        </>
+      )}
 
       {explanationError && <ErrorNotice message={explanationError} />}
 
@@ -1065,6 +1123,16 @@ function TenantTab() {
         {refreshError && <ErrorNotice message={refreshError} />}
 
         {refreshResult && (
+          <>
+          <Outcome
+            testid="cache-refresh-outcome"
+            headline={
+              refreshResult.bindings_refreshed === 0
+                ? "Cache refreshed — no routing hints were cached for this tenant."
+                : `Cache refreshed — ${refreshResult.bindings_refreshed} routing hint${refreshResult.bindings_refreshed === 1 ? "" : "s"} marked stale.`
+            }
+            detail="Nothing was deleted. The next context resolution re-reads these from the tenant registry instead of trusting the cached copy. Zero is normal on an environment with no ingress bindings seeded."
+          />
           <div className="grid gap-3 md:grid-cols-2" data-testid="cache-refresh-result">
             <div className="p-3 bg-muted rounded">
               <p className="text-xs text-muted-foreground">Bindings marked stale</p>
@@ -1075,6 +1143,7 @@ function TenantTab() {
               <p className="font-mono text-xs">{refreshResult.evidence_id}</p>
             </div>
           </div>
+          </>
         )}
       </Card>
 
@@ -1122,6 +1191,17 @@ function TenantTab() {
         {invalidError && <ErrorNotice message={invalidError} />}
 
         {invalidResult && (
+          <>
+          <Outcome
+            tone="warn"
+            testid="tenant-invalidate-outcome"
+            headline={
+              invalidResult.sessions_revoked === 0
+                ? "No live sessions to revoke — the tenant had none."
+                : `${invalidResult.sessions_revoked} session${invalidResult.sessions_revoked === 1 ? "" : "s"} revoked across this tenant.`
+            }
+            detail="Every affected user must sign in again. The session records are kept and marked invalid, never deleted — they are evidence. Your own session is included if you were signed in to this tenant."
+          />
           <div className="grid gap-3 md:grid-cols-2" data-testid="tenant-invalidate-result">
             <div className="p-3 bg-muted rounded">
               <p className="text-xs text-muted-foreground">Sessions revoked</p>
@@ -1132,6 +1212,7 @@ function TenantTab() {
               <p className="font-mono text-xs">{invalidResult.evidence_id}</p>
             </div>
           </div>
+          </>
         )}
       </Card>
     </div>
@@ -1357,6 +1438,13 @@ function SupportTab() {
         {attachError && <ErrorNotice message={attachError} />}
 
         {attachResult && (
+          <>
+          <Outcome
+            tone="warn"
+            testid="support-attach-outcome"
+            headline={`Break-glass elevation granted — expires in ${minutesUntil(attachResult.expires_at)} minutes.`}
+            detail="This grants no permissions by itself: authorization still runs unchanged on every request the support principal makes. It expires on its own, and an expired grant is reported for review until somebody signs it off."
+          />
           <div className="grid gap-3 md:grid-cols-3" data-testid="support-attach-result">
             <div className="p-3 bg-muted rounded">
               <p className="text-xs text-muted-foreground">Support Context ID</p>
@@ -1371,6 +1459,7 @@ function SupportTab() {
               <p className="font-mono text-xs">{attachResult.evidence_id}</p>
             </div>
           </div>
+          </>
         )}
       </div>
 
@@ -1417,6 +1506,23 @@ function SupportTab() {
         {lookupError && <ErrorNotice message={lookupError} />}
 
         {grant && (
+          <>
+          <Outcome
+            tone={grant.revoked_at || new Date(grant.expires_at) <= new Date() ? "warn" : "ok"}
+            testid="support-grant-outcome"
+            headline={
+              grant.revoked_at
+                ? "This elevation was revoked early and can no longer be used."
+                : new Date(grant.expires_at) > new Date()
+                  ? `This elevation is live for another ${minutesUntil(grant.expires_at)} minutes.`
+                  : "This elevation has expired and can no longer be used."
+            }
+            detail={
+              grant.reviewed_at
+                ? `Reviewed by ${grant.reviewed_by}. The break-glass loop is closed for this grant.`
+                : "Not yet reviewed. Expired grants are reported every 15 minutes until somebody independent signs them off — neither the grantee nor the approver may do it."
+            }
+          />
           <div className="p-3 bg-muted rounded space-y-2" data-testid="support-grant">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge tone={grant.revoked_at ? "neutral" : new Date(grant.expires_at) > new Date() ? "success" : "warning"}>
@@ -1442,6 +1548,7 @@ function SupportTab() {
             <p className="text-sm"><span className="text-xs text-muted-foreground">Justification:</span> {grant.justification}</p>
             <p className="text-xs text-muted-foreground">Evidence: <span className="font-mono">{grant.evidence_id}</span></p>
           </div>
+          </>
         )}
       </div>
     </Card>

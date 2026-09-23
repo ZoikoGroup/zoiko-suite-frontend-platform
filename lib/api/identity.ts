@@ -348,6 +348,8 @@ export async function resolveIdentity(input: {
 export async function getSession(input: {
   sessionContextId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiResult<GetSessionResponse>> {
   return apiGet<GetSessionResponse>(
@@ -357,6 +359,7 @@ export async function getSession(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -382,6 +385,8 @@ export async function explainContextResolution(input: {
   sessionContextId: string;
   asOf?: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiResult<ContextExplanation>> {
   return apiGet<ContextExplanation>(
@@ -392,6 +397,7 @@ export async function explainContextResolution(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -411,6 +417,8 @@ export async function invalidateSession(input: {
   actorPrincipalId: string;
   correlationId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
 }): Promise<ApiWriteResult<null>> {
   return apiPost<null>(
     "identityContext",
@@ -421,6 +429,7 @@ export async function invalidateSession(input: {
       identity: {
         principalId: input.actorPrincipalId,
         tenantId: input.callerTenantId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -437,6 +446,8 @@ export async function invalidateSession(input: {
 export async function getPrincipal(input: {
   principalId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiResult<Principal>> {
   return apiGet<Principal>(
@@ -446,6 +457,7 @@ export async function getPrincipal(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -500,6 +512,8 @@ export async function getPrincipalRoles(input: {
 export async function getPrincipalDelegations(input: {
   principalId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiResult<DelegatedAuthority[]>> {
   const result = await apiGet<DelegatedAuthority[]>(
@@ -509,6 +523,7 @@ export async function getPrincipalDelegations(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -545,6 +560,8 @@ export async function updatePrincipalStatus(input: {
   actorPrincipalId: string;
   correlationId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
 }): Promise<ApiWriteResult<null>> {
   return apiPut<null>(
     "identityContext",
@@ -555,6 +572,7 @@ export async function updatePrincipalStatus(input: {
       identity: {
         principalId: input.actorPrincipalId,
         tenantId: input.callerTenantId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -573,6 +591,8 @@ export async function updatePrincipalStatus(input: {
 export async function refreshTenantContextCache(input: {
   request: RefreshCacheRequest;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiWriteResult<RefreshCacheResponse>> {
   return apiPost<RefreshCacheResponse>(
@@ -584,6 +604,7 @@ export async function refreshTenantContextCache(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -603,6 +624,8 @@ export async function refreshTenantContextCache(input: {
 export async function invalidateTenantContext(input: {
   request: InvalidateTenantContextRequest;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiWriteResult<InvalidateTenantContextResponse>> {
   return apiPost<InvalidateTenantContextResponse>(
@@ -614,6 +637,7 @@ export async function invalidateTenantContext(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -629,15 +653,27 @@ export async function invalidateTenantContext(input: {
  * grants no permissions — it makes the support principal's session resolvable in
  * a tenant they do not belong to.
  *
- * Authorization is checked against the TARGET tenant, not the caller's own.
- * Requires IDENTITY_SUPPORT_CONTEXT_ATTACH in the target tenant. X-Principal-Id
- * is the support principal requesting the elevation; X-Tenant-Id is deliberately
- * NOT sent (the support principal does not belong to the target tenant).
+ * Authorization is checked against the TARGET tenant, not the caller's own —
+ * that tenant travels in the BODY as `tenant_id`, and the backend authorizes
+ * IDENTITY_SUPPORT_CONTEXT_ATTACH against it.
+ *
+ * The envelope headers carry the CALLER: who is making this request, from which
+ * tenant and entity. Those are two different questions and both must be
+ * answered. X-Tenant-Id used to be omitted here on the reasoning that the
+ * support principal does not belong to the target tenant — true, but the
+ * canonical input contract requires tenant_id and legal_entity_id on every
+ * material write, so omitting them did not express that nuance, it just made
+ * the call impossible: identity-context-svc answered
+ * `401 envelope_incomplete: legal_entity_id, tenant_id` every time.
  */
 export async function attachSupportContext(input: {
   request: AttachSupportContextRequest;
   /** The support principal requesting the elevation (X-Principal-Id). */
   supportPrincipalId: string;
+  /** The CALLER's own tenant, for the envelope. Not the target tenant. */
+  callerTenantId?: string;
+  /** The CALLER's own legal entity, for the envelope. */
+  callerLegalEntityId?: string;
 }): Promise<ApiWriteResult<AttachSupportContextResponse>> {
   return apiPost<AttachSupportContextResponse>(
     "identityContext",
@@ -645,7 +681,11 @@ export async function attachSupportContext(input: {
     input.request,
     {
       correlationId: input.request.correlation_id,
-      identity: { principalId: input.supportPrincipalId },
+      identity: {
+        principalId: input.supportPrincipalId,
+        tenantId: input.callerTenantId,
+        legalEntityId: input.callerLegalEntityId,
+      },
     },
   );
 }
@@ -661,6 +701,8 @@ export async function attachSupportContext(input: {
 export async function getSupportContext(input: {
   supportContextId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiResult<SupportContext>> {
   return apiGet<SupportContext>(
@@ -670,6 +712,7 @@ export async function getSupportContext(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -691,6 +734,8 @@ export async function revokeSupportContext(input: {
   reason?: string;
   correlationId?: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
   callerPrincipalId: string;
 }): Promise<ApiWriteResult<null>> {
   return apiDelete<null>(
@@ -702,6 +747,7 @@ export async function revokeSupportContext(input: {
       identity: {
         tenantId: input.callerTenantId,
         principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
