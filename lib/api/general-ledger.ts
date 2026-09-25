@@ -528,3 +528,49 @@ export function explainLedgerError(message: string): string {
   }
   return message;
 }
+
+// ─── Write: Create Journal Entry ──────────────────────────────────────────────
+
+export type CreateJournalEntryInput = {
+  reference_code: string;
+  description: string;
+  debit_account: string;
+  credit_account: string;
+  amount: number;
+  currency: string;
+  status?: string;
+  fiscal_period?: string;
+};
+
+/**
+ * Post a double-entry journal to the general ledger (simplified convenience
+ * wrapper for the service-inputs manual test console). Sends a STANDARD journal
+ * with two lines — one debit and one credit — using the amount for both.
+ */
+export async function createJournalEntry(
+  body: CreateJournalEntryInput,
+  identity?: Identity,
+): Promise<ApiResult<JournalWithLines>> {
+  const res = await apiPost<{ journal?: JournalWithLines } | JournalWithLines>(
+    "generalLedger",
+    "/v1/journals",
+    {
+      journal_type: "STANDARD",
+      transaction_date: new Date().toISOString().slice(0, 10),
+      posting_date: new Date().toISOString().slice(0, 10),
+      currency_code: body.currency ?? "GBP",
+      fiscal_period: body.fiscal_period ?? new Date().toISOString().slice(0, 7),
+      description: body.description,
+      reference_code: body.reference_code,
+      lines: [
+        { account_code: body.debit_account, debit_amount: body.amount, credit_amount: 0, description: "Debit" },
+        { account_code: body.credit_account, debit_amount: 0, credit_amount: body.amount, description: "Credit" },
+      ],
+    },
+    { identity },
+  );
+  if (!res.ok) return res;
+  const journal =
+    (res.data as { journal?: JournalWithLines }).journal ?? (res.data as JournalWithLines);
+  return { ok: true, data: journal };
+}

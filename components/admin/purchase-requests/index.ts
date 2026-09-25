@@ -12,3 +12,10 @@ export { PurchaseRequestPanel } from "../commercial-ops/PurchaseRequestPanel";
 export { PurchaseRequestTable } from "../commercial-ops/PurchaseRequestTable";
 export { RaiseRequestForm, DecideRequestForm } from "./PurchaseRequestForms";
 
+// Summary and Lookup are re-exported from commercial-ops, and that does not
+// contradict the paragraph above: it excludes the FORMS, because they call
+// Server Actions and sharing them would couple the two pages' write surfaces.
+// These two read and render — no actions, nothing to couple — so a second copy
+// would be duplication with no boundary to justify it.
+export { PurchaseRequestSummary } from "../commercial-ops/PurchaseRequestSummary";
+export { PurchaseRequestLookup } from "../commercial-ops/PurchaseRequestLookup";

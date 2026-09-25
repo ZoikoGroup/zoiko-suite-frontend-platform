@@ -1,16 +1,19 @@
 import { cookies } from "next/headers";
 import { CloudOff, Scale, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { PanelEmptyState, JsonBlock, CopyableId } from "@/components/admin/shared";
+import { PanelEmptyState, PayloadDetails, CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listApplicablePolicyVersions,
+  describePolicyType,
   describeScope,
+  explainPolicyError,
+  formatThreshold,
+  startsInFuture,
   thresholdAmount,
-  EVALUABLE_POLICY_TYPES,
 } from "@/lib/api/policies";
 
 /**
@@ -36,11 +39,13 @@ export async function ApplicablePolicyPanel({
       <PanelEmptyState
         icon={ShieldAlert}
         tone="warning"
-        label="No active session"
-        hint="Sign in again to read the applicable policy set."
+        label="You are not signed in"
+        hint="Sign in again to see which rules are in force."
       />
     );
   }
+
+  const type = describePolicyType(policyType);
 
   const result = await listApplicablePolicyVersions({
     policyType,
@@ -55,8 +60,10 @@ export async function ApplicablePolicyPanel({
       <PanelEmptyState
         icon={CloudOff}
         tone="warning"
-        label="Policy set unavailable"
-        hint={result.error.message}
+        label="These rules could not be read"
+        // Explained rather than echoed, for the same reason every other message
+        // on this page is: the client's diagnostic names a port and a status.
+        hint={explainPolicyError(result.error.message, { status: result.error.status })}
       />
     );
   }
@@ -66,21 +73,19 @@ export async function ApplicablePolicyPanel({
       <PanelEmptyState
         icon={Scale}
         tone="warning"
-        label={`Nothing active for ${policyType}`}
-        hint="An evaluation against this type and scope would answer 404 — policy-svc does not fall back to a default. Create a version below and activate it."
+        label={`No ${type.label.toLowerCase()} is in force here`}
+        hint="Checking an amount against this would come back undecided — the service will not invent a limit where none was set. Create a rule below, give it a limit, and bring it into force."
       />
     );
   }
 
-  const unevaluable = !EVALUABLE_POLICY_TYPES.includes(policyType);
-
   return (
     <div className="space-y-3">
-      {unevaluable && (
+      {!type.enforceable && (
         <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-          These versions are ACTIVE but unenforceable: policy-svc implements no evaluation logic
-          for {policyType}, so any evaluation against it answers 501. Being active is not the
-          same as being applied.
+          These are in force and still decide nothing. Nothing on the platform can act on a{" "}
+          {type.label.toLowerCase()} yet, so no check will ever consult them. Being in force is
+          not the same as being applied.
         </p>
       )}
 
@@ -89,25 +94,28 @@ export async function ApplicablePolicyPanel({
           <thead className="border-b border-slate-200 dark:border-slate-800">
             <tr>
               <th scope="col" className={HEAD}>
-                Policy
+                Rule
               </th>
               <th scope="col" className={HEAD}>
-                Scope
+                Applies to
               </th>
               <th scope="col" className={cn(HEAD, "text-right")}>
-                Threshold
+                Limit
+              </th>
+              {/* "Dated from", not "In force from". Everything in this table
+                  is already in force whatever this column says — see the
+                  warning below it. */}
+              <th scope="col" className={HEAD}>
+                Dated from
               </th>
               <th scope="col" className={HEAD}>
-                Effective
-              </th>
-              <th scope="col" className={HEAD}>
-                Activated
+                Brought into force
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {result.data.map((version, index) => {
-              const threshold = thresholdAmount(version.rule_payload);
+              const threshold = formatThreshold(version.rule_payload);
               return (
                 <tr
                   key={version.policy_version_id}
@@ -117,18 +125,18 @@ export async function ApplicablePolicyPanel({
                     {version.policy_code}
                     {index === 0 && (
                       <Badge tone="info" className="ml-2 align-middle">
-                        decides
+                        this one decides
                       </Badge>
                     )}
-                    {/* Both ids, labelled. The three forms below this panel each
-                        ask for one of them, they are indistinguishable UUIDs, and
-                        policy_id appeared nowhere on the page once the
-                        create-policy banner was gone — so it had to be recoverable
-                        from the read view, and it has to be obvious which is which. */}
+                    {/* Both references, labelled. The three forms below this panel
+                        each ask for one of them, they look identical, and the rule
+                        reference appeared nowhere on the page once the create
+                        banner was gone — so it had to be recoverable from the read
+                        view, and it has to be obvious which is which. */}
                     <dl className="mt-1 space-y-0.5 font-normal">
                       <div className="flex items-baseline gap-1.5">
                         <dt className="w-[3.25rem] shrink-0 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                          policy
+                          rule
                         </dt>
                         <dd>
                           <CopyableId value={version.policy_id} />
@@ -136,7 +144,7 @@ export async function ApplicablePolicyPanel({
                       </div>
                       <div className="flex items-baseline gap-1.5">
                         <dt className="w-[3.25rem] shrink-0 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                          version
+                          limit
                         </dt>
                         <dd>
                           <CopyableId value={version.policy_version_id} />
@@ -148,20 +156,29 @@ export async function ApplicablePolicyPanel({
                     <Badge tone="neutral">{describeScope(version)}</Badge>
                   </td>
                   <td className={cn(CELL, "text-right tabular-nums")}>
-                    {threshold === null ? (
+                    {threshold ?? (
                       <span className="text-xs text-rose-600 dark:text-rose-400">
-                        no threshold_amount
+                        No limit set
                       </span>
-                    ) : (
-                      threshold.toLocaleString("en-GB")
                     )}
+                    {/* What the rule does hold instead, as readable rows rather
+                        than the raw record — the reader still has to see it, and
+                        this is the one row on the page where the stored content
+                        is the whole story. */}
                     {threshold === null && (
-                      <JsonBlock value={version.rule_payload} className="mt-2 max-h-24" />
+                      <PayloadDetails
+                        value={version.rule_payload}
+                        className="mt-2 text-left"
+                        emptyLabel="Nothing was recorded on this rule at all."
+                        rawLabel="Show this in its original form"
+                      />
                     )}
                   </td>
                   <td className={cn(CELL, "whitespace-nowrap text-slate-500 dark:text-slate-400")}>
                     {formatDate(version.effective_from)}
-                    {version.effective_to ? ` → ${formatDate(version.effective_to)}` : " → open"}
+                    {version.effective_to
+                      ? ` until ${formatDate(version.effective_to)}`
+                      : " — no end date"}
                   </td>
                   <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
                     {version.activated_at ? (
@@ -184,12 +201,23 @@ export async function ApplicablePolicyPanel({
         </table>
       </div>
 
+      {/* A future date on something that is already deciding is the most
+          misleading thing this table can show, so it is called out rather than
+          left for the reader to infer from a column. */}
+      {result.data.some(startsInFuture) && (
+        <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+          A rule above is dated to start in the future and is being applied
+          <strong className="font-medium"> already</strong>. The date is recorded but not acted
+          on — once a limit is brought into force it decides immediately, whatever its start
+          date says. Do not rely on a future date to hold a limit back.
+        </p>
+      )}
+
       {result.data.some((v) => thresholdAmount(v.rule_payload) === null) && (
         <p className="text-xs leading-relaxed text-rose-600 dark:text-rose-400">
-          A version above has no numeric <code>threshold_amount</code>. policy-svc accepted it at
-          creation without validating the payload, and will answer 500{" "}
-          <code>invalid_policy_payload</code> if it is ever the deciding version. It needs
-          replacing.
+          One of the rules above has no limit on it. It was saved without one, and it will fail
+          outright the first time it is the rule asked to decide something. It needs replacing
+          with a version that sets a limit.
         </p>
       )}
     </div>

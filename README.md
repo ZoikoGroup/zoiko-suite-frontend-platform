@@ -186,3 +186,4 @@ above does not apply here.
 - Server Actions verify the session themselves. They are reachable by direct
   POST, not only through the UI, so they do not rely on the `/admin` proxy
   matcher.
+# CI/CD verification 2026-09-15T10:58:03Z

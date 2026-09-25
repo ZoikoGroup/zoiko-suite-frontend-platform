@@ -1,31 +1,37 @@
 import { cookies } from "next/headers";
 import { CloudOff, Scale, ShieldAlert } from "lucide-react";
+import { Badge } from "@/components/ui";
 import { PanelEmptyState } from "@/components/admin/shared";
+import { CELL, HEAD } from "@/components/admin/shared/form";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listBoardMeetings, listBoardResolutions } from "@/lib/api/legal";
+import { formatDateTime } from "@/lib/format";
+import {
+  describeMeetingStatus,
+  describeResolutionCategory,
+  describeResolutionStatus,
+  summariseVotes,
+  listBoardMeetings,
+  listBoardResolutions,
+} from "@/lib/api/legal";
 import { BoardMeetingForm } from "./BoardMeetingForm";
 import { BoardResolutionForm } from "./BoardResolutionForm";
 import { ResolutionActions } from "./ResolutionActions";
+import { ResolutionSummary } from "./BoardSummary";
 
-const STATUS_COLORS: Record<string, string> = {
-  SCHEDULED: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
-  IN_PROGRESS: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
-  ADJOURNED: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400",
-  CANCELLED: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300",
-  PROPOSED: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
-  PASSED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
-  REJECTED: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300",
-  RESCINDED: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400",
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  GOVERNANCE: "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300",
-  FINANCIAL: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
-  OPERATIONAL: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
-  EXECUTIVE: "bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300",
-  STATUTORY: "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300",
-};
-
+/**
+ * The board register: meetings booked, and resolutions put to the board.
+ *
+ * Resolutions are rendered as records rather than as table rows. Two reasons,
+ * and the first is the stronger: the wording of a resolution IS the decision,
+ * and a table had nowhere to put it — the `content` field was never shown at
+ * all, so the console displayed everything about each decision except what was
+ * decided. The second is that the columns a table can hold were codes.
+ * PROPOSED and PASSED look equally settled side by side, and only one of them
+ * means the board has agreed anything.
+ *
+ * Meetings stay a table. A booked meeting has nothing to read — where and when
+ * is the whole of it — so scanning is what a reader wants from that list.
+ */
 export async function BoardResolutionsPanel() {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
@@ -35,8 +41,8 @@ export async function BoardResolutionsPanel() {
       <PanelEmptyState
         icon={ShieldAlert}
         tone="warning"
-        label="No active session"
-        hint="Sign in to view board meetings and resolutions."
+        label="You are not signed in"
+        hint="Sign in to see the board's meetings and resolutions."
       />
     );
   }
@@ -52,15 +58,13 @@ export async function BoardResolutionsPanel() {
     listBoardResolutions(identity),
   ]);
 
-  const serviceDown = !meetingsResult.ok && meetingsResult.error.kind === "unreachable";
-
-  if (serviceDown) {
+  if (!meetingsResult.ok && meetingsResult.error.kind === "unreachable") {
     return (
       <PanelEmptyState
         icon={CloudOff}
         tone="warning"
-        label="board-resolutions-svc unavailable"
-        hint={meetingsResult.error.message}
+        label="The board records cannot be reached"
+        hint="Nothing is lost — the service that holds them is not responding. Try again shortly."
       />
     );
   }
@@ -69,111 +73,147 @@ export async function BoardResolutionsPanel() {
   const resolutions = resolutionsResult.ok ? resolutionsResult.data : [];
 
   return (
-    <div className="space-y-6">
-      {/* Write path: schedule a meeting + propose a resolution */}
+    <div className="space-y-8">
+      {/* Write path: book a meeting, put a resolution to the board. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-            Schedule a meeting
+            Book a meeting
           </h3>
           <BoardMeetingForm />
         </div>
         <div>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-            Propose a resolution
+            Put a resolution to the board
           </h3>
           <BoardResolutionForm meetings={meetings} />
         </div>
       </div>
 
-      {/* Meetings Table */}
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-          Board Meetings ({meetings.length})
+          Meetings in the diary ({meetings.length})
         </h3>
         {meetings.length === 0 ? (
-          <PanelEmptyState icon={Scale} label="No board meetings recorded" hint="Meetings created via board-resolutions-svc will appear here." />
+          <PanelEmptyState
+            icon={Scale}
+            label="No meetings have been booked"
+            hint="Book one above and it will be listed here."
+          />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Title", "Scheduled", "Location", "Status"].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
+                  {["Meeting", "When it sits", "Where", "Stage"].map((h) => (
+                    <th key={h} className={`${HEAD} text-left`}>
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {meetings.map((m) => (
-                  <tr key={m.meeting_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{m.title}</td>
-                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      {m.scheduled_at
-                        ? new Date(m.scheduled_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{m.location ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[m.status] ?? "bg-slate-100 text-slate-600"}`}>
-                        {m.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {meetings.map((m) => {
+                  const status = describeMeetingStatus(m.status);
+                  return (
+                    <tr
+                      key={m.meeting_id}
+                      className="transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/40"
+                    >
+                      <td className={`${CELL} font-medium text-slate-800 dark:text-slate-200`}>
+                        {m.title}
+                      </td>
+                      <td className={`${CELL} whitespace-nowrap`}>
+                        {m.scheduled_at ? formatDateTime(m.scheduled_at) : "Not recorded"}
+                      </td>
+                      <td className={CELL}>{m.location || "Not recorded"}</td>
+                      <td className={CELL}>
+                        {/* The label reads, the code stays quotable. */}
+                        <Badge tone={status.tone}>{status.label}</Badge>
+                        <span className="ml-2 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                          {status.raw}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {/* Resolutions Table */}
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-          Board Resolutions ({resolutions.length})
+          Resolutions put to the board ({resolutions.length})
         </h3>
         {resolutions.length === 0 ? (
-          <PanelEmptyState icon={Scale} label="No resolutions recorded" hint="Resolutions created via board-resolutions-svc will appear here." />
+          <PanelEmptyState
+            icon={Scale}
+            label="No resolutions have been put to the board"
+            hint="Propose one above and it will be listed here."
+          />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-800/60">
-                <tr>
-                  {["Number", "Title", "Category", "Votes", "Status", "Actions"].map((h) => (
-                    <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {resolutions.map((r) => (
-                  <tr key={r.resolution_id} className="align-top hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{r.resolution_number || "—"}</td>
-                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 max-w-[240px]">
-                      <span className="block truncate">{r.title}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${CATEGORY_COLORS[r.category] ?? "bg-slate-100 text-slate-600"}`}>
-                        {r.category}
+          <ul className="space-y-3">
+            {resolutions.map((r) => {
+              const status = describeResolutionStatus(r.status);
+              const category = describeResolutionCategory(r.category);
+              const votes = summariseVotes(r);
+
+              return (
+                <li
+                  key={r.resolution_id}
+                  className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+                >
+                  {/* The scannable line: where it stands, what it is called,
+                      what kind of decision, and how the vote went. Everything
+                      a table gave, without asking the reader to know a code. */}
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/40">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                        {r.title}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        {r.resolution_number
+                          ? `Resolution ${r.resolution_number}`
+                          : "Not numbered"}
+                        {" · "}
+                        {category.label}
+                        {" · "}
+                        {votes.line}
+                      </p>
+                    </div>
+                    <Badge tone={status.tone} dot={status.raw === "PASSED"}>
+                      {status.label}
+                    </Badge>
+                  </div>
+
+                  {/* Full detail behind a disclosure. Open, a dozen of these
+                      would bury the list; closed, the reader can still see
+                      which resolution they want before opening it. */}
+                  <details className="group">
+                    {/* Chevron-and-stable-label, matching the disclosure in
+                        PayloadDetails — one affordance across the console. */}
+                    <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-2.5 text-xs font-medium text-navy-700 transition-colors hover:bg-slate-50 dark:text-navy-300 dark:hover:bg-slate-800/40">
+                      <span className="transition-transform group-open:rotate-90" aria-hidden="true">
+                        ›
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      <span className="text-emerald-600 dark:text-emerald-400 font-medium">{r.votes_for ?? 0}✓</span>
-                      {" · "}
-                      <span className="text-red-500 dark:text-red-400">{r.votes_against ?? 0}✗</span>
-                      {Boolean(r.abstentions && r.abstentions > 0) && <span className="ml-1 text-slate-400">+{r.abstentions} abs.</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[r.status] ?? "bg-slate-100 text-slate-600"}`}>
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <ResolutionActions resolution={r} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      Read it in full{status.final ? "" : ", and act on it"}
+                    </summary>
+                    <div className="space-y-5 border-t border-slate-100 px-4 py-4 dark:border-slate-800">
+                      <ResolutionSummary resolution={r} />
+                      <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+                        <ResolutionActions
+                          resolution={r}
+                          currentPrincipalId={session.principalId}
+                        />
+                      </div>
+                    </div>
+                  </details>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
     </div>

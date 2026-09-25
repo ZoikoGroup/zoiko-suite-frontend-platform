@@ -27,7 +27,13 @@ import {
   getEvidenceRequirement,
   getEvidenceEvaluation,
   explainEvidenceError,
+  explainEvidenceOutcome,
+  actionLabel,
+  domainLabel,
   EVIDENCE_TYPES,
+  type EvidenceEvaluation,
+  type EvidenceRequirement,
+  type OutcomeKind,
   type PresentArtifact,
 } from "@/lib/api/evidence";
 import type { LookupState } from "@/components/admin/shared/lookup";
@@ -82,17 +88,17 @@ export async function submitRequirement(
   const artifactSubtype = String(formData.get("artifact_subtype") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
 
-  if (!domainCode) return { status: "error", message: "A domain code is required." };
-  if (!actionType) return { status: "error", message: "An action type is required." };
+  if (!domainCode) return { status: "error", message: "Choose a business area." };
+  if (!actionType) return { status: "error", message: "Enter the action this evidence is for." };
   if (!(EVIDENCE_TYPES as readonly string[]).includes(evidenceType)) {
-    return { status: "error", message: "Select an evidence type." };
+    return { status: "error", message: "Choose which kind of evidence is needed." };
   }
 
   let minimumCount: number | undefined;
   if (minimumRaw !== "") {
     const parsed = Number(minimumRaw);
     if (!Number.isInteger(parsed) || parsed < 1) {
-      return { status: "error", message: "Minimum count must be a whole number of 1 or more." };
+      return { status: "error", message: "How many are needed has to be a whole number, one or more." };
     }
     minimumCount = parsed;
   }
@@ -119,20 +125,21 @@ export async function submitRequirement(
   refresh();
 
   const gate =
-    scope === "entity"
-      ? "this legal entity"
-      : "every entity in this tenant, because it is tenant-wide";
+    scope === "entity" ? "this company" : "every company in the group";
 
   return result.status === 201
     ? {
         status: "created",
         requirement: result.data,
-        message: `Requirement added. It now gates ${actionType} in ${domainCode} for ${gate}, and any evaluation missing it will answer MISSING.`,
+        message: `Added. ${actionLabel(actionType)} in ${domainLabel(
+          domainCode,
+        )} now needs this evidence for ${gate}, and any check made without it will block the action.`,
       }
     : {
         status: "replayed",
         requirement: result.data,
-        message: "An identical requirement already existed; nothing was written.",
+        message:
+          "This requirement already existed, so nothing was added. What was already there is shown below.",
       };
 }
 
@@ -157,11 +164,11 @@ export async function submitRetirement(
   const requirementId = String(formData.get("requirement_id") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
 
-  if (!requirementId) return { status: "error", message: "A requirement ID is required." };
+  if (!requirementId) return { status: "error", message: "Enter the reference of the requirement to withdraw." };
   if (!reason) {
     return {
       status: "error",
-      message: "A reason is required — the service rejects a retirement without one.",
+      message: "Say why you are withdrawing it. Nothing is saved without a reason, so that the record explains itself later.",
     };
   }
 
@@ -179,7 +186,8 @@ export async function submitRetirement(
   return {
     status: "retired",
     requirement: result.data,
-    message: `Requirement end-dated. It stays readable in the catalog so evaluations made while it was in force can still be explained.`,
+    message:
+      "Withdrawn. It gates nothing from now on, and stays in the catalog so decisions made while it applied can still be explained.",
   };
 }
 
@@ -252,35 +260,41 @@ export async function submitEvidenceEvaluation(
 
   const evaluation = result.data;
   const unmet = evaluation.unmet ?? [];
-
-  if (evaluation.outcome === "NO_REQUIREMENTS_DEFINED") {
-    return {
-      status: "none-defined",
-      result: evaluation,
-      message: `No requirements are defined for ${actionType} in ${domainCode}. This is NOT the same as satisfied — nothing has been configured to check, so this action is currently ungated.`,
-    };
-  }
-
-  if (evaluation.outcome === "MISSING") {
-    return {
-      status: "missing",
-      result: evaluation,
-      message: `MISSING — ${unmet.length} requirement${unmet.length === 1 ? "" : "s"} unmet. The action must be blocked.`,
-    };
-  }
+  const explained = explainEvidenceOutcome(evaluation.outcome, unmet.length);
 
   return {
-    status: "satisfied",
+    status: OUTCOME_STATUS[explained.kind],
     result: evaluation,
-    message: "SATISFIED — every effective requirement was matched by a verified artifact.",
+    // The service answers with an outcome and a reference and says nothing about
+    // the question, so the question travels back for the summary to state.
+    asked: { domainCode, actionType },
+    // Deliberately empty: the summary below the banner carries the wording, so
+    // what each outcome means is defined in one place rather than here as well.
+    message: "",
   };
 }
 
+/**
+ * Outcome to form state.
+ *
+ * Exhaustive over OutcomeKind on purpose. This used to be two `if`s and a
+ * fallthrough to "satisfied", which meant an outcome this console had not been
+ * taught — a fourth one added to the service later, or a typo in a deployment —
+ * would have rendered as a green pass on an evidence gate. Mapping the
+ * unrecognised case explicitly is the whole point.
+ */
+const OUTCOME_STATUS: Record<OutcomeKind, EvidenceEvaluateState["status"]> = {
+  satisfied: "satisfied",
+  missing: "missing",
+  "none-defined": "none-defined",
+  unrecognised: "unrecognised",
+};
+
 /** Read one requirement by id. */
 export async function lookupRequirement(
-  _previous: LookupState,
+  _previous: LookupState<EvidenceRequirement>,
   formData: FormData,
-): Promise<LookupState> {
+): Promise<LookupState<EvidenceRequirement>> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -289,13 +303,13 @@ export async function lookupRequirement(
   }
 
   const requirementId = String(formData.get("requirement_id") ?? "").trim();
-  if (!requirementId) return { status: "error", message: "Enter a requirement ID." };
+  if (!requirementId) return { status: "error", message: "Enter a requirement reference." };
 
   const result = await getEvidenceRequirement(requirementId, identity);
 
   if (!result.ok) {
     if (result.error.status === 404) {
-      return { status: "missing", message: "No requirement with that id exists." };
+      return { status: "missing", message: explainEvidenceError("requirement_not_found") };
     }
     return { status: "error", message: explainEvidenceError(result.error.message) };
   }
@@ -311,9 +325,9 @@ export async function lookupRequirement(
  * determination even after the catalog changed underneath it.
  */
 export async function lookupEvaluation(
-  _previous: LookupState,
+  _previous: LookupState<EvidenceEvaluation>,
   formData: FormData,
-): Promise<LookupState> {
+): Promise<LookupState<EvidenceEvaluation>> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -322,13 +336,13 @@ export async function lookupEvaluation(
   }
 
   const evaluationId = String(formData.get("evaluation_id") ?? "").trim();
-  if (!evaluationId) return { status: "error", message: "Enter an evaluation ID." };
+  if (!evaluationId) return { status: "error", message: "Enter the reference of a past check." };
 
   const result = await getEvidenceEvaluation(evaluationId, identity);
 
   if (!result.ok) {
     if (result.error.status === 404) {
-      return { status: "missing", message: "No evaluation with that id exists." };
+      return { status: "missing", message: explainEvidenceError("evaluation_not_found") };
     }
     return { status: "error", message: explainEvidenceError(result.error.message) };
   }

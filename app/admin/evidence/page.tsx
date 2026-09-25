@@ -8,16 +8,18 @@ import {
   CardContent,
   Skeleton,
 } from "@/components/ui";
-import { PageHeader, LookupById } from "@/components/admin/shared";
+import { PageHeader } from "@/components/admin/shared";
 import { FIELD, LABEL } from "@/components/admin/shared/form";
 import {
   CatalogPanel,
   CreateRequirementForm,
   RetireRequirementForm,
   EvaluateEvidenceForm,
+  EvaluationLookup,
+  RequirementLookup,
 } from "@/components/admin/evidence";
+import { domainLabel } from "@/lib/api/evidence";
 import { DOMAIN_CODES } from "./state";
-import { lookupRequirement, lookupEvaluation } from "./actions";
 
 export const metadata: Metadata = { title: "Evidence Requirements" };
 
@@ -47,7 +49,7 @@ export default async function EvidencePage({ searchParams }: PageProps) {
     <div>
       <PageHeader
         title="Evidence Requirements"
-        description="The gate that decides whether the evidence required before an action may complete actually exists. A catalog of effective-dated requirements, and an evaluator that answers against them."
+        description="Decides whether the paperwork an action needs is actually on file before it can go ahead. Set out what each action requires, then check any action against it."
       />
 
       <Card className="mb-6 border-navy-200 dark:border-navy-500/30">
@@ -63,41 +65,55 @@ export default async function EvidencePage({ searchParams }: PageProps) {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/5">
               <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-                SATISFIED
+                It can go ahead
               </p>
               <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                Every effective requirement was matched. The action may proceed.
+                Everything required is on file. Nothing is holding the action up.
+              </p>
+              <p className="mt-1.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                SATISFIED
               </p>
             </div>
             <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-500/30 dark:bg-rose-500/5">
-              <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">MISSING</p>
+              <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">
+                It must be stopped
+              </p>
               <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                At least one requirement is unmet. The action must be blocked.
+                Something required is not on file. The check says what to produce.
+              </p>
+              <p className="mt-1.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                MISSING
               </p>
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-500/30 dark:bg-amber-500/5">
               <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                NO_REQUIREMENTS_DEFINED
+                Nothing is being checked
               </p>
               <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                Nothing is configured to check. Not a pass — the action is simply ungated.
+                No evidence has been asked for here. Not approval — the action is simply not
+                covered.
+              </p>
+              <p className="mt-1.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                NO_REQUIREMENTS_DEFINED
               </p>
             </div>
           </div>
           <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-            The third exists so an empty catalog cannot be mistaken for a verified one. Reporting
-            it as SATISFIED would make &ldquo;nobody has configured this yet&rdquo; look identical
-            to &ldquo;checked and complete&rdquo; — so this console renders it amber and says so.
+            The third answer exists so that &ldquo;nobody has set this up yet&rdquo; cannot be
+            mistaken for &ldquo;checked and complete&rdquo;. Most systems would report both as a
+            pass. This one keeps them apart, and this page shows the third in amber and says
+            plainly that nothing was checked.
           </p>
           <p className="border-t border-slate-100 pt-4 text-sm leading-relaxed text-slate-600 dark:border-slate-800 dark:text-slate-300">
             <strong className="font-medium text-slate-800 dark:text-slate-100">
-              This is the strictest service in the suite about its own boundaries.
+              When this service cannot be sure, it refuses rather than guesses.
             </strong>{" "}
-            Catalog writes are checked against authorization-svc and fail{" "}
-            <em>closed</em>. A missing tenant header is a 400 rather than a silent fallback to a
-            placeholder tenant. A body tenant that disagrees with the verified header is a 403. And
-            an unreachable document-vault-svc yields a 503 rather than a MISSING verdict — refusing
-            to answer beats writing a false fact into an append-only ledger.
+            Your permission to change the catalog is checked before anything is saved, and if that
+            check cannot be made, nothing is saved. If a request does not say which business or
+            which person it is for, it is refused rather than assumed. And if the documents you
+            list cannot be looked up, you get no answer at all — because recording evidence as
+            missing during an outage would put something untrue into a record that is kept
+            permanently.
           </p>
         </CardContent>
       </Card>
@@ -107,8 +123,8 @@ export default async function EvidencePage({ searchParams }: PageProps) {
           <div>
             <CardTitle>Requirement catalog</CardTitle>
             <CardDescription>
-              Includes retired requirements, deliberately — hiding them would misrepresent what
-              the gate used to require, which is what an audit needs to see.
+              Withdrawn requirements are shown too, on purpose — hiding them would misrepresent
+              what used to be required, which is exactly what an audit asks about.
             </CardDescription>
           </div>
         </CardHeader>
@@ -116,7 +132,7 @@ export default async function EvidencePage({ searchParams }: PageProps) {
           <form className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="sm:w-56">
               <label htmlFor="domain_code" className={LABEL}>
-                Domain
+                Business area
               </label>
               <select
                 id="domain_code"
@@ -124,17 +140,17 @@ export default async function EvidencePage({ searchParams }: PageProps) {
                 defaultValue={domainCode ?? ""}
                 className={FIELD}
               >
-                <option value="">All domains</option>
+                <option value="">All business areas</option>
                 {DOMAIN_CODES.map((code) => (
                   <option key={code} value={code}>
-                    {code}
+                    {domainLabel(code)}
                   </option>
                 ))}
               </select>
             </div>
             <div className="flex-1">
               <label htmlFor="action_type" className={LABEL}>
-                Action type
+                Action
               </label>
               <input
                 id="action_type"
@@ -167,10 +183,11 @@ export default async function EvidencePage({ searchParams }: PageProps) {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Evaluate an action</CardTitle>
+            <CardTitle>Check an action</CardTitle>
             <CardDescription>
-              The gate itself. A completed determination always returns 200, so read the outcome —
-              MISSING arrives as a success.
+              The gate itself. Answering is not the same as approving — a check that completes
+              successfully can still tell you the action must be stopped, so read the answer rather
+              than assuming it went through.
             </CardDescription>
           </div>
         </CardHeader>
@@ -182,28 +199,16 @@ export default async function EvidencePage({ searchParams }: PageProps) {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Read a stored record</CardTitle>
+            <CardTitle>Look up a past check</CardTitle>
             <CardDescription>
-              Evaluations are append-only and froze their payloads at decision time, so an old
-              record still explains itself after the catalog has moved on.
+              Every check is kept exactly as it was made and is never rewritten, so an old one
+              still explains itself even after the requirements have since changed.
             </CardDescription>
           </div>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <LookupById
-            action={lookupEvaluation}
-            inputName="evaluation_id"
-            label="Evaluation ID"
-            placeholder="Returned by an evaluation above"
-            hint="Includes the unmet and present-artifact payloads as they stood when the call was made."
-          />
-          <LookupById
-            action={lookupRequirement}
-            inputName="requirement_id"
-            label="Requirement ID"
-            placeholder="From the catalog table"
-            hint="Full record including the requirement payload."
-          />
+          <EvaluationLookup />
+          <RequirementLookup />
         </CardContent>
       </Card>
 
@@ -212,8 +217,8 @@ export default async function EvidencePage({ searchParams }: PageProps) {
           <div>
             <CardTitle>Add a requirement</CardTitle>
             <CardDescription>
-              Live, writable. A tenant-wide requirement gates every legal entity, so its
-              authorization is checked against the tenant rather than one entity.
+              This saves straight away. A requirement covering every company is a broader change,
+              so it needs permission over the whole business rather than one company.
             </CardDescription>
           </div>
         </CardHeader>
@@ -225,10 +230,10 @@ export default async function EvidencePage({ searchParams }: PageProps) {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Retire a requirement</CardTitle>
+            <CardTitle>Withdraw a requirement</CardTitle>
             <CardDescription>
-              There is no delete route and no soft-delete flag in this service. Retirement is
-              effective end-dating, and doing it twice is reported rather than silently accepted.
+              Nothing is ever deleted here. Withdrawing sets the date it stopped applying, and
+              doing it twice tells you so rather than quietly appearing to work again.
             </CardDescription>
           </div>
         </CardHeader>

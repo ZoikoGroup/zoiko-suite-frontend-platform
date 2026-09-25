@@ -3,21 +3,11 @@ import { CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
-import type { PurchaseRequest, RequestStatus } from "@/lib/api/purchase-requests";
-
-const STATUS_TONE: Record<RequestStatus, "success" | "danger" | "warning"> = {
-  APPROVED: "success",
-  REJECTED: "danger",
-  PENDING: "warning",
-};
-
-function formatAmount(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
+import {
+  describeRequestStatus,
+  formatRequestAmount,
+  type PurchaseRequest,
+} from "@/lib/api/purchase-requests";
 
 /**
  * The requisition register.
@@ -57,6 +47,7 @@ export function PurchaseRequestTable({ requests }: { requests: PurchaseRequest[]
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
           {requests.map((request) => {
+            const status = describeRequestStatus(request.status);
             const decidedBy =
               request.approved_by_principal_id ?? request.rejected_by_principal_id ?? null;
             const decidedAt = request.approved_at ?? request.rejected_at ?? null;
@@ -75,15 +66,23 @@ export function PurchaseRequestTable({ requests }: { requests: PurchaseRequest[]
                   )}
                 </td>
                 <td className={cn(CELL, "whitespace-nowrap tabular-nums text-slate-900 dark:text-slate-100")}>
-                  {formatAmount(request.amount, request.currency_code)}
+                  {formatRequestAmount(request.amount, request.currency_code)}
                 </td>
                 <td className={CELL}>
-                  <Badge tone={STATUS_TONE[request.status]} dot={request.status === "PENDING"}>
-                    {request.status}
+                  {/* The label reads; the code stays quotable beneath it. A
+                      budget holder needs to know whether money may be
+                      committed, and an auditor citing the same row needs the
+                      value the service holds — so the wording never replaces
+                      the code. */}
+                  <Badge tone={status.tone} dot={!status.decided} title={status.meaning}>
+                    {status.label}
                   </Badge>
-                  {request.status === "APPROVED" && (
+                  <p className="mt-0.5 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                    {status.raw}
+                  </p>
+                  {status.issuable && (
                     <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-                      issuable
+                      an order can be placed against it
                     </p>
                   )}
                 </td>

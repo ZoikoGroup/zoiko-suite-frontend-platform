@@ -17,12 +17,19 @@ type FeedbackState = ContractActionState | BoardActionState;
  * Accepts either action state — the contract console and the board write path
  * both report status + message, and a divergence between them would read as a
  * rendering bug rather than a choice.
+ *
+ * `children` carries the record the write produced, read back in plain English
+ * underneath the message. A one-line confirmation says the write happened; it
+ * does not let the reader check that what was stored is what they meant, and
+ * that is the part they cannot get anywhere else on the page.
  */
 export function ActionFeedback({
   state,
+  children,
   className,
 }: {
   state: FeedbackState;
+  children?: React.ReactNode;
   className?: string;
 }) {
   if (state.status === "idle") return null;
@@ -44,7 +51,16 @@ export function ActionFeedback({
       ) : (
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       )}
-      <span>{state.message}</span>
+      <div className="min-w-0 flex-1 space-y-2.5">
+        <p className="leading-relaxed">{state.message}</p>
+        {/* The record sits on its own ground rather than tinted by the banner:
+            it is a neutral read of what was stored, not part of the verdict. */}
+        {!isError && children && (
+          <div className="rounded-lg bg-white/70 p-3 ring-1 ring-inset ring-black/5 dark:bg-slate-900/40 dark:ring-white/5">
+            {children}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

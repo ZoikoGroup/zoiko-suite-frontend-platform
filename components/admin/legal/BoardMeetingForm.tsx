@@ -3,10 +3,11 @@
 import { useActionState } from "react";
 import { CalendarPlus } from "lucide-react";
 import { Button } from "@/components/ui";
-import { FIELD, LABEL } from "@/components/admin/shared/form";
+import { FIELD, HINT, LABEL } from "@/components/admin/shared/form";
 import { scheduleBoardMeeting } from "@/app/admin/legal/actions";
 import { IDLE_BOARD_STATE, type BoardActionState } from "@/app/admin/legal/state";
 import { ActionFeedback } from "./ActionFeedback";
+import { MeetingSummary } from "./BoardSummary";
 
 /**
  * Schedule a board meeting against board-resolutions-svc (:8122).
@@ -52,9 +53,10 @@ export function BoardMeetingForm() {
           </div>
           <div>
             <label htmlFor="effective_from" className={LABEL}>
-              Effective from
+              Record applies from
             </label>
             <input id="effective_from" name="effective_from" type="date" required className={FIELD} />
+            <p className={HINT}>The date this meeting&apos;s record takes effect from.</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -63,11 +65,15 @@ export function BoardMeetingForm() {
             {pending ? "Scheduling…" : "Schedule meeting"}
           </Button>
           <p className="text-xs text-slate-400 dark:text-slate-500">
-            Meetings are created as SCHEDULED — the service never accepts a caller-supplied status.
+            A meeting can only be booked here. It cannot later be started, adjourned, or
+            cancelled, and its minutes cannot be recorded.
           </p>
         </div>
       </form>
-      <ActionFeedback state={state} />
+      {/* The booked meeting, read back in plain English. */}
+      <ActionFeedback state={state}>
+        {state.meeting && <MeetingSummary meeting={state.meeting} variant="compact" />}
+      </ActionFeedback>
     </div>
   );
 }

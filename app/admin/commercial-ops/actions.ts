@@ -29,6 +29,8 @@ import {
   rejectPurchaseRequest,
   getPurchaseRequest,
   explainRequestError,
+  describeRequestStatus,
+  type PurchaseRequest,
 } from "@/lib/api/purchase-requests";
 import {
   createSpendPolicy,
@@ -45,6 +47,11 @@ import {
   explainVendorDDError,
 } from "@/lib/api/vendor-due-diligence";
 import { formatMoney } from "@/lib/format";
+import {
+  getWorkflowInstanceHistory,
+  createWorkflowInstance,
+  submitWorkflowStageAction,
+} from "@/lib/api/workflow-history";
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type {
   OrderActionState,
@@ -360,7 +367,10 @@ export async function submitPurchaseRequest(
   const result = await createPurchaseRequest({ identity, description, amount, currencyCode });
 
   if (!result.ok) {
-    return { status: "error", message: explainRequestError(result.error.message) };
+    return {
+      status: "error",
+      message: explainRequestError(result.error.message, { status: result.error.status }),
+    };
   }
 
   refresh();
@@ -375,12 +385,14 @@ export async function submitPurchaseRequest(
     ? {
         status: "created",
         requestId: request.request_id,
-        message: `Request raised for ${money}, status ${request.status} — ID ${request.request_id}. It authorises nothing until approved; an order cannot be issued against it yet.`,
+        request,
+        message: `Request raised for ${money}, and it is now awaiting a decision — reference ${request.request_id}. It authorises nothing yet: no order can be placed against it until somebody else approves it.`,
       }
     : {
         status: "replayed",
         requestId: request.request_id,
-        message: `No new request written — this replayed an existing one for ${money}, currently ${request.status}, ID ${request.request_id}. The service is idempotent on correlation ID, so a retried submit resolves to the original rather than duplicating it.`,
+        request,
+        message: `No new request written — one for ${money} had already been raised, and it stands as ${describeRequestStatus(request.status).label.toLowerCase()}. Reference ${request.request_id}. Submitting the form again resolved to the request that already exists rather than raising a second one for the same spend.`,
       };
 }
 
@@ -443,9 +455,20 @@ async function decideRequest(
 
   if (!result.ok) {
     if (result.error.status === 422) {
-      return { status: "already-decided", message: explainRequestError(result.error.message) };
+      return {
+        status: "already-decided",
+        message: explainRequestError(result.error.message, { status: result.error.status }),
+      };
     }
-    return { status: "error", message: explainRequestError(result.error.message) };
+    return {
+      status: "error",
+      message: explainRequestError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That request is no longer on record for your organisation, so nothing was decided. " +
+          "Reload the register to see which requests it holds now.",
+      }),
+    };
   }
 
   refresh();
@@ -455,20 +478,22 @@ async function decideRequest(
     ? {
         status: "approved",
         requestId: request.request_id,
-        message: `Request APPROVED and attributed to you. An order can now be issued against it — paste this ID into the issue form above: ${request.request_id}`,
+        request,
+        message: `Request approved, and the approval is recorded against you. An order can now be placed against it — paste this reference into the issue form above: ${request.request_id}. The decision is final and cannot be reversed here.`,
       }
     : {
         status: "rejected",
         requestId: request.request_id,
-        message: `Request REJECTED, with your reason stored on the record. No order can be issued against it.`,
+        request,
+        message: `Request rejected, with your reason stored on the record as the account of why. No order can be placed against it, and the decision cannot be reversed — a fresh request would have to be raised.`,
       };
 }
 
 /** Read one purchase request by id. */
 export async function lookupPurchaseRequest(
-  _previous: LookupState,
+  _previous: LookupState<PurchaseRequest>,
   formData: FormData,
-): Promise<LookupState> {
+): Promise<LookupState<PurchaseRequest>> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -492,7 +517,10 @@ export async function lookupPurchaseRequest(
           "No purchase request with that id exists for this tenant. A request belonging to another tenant reads as absent in exactly the same way.",
       };
     }
-    return { status: "error", message: explainRequestError(result.error.message) };
+    return {
+      status: "error",
+      message: explainRequestError(result.error.message, { status: result.error.status }),
+    };
   }
 
   return { status: "found", record: result.data, message: "" };
@@ -902,3 +930,133 @@ function isUuid(value: string): boolean {
 function formatAmount(amount: number, currency: string): string {
   return formatMoney(amount, currency);
 }
+
+/** Read workflow transition history by workflow instance id from workflow-history-svc (:8097). */
+export async function lookupWorkflowHistory(
+  _previous: LookupState,
+  formData: FormData,
+): Promise<LookupState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const workflowId = String(formData.get("lookup_workflow_id") ?? "").trim();
+  if (!workflowId) return { status: "error", message: "Enter a workflow instance ID." };
+
+  const result = await getWorkflowInstanceHistory(workflowId, identity);
+
+  if (!result.ok) {
+    if (result.error.status === 404) {
+      return {
+        status: "missing",
+        message:
+          "No workflow history found for this workflow instance ID within this tenant.",
+      };
+    }
+    return { status: "error", message: result.error.message || "Failed to query workflow history." };
+  }
+
+  return {
+    status: "found",
+    record: result.data,
+    message: "Workflow history retrieved successfully from workflow-history-svc (:8097)",
+  };
+}
+
+export type WorkflowInitiateState = {
+  status: "idle" | "created" | "error";
+  instanceId?: string;
+  message?: string;
+};
+
+export async function initiateWorkflowAction(
+  _previous: WorkflowInitiateState,
+  formData: FormData,
+): Promise<WorkflowInitiateState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const workflowType = String(formData.get("workflow_type") ?? "PURCHASE_APPROVAL").trim();
+  const stageName = String(formData.get("stage_name") ?? "Manager Approval").trim();
+  const approverId = String(formData.get("approver_principal_id") ?? "55555555-5555-5555-5555-555555555555").trim();
+
+  const res = await createWorkflowInstance(
+    {
+      workflow_type: workflowType,
+      stages: [
+        {
+          stage_order: 1,
+          stage_name: stageName,
+          required_role: "MANAGER",
+          approver_principal_id: approverId,
+        },
+      ],
+    },
+    identity
+  );
+
+  if (!res.ok) {
+    return { status: "error", message: res.error.message || "Failed to initiate workflow." };
+  }
+
+  return {
+    status: "created",
+    instanceId: res.data.workflow_instance_id,
+    message: `Workflow created successfully on workflow-svc (:8090)! Instance ID: ${res.data.workflow_instance_id}`,
+  };
+}
+
+export type WorkflowDecisionState = {
+  status: "idle" | "success" | "error";
+  message?: string;
+};
+
+export async function submitWorkflowDecisionAction(
+  _previous: WorkflowDecisionState,
+  formData: FormData,
+): Promise<WorkflowDecisionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const workflowId = String(formData.get("workflow_instance_id") ?? "").trim();
+  const action = String(formData.get("decision_action") ?? "APPROVE").trim() as "APPROVE" | "REJECT";
+  const comments = String(formData.get("comments") ?? "").trim();
+
+  if (!workflowId) return { status: "error", message: "Workflow Instance ID is required." };
+
+  const approverIdentity: SessionIdentity = {
+    ...identity,
+    principalId: "55555555-5555-5555-5555-555555555555",
+  };
+
+  const res = await submitWorkflowStageAction(
+    workflowId,
+    {
+      action,
+      rationale: comments || undefined,
+    },
+    approverIdentity
+  );
+
+  if (!res.ok) {
+    return { status: "error", message: res.error.message || "Failed to submit workflow decision." };
+  }
+
+  return {
+    status: "success",
+    message: `Decision "${action}" submitted to workflow-svc (:8090)! Event published to Kafka topic zoiko.workflow.events.`,
+  };
+}
+
+

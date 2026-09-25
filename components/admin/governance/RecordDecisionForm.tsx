@@ -2,9 +2,10 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui";
-import { JsonBlock, ResultBanner } from "@/components/admin/shared";
-import { FIELD, LABEL, OPTIONAL } from "@/components/admin/shared/form";
-import { DECISION_OUTCOMES } from "@/lib/api/governance";
+import { ResultBanner } from "@/components/admin/shared";
+import { FIELD, HINT, LABEL, OPTIONAL } from "@/components/admin/shared/form";
+import { DECISION_OUTCOMES, explainDecision } from "@/lib/api/governance";
+import { DecisionSummary } from "./DecisionSummary";
 import { submitDecision } from "@/app/admin/governance/actions";
 import { IDLE_RECORD_STATE, type RecordDecisionState } from "@/app/admin/governance/state";
 
@@ -36,16 +37,20 @@ export function RecordDecisionForm() {
             className={FIELD}
             autoComplete="off"
           />
+          <p className={HINT}>What was being decided on, as a code — e.g. PAYROLL_RELEASE.</p>
         </div>
 
         <div>
           <label htmlFor="outcome" className={LABEL}>
             Outcome
           </label>
+          {/* Labelled in plain words, submitted as the stored code. The code is
+              kept in the label too: this writes an evidence row, and whoever
+              picks a value should see exactly what will be stored. */}
           <select id="outcome" name="outcome" defaultValue="GRANTED" className={FIELD}>
             {DECISION_OUTCOMES.map((outcome) => (
               <option key={outcome} value={outcome}>
-                {outcome}
+                {explainDecision(outcome, "").shortLabel} ({outcome})
               </option>
             ))}
           </select>
@@ -87,7 +92,7 @@ export function RecordDecisionForm() {
 
         <div className="sm:col-span-2">
           <label htmlFor="evaluation_context" className={LABEL}>
-            Evaluation context <span className={OPTIONAL}>(optional JSON)</span>
+            Anything else worth recording <span className={OPTIONAL}>(optional)</span>
           </label>
           <textarea
             id="evaluation_context"
@@ -96,6 +101,11 @@ export function RecordDecisionForm() {
             placeholder={'{"amount": 48000, "currency": "GBP"}'}
             className={`${FIELD} font-mono text-xs`}
           />
+          <p className={HINT}>
+            The facts the decision was based on — an amount, a threshold, a reference. Written as
+            JSON, in the shape shown above, because the log stores it as structured data. It is
+            read back on this page as a plain list, so it does not have to be read as JSON.
+          </p>
         </div>
       </div>
 
@@ -108,17 +118,15 @@ export function RecordDecisionForm() {
         </p>
       </div>
 
+      {/* The written record, read back in plain English rather than as the
+          five-field JSON object this used to show. What the reader needs to
+          confirm is that the row says what they meant it to say — and they
+          cannot confirm that against a wire format. */}
       <ResultBanner tone={TONE[state.status]} message={state.message}>
         {state.decision && (
-          <JsonBlock
-            value={{
-              decision_id: state.decision.decision_id,
-              outcome: state.decision.outcome,
-              rule_basis: state.decision.rule_basis,
-              decided_at: state.decision.decided_at,
-              correlation_id: state.decision.correlation_id,
-            }}
-          />
+          <div className="rounded-lg bg-white/70 p-3 ring-1 ring-inset ring-black/5 dark:bg-slate-900/40 dark:ring-white/5">
+            <DecisionSummary decision={state.decision} variant="compact" />
+          </div>
         )}
       </ResultBanner>
     </form>

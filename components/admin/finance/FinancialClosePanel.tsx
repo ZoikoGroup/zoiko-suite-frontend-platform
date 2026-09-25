@@ -84,7 +84,7 @@ export async function FinancialClosePanel() {
         icon={CloudOff}
         tone="warning"
         label="Period register unavailable"
-        hint={explainCloseError(result.error.message)}
+        hint={explainCloseError(result.error.message, { status: result.error.status })}
       />
     );
   }

@@ -847,7 +847,7 @@ export async function createVATReturn(
   identity?: Identity
 ): Promise<ApiResult<VATReturn>> {
   const base = vatGstUrl();
-  return fetchDomainServicePost<VATReturn, VATReturn>(
+  return fetchDomainServicePost<{ vat_return?: VATReturn } & Partial<VATReturn>, VATReturn>(
     `${base}/v1/vat-returns`,
     base,
     "vat-gst-svc",
@@ -857,6 +857,45 @@ export async function createVATReturn(
       tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
       created_by: identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
     },
+    // The mock service wraps the record: { vat_return: {...} }.
+    // A real backend may return the flat object directly — fall back to the
+    // raw response so both shapes work without a code change.
+    (d) => (d.vat_return ?? d) as VATReturn
+  );
+}
+
+export type FileVATReturnInput = {
+  filed_by: string;
+};
+
+export async function fileVATReturn(
+  returnId: string,
+  input: FileVATReturnInput,
+  identity?: Identity
+): Promise<ApiResult<VATReturn>> {
+  const base = vatGstUrl();
+  return fetchDomainServicePost<VATReturn, VATReturn>(
+    `${base}/v1/vat-returns/${encodeURIComponent(returnId)}/file`,
+    base,
+    "vat-gst-svc",
+    identity,
+    {
+      filed_by: input.filed_by,
+    },
+    (d) => d
+  );
+}
+
+export async function getVATReturn(
+  returnId: string,
+  identity?: Identity
+): Promise<ApiResult<VATReturn>> {
+  const base = vatGstUrl();
+  return fetchDomainService<VATReturn, VATReturn>(
+    `${base}/v1/vat-returns/${encodeURIComponent(returnId)}`,
+    base,
+    "vat-gst-svc",
+    identity,
     (d) => d
   );
 }
@@ -1036,6 +1075,10 @@ async function fetchDomainServicePatch(
     Accept: "application/json",
     "Content-Type": "application/json",
     "X-Correlation-ID": correlationId,
+    "X-Request-Id": crypto.randomUUID(),
+    "X-Source-Channel": "web",
+    "X-Purpose-Context": "tax_compliance",
+    "Idempotency-Key": crypto.randomUUID(),
   };
   if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
   if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
@@ -1050,7 +1093,14 @@ async function fetchDomainServicePatch(
   }
 
   if (!res.ok) {
-    return { ok: false, error: { kind: "http", status: res.status, message: `${serviceName} returned ${res.status}` } };
+    let errorDetail = `${serviceName} returned ${res.status}`;
+    try {
+      const errJson = (await res.json()) as Record<string, unknown>;
+      if (typeof errJson.error === "string") errorDetail = errJson.error;
+    } catch {
+      // ignore
+    }
+    return { ok: false, error: { kind: "http", status: res.status, message: errorDetail } };
   }
 
   try {
@@ -1074,6 +1124,10 @@ async function fetchDomainServicePost<TRaw, TOut>(
     Accept: "application/json",
     "Content-Type": "application/json",
     "X-Correlation-ID": correlationId,
+    "X-Request-Id": crypto.randomUUID(),
+    "X-Source-Channel": "web",
+    "X-Purpose-Context": "tax_compliance",
+    "Idempotency-Key": crypto.randomUUID(),
   };
   if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
   if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
@@ -1081,7 +1135,7 @@ async function fetchDomainServicePost<TRaw, TOut>(
 
   let res: Response;
   try {
-    res = await fetch(urlStr, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(3000) });
+    res = await fetch(urlStr, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     return {
@@ -1089,19 +1143,30 @@ async function fetchDomainServicePost<TRaw, TOut>(
       error: {
         kind: isTimeout ? "timeout" : "unreachable",
         message: isTimeout
-          ? `${serviceName} did not respond within 3000ms`
+          ? `${serviceName} did not respond within 5000ms`
           : `${serviceName} is unreachable at ${base}`,
       },
     };
   }
 
   if (!res.ok) {
+    let errorDetail = `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`;
+    try {
+      const errJson = (await res.json()) as Record<string, unknown>;
+      if (typeof errJson.error === "string") {
+        errorDetail = errJson.error;
+      } else if (typeof errJson.message === "string") {
+        errorDetail = errJson.message;
+      }
+    } catch {
+      // ignore
+    }
     return {
       ok: false,
       error: {
         kind: "http",
         status: res.status,
-        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+        message: errorDetail,
       },
     };
   }
@@ -1674,6 +1739,9 @@ async function fetchDomainService<TRaw, TOut>(
   const headers: Record<string, string> = {
     Accept: "application/json",
     "X-Correlation-ID": correlationId,
+    "X-Request-Id": crypto.randomUUID(),
+    "X-Source-Channel": "web",
+    "X-Purpose-Context": "tax_compliance",
   };
   if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
   if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
@@ -1681,7 +1749,7 @@ async function fetchDomainService<TRaw, TOut>(
 
   let res: Response;
   try {
-    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(1500) });
+    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(15000) });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     if (ENABLE_MOCK_FALLBACK) {

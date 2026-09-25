@@ -38,6 +38,8 @@ import {
   recordResolutionVotes as recordResolutionVotesCall,
   passBoardResolution as passBoardResolutionCall,
   explainBoardError,
+  summariseVotes,
+  RESOLUTION_CATEGORIES,
   type ResolutionCategory,
 } from "@/lib/api/legal";
 import type { BoardActionState, ContractActionState } from "./state";
@@ -335,20 +337,16 @@ function fail(message: string): ContractActionState {
 
 const BOARD_EXPIRED: BoardActionState = {
   status: "error",
-  message: "Your session has expired — sign in again.",
+  message: "Nothing was changed — your session has expired. Sign in again and retry.",
 };
 
 function boardFail(message: string): BoardActionState {
   return { status: "error", message };
 }
 
-const CATEGORIES = new Set<ResolutionCategory>([
-  "GOVERNANCE",
-  "FINANCIAL",
-  "OPERATIONAL",
-  "EXECUTIVE",
-  "STATUTORY",
-]);
+/** One list, shared with the form that offers the choices and the helper that
+ *  explains them, so the three cannot drift apart. */
+const CATEGORIES = new Set<ResolutionCategory>(RESOLUTION_CATEGORIES);
 
 function isCategory(value: string): value is ResolutionCategory {
   return CATEGORIES.has(value as ResolutionCategory);
@@ -372,16 +370,16 @@ export async function scheduleBoardMeeting(
   const location = String(formData.get("location") ?? "").trim();
   const effectiveFrom = String(formData.get("effective_from") ?? "").trim();
 
-  if (!title) return boardFail("A meeting title is required.");
-  if (!scheduledAtRaw) return boardFail("A scheduled date and time is required.");
-  if (!effectiveFrom) return boardFail("An effective-from date is required.");
+  if (!title) return boardFail("Give the meeting a title — this is how it is listed and referred to.");
+  if (!scheduledAtRaw) return boardFail("Say when the meeting sits. Both the date and the time are needed.");
+  if (!effectiveFrom) return boardFail("Give the date the meeting's record applies from.");
 
   // datetime-local sends "2026-10-05T14:00", which is not RFC3339 — Go's
   // time.Time would reject the body with 400. Treat the input as local time
   // and emit a full RFC3339 timestamp (with seconds) for the service.
   const scheduled = new Date(scheduledAtRaw);
   if (Number.isNaN(scheduled.getTime())) {
-    return boardFail("Scheduled time is not a valid date and time.");
+    return boardFail("That is not a date and time the calendar recognises. Pick it again.");
   }
   const scheduledAt = scheduled.toISOString();
 
@@ -393,7 +391,9 @@ export async function scheduleBoardMeeting(
     effectiveFrom,
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(explainBoardError(result.error.message, { status: result.error.status }));
+  }
 
   refresh();
 
@@ -402,7 +402,8 @@ export async function scheduleBoardMeeting(
     status: "created",
     title: m.title,
     recordId: m.meeting_id,
-    message: `Board meeting "${m.title}" scheduled for ${new Date(m.scheduled_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}.`,
+    meeting: m,
+    message: `The meeting is in the diary for ${formatWhen(m.scheduled_at)}. You can now propose resolutions against it.`,
   };
 }
 
@@ -427,10 +428,10 @@ export async function proposeBoardResolution(
   const effectiveFrom = String(formData.get("effective_from") ?? "").trim();
   const effectiveTo = String(formData.get("effective_to") ?? "").trim();
 
-  if (!title) return boardFail("A resolution title is required.");
-  if (!content) return boardFail("Resolution content is required — this is the record that survives.");
-  if (!isCategory(category)) return boardFail("Select a resolution category.");
-  if (!effectiveFrom) return boardFail("An effective-from date is required.");
+  if (!title) return boardFail("Give the resolution a title — a short line saying what is being decided.");
+  if (!content) return boardFail("Write out what the resolution says. This wording is the record that survives, so it cannot be left blank.");
+  if (!isCategory(category)) return boardFail("Choose what kind of decision this is. It is not a label — it decides which supporting evidence the board needs before the resolution can be passed.");
+  if (!effectiveFrom) return boardFail("Give the date the decision applies from.");
 
   const result = await createBoardResolutionCall({
     identity,
@@ -443,7 +444,18 @@ export async function proposeBoardResolution(
     ...(effectiveTo ? { effectiveTo } : {}),
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(
+      explainBoardError(result.error.message, {
+        status: result.error.status,
+        // A 404 here is the meeting the resolution was put to, not the
+        // resolution — nothing has been created yet for a 404 to be about.
+        notFound:
+          "The meeting this was to be put to is no longer in the diary, so nothing was saved. " +
+          "Reload the page and pick a meeting from the list again, or propose it standalone.",
+      }),
+    );
+  }
 
   refresh();
 
@@ -452,7 +464,9 @@ export async function proposeBoardResolution(
     status: "created",
     title: r.title,
     recordId: r.resolution_id,
-    message: `Resolution "${r.title}" proposed as ${r.resolution_number || "unnumbered"} — still PROPOSED until it is voted on and passed.`,
+    resolution: r,
+    message:
+      "The resolution is on the table. It has no effect yet — the board still has to decide it.",
   };
 }
 
@@ -475,13 +489,13 @@ export async function tallyResolutionVotes(
   const votesAgainst = Number(formData.get("votes_against") ?? "0");
   const abstentions = Number(formData.get("abstentions") ?? "0");
 
-  if (!resolutionId) return boardFail("Missing resolution ID.");
+  if (!resolutionId) return boardFail("It is not clear which resolution this applies to. Reload the page and try again.");
   if (
     !Number.isInteger(votesFor) || votesFor < 0 ||
     !Number.isInteger(votesAgainst) || votesAgainst < 0 ||
     !Number.isInteger(abstentions) || abstentions < 0
   ) {
-    return boardFail("Vote counts must be whole, non-negative numbers.");
+    return boardFail("Enter each vote count as a whole number of people, using 0 for none. A count cannot be negative or a fraction.");
   }
 
   const result = await recordResolutionVotesCall({
@@ -492,15 +506,33 @@ export async function tallyResolutionVotes(
     abstentions,
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(
+      explainBoardError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That resolution is no longer on record for your organisation, so no count was " +
+          "saved. Reload the page to see what the register holds now.",
+        conflict:
+          "Nothing was saved. This resolution has already been closed, and the tally of a " +
+          "closed resolution cannot be changed. Reload the page to see how it was decided.",
+      }),
+    );
+  }
 
   refresh();
 
   const r = result.data;
+  const votes = summariseVotes(r);
   return {
     status: "voted",
     title: title || r.title,
-    message: `Tally recorded: ${r.votes_for} for, ${r.votes_against} against, ${r.abstentions} abstained. The resolution is still ${r.status} — a pass finalizes it.`,
+    recordId: r.resolution_id,
+    resolution: r,
+    // Says what was recorded and, in the same breath, that recording it settled
+    // nothing. The service does not compare the counts or act on them, so a
+    // message that stopped at the figures would read as a decision.
+    message: `Recorded: ${votes.line}. ${votes.headline} Nothing is decided by this — the resolution still has to be passed.`,
   };
 }
 
@@ -523,11 +555,13 @@ export async function passResolutionIntoForce(
   const title = String(formData.get("resolution_title") ?? "").trim();
   const createdBy = String(formData.get("resolution_created_by") ?? "").trim();
 
-  if (!resolutionId) return boardFail("Missing resolution ID.");
+  if (!resolutionId) return boardFail("It is not clear which resolution this applies to. Reload the page and try again.");
 
   if (createdBy === identity.principalId) {
     return boardFail(
-      "Segregation of duties: the principal who proposed a resolution may not pass it. Another principal with the RESOLUTION_PASS grant must close it.",
+      "You proposed this resolution, so you cannot be the one to pass it. That split is " +
+        "deliberate: one person must not be able to put their own proposal into force on " +
+        "their own. Someone else with the authority to close resolutions has to pass it.",
     );
   }
 
@@ -537,7 +571,20 @@ export async function passResolutionIntoForce(
     passedBy: identity.principalId,
   });
 
-  if (!result.ok) return boardFail(explainBoardError(result.error.message));
+  if (!result.ok) {
+    return boardFail(
+      explainBoardError(result.error.message, {
+        status: result.error.status,
+        notFound:
+          "That resolution is no longer on record for your organisation, so nothing was " +
+          "passed. Reload the page to see what the register holds now.",
+        conflict:
+          "Nothing was changed. This resolution has already been closed — passed, turned " +
+          "down, or withdrawn — so its outcome is fixed. Reload the page to see how it was " +
+          "decided.",
+      }),
+    );
+  }
 
   refresh();
 
@@ -547,8 +594,26 @@ export async function passResolutionIntoForce(
     title: title || r.title,
     recordId: r.resolution_id,
     passedBy: r.passed_by,
-    message: `"${title || r.title}" passed into force${r.passed_by ? ` by ${r.passed_by}` : ""}${r.passed_at ? ` at ${new Date(r.passed_at).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}. The evidence gate (evidence-requirements-svc) was satisfied before finalizing.`,
+    resolution: r,
+    message:
+      `The resolution is passed and in force${r.passed_at ? ` as of ${formatWhen(r.passed_at)}` : ""}. ` +
+      "The supporting evidence the board requires for this kind of decision was checked and " +
+      "found to be on file. It is now closed and cannot be changed.",
   };
+}
+
+/** A timestamp as a person would say it. The board messages are read by people
+ *  who did not write the service, so an ISO string is not an answer. */
+function formatWhen(value: string): string {
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) return value;
+  return when.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

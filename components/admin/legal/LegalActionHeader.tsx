@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Plus, Edit3, Vote, CheckCircle2, X, Server, Zap, Loader2 } from "lucide-react";
+import { BoardResolutionForm } from "./BoardResolutionForm";
 
 const SERVICES = [
   { name: "contract-lifecycle-svc",     port: "8119", color: "bg-emerald-500" },
@@ -232,116 +233,53 @@ function DraftClauseModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function PassResolutionModal({ onClose }: { onClose: () => void }) {
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [category, setCategory] = useState("GOVERNANCE");
-
-  async function handleCreate() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/v1/resolutions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          content,
-          category,
-          effective_from: new Date().toISOString(),
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Failed to create resolution");
-        setSubmitting(false);
-        return;
-      }
-    } catch (err) {
-      console.warn("API call degraded safely:", err);
-      setError("Network error - service may be unavailable");
-      setSubmitting(false);
-      return;
-    }
-    setSubmitting(false);
-    setDone(true);
-  }
-
+/**
+ * Propose a resolution, from the domain header.
+ *
+ * This is a shell around BoardResolutionForm rather than a second form. It used
+ * to be its own implementation, POSTing to /api/v1/resolutions — a route that
+ * writes nothing and answers 501 `not_implemented`, which the modal then showed
+ * to the reader verbatim as its error. So the button could not work, and when it
+ * failed it failed in machine codes.
+ *
+ * Reusing the real form fixes both at once: the write goes through the Server
+ * Action that reaches board-resolutions-svc, and the outcome is read back in
+ * plain English by the same component the register uses. It also means the two
+ * places a resolution can be proposed cannot drift apart.
+ *
+ * The meeting picker is empty here — the header has no server-side read to draw
+ * the diary from — so a resolution proposed from this modal is standalone. The
+ * form already handles that case, since the service treats the meeting as
+ * optional.
+ */
+function ProposeResolutionModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/20">
               <Vote className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
             </span>
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Pass Resolution</h2>
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                Put a resolution to the board
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Proposing it decides nothing — someone else has to pass it
+              </p>
+            </div>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:text-slate-600">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-md p-1 text-slate-400 hover:text-slate-600"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="p-5">
-          {done ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-              <p className="font-semibold text-slate-800 dark:text-slate-200">Resolution Created</p>
-              <p className="text-xs text-slate-500">Resolution registered in board-resolutions-svc (:8122).</p>
-              <button onClick={onClose} className="mt-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white">Done</button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {error && (
-                <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 dark:bg-red-500/10 dark:border-red-500/20">
-                  <p className="text-xs text-red-700 dark:text-red-300">{error}</p>
-                </div>
-              )}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Resolution Title</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Board Resolution 2026-001"
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Category</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
-                >
-                  <option value="GOVERNANCE">Governance</option>
-                  <option value="FINANCIAL">Financial</option>
-                  <option value="OPERATIONAL">Operational</option>
-                  <option value="EXECUTIVE">Executive</option>
-                  <option value="STATUTORY">Statutory</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Resolution Content</label>
-                <textarea
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Enter the resolution text..."
-                  rows={4}
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
-                />
-              </div>
-              <button
-                onClick={handleCreate}
-                disabled={submitting || !title || !content}
-                className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-medium text-white flex items-center justify-center gap-1.5 disabled:opacity-50"
-              >
-                {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Create Resolution"}
-              </button>
-            </div>
-          )}
+          <BoardResolutionForm meetings={[]} />
         </div>
       </div>
     </div>
@@ -355,7 +293,7 @@ export function LegalActionHeader() {
     <>
       {modal === "create" && <CreateContractModal onClose={() => setModal(null)} />}
       {modal === "clause" && <DraftClauseModal onClose={() => setModal(null)} />}
-      {modal === "resolution" && <PassResolutionModal onClose={() => setModal(null)} />}
+      {modal === "resolution" && <ProposeResolutionModal onClose={() => setModal(null)} />}
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
@@ -386,7 +324,7 @@ export function LegalActionHeader() {
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
             >
               <Vote className="h-3.5 w-3.5 text-emerald-500" />
-              Pass Resolution
+              Propose Resolution
             </button>
           </div>
         </div>

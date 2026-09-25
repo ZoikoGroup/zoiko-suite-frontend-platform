@@ -9,7 +9,12 @@ import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
 import { checkCloseReadiness, closeFiscalPeriod } from "@/app/admin/finance/actions";
 import { IDLE_CLOSE_STATE, type CloseActionState } from "@/app/admin/finance/state";
-import { formatPeriodRange, isLocked, type FiscalPeriod } from "@/lib/api/financial-close";
+import {
+  describeCloseStatus,
+  formatPeriodRange,
+  isLocked,
+  type FiscalPeriod,
+} from "@/lib/api/financial-close";
 
 /**
  * One fiscal period, with the two things that can be done to an open one:
@@ -45,6 +50,7 @@ export function FiscalPeriodRow({
   const state = closeState.status !== "idle" ? closeState : checkState;
 
   const locked = isLocked(period);
+  const status = describeCloseStatus(period.close_status);
 
   const feedback =
     state.status === "error"
@@ -70,9 +76,16 @@ export function FiscalPeriodRow({
         </td>
 
         <td className={CELL}>
-          <Badge tone={locked ? "success" : "warning"} dot={!locked}>
-            {period.close_status}
+          {/* The label reads; the code stays quotable underneath it. A
+              controller needs to know the books are sealed, and an auditor
+              citing the same row needs the value the service actually holds —
+              so the wording never replaces the code, it sits above it. */}
+          <Badge tone={status.tone} dot={!status.sealed} title={status.meaning}>
+            {status.label}
           </Badge>
+          <p className="mt-1 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+            {status.raw}
+          </p>
           {period.close_locked_at && (
             <p className="mt-1 whitespace-nowrap text-[11px] text-slate-400 dark:text-slate-500">
               sealed {formatDateTime(period.close_locked_at)}

@@ -17,7 +17,12 @@ const eslintConfig = defineConfig([
     "zoiko-suite-frontend-platform/**",
   ]),
   {
-    files: ["scratch/**/*.js", "**/scratch/**/*.js", "*.js"],
+    files: [
+      "scratch/**/*.js",
+      "**/scratch/**/*.js",
+      "mock-backend/**/*.js",
+      "*.js",
+    ],
     rules: {
       "@typescript-eslint/no-require-imports": "off",
       "@typescript-eslint/no-unused-vars": "off",
@@ -33,6 +38,8 @@ const eslintConfig = defineConfig([
           caughtErrorsIgnorePattern: "^_",
         },
       ],
+      "@typescript-eslint/no-explicit-any": "warn",
+      "react-hooks/set-state-in-effect": "warn",
     },
   },
 ]);

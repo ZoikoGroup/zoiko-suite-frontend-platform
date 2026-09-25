@@ -8,6 +8,7 @@
 // the record. Recording is the only write.
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
+import { humanizeCode } from "../humanize";
 
 /** Wire shape from the backend. Field names match the Go json tags exactly. */
 export type GovernanceDecision = {
@@ -20,6 +21,12 @@ export type GovernanceDecision = {
   rule_basis: string;
   evaluation_context?: unknown;
   correlation_id: string;
+  /** Null when the decision was not made inside a workflow instance. Promoted to
+   *  a first-class column in migration 000004 — "every decision made during
+   *  workflow instance X" is a real query on this log. */
+  workflow_instance_id?: string | null;
+  /** Null when the causing event or decision is not known. */
+  causation_id?: string | null;
   decided_at: string;
 };
 
@@ -269,11 +276,16 @@ function formatTimeAgo(isoTimestamp: string): string {
 // the raw records, every filter the service accepts, and the ability to write
 // one. Both live here rather than in two modules, because they are one service.
 //
-// Note what this service does NOT do: there is no tenant scoping. GET
-// /v1/decisions reads no identity header and applies no row-level security — it
-// returns every decision in the store, filtered only by the query parameters
-// given. The tenant boundary on this log is whatever the caller asks for, so
-// the console always passes an entity filter when it means to scope a read.
+// This service IS tenant-scoped, contrary to what this comment used to say.
+// Verified against the running service: GET /v1/decisions requires X-Tenant-Id
+// (400 `missing_tenant_id` without it), returns an empty list when given another
+// tenant's id, and row-level security is forced in the database (migrations
+// 000002 and 000006). A lookup by id behaves the same way, answering 404 for a
+// decision belonging to another tenant.
+//
+// So every read below takes an identity, and passing one is not optional — the
+// entity filter narrows a read within the tenant, it does not establish the
+// tenant boundary.
 
 /** Every filter GET /v1/decisions accepts. All optional, AND-composed. */
 export type DecisionFilters = {
@@ -331,8 +343,10 @@ export async function listDecisionRecords(
 /**
  * Fetch one decision by its id.
  *
- * 404 means no record with that id exists anywhere in the store — not "not
- * visible to you", because this service applies no tenant filter to a lookup.
+ * `identity` is required in practice. Without X-Tenant-Id the service refuses
+ * the read with 400 `missing_tenant_id`, and 404 means "not visible to this
+ * tenant" rather than "absent from the store" — the caller cannot tell a
+ * decision that does not exist from one belonging to another tenant.
  */
 export async function getDecision(
   decisionId: string,
@@ -427,6 +441,114 @@ export const DECISION_OUTCOMES = ["GRANTED", "DENIED", "ESCALATED"] as const;
  *  Overview page exactly. */
 export function bucketOutcome(raw: string): { outcome: DecisionOutcome; unmapped: boolean } {
   return normaliseOutcome(raw);
+}
+
+// ─── Reading a decision without reading the schema ───────────────────────────
+//
+// The records this service returns are evidence about whether something was
+// allowed to happen. The people who need that answer — a finance lead checking a
+// payment run, an auditor following a trail — are not the people who wrote the
+// service, and `{"outcome":"GRANTED","rule_basis":"SPEND-LIMIT-V3:pv-8f2c1a"}`
+// does not answer it for them. These helpers say what a record means in prose.
+// They never alter a stored value; the code stays visible next to the plain text.
+
+export type DecisionExplanation = {
+  /** One sentence: what happened to the action. */
+  headline: string;
+  /** What that means, for a reader who does not know the outcome vocabulary. */
+  meaning: string;
+  /** Short label for a badge — "Allowed", "Refused", "Needs review". */
+  shortLabel: string;
+  outcome: DecisionOutcome;
+  /** The outcome exactly as stored. */
+  raw: string;
+  unmapped: boolean;
+};
+
+/** Badge text per bucket. Plain verbs, not the storage vocabulary. */
+const OUTCOME_LABEL: Record<DecisionOutcome, string> = {
+  authorized: "Allowed",
+  denied: "Refused",
+  escalated: "Needs review",
+};
+
+/**
+ * Explain one decision in prose.
+ *
+ * `actionType` is folded into the headline because "Allowed" on its own is not a
+ * fact anyone can act on — what was allowed is the point. An outcome the service
+ * stored but this console does not recognise gets a headline that says exactly
+ * that, and is never described as an approval.
+ */
+export function explainDecision(outcomeRaw: string, actionType: string): DecisionExplanation {
+  const { outcome, unmapped } = normaliseOutcome(outcomeRaw);
+  const action = humanizeCode(actionType) || "This action";
+  const stored = outcomeRaw?.trim() || "(empty)";
+
+  if (unmapped) {
+    return {
+      headline: `${action}: the recorded outcome is not one this console recognises`,
+      meaning:
+        `The log stored the outcome "${stored}", which is not one of the values this ` +
+        "console knows how to read. It is shown as needing review, and is deliberately " +
+        "not treated as an approval — check with whoever operates the service that " +
+        "recorded it before relying on this record.",
+      shortLabel: "Needs review",
+      outcome,
+      raw: stored,
+      unmapped,
+    };
+  }
+
+  const MEANING: Record<DecisionOutcome, { headline: string; meaning: string }> = {
+    authorized: {
+      headline: `${action} was allowed`,
+      meaning:
+        "The governance rules were checked and this action was permitted to go ahead. " +
+        "The rule that permitted it is recorded below as the basis for the decision.",
+    },
+    denied: {
+      headline: `${action} was refused`,
+      meaning:
+        "The governance rules were checked and this action was blocked, so it did not " +
+        "go ahead. The rule that blocked it is recorded below as the basis for the decision.",
+    },
+    escalated: {
+      headline: `${action} was sent for review`,
+      meaning:
+        "The governance rules could not settle this action automatically, so it was " +
+        "passed to a person to approve or refuse. This record is the referral itself — " +
+        "it does not say what was decided afterwards.",
+    },
+  };
+
+  return {
+    ...MEANING[outcome],
+    shortLabel: OUTCOME_LABEL[outcome],
+    outcome,
+    raw: stored,
+    unmapped,
+  };
+}
+
+/**
+ * Split a rule basis into the rule and the reference after the colon.
+ *
+ * Callers write this field as `RULE-NAME:reference` — the placeholder in the
+ * console's own form is `SPEND-LIMIT-V3:pv-8f2c1a`. That is a convention rather
+ * than a contract (the column is a plain VARCHAR(256) with no format enforced),
+ * so a value with no colon comes back whole and unsplit rather than being forced
+ * into a shape it does not have.
+ */
+export function splitRuleBasis(raw: string): { rule: string; reference?: string } {
+  const trimmed = raw?.trim() ?? "";
+  const colon = trimmed.indexOf(":");
+  if (colon <= 0 || colon === trimmed.length - 1) return { rule: trimmed };
+
+  return {
+    rule: trimmed.slice(0, colon),
+    reference: trimmed.slice(colon + 1),
+  };
 }
 
 /**

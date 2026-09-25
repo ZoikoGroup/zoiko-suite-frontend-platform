@@ -2,11 +2,12 @@
 
 import { useActionState } from "react";
 import { Button } from "@/components/ui";
-import { CopyableId, ResultBanner } from "@/components/admin/shared";
+import { ResultBanner } from "@/components/admin/shared";
 import { FIELD, LABEL, OPTIONAL, PANEL } from "@/components/admin/shared/form";
 import { COMPATIBILITY_MODES } from "@/lib/api/schemas";
 import { registerSchemaAction } from "@/app/admin/schemas/actions";
 import { IDLE_REGISTER_SCHEMA } from "@/app/admin/schemas/state";
+import { ContractSummary, ViolationList } from "./SchemaSummary";
 
 /**
  * Tones.
@@ -27,6 +28,18 @@ const TONE = {
   error: "error",
   idle: "neutral",
 } as const;
+
+/**
+ * The two modes as a choice rather than a code.
+ *
+ * The stored code stays in the option text. This control decides which
+ * discipline is recorded on the version forever, and the reader who picks it is
+ * the one most likely to be asked later which one they chose.
+ */
+const MODE_CHOICE: Record<string, string> = {
+  BACKWARD: "Check it against the current version",
+  NONE: "Register it without a check",
+};
 
 const EXAMPLE = `{
   "type": "object",
@@ -65,30 +78,31 @@ export function RegisterSchemaForm({ eventNames }: { eventNames: string[] }) {
             ))}
           </datalist>
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            An existing name registers the next version. A new name starts at v1.
+            A name already in the register adds the next version to it. A new name starts at version 1.
           </p>
         </div>
 
         <div>
           <label className={LABEL} htmlFor="compatibility_mode">
-            Compatibility mode
+            How this version should be checked
           </label>
           <select id="compatibility_mode" name="compatibility_mode" className={FIELD} defaultValue="BACKWARD">
             {COMPATIBILITY_MODES.map((m) => (
               <option key={m} value={m}>
-                {m}
+                {MODE_CHOICE[m] ?? m} ({m})
               </option>
             ))}
           </select>
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            BACKWARD refuses anything that would break existing consumers. NONE skips the check — for a
-            controlled rollout, and recorded on the version so the exemption is visible.
+            Checking refuses anything that would break whoever already reads this event. Skipping the
+            check is for a change planned with those readers in advance — it is recorded on the version,
+            so the exemption stays visible afterwards.
           </p>
         </div>
 
         <div className="sm:col-span-2">
           <label className={LABEL} htmlFor="owning_service">
-            Owning service <span className={OPTIONAL}>optional</span>
+            Who publishes this event <span className={OPTIONAL}>optional</span>
           </label>
           <input
             id="owning_service"
@@ -98,13 +112,13 @@ export function RegisterSchemaForm({ eventNames }: { eventNames: string[] }) {
             autoComplete="off"
           />
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Who produces this event. The first question asked when a contract breaks.
+            The service that emits it. The first thing anyone asks when a contract breaks.
           </p>
         </div>
 
         <div className="sm:col-span-2">
           <label className={LABEL} htmlFor="json_schema">
-            JSON Schema
+            What the payload must contain, as JSON Schema
           </label>
           <textarea
             id="json_schema"
@@ -124,11 +138,10 @@ export function RegisterSchemaForm({ eventNames }: { eventNames: string[] }) {
 
       <div className={PANEL}>
         <p className="text-xs text-slate-600 dark:text-slate-400">
-          Compatibility is checked at the <strong>top level only</strong> — the checker reads{" "}
-          <code className="font-mono">properties</code> and <code className="font-mono">required</code> and
-          does not descend into nested objects or arrays. A breaking change buried inside a nested object
-          will be accepted. That is a documented limit of the service, not something this page can work
-          around.
+          The check looks at the <strong>outermost fields only</strong> — their names, the kind of value
+          each carries, and which of them have to be present. It does not look inside a field that holds a
+          group or a list, so a breaking change made in there is accepted. That is a documented limit of
+          the registry, not something this page can work around.
         </p>
       </div>
 
@@ -137,20 +150,17 @@ export function RegisterSchemaForm({ eventNames }: { eventNames: string[] }) {
       </Button>
 
       <ResultBanner tone={TONE[state.status]} message={state.message}>
+        {/* The checker's violations, each as the thing to fix rather than the
+            string it was reported as. */}
         {state.violations && state.violations.length > 0 ? (
-          <ul className="mt-2 space-y-1">
-            {state.violations.map((v) => (
-              <li key={v} className="flex gap-2 text-xs">
-                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-current opacity-60" aria-hidden="true" />
-                <span className="font-mono">{v}</span>
-              </li>
-            ))}
-          </ul>
+          <ViolationList violations={state.violations} />
         ) : null}
+        {/* What was registered, read back as a contract. This used to be a
+            copyable "name vN" and nothing else, which confirmed the write and
+            said nothing about what had just been committed to. */}
         {state.schema ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-slate-500 dark:text-slate-400">Registered</span>
-            <CopyableId value={`${state.schema.event_name} v${state.schema.version}`} />
+          <div className="mt-3 rounded-lg bg-white/60 p-3 dark:bg-slate-900/40">
+            <ContractSummary schema={state.schema} variant="compact" />
           </div>
         ) : null}
       </ResultBanner>
