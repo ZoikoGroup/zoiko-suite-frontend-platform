@@ -138,6 +138,37 @@ export async function listTemplates(identity?: Identity): Promise<ApiResult<Cont
   );
 }
 
+export type CreateClauseInput = {
+  identity: Identity & { principalId: string; tenantId: string };
+  title: string;
+  category: string;
+  body: string;
+  jurisdictionId: string;
+  isStandard: boolean;
+};
+
+export async function createClause(
+  input: CreateClauseInput,
+): Promise<ApiResult<Clause>> {
+  const base = clauseTemplateUrl();
+  return fetchDomainServicePost<{ clause: Clause }, Clause>(
+    `${base}/v1/clauses`,
+    base,
+    "clause-template-svc",
+    {
+      title: input.title,
+      category: input.category,
+      body: input.body,
+      jurisdiction_id: input.jurisdictionId,
+      is_standard: input.isStandard,
+      status: "APPROVED",
+      created_by: input.identity.principalId,
+    },
+    input.identity,
+    (d) => d.clause,
+  );
+}
+
 // ─── 3. Obligation Tracking ──────────────────────────────────────────────────
 
 export type ObligationType = "CONTRACTUAL" | "REGULATORY" | "STATUTORY" | "INTERNAL_POLICY";
@@ -426,6 +457,39 @@ export async function listCorporateActions(identity?: Identity): Promise<ApiResu
   );
 }
 
+export type CreateCorporateActionInput = {
+  identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
+  actionType: string;
+  title: string;
+  description?: string;
+  authorizedShares?: number;
+  shareClass?: string;
+};
+
+export async function createCorporateAction(
+  input: CreateCorporateActionInput,
+): Promise<ApiResult<CorporateAction>> {
+  const base = corporateActionsUrl();
+  return fetchDomainServicePost<{ action: CorporateAction }, CorporateAction>(
+    `${base}/v1/corporate-actions`,
+    base,
+    "corporate-actions-svc",
+    {
+      legal_entity_id: input.identity.legalEntityId,
+      action_type: input.actionType,
+      title: input.title,
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.authorizedShares !== undefined ? { authorized_shares: input.authorizedShares } : {}),
+      ...(input.shareClass ? { share_class: input.shareClass } : {}),
+      status: "PROPOSED",
+      effective_date: new Date().toISOString(),
+      created_by: input.identity.principalId,
+    },
+    input.identity,
+    (d) => d.action,
+  );
+}
+
 // ─── 6. Counterparty Management ──────────────────────────────────────────────
 
 export type Counterparty = {
@@ -496,6 +560,66 @@ async function fetchDomainService<TRaw, TOut>(
   let res: Response;
   try {
     res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} did not respond within 3000ms`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
+  }
+}
+
+async function fetchDomainServicePost<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  body: unknown,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(3000),
+    });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     return {

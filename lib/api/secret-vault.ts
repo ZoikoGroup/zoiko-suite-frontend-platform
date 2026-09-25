@@ -169,7 +169,10 @@ export async function createSecretPolicy(
       created_by_principal_id: input.principalId,
       ...(input.dataClassification ? { data_classification: input.dataClassification } : {}),
     },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: "SECRET_POLICY_MANAGEMENT",
+    },
   );
 }
 
@@ -274,7 +277,10 @@ export async function createSecretPolicyVersion(
       ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
       created_by_principal_id: input.principalId,
     },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: "SECRET_POLICY_VERSIONING",
+    },
   );
 }
 
@@ -296,7 +302,10 @@ export async function activateSecretPolicyVersion(input: {
       input.secretPolicyId,
     )}/versions/${encodeURIComponent(input.versionId)}/activate`,
     { activated_by_principal_id: input.principalId },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: "SECRET_POLICY_ACTIVATION",
+    },
   );
 }
 
@@ -326,7 +335,10 @@ export async function putSecretMaterial(input: {
     "secretVault",
     `/v1/secret-policies/${encodeURIComponent(input.secretPolicyId)}/material`,
     { material_base64: input.materialBase64 },
-    { identity: { principalId: input.principalId, tenantId: input.callerTenantId } },
+    {
+      identity: { principalId: input.principalId, tenantId: input.callerTenantId },
+      purposeContext: "SECRET_MATERIAL_PROVISIONING",
+    },
   );
 }
 
@@ -361,6 +373,7 @@ export async function rotateSecret(input: {
     { request_id: input.requestId, rotated_by_principal_id: input.principalId },
     {
       correlationId: input.requestId,
+      purposeContext: "SECRET_ROTATION",
       identity: { principalId: input.principalId, tenantId: input.callerTenantId },
     },
   );
@@ -408,6 +421,7 @@ export async function brokerSecret(input: {
     },
     {
       correlationId: input.correlationId ?? input.requestId,
+      purposeContext: "SECRET_ACCESS_REQUEST",
       // The broker used to take its whole tenant scope from the body, so the
       // policy that decided the request, the lease it minted and the audit entry
       // it wrote could all belong to a tenant the caller merely named.
@@ -491,7 +505,7 @@ export async function revokeLease(
     "secretVault",
     `/v1/secrets/leases/${encodeURIComponent(leaseId)}/revoke`,
     {},
-    { identity },
+    { identity, purposeContext: "SECRET_LEASE_REVOCATION" },
   );
 }
 

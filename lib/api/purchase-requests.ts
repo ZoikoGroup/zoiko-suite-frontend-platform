@@ -128,7 +128,7 @@ export type CreateRequestInput = {
 export async function createPurchaseRequest(
   input: CreateRequestInput,
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  return apiPost<PurchaseRequest>(
+  const result = await apiPost<PurchaseRequest>(
     "purchaseRequest",
     "/v1/purchase-requests",
     {
@@ -141,6 +141,18 @@ export async function createPurchaseRequest(
     },
     { identity: input.identity },
   );
+
+  if (!result.ok) return result;
+  if (!result.data || typeof result.data.request_id !== "string") {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "purchase-request-svc did not return the created request record",
+      },
+    };
+  }
+  return result;
 }
 
 /** Approve a PENDING request. Terminal — a second call answers 422. */

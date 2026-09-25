@@ -900,9 +900,5 @@ function isUuid(value: string): boolean {
 }
 
 function formatAmount(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amount);
+  return formatMoney(amount, currency);
 }

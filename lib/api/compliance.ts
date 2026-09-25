@@ -121,6 +121,26 @@ export async function listEscalatedExceptions(identity?: Identity): Promise<ApiR
   return { ok: true, data: list };
 }
 
+export async function createEscalatedException(
+  body: {
+    title: string;
+    source_service: string;
+    severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    description?: string;
+  },
+  identity?: Identity,
+): Promise<ApiResult<EscalatedException>> {
+  const res = await apiPost<{ exception?: EscalatedException } | EscalatedException>(
+    "exceptionEscalation",
+    "/v1/exceptions",
+    body,
+    { identity },
+  );
+  if (!res.ok) return res;
+  const exc = (res.data as { exception?: EscalatedException }).exception ?? (res.data as EscalatedException);
+  return { ok: true, data: exc };
+}
+
 export async function resolveException(
   exceptionId: string,
   resolutionNote: string,
