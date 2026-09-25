@@ -19,6 +19,8 @@ export type DomainKey =
   | "purchase-requests"
   | "security"
   | "integrations"
+  | "integration"
+  | "intelligence"
   | "delegations"
   | "evidence";
 

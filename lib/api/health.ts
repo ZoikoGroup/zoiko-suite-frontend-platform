@@ -71,6 +71,23 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   evidence: [
     { name: "filing-preparation-svc",    port: 8130 },
   ],
+  integration: [
+    { name: "connectivity-api-bridge-svc", port: 8144 },
+    { name: "banking-connector-svc",       port: 8145 },
+    { name: "hris-connector-svc",          port: 8146 },
+    { name: "tax-authority-interface-svc", port: 8147 },
+    { name: "esignature-integration-svc",  port: 8148 },
+    { name: "external-data-feed-svc",      port: 8149 },
+  ],
+  intelligence: [
+    { name: "anomaly-detection-svc",        port: 8153 },
+    { name: "forecasting-svc",              port: 8135 },
+    { name: "compliance-risk-scoring-svc",  port: 8136 },
+    { name: "reconciliation-intelligence-svc", port: 8137 },
+    { name: "reporting-orchestration-svc",  port: 8138 },
+    { name: "decision-support-svc",         port: 8154 },
+    { name: "migration-integrity-svc",      port: 8139 },
+  ],
 };
 
 export type DomainHealth = {

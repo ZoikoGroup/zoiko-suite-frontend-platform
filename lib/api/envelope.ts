@@ -28,20 +28,10 @@ export type Identity = {
   tenantId?: string;
   legalEntityId?: string;
 
-  /**
-   * The signed IdentityContextEnvelope from identity-context-svc, when the
-   * session has one. Sent as `Authorization: Bearer`.
-   *
-   * This is the field that matters the day the gateway goes in front. Today
-   * ZOIKO_USE_GATEWAY is false and the console talks to service ports directly,
-   * so services read the X-*-Id headers below and nothing verifies a token. With
-   * Traefik in front, gateway-auth-svc verifies THIS against identity-svc's JWKS
-   * and overwrites those headers from the verified claims — at which point the
-   * headers become an unverified hint and the envelope becomes the identity.
-   * Sending both now means the switch is a routing change, not a code change.
-   */
   envelopeJwt?: string;
 };
+
+export type CallerIdentity = Identity;
 
 /**
  * The §4 fields a caller may set per request. Everything not listed here is

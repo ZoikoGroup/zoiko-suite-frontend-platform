@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import type { CallerIdentity } from "@/lib/api/envelope";
+import type { ApiResult, ApiWriteResult } from "@/lib/api/client";
 
 // Active domain imports (Blocks 6–10)
 import {
@@ -14,12 +15,12 @@ import {
   getTaxSummaryStats,
   listUpcomingTaxDeadlines,
   createTaxRule,
-  evaluateDetermination,
+  evaluateTaxDetermination,
   createVATReturn,
   createCorporateTaxReturn,
   createWithholdingObligation,
   createFilingDraft,
-  createTaxAuthorityInterface,
+  registerTaxAuthorityInterface,
 } from "@/lib/api/tax";
 
 import {
@@ -140,7 +141,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return NextResponse.json({ purchase_orders: res.ok ? res.data : [] });
   }
   if (endpoint === "purchase-requests") {
-    const res = await listPurchaseRequests(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listPurchaseRequests({ identity: { ...identity, tenantId } });
     return NextResponse.json({ purchase_requests: res.ok ? res.data : [] });
   }
   if (endpoint === "spend-controls/limits") {
@@ -148,7 +150,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return NextResponse.json({ spend_limits: res.ok ? res.data : [] });
   }
   if (endpoint === "vendor-checks") {
-    const res = await listVendorChecks(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listVendorChecks({ identity: { ...identity, tenantId } });
     return NextResponse.json({ vendor_checks: res.ok ? res.data : [] });
   }
 
@@ -168,41 +171,61 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
 
   // ── Evidence Domain ────────────────────────────────────────────────────────
   if (endpoint === "evidence/requirements") {
-    const res = await listEvidenceRequirements(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listEvidenceRequirements({ tenantId }, { ...identity, tenantId });
     return NextResponse.json({ requirements: res.ok ? res.data : [] });
   }
 
   // ── Configuration / Service Inputs ─────────────────────────────────────────
   if (endpoint === "config/feature-flags") {
-    const res = await listFeatureFlags(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listFeatureFlags(tenantId);
     return NextResponse.json({ feature_flags: res.ok ? res.data : [] });
   }
   if (endpoint === "config/entries") {
-    const res = await listConfigEntries(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listConfigEntries(tenantId);
     return NextResponse.json({ config_entries: res.ok ? res.data : [] });
   }
 
   // ── Delegations ────────────────────────────────────────────────────────────
   if (endpoint === "delegations") {
-    const res = await listDelegations(identity);
+    const res = await listDelegations({ identity });
     return NextResponse.json({ delegations: res.ok ? res.data : [] });
   }
 
   // ── Secret Vault ───────────────────────────────────────────────────────────
   if (endpoint === "secrets/leases") {
-    const res = await listLeases(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listLeases(tenantId);
     return NextResponse.json({ leases: res.ok ? res.data : [] });
   }
   if (endpoint === "secrets/policies") {
-    const res = await listApplicableSecretPolicyVersions(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listApplicableSecretPolicyVersions({
+      secretClass: "DATABASE_CREDENTIAL",
+      callerTenantId: tenantId,
+    });
     return NextResponse.json({ policies: res.ok ? res.data : [] });
   }
   if (endpoint === "secrets/audit") {
-    const res = await listSecretAudit(identity);
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listSecretAudit(tenantId);
     return NextResponse.json({ audit_events: res.ok ? res.data : [] });
   }
 
   return NextResponse.json({ error: `Not found: ${endpoint}` }, { status: 404 });
+}
+
+function toJsonResponse<T>(res: ApiResult<T> | ApiWriteResult<T>) {
+  if (res.ok) {
+    const status = "status" in res && typeof res.status === "number" ? res.status : 200;
+    return NextResponse.json(res.data, { status });
+  }
+  return NextResponse.json(
+    { error: res.error.message, detail: res.error.body },
+    { status: res.error.status ?? 500 },
+  );
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
@@ -214,69 +237,103 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   // ── Tax Domain ─────────────────────────────────────────────────────────────
   if (endpoint === "tax-rules") {
     const res = await createTaxRule(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
   if (endpoint === "tax-determinations") {
-    const res = await evaluateDetermination(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    const res = await evaluateTaxDetermination(body, identity);
+    return toJsonResponse(res);
   }
   if (endpoint === "vat-returns") {
     const res = await createVATReturn(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
   if (endpoint === "corporate-tax-returns") {
     const res = await createCorporateTaxReturn(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
   if (endpoint === "withholding-tax") {
     const res = await createWithholdingObligation(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
   if (endpoint === "filing-preparation/drafts") {
     const res = await createFilingDraft(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
   if (endpoint === "tax-authority/interfaces") {
-    const res = await createTaxAuthorityInterface(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    const res = await registerTaxAuthorityInterface(body, identity);
+    return toJsonResponse(res);
   }
 
   // ── Legal Domain ───────────────────────────────────────────────────────────
   if (endpoint === "contracts") {
-    const res = await draftContract(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    const res = await draftContract({
+      ...body,
+      identity: {
+        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
+        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
+        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
+      },
+    });
+    return toJsonResponse(res);
   }
   if (endpoint === "clauses") {
     const res = await createClause(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
   if (endpoint === "meetings") {
-    const res = await createBoardMeeting(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    const res = await createBoardMeeting({
+      ...body,
+      identity: {
+        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
+        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
+        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
+      },
+    });
+    return toJsonResponse(res);
   }
   if (endpoint === "corporate-actions") {
     const res = await createCorporateAction(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
 
   // ── Commercial Ops Domain ──────────────────────────────────────────────────
   if (endpoint === "purchase-orders") {
-    const res = await issuePurchaseOrder(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    const res = await issuePurchaseOrder({
+      ...body,
+      identity: {
+        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
+        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
+        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
+      },
+      totalAmount: Number(body.totalAmount ?? body.total_amount ?? 0),
+      currencyCode: String(body.currencyCode ?? body.currency_code ?? "GBP"),
+    });
+    return toJsonResponse(res);
   }
   if (endpoint === "spend-controls/policies") {
-    const res = await createSpendPolicy(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    const res = await createSpendPolicy({
+      ...body,
+      identity: {
+        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
+        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
+        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
+      },
+      category: String(body.category ?? "PROCUREMENT"),
+      period: body.period ?? "MONTHLY",
+      thresholdAmount: Number(body.thresholdAmount ?? body.threshold_amount ?? 0),
+      currencyCode: String(body.currencyCode ?? body.currency_code ?? "GBP"),
+    });
+    return toJsonResponse(res);
   }
 
   // ── Compliance Domain ──────────────────────────────────────────────────────
   if (endpoint === "filing-tracker/requirements") {
     const res = await createFilingRequirement(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
   if (endpoint === "exception-escalation/exceptions") {
     const res = await createEscalatedException(body, identity);
-    return NextResponse.json(res.data, { status: res.status });
+    return toJsonResponse(res);
   }
 
   return NextResponse.json({ error: `POST handler not implemented for ${endpoint}` }, { status: 404 });
