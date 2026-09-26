@@ -1,0 +1,326 @@
+# ============================================================
+#  Zoiko Suite — Active Microservices Cluster (Blocks 6–10)
+#  Selected 37 Domain Services
+# ============================================================
+version: '3.8'
+
+x-mock-svc: &mock-svc
+  build:
+    context: ./mock-svc
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  networks:
+    - zoiko-net
+
+services:
+
+  # ── BLOCK 6 · LEGAL, CORPORATE & COMMERCIAL (11 services) ─────────────────
+
+  contract-lifecycle-svc:
+    <<: *mock-svc
+    container_name: contract-lifecycle-svc
+    ports: ["8119:8119"]
+    environment:
+      SERVICE_NAME: contract-lifecycle-svc
+      PORT: "8119"
+
+  clause-template-svc:
+    <<: *mock-svc
+    container_name: clause-template-svc
+    ports: ["8120:8120"]
+    environment:
+      SERVICE_NAME: clause-template-svc
+      PORT: "8120"
+
+  obligation-tracking-svc:
+    <<: *mock-svc
+    container_name: obligation-tracking-svc
+    ports: ["8121:8121"]
+    environment:
+      SERVICE_NAME: obligation-tracking-svc
+      PORT: "8121"
+
+  board-resolutions-svc:
+    <<: *mock-svc
+    container_name: board-resolutions-svc
+    ports: ["8122:8122"]
+    environment:
+      SERVICE_NAME: board-resolutions-svc
+      PORT: "8122"
+
+  corporate-actions-svc:
+    <<: *mock-svc
+    container_name: corporate-actions-svc
+    ports: ["8123:8123"]
+    environment:
+      SERVICE_NAME: corporate-actions-svc
+      PORT: "8123"
+
+  counterparty-management-svc:
+    <<: *mock-svc
+    container_name: counterparty-management-svc
+    ports: ["8124:8124"]
+    environment:
+      SERVICE_NAME: counterparty-management-svc
+      PORT: "8124"
+
+  purchase-request-svc:
+    <<: *mock-svc
+    container_name: purchase-request-svc
+    ports: ["8100:8100"]
+    environment:
+      SERVICE_NAME: purchase-request-svc
+      PORT: "8100"
+
+  purchase-order-svc:
+    <<: *mock-svc
+    container_name: purchase-order-svc
+    ports: ["8150:8150"]
+    environment:
+      SERVICE_NAME: purchase-order-svc
+      PORT: "8150"
+
+  spend-controls-svc:
+    <<: *mock-svc
+    container_name: spend-controls-svc
+    ports: ["8131:8131"]
+    environment:
+      SERVICE_NAME: spend-controls-svc
+      PORT: "8131"
+
+  vendor-due-diligence-svc:
+    <<: *mock-svc
+    container_name: vendor-due-diligence-svc
+    ports: ["8132:8132"]
+    environment:
+      SERVICE_NAME: vendor-due-diligence-svc
+      PORT: "8132"
+
+  procurement-workflow-svc:
+    <<: *mock-svc
+    container_name: procurement-workflow-svc
+    ports: ["8134:8134"]
+    environment:
+      SERVICE_NAME: procurement-workflow-svc
+      PORT: "8134"
+
+  # ── BLOCK 7 · TAX & COMPLIANCE (9 services) ───────────────────────────────
+
+  tax-rules-svc:
+    <<: *mock-svc
+    container_name: tax-rules-svc
+    ports: ["8125:8125"]
+    environment:
+      SERVICE_NAME: tax-rules-svc
+      PORT: "8125"
+
+  tax-determination-svc:
+    <<: *mock-svc
+    container_name: tax-determination-svc
+    ports: ["8126:8126"]
+    environment:
+      SERVICE_NAME: tax-determination-svc
+      PORT: "8126"
+
+  vat-gst-svc:
+    <<: *mock-svc
+    container_name: vat-gst-svc
+    ports: ["8127:8127"]
+    environment:
+      SERVICE_NAME: vat-gst-svc
+      PORT: "8127"
+
+  corporate-tax-svc:
+    <<: *mock-svc
+    container_name: corporate-tax-svc
+    ports: ["8128:8128"]
+    environment:
+      SERVICE_NAME: corporate-tax-svc
+      PORT: "8128"
+
+  withholding-tax-svc:
+    <<: *mock-svc
+    container_name: withholding-tax-svc
+    ports: ["8129:8129"]
+    environment:
+      SERVICE_NAME: withholding-tax-svc
+      PORT: "8129"
+
+  filing-preparation-svc:
+    <<: *mock-svc
+    container_name: filing-preparation-svc
+    ports: ["8130:8130"]
+    environment:
+      SERVICE_NAME: filing-preparation-svc
+      PORT: "8130"
+
+  filing-tracker-svc:
+    <<: *mock-svc
+    container_name: filing-tracker-svc
+    ports: ["8151:8151"]
+    environment:
+      SERVICE_NAME: filing-tracker-svc
+      PORT: "8151"
+
+  compliance-status-svc:
+    <<: *mock-svc
+    container_name: compliance-status-svc
+    ports: ["8152:8152"]
+    environment:
+      SERVICE_NAME: compliance-status-svc
+      PORT: "8152"
+
+  exception-escalation-svc:
+    <<: *mock-svc
+    container_name: exception-escalation-svc
+    ports: ["8133:8133"]
+    environment:
+      SERVICE_NAME: exception-escalation-svc
+      PORT: "8133"
+
+  # ── BLOCK 8 · INTELLIGENCE & REPORTING (7 services) ───────────────────────
+
+  anomaly-detection-svc:
+    <<: *mock-svc
+    container_name: anomaly-detection-svc
+    ports: ["8153:8153"]
+    environment:
+      SERVICE_NAME: anomaly-detection-svc
+      PORT: "8153"
+
+  forecasting-svc:
+    <<: *mock-svc
+    container_name: forecasting-svc
+    ports: ["8135:8135"]
+    environment:
+      SERVICE_NAME: forecasting-svc
+      PORT: "8135"
+
+  compliance-risk-scoring-svc:
+    <<: *mock-svc
+    container_name: compliance-risk-scoring-svc
+    ports: ["8136:8136"]
+    environment:
+      SERVICE_NAME: compliance-risk-scoring-svc
+      PORT: "8136"
+
+  reconciliation-intelligence-svc:
+    <<: *mock-svc
+    container_name: reconciliation-intelligence-svc
+    ports: ["8137:8137"]
+    environment:
+      SERVICE_NAME: reconciliation-intelligence-svc
+      PORT: "8137"
+
+  reporting-orchestration-svc:
+    <<: *mock-svc
+    container_name: reporting-orchestration-svc
+    ports: ["8138:8138"]
+    environment:
+      SERVICE_NAME: reporting-orchestration-svc
+      PORT: "8138"
+
+  decision-support-svc:
+    <<: *mock-svc
+    container_name: decision-support-svc
+    ports: ["8154:8154"]
+    environment:
+      SERVICE_NAME: decision-support-svc
+      PORT: "8154"
+
+  migration-integrity-svc:
+    <<: *mock-svc
+    container_name: migration-integrity-svc
+    ports: ["8139:8139"]
+    environment:
+      SERVICE_NAME: migration-integrity-svc
+      PORT: "8139"
+
+  # ── BLOCK 9 · SECURITY & TRUST (4 services) ───────────────────────────────
+
+  mtls-management-svc:
+    <<: *mock-svc
+    container_name: mtls-management-svc
+    ports: ["8140:8140"]
+    environment:
+      SERVICE_NAME: mtls-management-svc
+      PORT: "8140"
+
+  siem-integration-svc:
+    <<: *mock-svc
+    container_name: siem-integration-svc
+    ports: ["8141:8141"]
+    environment:
+      SERVICE_NAME: siem-integration-svc
+      PORT: "8141"
+
+  carta-svc:
+    <<: *mock-svc
+    container_name: carta-svc
+    ports: ["8142:8142"]
+    environment:
+      SERVICE_NAME: carta-svc
+      PORT: "8142"
+
+  key-management-svc:
+    <<: *mock-svc
+    container_name: key-management-svc
+    ports: ["8143:8143"]
+    environment:
+      SERVICE_NAME: key-management-svc
+      PORT: "8143"
+
+  # ── BLOCK 10 · INTEGRATION & EXTENSIBILITY (6 services) ───────────────────
+
+  connectivity-api-bridge-svc:
+    <<: *mock-svc
+    container_name: connectivity-api-bridge-svc
+    ports: ["8144:8144"]
+    environment:
+      SERVICE_NAME: connectivity-api-bridge-svc
+      PORT: "8144"
+
+  banking-connector-svc:
+    <<: *mock-svc
+    container_name: banking-connector-svc
+    ports: ["8145:8145"]
+    environment:
+      SERVICE_NAME: banking-connector-svc
+      PORT: "8145"
+
+  hris-connector-svc:
+    <<: *mock-svc
+    container_name: hris-connector-svc
+    ports: ["8146:8146"]
+    environment:
+      SERVICE_NAME: hris-connector-svc
+      PORT: "8146"
+
+  tax-authority-interface-svc:
+    <<: *mock-svc
+    container_name: tax-authority-interface-svc
+    ports: ["8147:8147"]
+    environment:
+      SERVICE_NAME: tax-authority-interface-svc
+      PORT: "8147"
+
+  esignature-integration-svc:
+    <<: *mock-svc
+    container_name: esignature-integration-svc
+    ports: ["8148:8148"]
+    environment:
+      SERVICE_NAME: esignature-integration-svc
+      PORT: "8148"
+
+  external-data-feed-svc:
+    <<: *mock-svc
+    container_name: external-data-feed-svc
+    ports: ["8149:8149"]
+    environment:
+      SERVICE_NAME: external-data-feed-svc
+      PORT: "8149"
+
+networks:
+  zoiko-net:
+    name: zoiko-net
+    driver: bridge

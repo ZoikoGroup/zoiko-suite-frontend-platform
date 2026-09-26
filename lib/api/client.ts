@@ -8,8 +8,10 @@
 // Note on caching: in Next.js 16 fetch is uncached by default, so dashboard
 // panels always read live state without an explicit no-store.
 
-import { REQUEST_TIMEOUT_MS, serviceLabel, serviceUrl, type ServiceName } from "./config";
+import { REQUEST_TIMEOUT_MS, serviceLabel, serviceUrl, type ServiceName, type ApiService } from "./config";
 import { envelopeHeaders, type EnvelopeOptions, type Identity } from "./envelope";
+
+export type { ServiceName, ApiService };
 
 /**
  * Result of a backend call. Deliberately a union rather than a throw: one

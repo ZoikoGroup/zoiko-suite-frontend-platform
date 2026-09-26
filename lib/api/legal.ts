@@ -138,6 +138,7 @@ export async function listTemplates(identity?: Identity): Promise<ApiResult<Cont
   );
 }
 
+
 // ─── 3. Obligation Tracking ──────────────────────────────────────────────────
 
 export type ObligationType = "CONTRACTUAL" | "REGULATORY" | "STATUTORY" | "INTERNAL_POLICY";
@@ -1069,6 +1070,7 @@ export async function listCorporateActions(identity?: Identity): Promise<ApiResu
     (d) => d.actions ?? [],
   );
 }
+
 
 // ─── 6. Counterparty Management ──────────────────────────────────────────────
 
