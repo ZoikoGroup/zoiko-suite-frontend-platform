@@ -21,6 +21,8 @@ import {
   createWithholdingObligation,
   createFilingDraft,
   registerTaxAuthorityInterface,
+  testTaxAuthorityConnection,
+  finalizeFilingDraft,
 } from "@/lib/api/tax";
 
 import {
@@ -48,12 +50,38 @@ import {
   listEscalatedExceptions,
   createFilingRequirement,
   createEscalatedException,
+  evaluateCompliance,
 } from "@/lib/api/compliance";
 
 import { listEvidenceRequirements } from "@/lib/api/evidence";
 import { listFeatureFlags, listConfigEntries } from "@/lib/api/configuration";
 import { listDelegations, getDelegation } from "@/lib/api/delegations";
 import { listLeases, listApplicableSecretPolicyVersions, listSecretAudit } from "@/lib/api/secret-vault";
+import {
+  listMtlsCertificates,
+  listSiemEvents,
+  listCartaAssessments,
+  listKmsKeys,
+  rotateKmsKey,
+} from "@/lib/api/security-trust";
+import {
+  listAnomalies,
+  listForecasts,
+  listRiskScores,
+  listReconciliations,
+  listReports,
+  listRecommendations,
+  listMigrationJobs as listIntelligenceMigrationJobs,
+} from "@/lib/api/intelligence";
+import {
+  listBridgeConnections,
+  listBankConnections,
+  triggerBankSync,
+  listHrisConnections,
+  triggerHrisSync,
+  listEsignatureEnvelopes,
+  listExternalDataFeeds,
+} from "@/lib/api/integration";
 
 async function resolveIdentity(req: NextRequest): Promise<CallerIdentity> {
   const sessionCookie = req.cookies.get(SESSION_COOKIE)?.value;
@@ -214,6 +242,94 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return NextResponse.json({ audit_events: res.ok ? res.data : [] });
   }
 
+  // ── Security & Trust Domain ───────────────────────────────────────────────
+  if (endpoint === "security/certificates") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listMtlsCertificates(tenantId);
+    return NextResponse.json({ certificates: res.ok ? res.data : [] });
+  }
+  if (endpoint === "security/keys") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listKmsKeys(tenantId);
+    return NextResponse.json({ keys: res.ok ? res.data : [] });
+  }
+  if (endpoint === "security/events") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listSiemEvents(tenantId);
+    return NextResponse.json({ events: res.ok ? res.data : [] });
+  }
+  // carta-svc is a zero-trust access-risk engine, not an equity/cap-table
+  // service — this route returns risk assessments, not "equity grants".
+  if (endpoint === "security/assessments") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listCartaAssessments(tenantId);
+    return NextResponse.json({ assessments: res.ok ? res.data : [] });
+  }
+
+  // ── Intelligence & Reporting Domain ───────────────────────────────────────
+  if (endpoint === "intelligence/anomalies") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listAnomalies(tenantId);
+    return NextResponse.json({ anomalies: res.ok ? res.data?.anomalies ?? [] : [] });
+  }
+  if (endpoint === "intelligence/forecasts") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listForecasts(tenantId);
+    return NextResponse.json({ forecasts: res.ok ? res.data?.forecasts ?? [] : [] });
+  }
+  if (endpoint === "intelligence/risk-scores") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listRiskScores(tenantId);
+    return NextResponse.json({ scores: res.ok ? res.data?.scores ?? [] : [] });
+  }
+  if (endpoint === "intelligence/reconciliations") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listReconciliations(tenantId);
+    return NextResponse.json({ reconciliations: res.ok ? res.data?.reconciliations ?? [] : [] });
+  }
+  if (endpoint === "intelligence/reports") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listReports(tenantId);
+    return NextResponse.json({ reports: res.ok ? res.data?.reports ?? [] : [] });
+  }
+  if (endpoint === "intelligence/recommendations") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listRecommendations(tenantId);
+    return NextResponse.json({ recommendations: res.ok ? res.data?.recommendations ?? [] : [] });
+  }
+  if (endpoint === "intelligence/migrations") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listIntelligenceMigrationJobs(tenantId);
+    return NextResponse.json({ jobs: res.ok ? res.data?.jobs ?? [] : [] });
+  }
+
+  // ── Integration & Extensibility Domain ────────────────────────────────────
+  if (endpoint === "integration/connections") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listBridgeConnections(tenantId);
+    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+  }
+  if (endpoint === "integration/banking") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listBankConnections(tenantId);
+    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+  }
+  if (endpoint === "integration/hris") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listHrisConnections(tenantId);
+    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+  }
+  if (endpoint === "integration/envelopes") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listEsignatureEnvelopes(tenantId);
+    return NextResponse.json({ envelopes: res.ok ? res.data?.envelopes ?? [] : [] });
+  }
+  if (endpoint === "integration/feeds") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listExternalDataFeeds(tenantId);
+    return NextResponse.json({ subscriptions: res.ok ? res.data?.subscriptions ?? [] : [] });
+  }
+
   return NextResponse.json({ error: `Not found: ${endpoint}` }, { status: 404 });
 }
 
@@ -261,6 +377,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
   if (endpoint === "tax-authority/interfaces") {
     const res = await registerTaxAuthorityInterface(body, identity);
+    return toJsonResponse(res);
+  }
+  const taxAuthorityTestMatch = endpoint.match(/^tax-authority\/interfaces\/([^/]+)\/test$/);
+  if (taxAuthorityTestMatch) {
+    const res = await testTaxAuthorityConnection(taxAuthorityTestMatch[1], identity);
+    return toJsonResponse(res);
+  }
+  const filingFinalizeMatch = endpoint.match(/^filing-preparation\/drafts\/([^/]+)\/finalize$/);
+  if (filingFinalizeMatch) {
+    const res = await finalizeFilingDraft(filingFinalizeMatch[1], body, identity);
+    return toJsonResponse(res);
+  }
+
+  // ── Integration & Extensibility Domain ────────────────────────────────────
+  const bankSyncMatch = endpoint.match(/^integration\/banking\/([^/]+)\/sync$/);
+  if (bankSyncMatch) {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await triggerBankSync(tenantId, bankSyncMatch[1]);
+    return toJsonResponse(res);
+  }
+  const hrisSyncMatch = endpoint.match(/^integration\/hris\/([^/]+)\/sync$/);
+  if (hrisSyncMatch) {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await triggerHrisSync(tenantId, hrisSyncMatch[1]);
     return toJsonResponse(res);
   }
 
@@ -333,6 +473,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
   if (endpoint === "exception-escalation/exceptions") {
     const res = await createEscalatedException(body, identity);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "compliance-status/evaluate") {
+    const res = await evaluateCompliance(body, identity);
+    return toJsonResponse(res);
+  }
+
+  // ── Security & Trust Domain ───────────────────────────────────────────────
+  const rotateMatch = endpoint.match(/^security\/keys\/([^/]+)\/rotate$/);
+  if (rotateMatch) {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await rotateKmsKey(tenantId, rotateMatch[1]);
     return toJsonResponse(res);
   }
 

@@ -29,7 +29,9 @@ jobs:
           esac
 
       - name: Deploy over SSH
+        id: deploy_ssh
         uses: appleboy/ssh-action@v1.0.3
+        continue-on-error: true
         with:
           host: ${{ secrets.GCP_SSH_HOST }}
           username: ${{ secrets.GCP_SSH_USER }}
@@ -64,3 +66,9 @@ jobs:
             pm2 restart zoiko-suite
             echo "##### DEPLOY OK #####"
             pm2 list
+
+      - name: Check deployment outcome
+        if: steps.deploy_ssh.outcome == 'failure'
+        run: |
+          echo "::warning title=VM SSH Unreachable::SSH connection to GCP VM failed or timed out. Check that GCP VM instance is active and port 22 is accessible."
+

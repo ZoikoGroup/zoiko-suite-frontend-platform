@@ -2,7 +2,7 @@ name: Frontend CI & PR Gate
 
 on:
   push:
-    branches: [main, vasu-deva]
+    branches: [main, vasu-deva, vasudeva-reddy]
   pull_request:
     branches: [main]
 

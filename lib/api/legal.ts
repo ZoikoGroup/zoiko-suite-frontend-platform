@@ -7,29 +7,37 @@
 // - counterparty-management-svc (8124)
 
 import { type ApiResult, type ApiWriteResult, type Identity, apiPost } from "./client";
+import { serviceUrl } from "./config";
+
+// Each of these previously built its own URL from a raw env var, bypassing the
+// central registry in config.ts — so ZOIKO_USE_GATEWAY had no effect on this
+// file's calls even though it did for every other domain's client. Routing
+// through serviceUrl() keeps behavior identical in the default (direct, no
+// gateway) mode this app runs in today, while making gateway mode work here
+// too instead of silently skipping it.
 
 function contractLifecycleUrl(): string {
-  return (process.env.ZOIKO_CONTRACT_LIFECYCLE_URL ?? "http://localhost:8119").replace(/\/$/, "");
+  return serviceUrl("contracts");
 }
 
 function clauseTemplateUrl(): string {
-  return (process.env.ZOIKO_CLAUSE_TEMPLATE_URL ?? "http://localhost:8120").replace(/\/$/, "");
+  return serviceUrl("clauseTemplate");
 }
 
 function obligationTrackingUrl(): string {
-  return (process.env.ZOIKO_OBLIGATION_TRACKING_URL ?? "http://localhost:8121").replace(/\/$/, "");
+  return serviceUrl("obligationTracking");
 }
 
 function boardResolutionsUrl(): string {
-  return (process.env.ZOIKO_BOARD_RESOLUTIONS_URL ?? "http://localhost:8122").replace(/\/$/, "");
+  return serviceUrl("boardResolutions");
 }
 
 function corporateActionsUrl(): string {
-  return (process.env.ZOIKO_CORPORATE_ACTIONS_URL ?? "http://localhost:8123").replace(/\/$/, "");
+  return serviceUrl("corporateActions");
 }
 
 function counterpartyManagementUrl(): string {
-  return (process.env.ZOIKO_COUNTERPARTY_MANAGEMENT_URL ?? "http://localhost:8124").replace(/\/$/, "");
+  return serviceUrl("counterparty");
 }
 
 // ─── 1. Contract Lifecycle ───────────────────────────────────────────────────
