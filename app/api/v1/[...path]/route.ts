@@ -61,9 +61,15 @@ import {
   listMtlsCertificates,
   listSiemEvents,
   listCartaAssessments,
+  evaluateCartaAccess,
   listKmsKeys,
   rotateKmsKey,
 } from "@/lib/api/security-trust";
+import {
+  createAIRun,
+  setActionRiskClassification,
+  registerModelProvider,
+} from "@/lib/api/ai-governance";
 import {
   listAnomalies,
   listForecasts,
@@ -264,6 +270,101 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
     const res = await listCartaAssessments(tenantId);
     return NextResponse.json({ assessments: res.ok ? res.data : [] });
+  }
+
+  // ── AI Governance Domain ──────────────────────────────────────────────────
+  if (endpoint === "ai-governance/runs") {
+    return NextResponse.json({
+      runs: [
+        {
+          run_id: "run-ai-001",
+          model_provider: "anthropic",
+          model_name: "claude-3-7-sonnet",
+          prompt_tokens: 1450,
+          completion_tokens: 320,
+          cost_estimate_usd: 0.0118,
+          guardrail_status: "PASSED",
+          purpose: "Contract compliance review — MSA renewal",
+          created_at: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
+        },
+        {
+          run_id: "run-ai-002",
+          model_provider: "openai",
+          model_name: "gpt-4o",
+          prompt_tokens: 3200,
+          completion_tokens: 890,
+          cost_estimate_usd: 0.0512,
+          guardrail_status: "PASSED",
+          purpose: "Automated VAT return reconciliation extract",
+          created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+        },
+        {
+          run_id: "run-ai-003",
+          model_provider: "anthropic",
+          model_name: "claude-3-5-haiku",
+          prompt_tokens: 820,
+          completion_tokens: 110,
+          cost_estimate_usd: 0.0016,
+          guardrail_status: "FLAGGED",
+          purpose: "Vendor due-diligence sanctions screening",
+          created_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+        },
+      ],
+    });
+  }
+  if (endpoint === "ai-governance/risk-classifications") {
+    return NextResponse.json({
+      classifications: [
+        {
+          action_type: "contract.draft_generate",
+          risk_tier: "TIER_3_MEDIUM",
+          requires_human_in_the_loop: true,
+          approval_quorum: 1,
+          description: "Automated drafting of commercial agreements from standard clause templates",
+        },
+        {
+          action_type: "payment.batch_disburse",
+          risk_tier: "TIER_1_CRITICAL",
+          requires_human_in_the_loop: true,
+          approval_quorum: 2,
+          description: "Autonomous initiation or settlement of bank disbursements over £10,000",
+        },
+        {
+          action_type: "tax.determination_evaluate",
+          risk_tier: "TIER_4_LOW",
+          requires_human_in_the_loop: false,
+          approval_quorum: 0,
+          description: "Real-time calculation of VAT/GST rates on sales line items",
+        },
+        {
+          action_type: "sec.kms_key_rotate",
+          risk_tier: "TIER_2_HIGH",
+          requires_human_in_the_loop: true,
+          approval_quorum: 1,
+          description: "Initiating scheduled cryptographic key version rotation on HSM vaults",
+        },
+      ],
+    });
+  }
+  if (endpoint === "ai-governance/model-providers") {
+    return NextResponse.json({
+      providers: [
+        {
+          provider: "anthropic",
+          model: "claude-3-7-sonnet",
+          is_verified: true,
+          max_context_tokens: 200000,
+          data_residency_region: "eu-west-1",
+        },
+        {
+          provider: "openai",
+          model: "gpt-4o",
+          is_verified: true,
+          max_context_tokens: 128000,
+          data_residency_region: "eu-west-1",
+        },
+      ],
+    });
   }
 
   // ── Intelligence & Reporting Domain ───────────────────────────────────────
@@ -485,6 +586,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   if (rotateMatch) {
     const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
     const res = await rotateKmsKey(tenantId, rotateMatch[1]);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "security/assessments/evaluate") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await evaluateCartaAccess(tenantId, body);
+    return toJsonResponse(res);
+  }
+
+  // ── AI Governance Domain ──────────────────────────────────────────────────
+  if (endpoint === "ai-governance/runs") {
+    const res = await createAIRun(body, identity);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "ai-governance/risk-classifications") {
+    const res = await setActionRiskClassification(body, identity);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "ai-governance/model-providers") {
+    const res = await registerModelProvider(body, identity);
     return toJsonResponse(res);
   }
 
