@@ -11,10 +11,9 @@ export function TestConnectionButton({ interfaceId, authorityCode }: { interface
     setStatus("testing");
     setMsg("");
     try {
-      const res = await fetch("/api/v1/tax-authority/interfaces", {
+      const res = await fetch(`/api/v1/tax-authority/interfaces/${encodeURIComponent(interfaceId)}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ interface_id: interfaceId, authority_code: authorityCode, action: "test_connection" }),
       });
       if (res.ok) {
         setStatus("ok");

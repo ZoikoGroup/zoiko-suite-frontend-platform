@@ -65,8 +65,9 @@ export const ALL_SERVICES: ServiceItem[] = [
   // Block 9
   { id: 28, block: "Block 9", domain: "Security & Trust", name: "mtls-management-svc", port: 8140, method: "GET", endpoint: "/api/v1/mtls/certificates", description: "Service-to-service mutual TLS x509 certificates and trust bundles" },
   { id: 29, block: "Block 9", domain: "Security & Trust", name: "siem-integration-svc", port: 8141, method: "POST", endpoint: "/api/v1/siem/events", description: "Security telemetry and event forwarding to corporate SIEM" },
-  { id: 30, block: "Block 9", domain: "Security & Trust", name: "carta-svc", port: 8142, method: "GET", endpoint: "/api/v1/carta/captable", description: "Shareholder equity ledgers and Carta cap table synchronizer" },
+  { id: 30, block: "Block 9", domain: "Security & Trust", name: "carta-svc", port: 8142, method: "GET", endpoint: "/api/v1/security/assessments", description: "Continuous Adaptive Risk & Trust Assessment (CARTA) zero-trust access engine" },
   { id: 31, block: "Block 9", domain: "Security & Trust", name: "key-management-svc", port: 8143, method: "GET", endpoint: "/api/v1/keys", description: "HSM key rotation and cryptographic envelope key manager" },
+  { id: 38, block: "Block 9", domain: "Security & Trust", name: "ai-governance-svc", port: 8183, method: "POST", endpoint: "/api/v1/ai-governance/runs", description: "AI safety guardrails, autonomous policy classification, and model residency registry" },
 
   // Block 10
   { id: 32, block: "Block 10", domain: "Integration & Extensibility", name: "connectivity-api-bridge-svc", port: 8144, method: "GET", endpoint: "/api/v1/bridge/connections", description: "External API gateway bridge and webhook ingress router" },

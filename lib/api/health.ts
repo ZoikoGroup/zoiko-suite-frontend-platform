@@ -56,6 +56,7 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
     { name: "siem-integration-svc",      port: 8141 },
     { name: "carta-svc",                 port: 8142 },
     { name: "key-management-svc",        port: 8143 },
+    { name: "ai-governance-svc",         port: 8183 },
   ],
   integrations: [
     { name: "connectivity-api-bridge-svc", port: 8144 },

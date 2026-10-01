@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Shield, Key, Eye, Lock, CheckCircle2, AlertCircle } from "lucide-react";
+import { Shield, Key, Eye, ShieldCheck, Bot, CheckCircle2 } from "lucide-react";
 
 type Stage = {
   id: string;
@@ -24,31 +24,40 @@ const STAGES: Stage[] = [
     description: "Every inter-service gRPC / HTTP payload verified via X.509 client certificates and strict SAN pinning.",
   },
   {
-    id: "kms",
-    title: "Envelope Encryption",
-    svc: "key-management-svc",
-    port: "8169",
-    status: "healthy",
-    icon: Key,
-    description: "AES-256-GCM data keys generated and wrapped via HSM-backed root keys with automated 90-day rotation.",
-  },
-  {
     id: "siem",
     title: "Threat Telemetry",
     svc: "siem-integration-svc",
-    port: "8167",
+    port: "8141",
     status: "healthy",
     icon: Eye,
     description: "Streaming audit trails, authentication anomalies, and rate-limit triggers routed directly to SIEM (Datadog/Splunk).",
   },
   {
     id: "carta",
-    title: "Equity Ledger Integrity",
+    title: "CARTA Zero-Trust Risk",
     svc: "carta-svc",
-    port: "8168",
+    port: "8142",
     status: "healthy",
-    icon: Lock,
-    description: "Cap table mutations, ISO/NSO grants, and shareholder registers synced with immutable cryptographic receipts.",
+    icon: ShieldCheck,
+    description: "Continuous Adaptive Risk and Trust Assessment evaluating subject identity, device posture, and action authorization.",
+  },
+  {
+    id: "kms",
+    title: "Envelope Encryption",
+    svc: "key-management-svc",
+    port: "8143",
+    status: "healthy",
+    icon: Key,
+    description: "AES-256-GCM data keys generated and wrapped via HSM-backed root keys with automated rotation & BYOK / HYOK support.",
+  },
+  {
+    id: "ai-gov",
+    title: "AI Safety Guardrails",
+    svc: "ai-governance-svc",
+    port: "8183",
+    status: "healthy",
+    icon: Bot,
+    description: "Dynamic LLM output moderation, data residency enforcement, and autonomous action risk tier classification.",
   },
 ];
 
@@ -60,19 +69,19 @@ export function SecurityProcessTimeline() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            Cryptographic Trust Chain
+            Cryptographic Trust Chain & AI Governance Pipeline
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            End-to-end zero-trust architecture protecting services, keys, and equity registers
+            End-to-end zero-trust architecture protecting transport, keys, telemetry, access risk, and autonomous agents
           </p>
         </div>
         <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
           <CheckCircle2 className="h-3.5 w-3.5" />
-          Zero Trust Active
+          Zero-Trust Verified
         </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {STAGES.map((stage, idx) => {
           const Icon = stage.icon;
           const isSelected = selected?.id === stage.id;
@@ -81,53 +90,56 @@ export function SecurityProcessTimeline() {
             <div
               key={stage.id}
               onClick={() => setSelected(isSelected ? null : stage)}
-              className={`group cursor-pointer rounded-lg border p-3.5 transition ${
+              className={`group relative flex cursor-pointer flex-col justify-between rounded-lg border p-3.5 transition ${
                 isSelected
-                  ? "border-emerald-500 bg-emerald-50/50 shadow-sm dark:border-emerald-500/60 dark:bg-emerald-950/20"
-                  : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50 dark:border-slate-800 dark:hover:border-slate-700 dark:hover:bg-slate-800/40"
+                  ? "border-emerald-500 bg-emerald-50/40 ring-1 ring-emerald-500 dark:border-emerald-400 dark:bg-emerald-950/20"
+                  : "border-slate-200 bg-slate-50/50 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-800/40 dark:hover:border-slate-700"
               }`}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-white shadow-xs dark:bg-slate-800 text-slate-700 dark:text-slate-200">
                     <Icon className="h-4 w-4" />
-                  </div>
-                  <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                    {stage.title}
                   </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[10px] text-slate-400">Step {idx + 1}</span>
+                    <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                  </div>
                 </div>
-                <span className="text-[10px] font-mono text-slate-400">0{idx + 1}</span>
+
+                <div className="mt-3">
+                  <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100">{stage.title}</h4>
+                  <div className="mt-0.5 flex items-center gap-1 font-mono text-[10px] text-slate-500 dark:text-slate-400">
+                    <span>{stage.svc}</span>
+                    <span>:{stage.port}</span>
+                  </div>
+                </div>
               </div>
 
-              <p className="mt-2 text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
+              <p className="mt-2 text-[11px] text-slate-500 line-clamp-2 dark:text-slate-400">
                 {stage.description}
               </p>
-
-              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-[11px] text-slate-400 dark:border-slate-800">
-                <span className="font-mono">{stage.svc}</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">:{stage.port}</span>
-              </div>
             </div>
           );
         })}
       </div>
 
       {selected && (
-        <div className="mt-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-slate-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-slate-200">
           <div className="flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-              {selected.title} — Implementation Details
-            </h4>
+            <span className="font-semibold text-emerald-900 dark:text-emerald-300">
+              {selected.title} Deep Dive ({selected.svc}:{selected.port})
+            </span>
             <button
               type="button"
               onClick={() => setSelected(null)}
-              className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
             >
-              Close
+              ✕ Close
             </button>
           </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-            {selected.description} Service running at <code className="font-mono font-bold text-emerald-600 dark:text-emerald-400">:{selected.port}</code> with strict mutual TLS and tenant verification.
+          <p className="mt-1 text-[11px] text-emerald-950/80 dark:text-emerald-200/90">
+            {selected.description}
           </p>
         </div>
       )}

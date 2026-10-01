@@ -270,6 +270,14 @@ services:
       SERVICE_NAME: key-management-svc
       PORT: "8143"
 
+  ai-governance-svc:
+    <<: *mock-svc
+    container_name: ai-governance-svc
+    ports: ["8183:8183"]
+    environment:
+      SERVICE_NAME: ai-governance-svc
+      PORT: "8183"
+
   # ── BLOCK 10 · INTEGRATION & EXTENSIBILITY (6 services) ───────────────────
 
   connectivity-api-bridge-svc:

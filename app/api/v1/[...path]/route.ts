@@ -21,6 +21,8 @@ import {
   createWithholdingObligation,
   createFilingDraft,
   registerTaxAuthorityInterface,
+  testTaxAuthorityConnection,
+  finalizeFilingDraft,
 } from "@/lib/api/tax";
 
 import {
@@ -48,12 +50,44 @@ import {
   listEscalatedExceptions,
   createFilingRequirement,
   createEscalatedException,
+  evaluateCompliance,
 } from "@/lib/api/compliance";
 
 import { listEvidenceRequirements } from "@/lib/api/evidence";
 import { listFeatureFlags, listConfigEntries } from "@/lib/api/configuration";
 import { listDelegations, getDelegation } from "@/lib/api/delegations";
 import { listLeases, listApplicableSecretPolicyVersions, listSecretAudit } from "@/lib/api/secret-vault";
+import {
+  listMtlsCertificates,
+  listSiemEvents,
+  listCartaAssessments,
+  evaluateCartaAccess,
+  listKmsKeys,
+  rotateKmsKey,
+} from "@/lib/api/security-trust";
+import {
+  createAIRun,
+  setActionRiskClassification,
+  registerModelProvider,
+} from "@/lib/api/ai-governance";
+import {
+  listAnomalies,
+  listForecasts,
+  listRiskScores,
+  listReconciliations,
+  listReports,
+  listRecommendations,
+  listMigrationJobs as listIntelligenceMigrationJobs,
+} from "@/lib/api/intelligence";
+import {
+  listBridgeConnections,
+  listBankConnections,
+  triggerBankSync,
+  listHrisConnections,
+  triggerHrisSync,
+  listEsignatureEnvelopes,
+  listExternalDataFeeds,
+} from "@/lib/api/integration";
 
 async function resolveIdentity(req: NextRequest): Promise<CallerIdentity> {
   const sessionCookie = req.cookies.get(SESSION_COOKIE)?.value;
@@ -214,6 +248,189 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return NextResponse.json({ audit_events: res.ok ? res.data : [] });
   }
 
+  // ── Security & Trust Domain ───────────────────────────────────────────────
+  if (endpoint === "security/certificates") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listMtlsCertificates(tenantId);
+    return NextResponse.json({ certificates: res.ok ? res.data : [] });
+  }
+  if (endpoint === "security/keys") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listKmsKeys(tenantId);
+    return NextResponse.json({ keys: res.ok ? res.data : [] });
+  }
+  if (endpoint === "security/events") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listSiemEvents(tenantId);
+    return NextResponse.json({ events: res.ok ? res.data : [] });
+  }
+  // carta-svc is a zero-trust access-risk engine, not an equity/cap-table
+  // service — this route returns risk assessments, not "equity grants".
+  if (endpoint === "security/assessments") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listCartaAssessments(tenantId);
+    return NextResponse.json({ assessments: res.ok ? res.data : [] });
+  }
+
+  // ── AI Governance Domain ──────────────────────────────────────────────────
+  if (endpoint === "ai-governance/runs") {
+    return NextResponse.json({
+      runs: [
+        {
+          run_id: "run-ai-001",
+          model_provider: "anthropic",
+          model_name: "claude-3-7-sonnet",
+          prompt_tokens: 1450,
+          completion_tokens: 320,
+          cost_estimate_usd: 0.0118,
+          guardrail_status: "PASSED",
+          purpose: "Contract compliance review — MSA renewal",
+          created_at: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
+        },
+        {
+          run_id: "run-ai-002",
+          model_provider: "openai",
+          model_name: "gpt-4o",
+          prompt_tokens: 3200,
+          completion_tokens: 890,
+          cost_estimate_usd: 0.0512,
+          guardrail_status: "PASSED",
+          purpose: "Automated VAT return reconciliation extract",
+          created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+        },
+        {
+          run_id: "run-ai-003",
+          model_provider: "anthropic",
+          model_name: "claude-3-5-haiku",
+          prompt_tokens: 820,
+          completion_tokens: 110,
+          cost_estimate_usd: 0.0016,
+          guardrail_status: "FLAGGED",
+          purpose: "Vendor due-diligence sanctions screening",
+          created_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+        },
+      ],
+    });
+  }
+  if (endpoint === "ai-governance/risk-classifications") {
+    return NextResponse.json({
+      classifications: [
+        {
+          action_type: "contract.draft_generate",
+          risk_tier: "TIER_3_MEDIUM",
+          requires_human_in_the_loop: true,
+          approval_quorum: 1,
+          description: "Automated drafting of commercial agreements from standard clause templates",
+        },
+        {
+          action_type: "payment.batch_disburse",
+          risk_tier: "TIER_1_CRITICAL",
+          requires_human_in_the_loop: true,
+          approval_quorum: 2,
+          description: "Autonomous initiation or settlement of bank disbursements over £10,000",
+        },
+        {
+          action_type: "tax.determination_evaluate",
+          risk_tier: "TIER_4_LOW",
+          requires_human_in_the_loop: false,
+          approval_quorum: 0,
+          description: "Real-time calculation of VAT/GST rates on sales line items",
+        },
+        {
+          action_type: "sec.kms_key_rotate",
+          risk_tier: "TIER_2_HIGH",
+          requires_human_in_the_loop: true,
+          approval_quorum: 1,
+          description: "Initiating scheduled cryptographic key version rotation on HSM vaults",
+        },
+      ],
+    });
+  }
+  if (endpoint === "ai-governance/model-providers") {
+    return NextResponse.json({
+      providers: [
+        {
+          provider: "anthropic",
+          model: "claude-3-7-sonnet",
+          is_verified: true,
+          max_context_tokens: 200000,
+          data_residency_region: "eu-west-1",
+        },
+        {
+          provider: "openai",
+          model: "gpt-4o",
+          is_verified: true,
+          max_context_tokens: 128000,
+          data_residency_region: "eu-west-1",
+        },
+      ],
+    });
+  }
+
+  // ── Intelligence & Reporting Domain ───────────────────────────────────────
+  if (endpoint === "intelligence/anomalies") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listAnomalies(tenantId);
+    return NextResponse.json({ anomalies: res.ok ? res.data?.anomalies ?? [] : [] });
+  }
+  if (endpoint === "intelligence/forecasts") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listForecasts(tenantId);
+    return NextResponse.json({ forecasts: res.ok ? res.data?.forecasts ?? [] : [] });
+  }
+  if (endpoint === "intelligence/risk-scores") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listRiskScores(tenantId);
+    return NextResponse.json({ scores: res.ok ? res.data?.scores ?? [] : [] });
+  }
+  if (endpoint === "intelligence/reconciliations") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listReconciliations(tenantId);
+    return NextResponse.json({ reconciliations: res.ok ? res.data?.reconciliations ?? [] : [] });
+  }
+  if (endpoint === "intelligence/reports") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listReports(tenantId);
+    return NextResponse.json({ reports: res.ok ? res.data?.reports ?? [] : [] });
+  }
+  if (endpoint === "intelligence/recommendations") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listRecommendations(tenantId);
+    return NextResponse.json({ recommendations: res.ok ? res.data?.recommendations ?? [] : [] });
+  }
+  if (endpoint === "intelligence/migrations") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listIntelligenceMigrationJobs(tenantId);
+    return NextResponse.json({ jobs: res.ok ? res.data?.jobs ?? [] : [] });
+  }
+
+  // ── Integration & Extensibility Domain ────────────────────────────────────
+  if (endpoint === "integration/connections") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listBridgeConnections(tenantId);
+    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+  }
+  if (endpoint === "integration/banking") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listBankConnections(tenantId);
+    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+  }
+  if (endpoint === "integration/hris") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listHrisConnections(tenantId);
+    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+  }
+  if (endpoint === "integration/envelopes") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listEsignatureEnvelopes(tenantId);
+    return NextResponse.json({ envelopes: res.ok ? res.data?.envelopes ?? [] : [] });
+  }
+  if (endpoint === "integration/feeds") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await listExternalDataFeeds(tenantId);
+    return NextResponse.json({ subscriptions: res.ok ? res.data?.subscriptions ?? [] : [] });
+  }
+
   return NextResponse.json({ error: `Not found: ${endpoint}` }, { status: 404 });
 }
 
@@ -261,6 +478,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
   if (endpoint === "tax-authority/interfaces") {
     const res = await registerTaxAuthorityInterface(body, identity);
+    return toJsonResponse(res);
+  }
+  const taxAuthorityTestMatch = endpoint.match(/^tax-authority\/interfaces\/([^/]+)\/test$/);
+  if (taxAuthorityTestMatch) {
+    const res = await testTaxAuthorityConnection(taxAuthorityTestMatch[1], identity);
+    return toJsonResponse(res);
+  }
+  const filingFinalizeMatch = endpoint.match(/^filing-preparation\/drafts\/([^/]+)\/finalize$/);
+  if (filingFinalizeMatch) {
+    const res = await finalizeFilingDraft(filingFinalizeMatch[1], body, identity);
+    return toJsonResponse(res);
+  }
+
+  // ── Integration & Extensibility Domain ────────────────────────────────────
+  const bankSyncMatch = endpoint.match(/^integration\/banking\/([^/]+)\/sync$/);
+  if (bankSyncMatch) {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await triggerBankSync(tenantId, bankSyncMatch[1]);
+    return toJsonResponse(res);
+  }
+  const hrisSyncMatch = endpoint.match(/^integration\/hris\/([^/]+)\/sync$/);
+  if (hrisSyncMatch) {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await triggerHrisSync(tenantId, hrisSyncMatch[1]);
     return toJsonResponse(res);
   }
 
@@ -333,6 +574,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
   if (endpoint === "exception-escalation/exceptions") {
     const res = await createEscalatedException(body, identity);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "compliance-status/evaluate") {
+    const res = await evaluateCompliance(body, identity);
+    return toJsonResponse(res);
+  }
+
+  // ── Security & Trust Domain ───────────────────────────────────────────────
+  const rotateMatch = endpoint.match(/^security\/keys\/([^/]+)\/rotate$/);
+  if (rotateMatch) {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await rotateKmsKey(tenantId, rotateMatch[1]);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "security/assessments/evaluate") {
+    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const res = await evaluateCartaAccess(tenantId, body);
+    return toJsonResponse(res);
+  }
+
+  // ── AI Governance Domain ──────────────────────────────────────────────────
+  if (endpoint === "ai-governance/runs") {
+    const res = await createAIRun(body, identity);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "ai-governance/risk-classifications") {
+    const res = await setActionRiskClassification(body, identity);
+    return toJsonResponse(res);
+  }
+  if (endpoint === "ai-governance/model-providers") {
+    const res = await registerModelProvider(body, identity);
     return toJsonResponse(res);
   }
 

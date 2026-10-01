@@ -51,6 +51,5 @@ zoiko-suite-frontend-platform/
 # local exports
 /exports/
 scratch/*.log
-
-
-
+*.log
+mock-svc/

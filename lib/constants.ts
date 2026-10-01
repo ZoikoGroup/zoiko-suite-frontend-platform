@@ -9,6 +9,8 @@ import {
   Sliders,
   Lock,
   Plug,
+  CircleDollarSign,
+  BrainCircuit,
 } from "lucide-react";
 
 export type DomainKey =
@@ -187,6 +189,12 @@ export const SECONDARY_NAV = [
 
 export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   {
+    title: "Finance & Treasury",
+    items: [
+      { label: "Finance & Payments", href: "/admin/finance", icon: CircleDollarSign },
+    ],
+  },
+  {
     title: "Legal, Corporate & Commercial",
     items: [
       { label: "Legal & Contracts", href: "/admin/legal", icon: Scale },
@@ -204,6 +212,12 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
     ],
   },
   {
+    title: "Intelligence & Reporting",
+    items: [
+      { label: "Intelligence & Reporting", href: "/admin/intelligence", icon: BrainCircuit },
+    ],
+  },
+  {
     title: "Security & Trust",
     items: [
       { label: "Security & Trust", href: "/admin/security", icon: Lock },
@@ -212,7 +226,10 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   {
     title: "Integration & Extensibility",
     items: [
-      { label: "Integrations", href: "/admin/integrations", icon: Plug },
+      // Points at /admin/integration (singular) — the route with real panels
+      // wired to live data. /admin/integrations (plural) is a static,
+      // non-functional placeholder left over from an earlier pass; not linked.
+      { label: "Integrations", href: "/admin/integration", icon: Plug },
     ],
   },
   {

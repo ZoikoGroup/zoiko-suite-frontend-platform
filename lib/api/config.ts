@@ -20,8 +20,13 @@ const DEFAULTS = {
   secretVault:                "http://127.0.0.1:8087",  // secret-vault-svc
   obligations:                "http://127.0.0.1:8088",  // obligations-svc
   authorization:              "http://127.0.0.1:8089",  // authorization-svc
-  accessControl:              "http://127.0.0.1:8137",  // access-control-svc
-  delegatedAuthority:         "http://127.0.0.1:8136",  // delegated-authority-svc
+  // accessControl and delegatedAuthority previously collided with
+  // reconciliationIntel (8137) and complianceRiskScoring (8136) below — both of
+  // which have real containers running locally, unlike these two. Reassigned to
+  // unused ports so every key resolves to a distinct URL; neither change alters
+  // any currently-running service's address.
+  accessControl:              "http://127.0.0.1:8181",  // access-control-svc
+  delegatedAuthority:         "http://127.0.0.1:8180",  // delegated-authority-svc
   documentVault:              "http://127.0.0.1:8094",  // document-vault-svc
   auditEventStore:            "http://127.0.0.1:8084",  // audit-event-store-svc
   tenantRegistry:             "http://127.0.0.1:8081",  // tenant-entity-registry-svc
@@ -52,7 +57,9 @@ const DEFAULTS = {
   orgStructure:               "http://127.0.0.1:8116",  // org-structure-svc
   offboardingSeverance:       "http://127.0.0.1:8117",  // offboarding-severance-svc
   workforceCompliance:        "http://127.0.0.1:8118",  // workforce-compliance-svc
-  performanceReview:          "http://127.0.0.1:8139",  // performance-review-svc
+  // Was 8139, colliding with migrationIntegrity below (which has a real
+  // container running locally; this one doesn't). Reassigned to a free port.
+  performanceReview:          "http://127.0.0.1:8182",  // performance-review-svc
 
   // ── BLOCK 6 · Legal, Corporate & Commercial ─────────────────────────────
   contracts:                  "http://127.0.0.1:8119",  // contract-lifecycle-svc
@@ -93,7 +100,9 @@ const DEFAULTS = {
   siemIntegration:            "http://127.0.0.1:8141",  // siem-integration-svc
   carta:                      "http://127.0.0.1:8142",  // carta-svc
   keyManagement:              "http://127.0.0.1:8143",  // key-management-svc
-  aiGovernance:               "http://127.0.0.1:8146",  // ai-governance-svc
+  // Was 8146, colliding with hrisConnector below (which has a real container
+  // running locally; this one doesn't). Reassigned to a free port.
+  aiGovernance:               "http://127.0.0.1:8183",  // ai-governance-svc
 
   // ── BLOCK 10 · Integration & Extensibility ──────────────────────────────
   connectivityBridge:         "http://127.0.0.1:8144",  // connectivity-api-bridge-svc
