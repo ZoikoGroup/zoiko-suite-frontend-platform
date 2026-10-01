@@ -7,15 +7,19 @@
 // chain verification (which is a POST to the service but changes nothing in
 // the store). These actions expose:
 //
-//  1. verifyChainAction     — trigger SHA-256 chain verification on the log
-//  2. filterAuditEventsAction — return a filtered slice of events (domain, dates)
-//  3. exportAuditLogAction   — serialise events to JSON for download
+//  1. verifyChainAction    — trigger SHA-256 chain verification on the log
+//  2. exportAuditLogAction — serialise events to JSON for download
+//
+// Domain/date/search/status filtering of the visible ledger is handled
+// entirely client-side in AuditEventLedgerPanel — there is no separate
+// filter Server Action, since the backend has no "domain" query parameter
+// to push that filter down to (see lib/api/audit-events.ts).
 //
 // None of these actions are authorised decisions about the data — they surface
 // what audit-event-store-svc returns without adding policy.
 
 import { getAuditEvents, verifyAuditChain } from "@/lib/api/audit-events";
-import type { VerifyChainState, FilterState, ExportState, AuditDomain } from "./state";
+import type { VerifyChainState, ExportState } from "./state";
 
 /**
  * Trigger a cryptographic hash-chain verification on the audit event log.
@@ -50,76 +54,6 @@ export async function verifyChainAction(
       message: `Chain verification could not be completed: ${err instanceof Error ? err.message : "unknown error"}. The audit event service may be unreachable.`,
     };
   }
-}
-
-/**
- * Filter audit events by domain and/or date range.
- *
- * Because the current API client has no server-side filtering parameters, the
- * full event list is fetched and filtered here. This is accurate but not
- * scalable to millions of events — add query parameters to the API client when
- * audit-event-store-svc exposes them.
- */
-export async function filterAuditEventsAction(
-  _previous: FilterState,
-  formData: FormData,
-): Promise<FilterState> {
-  const domain = (String(formData.get("filter_domain") ?? "").trim() as AuditDomain) || "";
-  const dateFrom = String(formData.get("filter_date_from") ?? "").trim();
-  const dateTo = String(formData.get("filter_date_to") ?? "").trim();
-
-  if (!domain && !dateFrom && !dateTo) {
-    return {
-      status: "error",
-      message: "Provide at least one filter — domain, start date, or end date.",
-    };
-  }
-
-  const result = await getAuditEvents();
-
-  let events = result.data;
-
-  if (domain) {
-    events = events.filter((e) => e.domain === domain);
-  }
-  if (dateFrom) {
-    const from = new Date(dateFrom).getTime();
-    if (isNaN(from)) {
-      return { status: "error", message: "Start date is not a valid date." };
-    }
-    events = events.filter((e) => new Date(e.timestamp).getTime() >= from);
-  }
-  if (dateTo) {
-    const to = new Date(dateTo).getTime();
-    if (isNaN(to)) {
-      return { status: "error", message: "End date is not a valid date." };
-    }
-    // Add 24 hours to include the full end day.
-    events = events.filter((e) => new Date(e.timestamp).getTime() <= to + 86_400_000);
-  }
-
-  if (events.length === 0) {
-    const parts = [domain && `domain "${domain}"`, dateFrom && `from ${dateFrom}`, dateTo && `to ${dateTo}`]
-      .filter(Boolean)
-      .join(", ");
-    return {
-      status: "empty",
-      message: `No events match these filters (${parts}). The current log may not contain any events for that selection.`,
-    };
-  }
-
-  const parts = [
-    domain && `domain "${domain}"`,
-    dateFrom && `from ${dateFrom}`,
-    dateTo && `to ${dateTo}`,
-  ]
-    .filter(Boolean)
-    .join(", ");
-
-  return {
-    status: "filtered",
-    message: `${events.length} event${events.length === 1 ? "" : "s"} match ${parts}. The table above has been updated.`,
-  };
 }
 
 /**

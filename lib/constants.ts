@@ -27,6 +27,10 @@ import {
   Bot,
   Layers,
   ArrowLeftRight,
+  CreditCard,
+  BarChart3,
+  Archive,
+  Milestone,
 } from "lucide-react";
 
 export type DomainKey =
@@ -42,7 +46,9 @@ export type DomainKey =
   | "documents"
   | "commercial-ops"
   | "purchase-requests"
-  | "audit-events";
+  | "audit-events"
+  | "evidence-manifests"
+  | "workflow-history";
 
 export type DomainStatus = "operational" | "attention" | "action-required";
 
@@ -75,6 +81,8 @@ export const DOMAINS: Domain[] = [
       "Consolidation Service",
       "Chart of Accounts Service",
       "Financial Close Service",
+      "Payment Initiation Adapter Service",
+      "Payment Status Service",
     ],
   },
   {
@@ -254,6 +262,26 @@ export const DOMAINS: Domain[] = [
       "Tamper Evidence Verifier",
     ],
   },
+  {
+    key: "evidence-manifests",
+    label: "Evidence Manifests",
+    href: "/admin/evidence-manifests",
+    icon: Archive,
+    purpose:
+      "Assemble structured, checksummed evidence sets for audit, regulator, legal-discovery and compliance-review scenarios — pulling governance decisions, access decisions and workflow history from their owning services and fixing them in an immutable snapshot. Fails closed: any source it cannot reach fails the whole manifest rather than returning a silent partial one.",
+    status: "operational",
+    coreServices: ["Evidence Manifest Service"],
+  },
+  {
+    key: "workflow-history",
+    label: "Workflow History",
+    href: "/admin/workflow-history",
+    icon: Milestone,
+    purpose:
+      "The durable, append-only history of every workflow instance on the platform — built entirely from events every workflow-driven service publishes, replay-safe, and immutable at the database level once recorded.",
+    status: "operational",
+    coreServices: ["Workflow History Service"],
+  },
 ];
 
 export const PRIMARY_NAV = [
@@ -294,6 +322,7 @@ export const PLATFORM_NAV = [
   // every service that owns deletable data rather than belonging to one: an
   // active legal hold here blocks deletion in Finance, HR, Legal and Tax alike.
   { label: "Retention & Holds", href: "/admin/retention", icon: Snowflake },
+  { label: "Metric Registry", href: "/admin/metrics", icon: BarChart3 },
   { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
 ];
 
@@ -332,6 +361,8 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
       { label: "Compliance", href: "/admin/compliance", icon: ShieldCheck },
       { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
       { label: "Audit Event Store", href: "/admin/audit-events", icon: History },
+      { label: "Evidence Manifests", href: "/admin/evidence-manifests", icon: Archive },
+      { label: "Workflow History", href: "/admin/workflow-history", icon: Milestone },
       { label: "AI Governance", href: "/admin/ai-governance", icon: Bot },
       { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
       { label: "Migration Integrity", href: "/admin/migrations", icon: ArrowLeftRight },
@@ -349,6 +380,9 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
     title: "Organization & Reference Data",
     items: [
       { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },
+      { label: "Commercial Accounts", href: "/admin/commercial-accounts", icon: CreditCard },
+      { label: "Capability Registry", href: "/admin/capabilities", icon: Sliders },
+      { label: "Metric Registry", href: "/admin/metrics", icon: BarChart3 },
       { label: "Jurisdictions & Rules", href: "/admin/jurisdictions", icon: Globe2 },
       // Sits here rather than under a business domain because it decides which
       // system is believed for a field family across every domain at once —

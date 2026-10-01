@@ -24,14 +24,6 @@ export type VerifyChainState = {
 
 export const IDLE_VERIFY_STATE: VerifyChainState = { status: "idle", message: "" };
 
-/** Outcome of a filter action (not a mutation — no writes). */
-export type FilterState = {
-  status: "idle" | "filtered" | "empty" | "error";
-  message: string;
-};
-
-export const IDLE_FILTER_STATE: FilterState = { status: "idle", message: "" };
-
 /** Outcome of an export action. */
 export type ExportState = {
   status: "idle" | "exported" | "empty" | "error";

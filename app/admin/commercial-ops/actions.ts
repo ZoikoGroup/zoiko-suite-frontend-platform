@@ -47,11 +47,8 @@ import {
   explainVendorDDError,
 } from "@/lib/api/vendor-due-diligence";
 import { formatMoney } from "@/lib/format";
-import {
-  getWorkflowInstanceHistory,
-  createWorkflowInstance,
-  submitWorkflowStageAction,
-} from "@/lib/api/workflow-history";
+import { createWorkflowInstance, submitWorkflowStageAction } from "@/lib/api/workflow";
+import { getInstanceHistory } from "@/lib/api/workflow-history";
 import type { LookupState } from "@/components/admin/shared/lookup";
 import type {
   OrderActionState,
@@ -950,7 +947,7 @@ export async function lookupWorkflowHistory(
   const workflowId = String(formData.get("lookup_workflow_id") ?? "").trim();
   if (!workflowId) return { status: "error", message: "Enter a workflow instance ID." };
 
-  const result = await getWorkflowInstanceHistory(workflowId, identity);
+  const result = await getInstanceHistory({ identity, workflowInstanceId: workflowId });
 
   if (!result.ok) {
     if (result.error.status === 404) {
@@ -988,20 +985,16 @@ export async function initiateWorkflowAction(
   }
 
   const workflowType = String(formData.get("workflow_type") ?? "PURCHASE_APPROVAL").trim();
-  const stageName = String(formData.get("stage_name") ?? "Manager Approval").trim();
   const approverId = String(formData.get("approver_principal_id") ?? "55555555-5555-5555-5555-555555555555").trim();
 
   const res = await createWorkflowInstance(
     {
       workflow_type: workflowType,
-      stages: [
-        {
-          stage_order: 1,
-          stage_name: stageName,
-          required_role: "MANAGER",
-          approver_principal_id: approverId,
-        },
-      ],
+      // workflow-svc's real stage shape names only the approver — stage
+      // ordering, names and required roles are not fields it stores or
+      // checks (a prior version of this call sent three fields the backend
+      // silently ignored).
+      stages: [{ approver_principal_id: approverId }],
     },
     identity
   );

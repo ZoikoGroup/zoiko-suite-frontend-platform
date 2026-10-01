@@ -134,6 +134,31 @@ export type JournalHeader = {
   validated_at?: string | null;
   posted_at?: string | null;
   reversed_at?: string | null;
+
+  // ── ACC-03 journal proposal/approval lifecycle ──────────────────────────
+  //
+  // A SEPARATE lifecycle from `status` above — status is ACC-04/05's own
+  // Tri-Phase Commit for the actual ledger write; approval_status is whether
+  // this proposal is even eligible to reach the posting engine. Always
+  // present on every real response (the backend's JournalHeader always
+  // carries it), never optional in practice.
+  approval_status: ApprovalStatus;
+  /** A permanent hash of exactly what content was approved, captured at
+   *  approve time. Purely evidentiary — nothing re-checks it after the fact. */
+  approval_fingerprint?: string | null;
+  submitted_at?: string | null;
+  submitted_by_principal_id?: string | null;
+  approved_at?: string | null;
+  approved_by_principal_id?: string | null;
+  rejected_at?: string | null;
+  rejected_by_principal_id?: string | null;
+  rejection_reason?: string | null;
+  posting_requested_at?: string | null;
+  posting_requested_by_principal_id?: string | null;
+  /** Set only on a journal created via RequestCorrection, pointing at the
+   *  original it corrects — "corrections create new journals," never an
+   *  in-place edit of a posted one. */
+  correction_of_journal_id?: string | null;
 };
 
 export type JournalLine = {
@@ -302,6 +327,9 @@ export type CreateJournalInput = {
   /** Supporting documents. Merged with the §4 envelope's X-Evidence-Refs
    *  rather than replacing it, so both survive. */
   evidenceRefs?: string[];
+  /** Optional. Carried as correlation_id on the journal. Required when correlating
+   *  with a customer invoice in accounts-receivable-svc or an external source event. */
+  correlationId?: string;
 };
 
 /** Today as an ISO calendar date, for defaulting the two date fields.
@@ -334,9 +362,9 @@ export async function createJournal(
 ): Promise<ApiWriteResult<JournalWithLines>> {
   // One key for both roles. correlation_id is the service's own idempotency key
   // (partial unique index on tenant_id, correlation_id) and Idempotency-Key is
-  // the §4 envelope's. Deriving them from the same value means a retry that
-  // reaches either check is recognised as the same submission by both.
-  const submissionKey = crypto.randomUUID();
+  // the §4 envelope's. If a correlationId was explicitly supplied (e.g. to link
+  // to an accounts-receivable customer invoice), use it; otherwise mint a fresh UUID.
+  const submissionKey = input.correlationId?.trim() || crypto.randomUUID();
 
   return apiPost<JournalWithLines>(
     "generalLedger",
@@ -526,5 +554,523 @@ export function explainLedgerError(message: string): string {
   if (message.includes("store_unavailable")) {
     return "general-ledger-svc could not reach its database. Nothing was written.";
   }
+  if (message.includes("self_approval_not_permitted")) {
+    return "The principal who submitted this journal may not also approve it. Maker/checker applies to every journal — there is no configuration that exempts one.";
+  }
+  if (message.includes("reject_reason_required")) {
+    return "A reason is required to reject a journal.";
+  }
+  if (message.includes("journal_unbalanced_at_submit")) {
+    return "This journal's debits and credits do not balance and cannot be submitted for approval.";
+  }
+  if (message.includes("invalid_approval_transition")) {
+    return "That action is not legal from this journal's current approval status. Use \"available actions\" to see what can be done next.";
+  }
+  if (message.includes("correction_source_not_posted")) {
+    return "Only a POSTED journal may be corrected.";
+  }
+  if (message.includes("account_already_exists")) {
+    return "An account with this code already exists in the Chart of Accounts.";
+  }
+  if (message.includes("account_not_found")) {
+    return "No account with that code exists in the Chart of Accounts.";
+  }
+  if (message.includes("parent_account_not_found")) {
+    return "parent_account_id does not name an existing account.";
+  }
+  if (message.includes("account_inactive")) {
+    return "That account is INACTIVE and may not be posted to.";
+  }
+  if (message.includes("invalid_account_type")) {
+    return "account_type must be one of Asset, Liability, Equity, Revenue, Expense.";
+  }
+  if (message.includes("control_account_posting_restricted")) {
+    return "That account is a control account with direct posting restricted. An explicit, authorized override is required to post to it directly.";
+  }
+  if (message.includes("account_mapping_not_found")) {
+    return "No effective account mapping exists for this key.";
+  }
+  if (message.includes("mapping_target_account_invalid")) {
+    return "account_code does not name an existing ACTIVE account in the Chart of Accounts.";
+  }
+  if (message.includes("trial_balance_not_found")) {
+    return "No trial balance snapshot with that id exists for this tenant.";
+  }
+  if (message.includes("ledger_scope_required")) {
+    return "A legal entity is required to query the ledger — there is no all-entities view.";
+  }
   return message;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACC-03 — Journal proposal/approval lifecycle
+//
+// A SEPARATE lifecycle from JournalStatus above. JournalStatus is ACC-04/05's
+// own Tri-Phase Commit for the actual ledger write; ApprovalStatus is whether
+// a journal is even eligible to reach the posting engine:
+//
+//   DRAFT ──▶ PENDING_APPROVAL ──▶ APPROVED ──▶ POSTING_REQUESTED ──▶ POSTED
+//     ▲              │  └──▶ REJECTED
+//     └──────────────┘ (amending a submitted journal withdraws it back to DRAFT)
+//
+// Maker/checker applies universally: the principal who submitted a journal
+// may never also approve it, regardless of role.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type ApprovalStatus =
+  | "DRAFT"
+  | "PENDING_APPROVAL"
+  | "APPROVED"
+  | "POSTING_REQUESTED"
+  | "POSTED"
+  | "REJECTED"
+  | "CANCELLED";
+
+export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
+  DRAFT: "Draft",
+  PENDING_APPROVAL: "Pending approval",
+  APPROVED: "Approved",
+  POSTING_REQUESTED: "Posting requested",
+  POSTED: "Posted",
+  REJECTED: "Rejected",
+  CANCELLED: "Cancelled",
+};
+
+/** ACC-03's own GetAvailableActions answer — which lifecycle commands are
+ *  legal to call on this journal right now, derived by the service from its
+ *  own ValidApprovalTransitions rather than guessed client-side. */
+export type AvailableActions = {
+  journal_id: string;
+  actions: string[];
+};
+
+export const ACTION_LABELS: Record<string, string> = {
+  submit: "Submit for approval",
+  approve: "Approve",
+  reject: "Reject",
+  "request-posting": "Request posting",
+  amend: "Amend (withdraw to draft)",
+  correct: "Request correction",
+  validate: "Validate",
+  post: "Post to ledger",
+  reverse: "Reverse",
+};
+
+export type JournalHistoryEntry = {
+  event: string;
+  at: string;
+  principal_id: string;
+  detail?: string;
+};
+
+/** Which lifecycle commands are legal on this journal right now. */
+export async function getAvailableActions(
+  journalId: string,
+  identity: Identity & { tenantId: string },
+): Promise<ApiResult<AvailableActions>> {
+  return apiGet<AvailableActions>("generalLedger", `/v1/journals/${journalId}/available-actions`, { identity });
+}
+
+/** The journal's full lifecycle so far, derived from its own actor/timestamp
+ *  columns — an entry appears only if its corresponding timestamp is set. */
+export async function getJournalHistory(
+  journalId: string,
+  identity: Identity & { tenantId: string },
+): Promise<ApiResult<JournalHistoryEntry[]>> {
+  const result = await apiGet<JournalHistoryEntry[] | null>(
+    "generalLedger",
+    `/v1/journals/${journalId}/history`,
+    { identity },
+  );
+  if (!result.ok) return result;
+  return { ok: true, data: result.data ?? [] };
+}
+
+/** Submit a DRAFT journal for approval. Refused if it does not balance. */
+export async function submitJournal(
+  journalId: string,
+  identity: Identity & { principalId: string; tenantId: string },
+): Promise<ApiWriteResult<JournalWithLines>> {
+  return apiPost<JournalWithLines>("generalLedger", `/v1/journals/${journalId}/submit`, {}, { identity });
+}
+
+/** Approve a PENDING_APPROVAL journal. Refused if the caller is the same
+ *  principal who submitted it — maker/checker is universal, not selective. */
+export async function approveJournal(
+  journalId: string,
+  identity: Identity & { principalId: string; tenantId: string },
+): Promise<ApiWriteResult<JournalWithLines>> {
+  return apiPost<JournalWithLines>("generalLedger", `/v1/journals/${journalId}/approve`, {}, { identity });
+}
+
+/** Reject a PENDING_APPROVAL journal. A reason is required. */
+export async function rejectJournal(
+  journalId: string,
+  reason: string,
+  identity: Identity & { principalId: string; tenantId: string },
+): Promise<ApiWriteResult<JournalWithLines>> {
+  return apiPost<JournalWithLines>(
+    "generalLedger",
+    `/v1/journals/${journalId}/reject`,
+    { reason },
+    { identity },
+  );
+}
+
+/** Move an APPROVED journal to POSTING_REQUESTED — the hand-off to the
+ *  posting engine (ACC-04), which then commits it to the ledger. */
+export async function requestPosting(
+  journalId: string,
+  identity: Identity & { principalId: string; tenantId: string },
+): Promise<ApiWriteResult<JournalWithLines>> {
+  return apiPost<JournalWithLines>("generalLedger", `/v1/journals/${journalId}/request-posting`, {}, { identity });
+}
+
+/** Withdraw a submitted-but-not-yet-approved journal back to DRAFT and
+ *  replace its editable fields and every line in one call. Only legal while
+ *  ApprovalStatus is DRAFT or PENDING_APPROVAL. */
+export type AmendDraftJournalInput = {
+  identity: Identity & { principalId: string; tenantId: string };
+  description: string;
+  journalType: JournalType;
+  transactionDate: string;
+  postingDate: string;
+  currencyCode: string;
+  bookId?: string;
+  reportingBasis?: string;
+  evidenceRefs?: string[];
+  lines: CreateJournalLineInput[];
+};
+
+export async function amendDraftJournal(
+  journalId: string,
+  input: AmendDraftJournalInput,
+): Promise<ApiWriteResult<JournalWithLines>> {
+  return apiPost<JournalWithLines>(
+    "generalLedger",
+    `/v1/journals/${journalId}/amend`,
+    {
+      description: input.description,
+      journal_type: input.journalType,
+      transaction_date: input.transactionDate,
+      posting_date: input.postingDate,
+      currency_code: input.currencyCode,
+      book_id: input.bookId,
+      reporting_basis: input.reportingBasis,
+      evidence_refs: input.evidenceRefs,
+      lines: input.lines.map((line) => ({
+        account_code: line.accountCode,
+        debit_amount: line.debitAmount ?? 0,
+        credit_amount: line.creditAmount ?? 0,
+        description: line.description,
+        dimensions: line.dimensions,
+      })),
+    },
+    { identity: input.identity },
+  );
+}
+
+/** Request a correction of a POSTED journal — "corrections create new
+ *  journals," never an in-place edit of a posted one. Returns the new
+ *  correcting journal, which starts life as its own fresh DRAFT. */
+export type RequestCorrectionInput = {
+  identity: Identity & { principalId: string; tenantId: string };
+  reason: string;
+  description: string;
+  lines: CreateJournalLineInput[];
+};
+
+export async function requestCorrection(
+  journalId: string,
+  input: RequestCorrectionInput,
+): Promise<ApiWriteResult<JournalWithLines>> {
+  return apiPost<JournalWithLines>(
+    "generalLedger",
+    `/v1/journals/${journalId}/correct`,
+    {
+      reason: input.reason,
+      description: input.description,
+      lines: input.lines.map((line) => ({
+        account_code: line.accountCode,
+        debit_amount: line.debitAmount ?? 0,
+        credit_amount: line.creditAmount ?? 0,
+        description: line.description,
+        dimensions: line.dimensions,
+      })),
+    },
+    { identity: input.identity },
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACC-01 — Chart of Accounts
+//
+// Kept as its own authority, separate from journals/postings/ledger, per the
+// spec's Cross-Service Accounting Authority Matrix. Tenant-wide reference
+// data — accounts are not scoped to a legal entity.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type AccountType = "ASSET" | "LIABILITY" | "EQUITY" | "REVENUE" | "EXPENSE";
+
+export const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
+  { value: "ASSET", label: "Asset" },
+  { value: "LIABILITY", label: "Liability" },
+  { value: "EQUITY", label: "Equity" },
+  { value: "REVENUE", label: "Revenue" },
+  { value: "EXPENSE", label: "Expense" },
+];
+
+export type Account = {
+  account_id: string;
+  tenant_id: string;
+  account_code: string;
+  account_name: string;
+  account_type: AccountType;
+  parent_account_id?: string | null;
+  /** Invariant #7: a control account with direct_posting_restricted=true
+   *  cannot be posted to by an ordinary manual journal without an explicit
+   *  override. A control account with no restriction is a real, allowed
+   *  state — the two facts are independent. */
+  is_control_account: boolean;
+  direct_posting_restricted: boolean;
+  status: "ACTIVE" | "INACTIVE";
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export type CreateAccountInput = {
+  identity: Identity & { principalId: string };
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  parentAccountId?: string;
+  isControlAccount?: boolean;
+  directPostingRestricted?: boolean;
+};
+
+export async function createAccount(input: CreateAccountInput): Promise<ApiWriteResult<Account>> {
+  return apiPost<Account>(
+    "generalLedger",
+    "/v1/chart-of-accounts",
+    {
+      account_code: input.accountCode,
+      account_name: input.accountName,
+      account_type: input.accountType,
+      parent_account_id: input.parentAccountId,
+      is_control_account: input.isControlAccount,
+      direct_posting_restricted: input.directPostingRestricted,
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function listAccounts(identity: Identity & { principalId: string }): Promise<ApiResult<Account[]>> {
+  const result = await apiGet<Account[] | null>("generalLedger", "/v1/chart-of-accounts", { identity });
+  if (!result.ok) return result;
+  return { ok: true, data: result.data ?? [] };
+}
+
+export async function getAccount(
+  accountCode: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiResult<Account>> {
+  return apiGet<Account>("generalLedger", `/v1/chart-of-accounts/${encodeURIComponent(accountCode)}`, { identity });
+}
+
+/** Deactivate an account. Never a delete — a posted-to account can never
+ *  actually be removed, only refused for future postings. */
+export async function deactivateAccount(
+  accountCode: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiWriteResult<Account>> {
+  return apiPost<Account>(
+    "generalLedger",
+    `/v1/chart-of-accounts/${encodeURIComponent(accountCode)}/deactivate`,
+    {},
+    { identity },
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACC-02 — Account Mapping
+//
+// Effective-dated mapping of a caller-declared business concept (mapping_key
+// — its meaning belongs to whichever domain declares it; this service never
+// interprets it) to a real, chart-registered account_code. Versioned: a new
+// mapping for the same key supersedes the old one rather than editing it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type AccountMapping = {
+  account_mapping_id: string;
+  tenant_id: string;
+  mapping_key: string;
+  account_code: string;
+  effective_from: string;
+  effective_to?: string | null;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export async function setAccountMapping(
+  mappingKey: string,
+  accountCode: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiWriteResult<AccountMapping>> {
+  return apiPost<AccountMapping>(
+    "generalLedger",
+    "/v1/account-mappings",
+    { mapping_key: mappingKey, account_code: accountCode },
+    { identity },
+  );
+}
+
+export async function listAccountMappings(
+  identity: Identity & { principalId: string },
+): Promise<ApiResult<AccountMapping[]>> {
+  const result = await apiGet<AccountMapping[] | null>("generalLedger", "/v1/account-mappings", { identity });
+  if (!result.ok) return result;
+  return { ok: true, data: result.data ?? [] };
+}
+
+export async function getAccountMapping(
+  mappingKey: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiResult<AccountMapping>> {
+  return apiGet<AccountMapping>(
+    "generalLedger",
+    `/v1/account-mappings/${encodeURIComponent(mappingKey)}`,
+    { identity },
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACC-15 — Trial Balance
+//
+// A real, durable dataset pinned to an explicit ledger watermark (invariant
+// #11), never recompiled ad hoc client-side. Immutable once compiled.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type TrialBalanceLine = {
+  account_code: string;
+  net_balance: number;
+};
+
+export type TrialBalanceSnapshot = {
+  trial_balance_snapshot_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  fiscal_period: string;
+  /** MAX(journal_seq) among the FINALIZED/REVERSED journals actually
+   *  included — a real, monotonic, reproducible "as of what point" answer. */
+  ledger_watermark: number;
+  compiled_at: string;
+  compiled_by_principal_id: string;
+  lines: TrialBalanceLine[];
+};
+
+export async function compileTrialBalance(
+  legalEntityId: string,
+  fiscalPeriod: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiWriteResult<TrialBalanceSnapshot>> {
+  return apiPost<TrialBalanceSnapshot>(
+    "generalLedger",
+    "/v1/trial-balance/compile",
+    { legal_entity_id: legalEntityId, fiscal_period: fiscalPeriod },
+    { identity },
+  );
+}
+
+export async function getTrialBalance(
+  snapshotId: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiResult<TrialBalanceSnapshot>> {
+  return apiGet<TrialBalanceSnapshot>("generalLedger", `/v1/trial-balance/${snapshotId}`, { identity });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACC-05 — General Ledger (posted entries and derived balances)
+//
+// ledger_entries is one row per journal line, written exactly once when the
+// journal reaches FINALIZED, and never updated or deleted afterward.
+// ledger_balances is a derived, rebuildable projection over it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type LedgerEntry = {
+  ledger_entry_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  book_id?: string;
+  fiscal_period: string;
+  journal_id: string;
+  journal_line_id: string;
+  line_number: number;
+  account_code: string;
+  debit_amount: number;
+  credit_amount: number;
+  currency_code: string;
+  dimensions?: Record<string, string> | null;
+  transaction_date: string;
+  posting_date: string;
+  source_event_id?: string | null;
+  correlation_id: string;
+  entry_seq: number;
+  created_at: string;
+};
+
+export type LedgerBalance = {
+  tenant_id: string;
+  legal_entity_id: string;
+  book_id?: string;
+  account_code: string;
+  fiscal_period: string;
+  dimensions_key?: string;
+  debit_total: number;
+  credit_total: number;
+  net_balance: number;
+  watermark_entry_seq: number;
+  rebuilt_at: string;
+};
+
+export type QueryLedgerFilter = {
+  identity: Identity & { principalId: string; tenantId: string };
+  /** Required — there is no all-entities view; a query naming none is refused. */
+  legalEntityId: string;
+  bookId?: string;
+  accountCode?: string;
+  fiscalPeriod?: string;
+  journalId?: string;
+};
+
+export async function queryLedgerEntries(filter: QueryLedgerFilter): Promise<ApiResult<LedgerEntry[]>> {
+  const result = await apiGet<LedgerEntry[] | null>("generalLedger", "/v1/ledger/entries", {
+    identity: filter.identity,
+    query: {
+      legal_entity_id: filter.legalEntityId,
+      book_id: filter.bookId,
+      account_code: filter.accountCode,
+      fiscal_period: filter.fiscalPeriod,
+      journal_id: filter.journalId,
+    },
+  });
+  if (!result.ok) return result;
+  return { ok: true, data: result.data ?? [] };
+}
+
+export async function queryAccountBalance(params: {
+  identity: Identity & { principalId: string; tenantId: string };
+  legalEntityId: string;
+  accountCode: string;
+  bookId?: string;
+  fiscalPeriod?: string;
+}): Promise<ApiResult<LedgerBalance>> {
+  return apiGet<LedgerBalance>("generalLedger", "/v1/ledger/balance", {
+    identity: params.identity,
+    query: {
+      legal_entity_id: params.legalEntityId,
+      account_code: params.accountCode,
+      book_id: params.bookId,
+      fiscal_period: params.fiscalPeriod,
+    },
+  });
 }

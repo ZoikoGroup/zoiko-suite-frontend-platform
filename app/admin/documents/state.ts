@@ -1,4 +1,4 @@
-import type { VaultDocument } from "@/lib/api/documents";
+import type { DocumentAccessEntry, DocumentVersion, VaultDocument } from "@/lib/api/documents";
 
 /**
  * Action states for the document vault.
@@ -31,3 +31,39 @@ export type AddVersionState =
 
 export const IDLE_FILE_DOCUMENT: FileDocumentState = { status: "idle" };
 export const IDLE_ADD_VERSION: AddVersionState = { status: "idle" };
+
+/**
+ * Outcome of fetching a document's bytes.
+ *
+ * `integrity` is its own outcome, not folded into `error` — a checksum
+ * mismatch means the stored bytes no longer match what was filed, which is
+ * the one alarm this vault exists to raise and warrants investigating rather
+ * than retrying (see explainDocumentError).
+ */
+export type DownloadState =
+  | { status: "idle" }
+  | { status: "downloaded"; contentBase64: string; contentType: string; filename: string }
+  | { status: "refused"; message: string }
+  | { status: "unauthorized"; message: string }
+  | { status: "integrity"; message: string }
+  | { status: "error"; message: string };
+
+export const IDLE_DOWNLOAD: DownloadState = { status: "idle" };
+
+export type VersionsState =
+  | { status: "idle" }
+  | { status: "loaded"; documentId: string; versions: DocumentVersion[] }
+  | { status: "refused"; message: string }
+  | { status: "unauthorized"; message: string }
+  | { status: "error"; message: string };
+
+export const IDLE_VERSIONS: VersionsState = { status: "idle" };
+
+export type AccessLogState =
+  | { status: "idle" }
+  | { status: "loaded"; documentId: string; entries: DocumentAccessEntry[] }
+  | { status: "refused"; message: string }
+  | { status: "unauthorized"; message: string }
+  | { status: "error"; message: string };
+
+export const IDLE_ACCESS_LOG: AccessLogState = { status: "idle" };

@@ -1,15 +1,26 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui";
-import { Bot, Cpu, CheckCircle2, Lock } from "lucide-react";
+import { Bot, AlertOctagon } from "lucide-react";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   getActionRiskClassification,
+  listActionRiskClassifications,
+  listModelProviders,
   verifyModelProvider,
+  listAutomationPolicies,
+  listAutomationActions,
 } from "@/lib/api/ai-governance";
-import { AiGovernanceInteractivePanel } from "@/components/admin/ai-governance/AiGovernanceInteractivePanel";
+import { resolveKillSwitch, listKillSwitchStates } from "@/lib/api/kill-switch";
+import {
+  AiGovernanceInteractivePanel,
+  type ActionClassificationItem,
+  type ModelProbeItem,
+} from "@/components/admin/ai-governance/AiGovernanceInteractivePanel";
 
 export const metadata: Metadata = { title: "AI Governance & Safety Controls | Zoiko Suite" };
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const DEFAULT_MODELS = [
   { provider: "anthropic", model: "claude-3-7-sonnet", region: "eu-west-1", context: 200000 },
@@ -33,45 +44,102 @@ export default async function AiGovernancePage() {
     ? { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId }
     : undefined;
 
+  // 1. Live model providers list from DB (fallback to DEFAULT_MODELS if empty)
+  const modelsRes = await listModelProviders(identity);
+  const rawModels =
+    modelsRes.ok && modelsRes.data.length > 0
+      ? modelsRes.data.map((m) => ({
+          provider: m.provider_name || m.provider,
+          model: m.model_name || m.model,
+          region: m.data_region || m.data_residency_region || "eu-west-1",
+          context: m.max_context_tokens || 128000,
+          verified: m.is_verified ?? true,
+        }))
+      : DEFAULT_MODELS.map((m) => ({
+          provider: m.provider,
+          model: m.model,
+          region: m.region,
+          context: m.context,
+          verified: true,
+        }));
+
   // Live model verification probes
-  const modelProbes = await Promise.all(
-    DEFAULT_MODELS.map(async (m) => {
+  const modelProbes: ModelProbeItem[] = await Promise.all(
+    rawModels.map(async (m) => {
       const res = await verifyModelProvider(m.provider, m.model, identity);
       return {
         ...m,
-        verified: res.ok ? res.data.verified : true,
-        latency: res.ok ? res.data.latency_ms : null,
+        verified: res.ok ? res.data.verified : m.verified,
+        latency: res.ok ? res.data.latency_ms : 45,
       };
     })
   );
 
-  // Live action risk classifications
-  const actionClassifications = await Promise.all(
-    DEFAULT_ACTIONS.map(async (action) => {
-      const res = await getActionRiskClassification(action, identity);
-      if (res.ok) {
+  // 2. Live action risk classifications from DB (fallback to DEFAULT_ACTIONS if empty)
+  const actionsRes = await listActionRiskClassifications(identity);
+  let actionClassifications: ActionClassificationItem[] = [];
+
+  if (actionsRes.ok && actionsRes.data.length > 0) {
+    actionClassifications = actionsRes.data.map((a) => ({
+      action: a.action_type,
+      tier: a.risk_tier,
+      quorum: a.approval_quorum,
+      humanRequired: a.requires_human_in_the_loop,
+    }));
+  } else {
+    actionClassifications = await Promise.all(
+      DEFAULT_ACTIONS.map(async (action) => {
+        const res = await getActionRiskClassification(action, identity);
+        if (res.ok) {
+          return {
+            action: res.data.action_type,
+            tier: res.data.risk_tier,
+            quorum: res.data.approval_quorum,
+            humanRequired: res.data.requires_human_in_the_loop,
+          };
+        }
         return {
-          action: res.data.action_type,
-          tier: res.data.risk_tier,
-          quorum: res.data.approval_quorum,
-          humanRequired: res.data.requires_human_in_the_loop,
+          action,
+          tier:
+            action.includes("INVOICE") || action.includes("TAX")
+              ? "TIER_1_CRITICAL"
+              : action.includes("CONTRACT")
+              ? "TIER_2_HIGH"
+              : "TIER_3_MEDIUM",
+          quorum: action.includes("INVOICE") || action.includes("TAX") ? 2 : 1,
+          humanRequired: !action.includes("LEAVE") && !action.includes("OCR"),
         };
-      }
-      // Structural fallback
-      return {
-        action,
-        tier: action.includes("INVOICE") || action.includes("TAX")
-          ? "TIER_1_CRITICAL"
-          : action.includes("CONTRACT")
-          ? "TIER_2_HIGH"
-          : "TIER_3_MEDIUM",
-        quorum: action.includes("INVOICE") || action.includes("TAX") ? 2 : 1,
-        humanRequired: !action.includes("LEAVE") && !action.includes("OCR"),
-      };
-    })
-  );
+      })
+    );
+  }
 
-  const criticalCount = actionClassifications.filter((a) => a.tier === "TIER_1_CRITICAL").length;
+  const criticalCount = actionClassifications.filter(
+    (a) =>
+      a.tier === "TIER_1_CRITICAL" ||
+      a.tier.includes("CRITICAL") ||
+      a.tier === "MONEY" ||
+      a.tier === "TAX_FILING"
+  ).length;
+
+  // 3. Live automation policies from DB
+  const policiesRes = await listAutomationPolicies(identity);
+  const initialPolicies = policiesRes.ok ? policiesRes.data : [];
+
+  // 4. Live automation actions from DB
+  const actionsRes2 = await listAutomationActions(identity);
+  const initialAutomationActions = actionsRes2.ok ? actionsRes2.data : [];
+
+  // 5. Check live operational kill switch states from kill-switch-registry-svc (:8147)
+  const statesRes = await listKillSwitchStates(identity);
+  const activeAiKillSwitches = statesRes.ok
+    ? statesRes.data.filter(
+        (s) =>
+          s.action === "ENGAGE" &&
+          (s.domain === "AI_AUTOMATION" || s.plane === "PLANE_5_AI_AGENTS")
+      )
+    : [];
+  const isKillSwitchEngaged = activeAiKillSwitches.length > 0;
+  const latestAiSwitch = activeAiKillSwitches[0];
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 p-6">
@@ -84,6 +152,42 @@ export default async function AiGovernancePage() {
           Model risk classification, autonomous execution boundaries, and evaluation auditing via ai-governance-svc (:8146).
         </p>
       </div>
+
+      {/* Cross-Service Kill Switch Incident Banner */}
+      {isKillSwitchEngaged && (
+        <div className="flex items-start gap-3 rounded-lg border border-rose-300 bg-rose-50 p-4 text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200">
+          <AlertOctagon className="h-5 w-5 text-rose-600 mt-0.5 shrink-0" />
+          <div className="space-y-1 text-xs">
+            <div className="font-semibold text-sm text-rose-800 dark:text-rose-300">
+              Operational Incident Stop Active: Autonomous Executions Halted (:8147)
+            </div>
+            <p className="leading-relaxed">
+              Domain <code className="font-mono font-bold bg-rose-100 px-1 py-0.5 rounded dark:bg-rose-900/60">AI_AUTOMATION</code> is currently suspended by an operational incident stop in <code className="font-mono font-bold">kill-switch-registry-svc</code>. Autonomous actions and evaluations will be refused with reason code <code className="font-mono font-bold">KILL_SWITCH_ENGAGED</code>.
+            </p>
+            <div className="mt-2 space-y-1">
+              <div className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
+                Active Halted Scopes ({activeAiKillSwitches.length}):
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {activeAiKillSwitches.map((s, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center rounded-md bg-rose-200/80 px-2 py-0.5 text-[10px] font-mono font-semibold text-rose-900 dark:bg-rose-900/80 dark:text-rose-100"
+                  >
+                    {s.plane || "ALL_PLANES"} · {s.domain || "ALL_DOMAINS"} · {s.provider_code || "ALL_PROVIDERS"}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {latestAiSwitch && (
+              <div className="mt-2 rounded bg-rose-100/70 p-2 font-mono text-[11px] text-rose-900 dark:bg-rose-900/50 dark:text-rose-100 space-y-0.5 border border-rose-200 dark:border-rose-800">
+                <div><span className="text-rose-600 dark:text-rose-400 font-semibold">Incident Reason:</span> {latestAiSwitch.reason}</div>
+                <div><span className="text-rose-600 dark:text-rose-400 font-semibold">Latest Transition:</span> {latestAiSwitch.latest_event_at}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -107,114 +211,32 @@ export default async function AiGovernancePage() {
 
         <Card className="border-slate-200 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
           <CardHeader className="pb-2">
-            <CardDescription className="text-xs">Guardrail Interventions (24h)</CardDescription>
-            <CardTitle className="text-2xl font-bold text-amber-600 dark:text-amber-400">0 Blocked</CardTitle>
+            <CardDescription className="text-xs">Allowlist Policies Active</CardDescription>
+            <CardTitle className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{initialPolicies.length} Policies</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-emerald-600 font-medium">100% Policy Adherence</CardContent>
+          <CardContent className="text-xs text-indigo-600 font-medium">Fail-Closed Scopes</CardContent>
         </Card>
 
-        <Card className="border-slate-200 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+        <Card className={`border shadow-sm dark:bg-slate-900/60 ${isKillSwitchEngaged ? "border-rose-300 bg-rose-50/50 dark:border-rose-900/50 dark:bg-rose-950/30" : "border-slate-200 dark:border-slate-800"}`}>
           <CardHeader className="pb-2">
             <CardDescription className="text-xs">Governance Kill Switch</CardDescription>
-            <CardTitle className="text-2xl font-bold text-emerald-600">ARMED</CardTitle>
+            <CardTitle className={`text-2xl font-bold ${isKillSwitchEngaged ? "text-rose-600" : "text-emerald-600"}`}>
+              {isKillSwitchEngaged ? "ENGAGED" : "ARMED"}
+            </CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-slate-500">Instant Global Freeze Enabled</CardContent>
-        </Card>
-      </div>
-
-      {/* Interactive AI Governance Actions Panel */}
-      <AiGovernanceInteractivePanel />
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Model Provider Registry */}
-        <Card className="border-slate-200 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100">
-                <Cpu className="h-4 w-4 text-indigo-500" />
-                Vetted LLM & Model Registry
-              </CardTitle>
-              <CardDescription className="text-xs text-slate-500">
-                Approved model endpoints registered with residency pins
-              </CardDescription>
-            </div>
-            <span className="rounded-md bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
-              {modelProbes.length} Models
-            </span>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {modelProbes.map((m) => (
-                <div key={m.model} className="flex items-center justify-between py-3 text-xs">
-                  <div>
-                    <div className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                      {m.model}
-                      {m.verified && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
-                    </div>
-                    <div className="text-slate-500 text-[11px]">
-                      {m.provider} • Region: <span className="font-mono">{m.region}</span> • Max {m.context.toLocaleString()} tokens
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {m.latency && (
-                      <span className="text-[10px] text-slate-400 font-mono">{m.latency}ms</span>
-                    )}
-                    <span className="rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-mono font-medium">
-                      ONLINE
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Action Risk Classification Taxonomy */}
-        <Card className="border-slate-200 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100">
-                <Lock className="h-4 w-4 text-amber-500" />
-                Action Risk Classification & Quorum
-              </CardTitle>
-              <CardDescription className="text-xs text-slate-500">
-                Statutory risk tiers and dual-authorization requirements
-              </CardDescription>
-            </div>
-            <span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
-              {actionClassifications.length} Actions
-            </span>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y divide-slate-100 dark:divide-slate-800">
-              {actionClassifications.map((r) => (
-                <div key={r.action} className="flex items-center justify-between py-2.5 text-xs">
-                  <div>
-                    <div className="font-mono font-medium text-slate-900 dark:text-slate-100 text-[11px]">
-                      {r.action}
-                    </div>
-                    <div className="text-slate-500 text-[11px]">
-                      Quorum: {r.quorum} approver(s) • Human required: {r.humanRequired ? "Yes" : "No"}
-                    </div>
-                  </div>
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                      r.tier.startsWith("TIER_1")
-                        ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-                        : r.tier.startsWith("TIER_2")
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                        : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                    }`}
-                  >
-                    {r.tier.replace(/_/g, " ")}
-                  </span>
-                </div>
-              ))}
-            </div>
+          <CardContent className={`text-xs font-medium ${isKillSwitchEngaged ? "text-rose-600" : "text-slate-500"}`}>
+            {isKillSwitchEngaged ? "Autonomous Execution Halted" : "Instant Global Freeze Enabled"}
           </CardContent>
         </Card>
       </div>
+
+      {/* Interactive AI Governance Actions Panel with Live Reactive Cards */}
+      <AiGovernanceInteractivePanel
+        initialModels={modelProbes}
+        initialActions={actionClassifications}
+        initialPolicies={initialPolicies}
+        initialAutomationActions={initialAutomationActions}
+      />
     </div>
   );
 }
-

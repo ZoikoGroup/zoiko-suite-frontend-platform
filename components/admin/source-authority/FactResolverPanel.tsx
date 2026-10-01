@@ -12,7 +12,7 @@ import {
 } from "@/lib/api/source-authority";
 
 function when(value: string | null | undefined): string {
-  return value ? new Date(value).toLocaleString() : "—";
+  return value ? new Date(value).toLocaleString("en-CA") : "—";
 }
 
 function ClassBadge({ authorityClass }: { authorityClass: NormalizedFact["authority_class"] }) {

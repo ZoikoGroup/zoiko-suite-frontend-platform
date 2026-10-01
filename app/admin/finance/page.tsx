@@ -14,17 +14,46 @@ import {
   FinancialClosePanel,
   GeneralLedgerPanel,
   IntercompanyPanel,
+  ConsolidationPanel,
   PayeeBankingIdentityWorkbench,
   IssueInvoiceForm,
   IngestStatementLineForm,
+  PayableOpenItemForm,
+  PayableOpenItemPanel,
+  PaymentRunWorkbench,
+  PaymentInitiationWorkbench,
+  SupplierRecoveryWorkbench,
+  PaymentStatusWorkbench,
   RecordInvoiceForm,
   RecordJournalForm,
   RegisterPeriodForm,
+  TreasuryPanel,
+  JournalLookupPanel,
+  ChartOfAccountsPanel,
+  CreateAccountForm,
+  AccountMappingsPanel,
+  SetAccountMappingForm,
+  TrialBalancePanel,
+  LedgerQueryPanel,
 } from "@/components/admin/finance";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import {
+  listBankAccounts,
+  listCashPositions,
+  getEffectiveCash,
+  getLiquidityForecast,
+  listTransfers,
+  listThresholds,
+} from "@/lib/api/treasury";
+import { listPaymentRuns } from "@/lib/api/payment-run";
+import { listPaymentAttempts } from "@/lib/api/payment-initiation";
+import { listRecoveryCases } from "@/lib/api/supplier-recovery";
+import { listPayments, listUnresolvedPayments } from "@/lib/api/payment-status";
 import type { InvoiceStatus } from "@/lib/api/accounts-payable";
 import type { StatementLineStatus } from "@/lib/api/bank-reconciliation";
 import type { JournalStatus } from "@/lib/api/general-ledger";
-import { lookupJournal, lookupStatementLine, lookupVendorInvoice } from "./actions";
+import { lookupStatementLine, lookupVendorInvoice } from "./actions";
 
 export const metadata: Metadata = { title: "Finance, Payables & Receivables | Zoiko Suite" };
 
@@ -72,6 +101,16 @@ const WIRED_SERVICES = new Set([
   "Intercompany Accounting Service",
   // payee-banking-identity-svc (:8166) — live and writable.
   "Payee Banking Identity Service",
+  // treasury-svc (:8103) — live and writable.
+  "Treasury & Cash Position Service",
+  // consolidation-svc (:8106) — live and writable.
+  "Consolidation Service",
+  // payment-run-svc (:8161) — live and writable.
+  "Payment Run Service",
+  // payment-initiation-adapter-svc (:8162, BNK-06) — live and writable.
+  "Payment Initiation Adapter Service",
+  // payment-status-svc (:8163, BNK-07) — live and writable.
+  "Payment Status Service",
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -162,6 +201,43 @@ function RegisterSkeleton() {
 export default async function FinancePage({ searchParams }: PageProps) {
   const domain = DOMAINS.find((d) => d.key === "finance")!;
   const params = await searchParams;
+
+  const cookieStore = await cookies();
+  const session = decodeSession(cookieStore.get(SESSION_COOKIE)?.value);
+  const legalEntityId = session?.legalEntityId ?? "22222222-2222-2222-2222-222222222222";
+  const identity = session
+    ? {
+        principalId: session.principalId,
+        tenantId: session.tenantId,
+        legalEntityId: session.legalEntityId,
+      }
+    : undefined;
+
+  const [
+    treasuryAcctsRes,
+    treasuryPosRes,
+    effectiveCashRes,
+    forecastRes,
+    treasuryTransfersRes,
+    treasuryThresholdsRes,
+    paymentRunsRes,
+    paymentAttemptsRes,
+    recoveryCasesRes,
+    paymentsRes,
+    unresolvedPaymentsRes,
+  ] = await Promise.all([
+    listBankAccounts(legalEntityId, identity),
+    listCashPositions(legalEntityId, identity),
+    getEffectiveCash(legalEntityId, "INR", identity),
+    getLiquidityForecast(legalEntityId, "INR", identity),
+    listTransfers(legalEntityId, identity),
+    listThresholds(legalEntityId, identity),
+    identity ? listPaymentRuns(identity, legalEntityId) : Promise.resolve({ ok: true, data: [] }),
+    identity ? listPaymentAttempts(identity, { legalEntityId }) : Promise.resolve({ ok: true, data: [] }),
+    identity ? listRecoveryCases(legalEntityId, identity) : Promise.resolve({ ok: true, data: [] }),
+    identity ? listPayments(identity, { legalEntityId }) : Promise.resolve({ ok: true, data: [] }),
+    identity ? listUnresolvedPayments(identity) : Promise.resolve({ ok: true, data: [] }),
+  ]);
 
   const stageRaw = one(params.stage);
   const stage = stageRaw && isInvoiceStatus(stageRaw) ? stageRaw : undefined;
@@ -373,14 +449,100 @@ export default async function FinancePage({ searchParams }: PageProps) {
           </Suspense>
 
           <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
-            <LookupById
-              action={lookupJournal}
-              inputName="lookup_journal_id"
-              label="Read one journal"
-              placeholder="Must be a UUID"
-              hint="The full record including every line: each actor and timestamp along the lifecycle, the reversal link if this journal is one, and the Atomic Linking references tying the posting to the upstream event or governance decision that caused it. An unknown id, another tenant's journal, and a malformed one all read as absent — the service deliberately does not distinguish them."
-            />
+            <JournalLookupPanel />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── general-ledger-svc: ACC-01 Chart of Accounts ─────────────────────
+          Tenant-wide reference data, not scoped to a legal entity. Until an
+          account exists here, general-ledger-svc validates nothing about a
+          journal line's account_code beyond string shape — a typo posts a
+          perfectly valid entry against an account that does not exist. */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Chart of Accounts</CardTitle>
+            <CardDescription>
+              ACC-01&apos;s account master. Kept as its own authority from journal state and ledger
+              balances, per the platform&apos;s Cross-Service Accounting Authority Matrix. Deactivating
+              an account never deletes it — postings that already reference it are untouched, and it
+              is refused for any new one.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <CreateAccountForm />
+          <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
+            <Suspense fallback={<RegisterSkeleton />}>
+              <ChartOfAccountsPanel />
+            </Suspense>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── general-ledger-svc: ACC-02 Account Mapping ───────────────────────
+          Effective-dated resolution of a caller-declared business concept to
+          a real, chart-registered account. Versioned: setting a mapping for a
+          key that already has one supersedes it rather than editing it. */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Account mappings</CardTitle>
+            <CardDescription>
+              ACC-02. A mapping key&apos;s meaning belongs to whichever domain declares it — this
+              service never interprets it, only resolves it to an ACTIVE account.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <SetAccountMappingForm />
+          <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
+            <Suspense fallback={<RegisterSkeleton />}>
+              <AccountMappingsPanel />
+            </Suspense>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── general-ledger-svc: ACC-15 Trial Balance ─────────────────────────
+          A real, durable dataset pinned to an explicit ledger watermark
+          (invariant #11), never recomputed ad hoc client-side. Immutable once
+          compiled. */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Trial balance</CardTitle>
+            <CardDescription>
+              ACC-15. Compiles every FINALIZED/REVERSED journal line for a legal entity and fiscal
+              period into a permanent snapshot, watermarked at the ledger sequence it was compiled
+              at. Compiling again after more journals post produces a new, separate snapshot — the
+              old one never changes.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <TrialBalancePanel />
+        </CardContent>
+      </Card>
+
+      {/* ── general-ledger-svc: ACC-05 posted entries and balances ───────────
+          A journal is a proposal moving through Tri-Phase Commit; an entry
+          here exists only once, written the instant that journal reaches
+          FINALIZED, and is never updated or deleted afterward. Balances are a
+          derived, rebuildable projection over it — never a source of truth. */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Ledger entries &amp; balances</CardTitle>
+            <CardDescription>
+              ACC-05. Legal entity is mandatory on both queries below — there is no all-entities
+              view, deliberately, so a query can never accidentally cross entities.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <LedgerQueryPanel />
         </CardContent>
       </Card>
 
@@ -654,6 +816,79 @@ export default async function FinancePage({ searchParams }: PageProps) {
         </CardContent>
       </Card>
 
+      {/* ── payable-open-item-svc (:8164, AP-08) ──────────────────────────────
+          A distinct ledger from accounts-payable-svc above: this is the
+          authoritative record of residual amounts, holds, disputes, and
+          settlement applications, not vendor-invoice intake. Had no frontend
+          at all until this card and panel were added. */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Open a payable</CardTitle>
+            <CardDescription>
+              Live, writable. Backed by payable-open-item-svc (AP-08) — the ledger of residual
+              amounts, holds, disputes, and settlement applications, separate from the vendor-invoice
+              intake above. A payable is unique per source type and reference; holding it blocks
+              closing but not payment, and only a fully settled, unheld, undisputed payable may be
+              closed.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <PayableOpenItemForm />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Payable open items register</CardTitle>
+            <CardDescription>
+              Every open item for this legal entity. Hold, release, apply a confirmed payment, or
+              close, per row — dispute and supplier-credit/recovery actions exist on the service but
+              have no button here yet.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<RegisterSkeleton />}>
+            <PayableOpenItemPanel />
+          </Suspense>
+        </CardContent>
+      </Card>
+
+      {/* ── payment-run-svc (:8161, AP-11) ──────────────────────────────────
+          Orchestrates authorized payable instructions into controlled runs,
+          consumes AP-10 payment authorizations, and submits to Banking (BNK-06/07). */}
+      <PaymentRunWorkbench
+        initialRuns={paymentRunsRes.ok ? paymentRunsRes.data : []}
+        legalEntityId={legalEntityId}
+      />
+
+      {/* ── payment-initiation-adapter-svc (:8162, BNK-06) ───────────────────
+          Payment Initiation Adapter: Pluggable provider adapter boundary, durable
+          pre-submission attempts, idempotent network submission, retry protection,
+          audit event evidence, and provider transmission receipts. */}
+      <PaymentInitiationWorkbench
+        initialAttempts={paymentAttemptsRes.ok ? paymentAttemptsRes.data : []}
+        legalEntityId={legalEntityId}
+      />
+
+      {/* ── payment-status-svc (:8163, BNK-07) ────────────────────────────────
+          Payment Status & Finality Confirmation Workbench: Real HMAC-verified
+          webhook receiver, external status polling, bank statement confirmation,
+          conflict detection, and return/cancellation governance. */}
+      <PaymentStatusWorkbench
+        initialPayments={paymentsRes.ok ? paymentsRes.data : []}
+        unresolvedPayments={unresolvedPaymentsRes.ok ? unresolvedPaymentsRes.data : []}
+        legalEntityId={legalEntityId}
+      />
+
+      <SupplierRecoveryWorkbench
+        initialCases={recoveryCasesRes.ok ? recoveryCasesRes.data : []}
+        legalEntityId={legalEntityId}
+      />
+
       {/* ── financial-close-svc (:8104) ───────────────────────────────────────
           Last of the three live registers, and deliberately after the ledger:
           a period is closed on the strength of what is in the journal register
@@ -722,6 +957,21 @@ export default async function FinancePage({ searchParams }: PageProps) {
 
       {/* Financial Process Timeline */}
       <FinanceProcessTimeline />
+
+      {/* ── treasury-svc (:8103) ─────────────────────────────────────────────
+          Treasury & Cash Management Workbench */}
+      <div className="pt-2">
+        <TreasuryPanel
+          initialAccounts={treasuryAcctsRes.ok ? treasuryAcctsRes.data : []}
+          initialPositions={treasuryPosRes.ok ? treasuryPosRes.data : []}
+          initialEffectiveCash={effectiveCashRes.ok ? effectiveCashRes.data : null}
+          initialForecast={forecastRes.ok ? forecastRes.data : null}
+          initialTransfers={treasuryTransfersRes.ok ? treasuryTransfersRes.data : []}
+          initialThresholds={treasuryThresholdsRes.ok ? treasuryThresholdsRes.data : []}
+          legalEntityId={legalEntityId}
+          currentPrincipalId={identity?.principalId}
+        />
+      </div>
 
       {/* Core Services badges */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
@@ -794,7 +1044,7 @@ export default async function FinancePage({ searchParams }: PageProps) {
 
       {/* ── intercompany-accounting-svc (:8105) ───────────────────────────────
           Intercompany Accounting and Reciprocal Balance Matching */}
-      <div className="pt-4">
+      <div className="pt-4" id="intercompany-accounting">
         <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
           Intercompany Accounting & Reciprocal Transactions
         </h2>
@@ -805,6 +1055,20 @@ export default async function FinancePage({ searchParams }: PageProps) {
       </div>
 
       <IntercompanyPanel />
+
+      {/* ── consolidation-svc (:8106) ──────────────────────────────────────────
+          Group Financial Consolidation, Multi-Entity Rollup & ACC-12 Adjustments */}
+      <div className="pt-4" id="consolidation-accounting">
+        <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
+          Group Financial Consolidation & Adjustments
+        </h2>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Live, writable. Backed by <code className="font-mono text-xs text-navy-700 dark:text-navy-300">consolidation-svc (:8106)</code>.
+          Executes parent-group trial balance rollups, eliminates reciprocal balances against <code className="font-mono text-xs text-navy-700 dark:text-navy-300">intercompany-accounting-svc (:8105)</code>, and governs top-side consolidation adjustments with <code className="font-mono text-xs text-navy-700 dark:text-navy-300">general-ledger-svc (:8098)</code>.
+        </p>
+      </div>
+
+      <ConsolidationPanel />
 
       {/* ── payee-banking-identity-svc (:8166) ──────────────────────────────────
           Payee Banking Identity Master & Beneficiary Governance */}

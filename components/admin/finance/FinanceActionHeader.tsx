@@ -1,4 +1,4 @@
-import { Landmark, Scale, CalendarCheck, Plus } from "lucide-react";
+import { Landmark, Scale, CalendarCheck, Plus, ArrowLeftRight, Layers } from "lucide-react";
 
 /**
  * A pointer to the Finance domain's real actions.
@@ -53,6 +53,18 @@ export function FinanceActionHeader() {
       label: "Register a fiscal period",
       href: "#register-fiscal-period",
       hint: "financial-close-svc · readiness check, then lock",
+    },
+    {
+      icon: ArrowLeftRight,
+      label: "Intercompany accounting",
+      href: "#intercompany-accounting",
+      hint: "intercompany-accounting-svc (:8105) · reciprocal matching & disputes",
+    },
+    {
+      icon: Layers,
+      label: "Group consolidation",
+      href: "#consolidation-accounting",
+      hint: "consolidation-svc (:8106) · multi-entity rollup & adjustments",
     },
   ];
 

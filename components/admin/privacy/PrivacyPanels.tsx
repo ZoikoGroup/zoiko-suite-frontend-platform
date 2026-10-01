@@ -17,6 +17,9 @@ import { JsonBlock } from "@/components/admin/shared/JsonBlock";
 import { ResultBanner } from "@/components/admin/shared/ResultBanner";
 import {
   createNoticeAction,
+  approveNoticeAction,
+  publishNoticeAction,
+  withdrawNoticeAction,
   recordConsentAction,
   withdrawConsentAction,
   lookupConsentStatus,
@@ -30,6 +33,21 @@ const IDLE_CONSENT: ConsentActionState = { status: "idle" };
 export function PrivacyPanels() {
   const [noticeState, noticeSubmit, noticePending] = useActionState(
     createNoticeAction,
+    IDLE_CONSENT
+  );
+
+  const [approveState, approveSubmit, approvePending] = useActionState(
+    approveNoticeAction,
+    IDLE_CONSENT
+  );
+
+  const [publishState, publishSubmit, publishPending] = useActionState(
+    publishNoticeAction,
+    IDLE_CONSENT
+  );
+
+  const [withdrawNoticeState, withdrawNoticeSubmit, withdrawNoticePending] = useActionState(
+    withdrawNoticeAction,
     IDLE_CONSENT
   );
 
@@ -98,8 +116,14 @@ export function PrivacyPanels() {
                   defaultValue="11111111-2222-3333-4444-555555555555"
                   placeholder="e.g. 11111111-2222-3333-4444-555555555555"
                   className={`${FIELD} font-mono text-xs`}
+                  list="published-purposes"
                   required
                 />
+                <datalist id="published-purposes">
+                  <option value="11111111-2222-3333-4444-555555555555">Direct Marketing & Communications (PRV-01 Published)</option>
+                  <option value="b6883652-f50d-4801-836c-a967b2554a90">Customer Support & Post-Sale Delivery (PRV-01 Published)</option>
+                  <option value="04f3b13c-35ab-49f2-bb93-f5655080fc0e">Transaction Processing (PRV-01 Published)</option>
+                </datalist>
                 <p className={HINT}>Direct Marketing (PRV-01 Published UUID)</p>
               </div>
 
@@ -138,6 +162,87 @@ export function PrivacyPanels() {
                   placeholder="Optional notice version UUID"
                   className={`${FIELD} font-mono text-xs`}
                 />
+              </div>
+            </div>
+
+            {/* Affirmative Action & Proxy Evidence (§10.1, §11.1) */}
+            <div className="rounded-lg border border-slate-200 dark:border-navy-600/30 p-3 bg-slate-50/50 dark:bg-navy-900/20 space-y-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="affirmative_action_type" className={LABEL}>
+                    Affirmative Action Type (§10.1)
+                  </label>
+                  <select id="affirmative_action_type" name="affirmative_action_type" defaultValue="EXPLICIT_CHECKBOX" className={FIELD}>
+                    <option value="EXPLICIT_CHECKBOX">EXPLICIT_CHECKBOX (Active Opt-In)</option>
+                    <option value="ELECTRONIC_SIGNATURE">ELECTRONIC_SIGNATURE (E-Signature)</option>
+                    <option value="REPRESENTATIVE_SIGNATURE">REPRESENTATIVE_SIGNATURE (Legal Proxy)</option>
+                    <option value="BIOMETRIC_CONFIRMATION">BIOMETRIC_CONFIRMATION (Passkey / FIDO)</option>
+                  </select>
+                  <p className={HINT}>Demonstrable affirmative act evidence</p>
+                </div>
+
+                <div>
+                  <label htmlFor="affirmative_evidence" className={LABEL}>
+                    Affirmative Evidence Reference <span className="text-slate-400">(optional)</span>
+                  </label>
+                  <input
+                    id="affirmative_evidence"
+                    name="affirmative_evidence"
+                    placeholder="e.g. signature_sha256 or audit_log_ref"
+                    className={`${FIELD} font-mono text-xs`}
+                  />
+                  <p className={HINT}>Cryptographic or audit trail artifact</p>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-200 dark:border-navy-600/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="checkbox"
+                    id="is_proxy"
+                    name="is_proxy"
+                    value="true"
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="is_proxy" className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                    Acting as Authorized Proxy / Representative (§11.1)
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div>
+                    <label htmlFor="representative_subject_ref" className={LABEL}>
+                      Representative Subject Ref
+                    </label>
+                    <input
+                      id="representative_subject_ref"
+                      name="representative_subject_ref"
+                      placeholder="e.g. guardian/legal-rep-id"
+                      className={`${FIELD} font-mono text-xs`}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="representative_authority_ref" className={LABEL}>
+                      Authority Document Ref
+                    </label>
+                    <input
+                      id="representative_authority_ref"
+                      name="representative_authority_ref"
+                      placeholder="e.g. POA-DOC-2026-001"
+                      className={`${FIELD} font-mono text-xs`}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="representative_evidence" className={LABEL}>
+                      Authority Evidence Reference
+                    </label>
+                    <input
+                      id="representative_evidence"
+                      name="representative_evidence"
+                      placeholder="e.g. notarized_pdf_sha256"
+                      className={`${FIELD} font-mono text-xs`}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -289,6 +394,7 @@ export function PrivacyPanels() {
                   defaultValue="11111111-2222-3333-4444-555555555555"
                   placeholder="Purpose UUID"
                   className={`${FIELD} font-mono text-xs`}
+                  list="published-purposes"
                   required
                 />
               </div>
@@ -348,6 +454,51 @@ export function PrivacyPanels() {
                 </p>
               )}
             </form>
+
+            {/* Notice Governance Lifecycle */}
+            <div className="mt-6 pt-4 border-t border-slate-200 dark:border-navy-600/30 space-y-4">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Notice Governance Lifecycle (SoD Gated)
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Maker cannot self-approve or publish; Approver cannot publish (§7.1, §28).
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <form action={approveSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-amber-50/30 dark:bg-amber-900/10">
+                  <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400">1. Approve Version</span>
+                  <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
+                  <input name="version_id" placeholder="Version ID (opt)" className={`${FIELD} font-mono text-xs`} />
+                  <Button type="submit" size="sm" loading={approvePending} className="w-full text-xs">
+                    Approve (Checker)
+                  </Button>
+                </form>
+
+                <form action={publishSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-emerald-50/30 dark:bg-emerald-900/10">
+                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">2. Publish Version</span>
+                  <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
+                  <input name="version_id" placeholder="Version ID (opt)" className={`${FIELD} font-mono text-xs`} />
+                  <Button type="submit" size="sm" loading={publishPending} className="w-full text-xs">
+                    Publish (Live)
+                  </Button>
+                </form>
+
+                <form action={withdrawNoticeSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-rose-50/30 dark:bg-rose-900/10">
+                  <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400">3. Withdraw Version</span>
+                  <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
+                  <input name="version_id" placeholder="Version ID (opt)" className={`${FIELD} font-mono text-xs`} />
+                  <Button type="submit" size="sm" loading={withdrawNoticePending} variant="secondary" className="w-full text-xs text-rose-600 border-rose-300 dark:border-rose-800">
+                    Withdraw
+                  </Button>
+                </form>
+              </div>
+              {(approveState.message || publishState.message || withdrawNoticeState.message) && (
+                <p className="text-xs text-slate-700 dark:text-slate-300">
+                  {approveState.message || publishState.message || withdrawNoticeState.message}
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
 

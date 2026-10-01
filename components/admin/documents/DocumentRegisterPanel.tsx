@@ -1,38 +1,9 @@
 import { cookies } from "next/headers";
 import { FileText, CloudOff, ShieldAlert } from "lucide-react";
-import { PanelEmptyState, CopyableId } from "@/components/admin/shared";
-import { CELL, HEAD } from "@/components/admin/shared/form";
+import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import {
-  explainDocumentError,
-  listDocuments,
-  type Classification,
-  type VaultDocument,
-} from "@/lib/api/documents";
-
-function ClassificationBadge({ value }: { value: Classification }) {
-  const style =
-    value === "RESTRICTED"
-      ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
-      : value === "CONFIDENTIAL"
-        ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-        : value === "INTERNAL"
-          ? "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"
-          : "bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400";
-
-  return (
-    <span
-      className={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium " + style}
-      title="Reading this document's bytes needs DOCUMENT_DOWNLOAD, which is a separate grant from seeing it listed here."
-    >
-      {value}
-    </span>
-  );
-}
-
-function when(value: string): string {
-  return new Date(value).toLocaleString();
-}
+import { explainDocumentError, listDocuments, MAX_DOCUMENTS_PAGE } from "@/lib/api/documents";
+import { DocumentRegisterTable } from "./DocumentRegisterTable";
 
 /**
  * The vault register for the session's legal entity.
@@ -67,7 +38,11 @@ export async function DocumentRegisterPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const result = await listDocuments({ identity, legalEntityId: session.legalEntityId });
+  const result = await listDocuments({
+    identity,
+    legalEntityId: session.legalEntityId,
+    limit: MAX_DOCUMENTS_PAGE,
+  });
 
   if (!result.ok) {
     // A 403 here is a governance answer, not an outage: this principal holds no
@@ -94,52 +69,17 @@ export async function DocumentRegisterPanel() {
     );
   }
 
+  const truncated = result.data.length === MAX_DOCUMENTS_PAGE;
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[46rem] border-collapse">
-        <thead>
-          <tr>
-            <th className={HEAD}>Title</th>
-            <th className={HEAD}>Classification</th>
-            <th className={HEAD}>Version</th>
-            <th className={HEAD}>Retention</th>
-            <th className={HEAD}>Residency</th>
-            <th className={HEAD}>Filed by</th>
-            <th className={HEAD}>Filed</th>
-            <th className={HEAD}>ID</th>
-          </tr>
-        </thead>
-        <tbody>
-          {result.data.map((d: VaultDocument) => (
-            <tr key={d.document_id} className="border-t border-slate-100 dark:border-slate-800">
-              <td className={CELL}>{d.title}</td>
-              <td className={CELL}>
-                <ClassificationBadge value={d.classification} />
-              </td>
-              <td className={CELL}>
-                <span title="Versions are append-only — this is the current one, not the only one.">
-                  v{d.current_version}
-                </span>
-              </td>
-              <td className={CELL}>
-                <span className="text-xs">{d.retention_policy}</span>
-              </td>
-              <td className={CELL}>
-                <span className="text-xs">{d.residency_region_code ?? "—"}</span>
-              </td>
-              <td className={CELL}>
-                <span className="text-xs">{d.created_by_principal_id}</span>
-              </td>
-              <td className={CELL}>
-                <span className="text-xs">{when(d.created_at)}</span>
-              </td>
-              <td className={CELL}>
-                <CopyableId value={d.document_id} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-3">
+      {truncated && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300">
+          This entity has at least {MAX_DOCUMENTS_PAGE} filed documents — the vault&rsquo;s own page
+          ceiling — so more may exist beyond what is shown below.
+        </div>
+      )}
+      <DocumentRegisterTable documents={result.data} />
     </div>
   );
 }

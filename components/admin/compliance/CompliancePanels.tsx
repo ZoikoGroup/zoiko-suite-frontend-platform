@@ -24,18 +24,18 @@ export async function FilingTrackerPanel() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60">
               <tr>
-                {["Filing Name", "Authority", "Due Date", "Frequency", "Status"].map((h) => (
+                {["Filing", "Authority", "Period", "Due Date", "Status"].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {requirements.map((r) => (
-                <tr key={r.requirement_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                  <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{r.filing_name}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{r.authority_name}</td>
+                <tr key={r.filing_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                  <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{r.filing_type}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{r.filing_authority}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{r.period_key}</td>
                   <td className="px-4 py-3 text-xs font-semibold text-slate-700 dark:text-slate-300">{r.due_date}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{r.frequency}</td>
                   <td className="px-4 py-3 text-xs font-bold text-emerald-600">{r.status}</td>
                 </tr>
               ))}
@@ -103,18 +103,18 @@ export async function StatusAndEscalationPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Title", "Source", "Level", "Status"].map((h) => (
+                  {["Type", "Linked Object", "Severity", "Status"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {exceptions.map((ex) => (
-                  <tr key={ex.exception_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{ex.title}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{ex.source_service}</td>
-                    <td className="px-4 py-3 text-xs font-bold text-red-500">L{ex.escalation_level}</td>
-                    <td className="px-4 py-3 text-xs font-medium text-slate-600">{ex.status}</td>
+                  <tr key={ex.exception_case_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{ex.exception_type}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{ex.linked_object_type}: {ex.linked_object_id}</td>
+                    <td className="px-4 py-3 text-xs font-bold text-red-500">{ex.severity_level}</td>
+                    <td className="px-4 py-3 text-xs font-medium text-slate-600">{ex.case_status}</td>
                   </tr>
                 ))}
               </tbody>

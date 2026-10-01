@@ -12,7 +12,7 @@ import type { InvoiceStatus } from "@/lib/api/accounts-payable";
 // annotating a receivable.
 import type { InvoiceStatus as CustomerInvoiceStatus } from "@/lib/api/accounts-receivable";
 import type { StatementLineStatus } from "@/lib/api/bank-reconciliation";
-import type { JournalStatus } from "@/lib/api/general-ledger";
+import type { ApprovalStatus, JournalStatus } from "@/lib/api/general-ledger";
 
 /**
  * Outcomes of a payables write.
@@ -260,3 +260,54 @@ export function isReceivableHop(value: string): value is ReceivableHop {
  *  make has at least a debit and a credit. The cap is a form limit, not a
  *  service one — the service accepts any number of lines. */
 export const JOURNAL_LINE_SLOTS = { initial: 2, max: 10 } as const;
+
+// ─── ACC-03 approval lifecycle (general-ledger-svc) ──────────────────────────
+
+/**
+ * Outcome of a lifecycle command (submit/approve/reject/request-posting).
+ *
+ * `refused` covers both the RBAC "not authorized" answer and the maker/checker
+ * "you submitted this, you cannot approve it" answer — both are the control
+ * working, not a fault, and both name the reason in `message`.
+ * `out-of-sequence` is a 409/422 on a command not legal from the journal's
+ * current approval status, usually because the register on screen is a moment
+ * behind.
+ */
+export type ApprovalActionState = {
+  status: "idle" | "done" | "refused" | "out-of-sequence" | "error";
+  message: string;
+  journalId?: string;
+  approvalStatus?: ApprovalStatus;
+};
+
+export const IDLE_APPROVAL_STATE: ApprovalActionState = { status: "idle", message: "" };
+
+// ─── ACC-01 Chart of Accounts (general-ledger-svc) ───────────────────────────
+
+export type AccountActionState = {
+  status: "idle" | "created" | "deactivated" | "duplicate" | "error";
+  message: string;
+  accountCode?: string;
+};
+
+export const IDLE_ACCOUNT_STATE: AccountActionState = { status: "idle", message: "" };
+
+// ─── ACC-02 Account Mapping (general-ledger-svc) ─────────────────────────────
+
+export type MappingActionState = {
+  status: "idle" | "set" | "error";
+  message: string;
+  mappingKey?: string;
+};
+
+export const IDLE_MAPPING_STATE: MappingActionState = { status: "idle", message: "" };
+
+// ─── ACC-15 Trial Balance (general-ledger-svc) ───────────────────────────────
+
+export type TrialBalanceActionState = {
+  status: "idle" | "compiled" | "error";
+  message: string;
+  snapshotId?: string;
+};
+
+export const IDLE_TRIAL_BALANCE_STATE: TrialBalanceActionState = { status: "idle", message: "" };

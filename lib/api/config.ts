@@ -49,6 +49,27 @@ const DEFAULTS = {
   // port nothing in this platform uses — so it was reachable only because compose
   // overrides PORT. Fixed there too; this is the number both now agree on.
   vendorDueDiligence: "http://localhost:8135",
+  // 8164, per compose (services/payable-open-item-svc, AP-08). Had no entry here
+  // at all until now — the service existed only as a backend API with zero
+  // frontend wiring.
+  payableOpenItem: "http://localhost:8164",
+  // 8161, per compose (services/payment-run-svc, AP-11)
+  paymentRun: "http://localhost:8161",
+  // 8160, per compose (services/payment-authorization-svc, AP-10)
+  paymentAuthorization: "http://localhost:8160",
+  // 8159, per compose (services/payment-proposal-svc, AP-09)
+  paymentProposal: "http://localhost:8159",
+  // 8162, per compose (services/payment-initiation-adapter-svc, BNK-06)
+  paymentInitiationAdapter: "http://localhost:8162",
+  // 8163, per compose (services/payment-status-svc, BNK-07)
+  paymentStatus: "http://localhost:8163",
+  supplierRecovery: "http://localhost:8165",
+  // 8156, per compose (services/supplier-financial-profile-svc, AP-01). Same
+  // gap as payableOpenItem above — zero frontend wiring existed until now.
+  supplierFinancialProfile: "http://localhost:8156",
+  // 8157, per compose (services/goods-service-receipt-svc, AP-04). Goods/Service
+  // receipt linking purchase-order-svc (AP-03) and invoice-approval-svc (AP-05/06).
+  goodsServiceReceipt: "http://localhost:8157",
   auditEventStore: "http://localhost:8084",
   tenantRegistry: "http://localhost:8081",
   schemaRegistry: "http://localhost:8093",
@@ -86,7 +107,13 @@ const DEFAULTS = {
   workflowHistory: "http://localhost:8097",
   privacyConsent: "http://localhost:8152",
   privacyPurposeRegistry: "http://localhost:8151",
+  privacyDecision: "http://localhost:8153",
+  privacyRights: "http://localhost:8154",
   privacyTransfer: "http://localhost:8155",
+  // ── Commercial Plane 1 (doc7 §3) ──────────────────────────────────────────
+  commercialAccount: "http://localhost:8144",
+  capabilityRegistry: "http://localhost:8145",
+  killSwitchRegistry: process.env.ZOIKO_KILL_SWITCH_REGISTRY_URL ?? "http://localhost:8147",
   // ── Payee Banking Identity & Counterparty Domain ─────────────────────────
   payeeBankingIdentity: "http://localhost:8166",
   counterpartyManagement: "http://localhost:8124",
@@ -97,7 +124,11 @@ const DEFAULTS = {
   opensearch: "http://localhost:9200",
   migrationIntegrity: "http://localhost:8139",
   // ── Filing Tracker ────────────────────────────────────────────────────────
-  filingTracker: "http://localhost:8141",
+  // 8131, per compose (services/filing-tracker-svc). This said 8141 — a port
+  // nothing in this platform serves for this service — and .env.local
+  // separately said 8136 (compliance-risk-scoring-svc's port), so the env
+  // override was silently pointing at the wrong service too.
+  filingTracker: "http://localhost:8131",
   // 8133, per compose. notification-svc delivers governed notifications. EMAIL
   // goes through a real SMTP provider (Mailpit locally, on :8025); IN_APP is
   // delivered by being recorded and carries read state. WEBHOOK has no provider
@@ -119,6 +150,12 @@ const DEFAULTS = {
   // documents: append-only version lineage, a SHA-256 checksum re-verified on
   // every read, and an append-only access log of who read what.
   documentVault: "http://localhost:8094",
+  // 8095, per compose. evidence-manifest-svc assembles structured, checksummed
+  // evidence sets (audit/regulator/legal-discovery/compliance-review) from
+  // governance-decision-log-svc, authorization-svc's access decisions, and
+  // workflow-svc/workflow-history-svc — fails closed if any source it needs
+  // is unreachable, never returning a silent partial manifest.
+  evidenceManifest: "http://localhost:8095",
   // 8150, per compose. source-authority-svc answers "which connected system's
   // value should I trust for this field, right now" — precedence rules that are
   // platform-wide reference data, composed over normalized facts that are
@@ -157,6 +194,7 @@ const DEFAULTS = {
   // regenerated — the checked-in file was stale and this service was one of
   // seven with no prefix at all, so ZOIKO_USE_GATEWAY=true would have 404'd.
   retentionRegistry: "http://localhost:8148",
+  metricRegistry: "http://localhost:8149",
   // The gateway's host port is GATEWAY_PORT in the backend compose, which
   // defaults to 8000 because port 80 is usually already taken on a dev machine.
   gateway: "http://localhost:8000",
@@ -194,6 +232,15 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   accountsPayable: "/accounts-payable-svc",
   spendControls: "/spend-controls-svc",
   vendorDueDiligence: "/vendor-due-diligence-svc",
+  payableOpenItem: "/payable-open-item-svc",
+  paymentRun: "/payment-run-svc",
+  paymentAuthorization: "/payment-authorization-svc",
+  paymentProposal: "/payment-proposal-svc",
+  paymentInitiationAdapter: "/payment-initiation-adapter-svc",
+  paymentStatus: "/payment-status-svc",
+  supplierRecovery: "/supplier-recovery-svc",
+  supplierFinancialProfile: "/supplier-financial-profile-svc",
+  goodsServiceReceipt: "/goods-service-receipt-svc",
   auditEventStore: "/audit-event-store-svc",
   tenantRegistry: "/tenant-entity-registry-svc",
   schemaRegistry: "/schema-registry-svc",
@@ -202,6 +249,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   boardResolutions: "/board-resolutions-svc",
   delegatedAuthority: "/delegated-authority-svc",
   documentVault: "/document-vault-svc",
+  evidenceManifest: "/evidence-manifest-svc",
   sourceAuthority: "/source-authority-svc",
   // Tax Domain
   taxRules: "/tax-rules-svc",
@@ -212,6 +260,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   filingPreparation: "/filing-preparation-svc",
   taxAuthorityInterface: "/tax-authority-interface-svc",
   retentionRegistry: "/retention-registry-svc",
+  metricRegistry: "/metric-registry-svc",
   // Finance Domain extras
   treasury: "/treasury-svc",
   intercompanyAccounting: "/intercompany-accounting-svc",
@@ -247,7 +296,12 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   workflowHistory: "/workflow-history-svc",
   privacyConsent: "/privacy-consent-svc",
   privacyPurposeRegistry: "/privacy-purpose-registry-svc",
+  privacyDecision: "/privacy-decision-svc",
+  privacyRights: "/privacy-rights-svc",
   privacyTransfer: "/privacy-transfer-svc",
+  commercialAccount: "/commercial-account-svc",
+  capabilityRegistry: "/capability-registry-svc",
+  killSwitchRegistry: "/kill-switch-registry-svc",
   payeeBankingIdentity: "/payee-banking-identity-svc",
   counterpartyManagement: "/counterparty-management-svc",
   gatewayAuth: "/gateway-auth-svc",

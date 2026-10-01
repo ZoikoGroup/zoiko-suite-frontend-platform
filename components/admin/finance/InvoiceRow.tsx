@@ -165,9 +165,27 @@ export function InvoiceRow({
 
         <td className={cn(CELL, "text-right")}>
           {next ? (
-            <form action={action} className="inline-flex">
+            <form action={action} className="inline-flex flex-col items-end gap-1.5">
               <input type="hidden" name="invoice_id" value={invoice.invoice_id} />
               <input type="hidden" name="action" value={next.action} />
+              {invoice.status === "VALIDATED" && (
+                <div className="flex items-center gap-1 text-[11px]">
+                  <span className="text-slate-400">Approver (SoD):</span>
+                  <select
+                    name="approver_principal_id"
+                    defaultValue="55555555-5555-5555-5555-555555555555"
+                    className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    title="Maker-Checker Segregation of Duties: Approver must differ from creator"
+                  >
+                    <option value="55555555-5555-5555-5555-555555555555">
+                      Elena Rostova (CFO / Checker)
+                    </option>
+                    <option value="33333333-3333-3333-3333-333333333333">
+                      Lingaraj (Creator / Self-Approval SoD Refusal)
+                    </option>
+                  </select>
+                </div>
+              )}
               <Button
                 type="submit"
                 size="sm"

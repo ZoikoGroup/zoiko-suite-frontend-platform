@@ -19,9 +19,18 @@ import {
   addVersion,
   createDocument,
   explainDocumentError,
+  getDocumentContent,
+  listAccessLog,
+  listVersions,
   type Classification,
 } from "@/lib/api/documents";
-import { type AddVersionState, type FileDocumentState } from "./state";
+import {
+  type AccessLogState,
+  type AddVersionState,
+  type DownloadState,
+  type FileDocumentState,
+  type VersionsState,
+} from "./state";
 
 async function requireIdentity(): Promise<SessionIdentity & { principalId: string }> {
   const store = await cookies();
@@ -137,4 +146,89 @@ export async function addVersionAction(
     document: result.data,
     message: `Added version ${result.data.current_version}. The previous version is untouched — the lineage is append-only, so nothing that was ever filed here is rewritten or removed.`,
   };
+}
+
+/**
+ * Fetch a document's bytes so the browser can download them.
+ *
+ * Returns the content as base64 rather than streaming it, the same way
+ * exportAuditLogAction hands audit-events' JSON export to the client — a
+ * Server Action's return value is the only channel back to the component
+ * that called it, so the bytes travel as data, and the client component
+ * decodes them into a Blob and triggers the actual save.
+ */
+export async function downloadDocumentAction(
+  documentId: string,
+  title: string,
+): Promise<DownloadState> {
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "unauthorized", message: EXPIRED };
+  }
+
+  if (!documentId) return { status: "error", message: "A document id is required." };
+
+  const result = await getDocumentContent({ identity, documentId });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    const explained = explainDocumentError(message);
+    if (status === 401) return { status: "unauthorized", message: explained };
+    if (status === 403) return { status: "refused", message: explained };
+    if (status === 409) return { status: "integrity", message: explained };
+    return { status: "error", message: explained };
+  }
+
+  return {
+    status: "downloaded",
+    contentBase64: result.data.contentBase64,
+    contentType: result.data.contentType,
+    filename: title,
+  };
+}
+
+/** The version lineage for one document, oldest first as the service returns it. */
+export async function fetchVersionsAction(documentId: string): Promise<VersionsState> {
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "unauthorized", message: EXPIRED };
+  }
+
+  const result = await listVersions({ identity, documentId });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    const explained = explainDocumentError(message);
+    if (status === 401) return { status: "unauthorized", message: explained };
+    if (status === 403) return { status: "refused", message: explained };
+    return { status: "error", message: explained };
+  }
+
+  return { status: "loaded", documentId, versions: result.data };
+}
+
+/** The access history for one document, as recorded by every prior read. */
+export async function fetchAccessLogAction(documentId: string): Promise<AccessLogState> {
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "unauthorized", message: EXPIRED };
+  }
+
+  const result = await listAccessLog({ identity, documentId });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    const explained = explainDocumentError(message);
+    if (status === 401) return { status: "unauthorized", message: explained };
+    if (status === 403) return { status: "refused", message: explained };
+    return { status: "error", message: explained };
+  }
+
+  return { status: "loaded", documentId, entries: result.data };
 }

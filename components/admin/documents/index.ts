@@ -1,2 +1,3 @@
 export { DocumentRegisterPanel } from "./DocumentRegisterPanel";
-export { FileDocumentForm } from "./DocumentForms";
+export { DocumentRegisterTable } from "./DocumentRegisterTable";
+export { AddVersionForm, FileDocumentForm } from "./DocumentForms";

@@ -37,25 +37,27 @@ export async function createFilingRequirementAction(
     return { ok: false, message: "Your session has expired — sign in again." };
   }
 
-  const filingName = String(formData.get("filing_name") ?? "").trim();
-  const authorityName = String(formData.get("authority_name") ?? "").trim();
+  const filingAuthority = String(formData.get("filing_authority") ?? "").trim();
   const dueDate = String(formData.get("due_date") ?? "").trim();
-  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "jur-uk-gb").trim();
-  const frequency = String(formData.get("frequency") ?? "ANNUAL").trim();
+  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "uk-gov-01").trim();
+  const filingType = String(formData.get("filing_type") ?? "VAT").trim();
+  const periodKey = String(formData.get("period_key") ?? "").trim();
+  const notes = String(formData.get("notes") ?? "").trim();
 
-  if (!filingName || !authorityName || !dueDate) {
-    return { ok: false, message: "Filing name, authority name, and statutory due date are required." };
+  if (!filingAuthority || !dueDate) {
+    return { ok: false, message: "Filing authority and statutory due date are required." };
   }
 
   const res = await createFilingRequirement(
     {
-      filing_name: filingName,
-      authority_name: authorityName,
-      due_date: dueDate,
-      jurisdiction_id: jurisdictionId,
-      frequency,
       legal_entity_id: identity.legalEntityId,
-      status: "OPEN",
+      jurisdiction_id: jurisdictionId,
+      filing_authority: filingAuthority,
+      filing_type: filingType,
+      period_key: periodKey,
+      due_date: dueDate,
+      notes,
+      created_by: identity.principalId,
     },
     identity
   );
@@ -67,8 +69,8 @@ export async function createFilingRequirementAction(
   refresh();
   return {
     ok: true,
-    message: `Filing requirement "${filingName}" registered in filing-tracker-svc.`,
-    id: res.data.requirement_id,
+    message: `Filing requirement for ${filingAuthority} registered in filing-tracker-svc (:8131).`,
+    id: res.data.filing_id,
   };
 }
 

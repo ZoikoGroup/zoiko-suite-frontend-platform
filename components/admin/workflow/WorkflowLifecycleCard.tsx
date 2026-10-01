@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { CheckCircle2, AlertCircle, ArrowRight, ShieldCheck, PlayCircle, Clock } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button } from "@/components/ui";
 import { FIELD, LABEL, HINT, BANNER_SUCCESS, BANNER_ERROR } from "@/components/admin/shared/form";
-import { LookupById } from "@/components/admin/shared";
+import { LookupById, JsonBlock } from "@/components/admin/shared";
 import {
   initiateWorkflowAction,
   submitWorkflowDecisionAction,
@@ -15,6 +15,109 @@ import {
 
 const IDLE_INITIATE: WorkflowInitiateState = { status: "idle" };
 const IDLE_DECISION: WorkflowDecisionState = { status: "idle" };
+
+type HistoryEvent = {
+  event_id: string;
+  workflow_instance_id: string;
+  event_type: string;
+  correlation_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  payload: Record<string, unknown>;
+  recorded_at: string;
+};
+
+function renderWorkflowHistory(record: unknown) {
+  const events = Array.isArray(record) ? (record as HistoryEvent[]) : [];
+  if (events.length === 0) {
+    return <p className="text-xs text-slate-500">No events found in workflow history.</p>;
+  }
+
+  return (
+    <div className="space-y-4 pt-2">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-2 dark:border-slate-800">
+        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+          Chronological Transition Audit ({events.length} {events.length === 1 ? "event" : "events"} recorded)
+        </span>
+        <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+          workflow-history-svc :8097
+        </span>
+      </div>
+
+      <div className="space-y-3">
+        {events.map((evt, idx) => {
+          const isStarted = evt.event_type === "workflow.started";
+          const isApproved = evt.event_type === "approval.granted";
+          const isCompleted = evt.event_type === "workflow.completed";
+
+          const badgeStyle = isStarted
+            ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+            : isApproved
+            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+            : isCompleted
+            ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
+            : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
+
+          return (
+            <div
+              key={evt.event_id || idx}
+              className="rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 space-y-2"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    {idx + 1}
+                  </span>
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${badgeStyle}`}>
+                    {evt.event_type}
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] text-slate-400">
+                  {evt.recorded_at ? new Date(evt.recorded_at).toLocaleTimeString() : ""}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 text-[11px] font-mono text-slate-600 dark:text-slate-400">
+                <div>
+                  <span className="text-slate-400">Event ID:</span>{" "}
+                  <span className="select-all text-slate-700 dark:text-slate-300">{evt.event_id}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">Correlation:</span>{" "}
+                  <span className="select-all">{evt.correlation_id}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">Tenant:</span> {evt.tenant_id}
+                </div>
+                <div>
+                  <span className="text-slate-400">Legal Entity:</span> {evt.legal_entity_id}
+                </div>
+              </div>
+
+              {evt.payload && Object.keys(evt.payload).length > 0 && (
+                <div className="mt-2 rounded bg-slate-50 p-2.5 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                    Event Payload Snapshot
+                  </span>
+                  <pre className="text-[11px] font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-all">
+                    {JSON.stringify(evt.payload, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pt-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+          Raw Wire JSON (Full Response)
+        </span>
+        <JsonBlock value={events} />
+      </div>
+    </div>
+  );
+}
 
 export function WorkflowLifecycleCard() {
   const [initiateState, initiateSubmit, initiatePending] = useActionState(
@@ -134,7 +237,7 @@ export function WorkflowLifecycleCard() {
               2
             </span>
             <div>
-              <CardTitle>Submit Workflow Decision / Approval</CardTitle>
+              <CardTitle>Submit Workflow Decision / Approval (workflow-svc :8090)</CardTitle>
               <CardDescription>
                 Decide a pending stage. Emits <code className="font-mono text-xs text-navy-700 dark:text-navy-300">approval.granted</code> with comments to Kafka.
               </CardDescription>
@@ -149,6 +252,7 @@ export function WorkflowLifecycleCard() {
                   Workflow Instance ID <span className="text-slate-400">(from Step 1)</span>
                 </label>
                 <input
+                  key={initiateState.instanceId ?? "init-empty"}
                   id="decision_workflow_id"
                   name="workflow_instance_id"
                   defaultValue={initiateState.instanceId ?? ""}
@@ -232,6 +336,7 @@ export function WorkflowLifecycleCard() {
             placeholder="Paste your generated workflow instance ID"
             hint="Inspect all transitions, approval stages, comments, and event payloads recorded by workflow-history-svc."
             buttonLabel="Look up History"
+            renderRecord={renderWorkflowHistory}
           />
         </CardContent>
       </Card>

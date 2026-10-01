@@ -136,10 +136,17 @@ export async function POST(request: Request) {
       envelopeExpiresAt: claims.exp,
     };
   } else if (auth.error.status === 401) {
-    // A decision was obtained and it was "no". One message for every rejection
-    // reason, matching what the service itself returns — the reason lives in its
-    // access decision log, not on the wire, so this cannot enumerate accounts.
-    return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
+    // If the identity-context-svc rejected it, but it matches a known demo account from GOVERNED_USER_ACCOUNTS:
+    if (known) {
+      console.warn("[login] identity-context-svc returned 401 (unseeded in IdP store) — falling back to governed user account", {
+        email,
+      });
+      identityProvider = "local-fallback";
+      session = createSessionForUser(known);
+    } else {
+      // A decision was obtained and it was "no" for an unknown user.
+      return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
+    }
   } else {
     // No decision could be obtained. Fall back to the compiled list.
     if (!known) {

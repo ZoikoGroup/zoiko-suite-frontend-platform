@@ -5,8 +5,13 @@ import { Button } from "@/components/ui";
 import { CopyableId, ResultBanner } from "@/components/admin/shared";
 import { FIELD, HINT, LABEL, OPTIONAL } from "@/components/admin/shared/form";
 import { CLASSIFICATIONS } from "@/lib/api/documents";
-import { fileDocumentAction } from "@/app/admin/documents/actions";
-import { IDLE_FILE_DOCUMENT, type FileDocumentState } from "@/app/admin/documents/state";
+import { addVersionAction, fileDocumentAction } from "@/app/admin/documents/actions";
+import {
+  IDLE_ADD_VERSION,
+  IDLE_FILE_DOCUMENT,
+  type AddVersionState,
+  type FileDocumentState,
+} from "@/app/admin/documents/state";
 
 /**
  * Tones.
@@ -143,6 +148,72 @@ export function FileDocumentForm({ legalEntityId }: { legalEntityId: string }) {
           </div>
         )}
       </ResultBanner>
+    </form>
+  );
+}
+
+const ADD_VERSION_TONE = {
+  added: "success",
+  refused: "warning",
+  unauthorized: "error",
+  error: "error",
+  idle: "neutral",
+} as const;
+
+/**
+ * Append a new version of an existing document — the vault's own
+ * POST /{id}/versions, which had no UI surface at all before this: the
+ * previous version is never touched, so this is purely additive.
+ */
+export function AddVersionForm({ documentId }: { documentId: string }) {
+  const [state, action, pending] = useActionState<AddVersionState, FormData>(
+    addVersionAction,
+    IDLE_ADD_VERSION,
+  );
+  const [file, setFile] = useState<{ name: string; contentType: string; base64: string } | null>(null);
+  const [reading, setReading] = useState(false);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files?.[0];
+    if (!picked) {
+      setFile(null);
+      return;
+    }
+    setReading(true);
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(picked);
+    });
+    const { contentType, base64 } = splitDataUrl(dataUrl);
+    setFile({ name: picked.name, contentType, base64 });
+    setReading(false);
+  }
+
+  return (
+    <form action={action} className="space-y-3">
+      <input type="hidden" name="document_id" value={documentId} />
+      <input type="hidden" name="content_base64" value={file?.base64 ?? ""} />
+      <input type="hidden" name="content_type" value={file?.contentType ?? ""} />
+
+      <div>
+        <input className={FIELD} type="file" onChange={onPick} required />
+        <p className={HINT}>
+          {file
+            ? `${file.name} — ${file.contentType}`
+            : "The current version stays exactly as filed — this adds a new one alongside it."}
+        </p>
+      </div>
+
+      <Button type="submit" size="sm" variant="secondary" disabled={pending || reading || !file}>
+        {pending ? "Adding…" : reading ? "Reading file…" : "Add version"}
+      </Button>
+
+      <ResultBanner
+        tone={ADD_VERSION_TONE[state.status]}
+        message={state.status === "idle" ? undefined : state.message}
+      />
     </form>
   );
 }

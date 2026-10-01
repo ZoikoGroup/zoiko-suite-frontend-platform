@@ -95,8 +95,8 @@ export default async function CompliancePage() {
         <SectionCard
           icon={FileCheck}
           title="Statutory Filing Requirements"
-          subtitle="obligations-svc & evidence-requirements-svc — regulatory obligations and evidentiary standards"
-          ports="8088, 8130"
+          subtitle="filing-tracker-svc — statutory filing schedule, submission, and confirmation tracking"
+          ports="8131"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <FilingTrackerPanel />
@@ -107,7 +107,7 @@ export default async function CompliancePage() {
           icon={ShieldCheck}
           title="Compliance Status & Exception Escalations"
           subtitle="evidence-manifest-svc & exception-escalation-svc — verified evidence manifests and SLA breach tracking"
-          ports="8095, 8138"
+          ports="8095, 8133"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <StatusAndEscalationPanel />

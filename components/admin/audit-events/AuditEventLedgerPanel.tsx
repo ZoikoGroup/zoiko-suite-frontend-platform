@@ -129,11 +129,23 @@ export function AuditEventLedgerPanel({
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Hash Chain Status
               </span>
-              <Lock className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <Lock
+                className={`h-4 w-4 ${
+                  summary.hashChainVerified
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              />
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                100% Intact
+              <span
+                className={`text-2xl font-bold ${
+                  summary.hashChainVerified
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-red-600 dark:text-red-400"
+                }`}
+              >
+                {summary.hashChainVerified ? "Intact" : "BROKEN"}
               </span>
             </div>
             <p className="mt-1 text-xs text-slate-500">Cryptographically immutable</p>

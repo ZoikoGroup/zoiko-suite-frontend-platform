@@ -9,55 +9,51 @@ type Step = {
   title: string;
   service: string;
   port: string;
-  count: number;
+  count: number | null;
   status: "complete" | "active" | "pending";
   detail: string;
   examples: string[];
 };
 
-function useLiveStepCounts(): Record<string, number> {
-  const [counts, setCounts] = useState<Record<string, number>>({});
+// audit-event-store-svc is the only service this page talks to, so only the
+// stages that service actually owns (ingestion, hash-chaining, and chain
+// verification — all three answered by its one GET /v1/events response) can
+// carry a real live count. The upstream stages (Domain Action, Identity
+// Enriched, Governance Evaluated) happen in other services this page never
+// calls, so they show no fabricated number — see the audit finding this
+// replaced: every step previously "counted" the exact same single-service
+// endpoint regardless of which service the step claimed to be reporting on.
+function useLiveAuditCounts(): { total: number | null; hashChainValid: boolean | null } {
+  const [state, setState] = useState<{ total: number | null; hashChainValid: boolean | null }>({
+    total: null,
+    hashChainValid: null,
+  });
   useEffect(() => {
     let cancelled = false;
     async function fetchCounts() {
-      const endpoints: [string, string][] = [
-        ["audit/events", "action"],
-        ["audit/events", "identity"],
-        ["audit/events", "governance"],
-        ["audit/events", "ingestion"],
-        ["audit/events", "hashchain"],
-        ["audit/events", "audited"],
-      ];
-      const results = await Promise.allSettled(
-        endpoints.map(async ([ep, stepId]) => {
-          const res = await fetch(`/api/v1/${ep}`, { signal: AbortSignal.timeout(5000) });
-          if (!res.ok) return [stepId, 0] as const;
-          const json = await res.json().catch(() => ({}));
-          const total = typeof json.total === "number" ? json.total : undefined;
-          const key = Object.keys(json).find((k) => Array.isArray(json[k]));
-          return [stepId, total ?? (key ? json[key].length : 0)] as const;
-        }),
-      );
-      if (cancelled) return;
-      const merged: Record<string, number> = {};
-      for (const r of results) {
-        if (r.status === "fulfilled") {
-          const [stepId, count] = r.value;
-          merged[stepId] = count;
-        }
+      try {
+        const res = await fetch(`/api/v1/audit/events`, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return;
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        setState({
+          total: typeof json.total === "number" ? json.total : Array.isArray(json.events) ? json.events.length : 0,
+          hashChainValid: typeof json.hash_chain_valid === "boolean" ? json.hash_chain_valid : null,
+        });
+      } catch {
+        // Leave the previous known-good values in place on a transient failure.
       }
-      setCounts(merged);
     }
     fetchCounts();
     const interval = setInterval(fetchCounts, 30_000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
-  return counts;
+  return state;
 }
 
 export function AuditEventsProcessTimeline() {
   const [activeStep, setActiveStep] = useState<string | null>(null);
-  const liveCounts = useLiveStepCounts();
+  const { total, hashChainValid } = useLiveAuditCounts();
 
   const STEPS: Step[] = [
     {
@@ -66,9 +62,9 @@ export function AuditEventsProcessTimeline() {
       title: "Domain Action",
       service: "domain-microservices",
       port: "8080-8147",
-      count: liveCounts["action"] ?? 0,
+      count: null,
       status: "complete",
-      detail: "User or system action occurs in any of the 50 domain microservices.",
+      detail: "User or system action occurs in any of the 50 domain microservices. This page does not call those services, so no live count is shown here — see each domain's own workbench.",
       examples: ["PO Issued", "Tax Return Filed", "Payslip Generated"],
     },
     {
@@ -77,9 +73,9 @@ export function AuditEventsProcessTimeline() {
       title: "Identity Enriched",
       service: "tenant-entity-registry-svc",
       port: ":8081",
-      count: liveCounts["identity"] ?? 0,
+      count: null,
       status: "complete",
-      detail: "X-Tenant-Id, X-Principal-Id, and X-Correlation-ID attached.",
+      detail: "X-Tenant-Id, X-Principal-Id, and X-Correlation-ID attached. This page does not call tenant-entity-registry-svc, so no live count is shown here.",
       examples: ["Tenant 11111111-1111-1111 · Correlation e8912"],
     },
     {
@@ -88,9 +84,9 @@ export function AuditEventsProcessTimeline() {
       title: "Governance Evaluated",
       service: "governance-decision-log-svc",
       port: ":8083",
-      count: liveCounts["governance"] ?? 0,
+      count: null,
       status: "complete",
-      detail: "Action evaluated against security policies & logged to decision log.",
+      detail: "Action evaluated against security policies & logged to decision log. This page does not call governance-decision-log-svc, so no live count is shown here.",
       examples: ["Outcome: AUTHORIZED · Basis: Rule UK-VAT-STD"],
     },
     {
@@ -99,32 +95,34 @@ export function AuditEventsProcessTimeline() {
       title: "Event Ingested",
       service: "audit-event-store-svc",
       port: ":8084",
-      count: liveCounts["ingestion"] ?? 0,
+      count: total,
       status: "active",
-      detail: "Event payload written to append-only event store repository.",
+      detail: "Event payload written to append-only event store repository. Live count from GET /v1/events.",
       examples: ["Event ID evt-2026-99182 · Status: INGESTED"],
     },
     {
       id: "hashchain",
       icon: Lock,
       title: "SHA-256 Hash Chained",
-      service: "cryptographic-hashchain-svc",
+      service: "audit-event-store-svc",
       port: ":8084",
-      count: liveCounts["hashchain"] ?? 0,
+      count: total,
       status: "active",
-      detail: "SHA-256 hash calculated incorporating previous event hash.",
+      detail: "SHA-256 hash calculated incorporating previous event hash. Every stored event is chained atomically on write, so this count matches events ingested.",
       examples: ["PrevHash: a8f9c... ➔ CurrHash: e3b0c..."],
     },
     {
       id: "audited",
       icon: Search,
       title: "Tamper Verified",
-      service: "event-provenance-auditor",
+      service: "audit-event-store-svc",
       port: ":8084",
-      count: liveCounts["audited"] ?? 0,
-      status: "pending",
-      detail: "Continuous provenance auditor verifies zero hash gaps across all events.",
-      examples: ["Verification Status: TAMPER_FREE"],
+      count: hashChainValid === false ? 0 : total,
+      status: hashChainValid === false ? "pending" : "complete",
+      detail: hashChainValid === false
+        ? "Hash-chain verification FAILED on the last check — one or more events may have been tampered with."
+        : "Hash-chain verification passed on the last check (GET /v1/events' hash_chain_valid).",
+      examples: [hashChainValid === false ? "Verification Status: CHAIN BROKEN" : "Verification Status: TAMPER_FREE"],
     },
   ];
 
@@ -163,7 +161,7 @@ export function AuditEventsProcessTimeline() {
                     {step.title}
                   </span>
                   <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                    {step.count.toLocaleString("en-US")}
+                    {step.count === null ? "—" : step.count.toLocaleString("en-US")}
                   </span>
                   <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{step.port}</span>
                 </button>

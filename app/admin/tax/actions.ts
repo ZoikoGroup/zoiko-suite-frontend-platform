@@ -247,16 +247,15 @@ export async function createCorporateTaxAction(formData: FormData): Promise<TaxA
   const res = await createCorporateTaxReturn(payload, identity);
 
   if (!res.ok) {
+    // Surface the real backend response rather than fabricating a fake
+    // success — a 409 (duplicate fiscal year), 401 (envelope/auth rejection),
+    // or any other refusal must reach the caller as a failure, not a
+    // silently-invented DRAFT record.
     return {
-      ok: true,
-      data: {
-        return_id: `cit-${fiscalYear}-${Date.now().toString(36)}`,
-        fiscal_year: fiscalYear,
-        balance_due: Math.round(taxableIncome * (taxRate / 100)),
-        status: "DRAFT",
-        currency,
-      },
-      message: `Corporate tax estimate recorded in fallback mode.`,
+      ok: false,
+      error: res.error.status
+        ? `corporate-tax-svc rejected the request (${res.error.status}): ${res.error.message}`
+        : res.error.message,
     };
   }
 

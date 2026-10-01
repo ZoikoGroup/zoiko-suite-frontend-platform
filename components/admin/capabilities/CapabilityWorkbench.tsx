@@ -71,6 +71,39 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
   // Reactive feedback tracking latest triggered operation
   const [latestFeedback, setLatestFeedback] = useState<CapabilityActionState | null>(null);
 
+  // Form Fields State
+  const [capCode, setCapCode] = useState("PAYMENT_ROUTING_SEPA");
+  const [moduleDomain, setModuleDomain] = useState("PAYMENTS");
+  const [capVersion, setCapVersion] = useState("1");
+  const [dependencies, setDependencies] = useState("BANKING_GATEWAY,LEDGER_POSTING");
+  const [riskClass, setRiskClass] = useState("MEDIUM");
+
+  // Market Release Form Fields
+  const [marketCode, setMarketCode] = useState("GB");
+  const [languageCode, setLanguageCode] = useState("en");
+  const [legalApproval, setLegalApproval] = useState("APPROVED");
+  const [marketReleaseState, setMarketReleaseState] = useState("GA");
+
+  // Integration Form Fields
+  const [providerCode, setProviderCode] = useState("STRIPE");
+  const [certified, setCertified] = useState(true);
+  const [integrationHealth, setIntegrationHealth] = useState("HEALTHY");
+
+  // Operational State Form Fields
+  const [opState, setOpState] = useState("GA");
+  const [opReason, setOpReason] = useState("Platform production release baseline");
+
+  // Claims Form Fields (SoD: Wording Owner != Legal Approver)
+  const [claimText, setClaimText] = useState("Real-time GBP & EUR settlement within 5 seconds under SEPA Instant.");
+  const [claimScope, setClaimScope] = useState("UK_EEA");
+  const [wordingOwner, setWordingOwner] = useState(initialPrincipalId);
+  const [claimApprover, setClaimApprover] = useState("44444444-4444-4444-4444-444444444444");
+
+  // Resolution Form Fields
+  const [capCodeInput, setCapCodeInput] = useState("PAYMENT_ROUTING_SEPA");
+  const [resolveMarket, setResolveMarket] = useState("GB");
+  const [resolveProvider, setResolveProvider] = useState("STRIPE");
+
   useEffect(() => { if (capState.status !== "idle") setLatestFeedback(capState); }, [capState]);
   useEffect(() => { if (getCapState.status !== "idle") setLatestFeedback(getCapState); }, [getCapState]);
   useEffect(() => { if (marketState.status !== "idle") setLatestFeedback(marketState); }, [marketState]);
@@ -136,39 +169,6 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
       setActiveResolution(resolveState.resolution);
     }
   }, [resolveState]);
-
-  // Form Fields State
-  const [capCode, setCapCode] = useState("PAYMENT_ROUTING_SEPA");
-  const [moduleDomain, setModuleDomain] = useState("PAYMENTS");
-  const [capVersion, setCapVersion] = useState("1");
-  const [dependencies, setDependencies] = useState("BANKING_GATEWAY,LEDGER_POSTING");
-  const [riskClass, setRiskClass] = useState("MEDIUM");
-
-  // Market Release Form Fields
-  const [marketCode, setMarketCode] = useState("GB");
-  const [languageCode, setLanguageCode] = useState("en");
-  const [legalApproval, setLegalApproval] = useState("APPROVED");
-  const [marketReleaseState, setMarketReleaseState] = useState("GA");
-
-  // Integration Form Fields
-  const [providerCode, setProviderCode] = useState("STRIPE");
-  const [certified, setCertified] = useState(true);
-  const [integrationHealth, setIntegrationHealth] = useState("HEALTHY");
-
-  // Operational State Form Fields
-  const [opState, setOpState] = useState("GA");
-  const [opReason, setOpReason] = useState("Platform production release baseline");
-
-  // Claims Form Fields
-  const [claimText, setClaimText] = useState("Real-time GBP & EUR settlement within 5 seconds under SEPA Instant.");
-  const [claimScope, setClaimScope] = useState("UK_EEA");
-  const [wordingOwner, setWordingOwner] = useState(initialPrincipalId);
-  const [claimApprover, setClaimApprover] = useState(initialPrincipalId);
-
-  // Resolution Form Fields
-  const [capCodeInput, setCapCodeInput] = useState("PAYMENT_ROUTING_SEPA");
-  const [resolveMarket, setResolveMarket] = useState("GB");
-  const [resolveProvider, setResolveProvider] = useState("STRIPE");
 
   // Preset Applicator
   const applyPreset = (type: "sepa" | "ledger" | "ai") => {

@@ -235,6 +235,9 @@ export async function recordAssessmentAction(
   const outcome = String(formData.get("outcome") ?? "APPROVE").trim() as AssessmentOutcome;
   const residualRisk = String(formData.get("residual_risk") ?? "").trim() || undefined;
   const evidenceRef = String(formData.get("evidence_ref") ?? "").trim() || undefined;
+  const governmentAccessRisk = String(formData.get("government_access_risk") ?? "").trim() || undefined;
+  const technicalMeasures = String(formData.get("technical_measures") ?? "").trim() || undefined;
+  const organizationalMeasures = String(formData.get("organizational_measures") ?? "").trim() || undefined;
   const reviewTriggerAt = String(formData.get("review_trigger_at") ?? "").trim() || undefined;
 
   if (!relationshipId) {
@@ -247,6 +250,9 @@ export async function recordAssessmentAction(
       outcome,
       residual_risk: residualRisk,
       evidence_ref: evidenceRef,
+      government_access_risk: governmentAccessRisk,
+      technical_measures: technicalMeasures,
+      organizational_measures: organizationalMeasures,
       review_trigger_at: reviewTriggerAt,
     },
     identity
@@ -280,6 +286,9 @@ export async function evaluateTransferAction(
   const transferMechanismId = String(formData.get("transfer_mechanism_id") ?? "").trim();
   const destinationJurisdiction = String(formData.get("destination_jurisdiction") ?? "US").trim();
   const assessmentRequired = formData.get("assessment_required") === "true";
+  const conditions = String(formData.get("conditions") ?? "").trim() || undefined;
+  const enforceConditions = formData.get("enforce_conditions") === "true";
+  const reassessmentTrigger = String(formData.get("reassessment_trigger") ?? "").trim() || undefined;
 
   if (!relationshipId || !transferMechanismId) {
     return { status: "error", message: "relationship_id and transfer_mechanism_id are required" };
@@ -291,6 +300,9 @@ export async function evaluateTransferAction(
       transfer_mechanism_id: transferMechanismId,
       destination_jurisdiction: destinationJurisdiction,
       assessment_required: assessmentRequired,
+      conditions,
+      enforce_conditions: enforceConditions,
+      reassessment_trigger: reassessmentTrigger,
     },
     identity
   );
@@ -904,6 +916,117 @@ export async function runAutomatedQASuiteAction(): Promise<QAScenarioResult[]> {
       passed: false,
       details: "Exception thrown.",
     });
+  }
+
+  // Scenario 11 (Positive): CONDITIONAL Outcome with Supplementary Measures (§16.1 & §18)
+  if (relationshipId && mechanismId) {
+    try {
+      await recordTransferAssessment(
+        {
+          relationship_id: relationshipId,
+          outcome: "APPROVE",
+          residual_risk: "MEDIUM - Satisfied conditionally via supplementary measures",
+          evidence_ref: "TIA-2026-SUPP-MEASURES-01",
+          technical_measures: "TLS_1_3_AND_CUSTOMER_HSM_ENVELOPE_ENCRYPTION",
+          organizational_measures: "QUARTERLY_ACCESS_REVIEWS_AND_LOCAL_DATA_DELETION",
+        },
+        identity
+      );
+
+      const condRes = await evaluateTransfer(
+        {
+          relationship_id: relationshipId,
+          transfer_mechanism_id: mechanismId,
+          destination_jurisdiction: "US",
+          assessment_required: true,
+        },
+        identity
+      );
+
+      // Restore baseline clean assessment
+      await recordTransferAssessment(
+        {
+          relationship_id: relationshipId,
+          outcome: "APPROVE",
+          residual_risk: "LOW - Mitigated by customer-held HSM encryption keys",
+          evidence_ref: "TIA-2026-AWS-EU-01",
+        },
+        identity
+      );
+
+      const isConditional =
+        condRes.ok &&
+        condRes.data.result === "CONDITIONAL" &&
+        Boolean(condRes.data.conditions && condRes.data.conditions.includes("TLS_1_3"));
+
+      results.push({
+        id: "TC-PRV05-11",
+        name: "Positive: CONDITIONAL Authorization via Supplementary Measures (§16.1)",
+        type: "positive",
+        description: "Evaluate transfer when approved assessment specifies technical/organizational measures",
+        expectedStatus: "CONDITIONAL (with machine-enforceable conditions)",
+        actualResult: condRes.ok
+          ? `Result: ${condRes.data.result}, Conditions: [${condRes.data.conditions || "None"}]`
+          : condRes.error.message,
+        passed: isConditional,
+        details: "PRV-05 produces CONDITIONAL authorization bound to enforceable technical/organizational measures.",
+      });
+    } catch (err: unknown) {
+      results.push({
+        id: "TC-PRV05-11",
+        name: "Positive: CONDITIONAL Authorization via Supplementary Measures (§16.1)",
+        type: "positive",
+        description: "Evaluate transfer with supplementary measures",
+        expectedStatus: "CONDITIONAL",
+        actualResult: String(err),
+        passed: false,
+        details: "Exception thrown.",
+      });
+    }
+  }
+
+  // Scenario 12 (Negative): Mandatory Reassessment Trigger on New Destination Jurisdiction (§17.1)
+  if (relationshipId && mechanismId) {
+    try {
+      const trigRes = await evaluateTransfer(
+        {
+          relationship_id: relationshipId,
+          transfer_mechanism_id: mechanismId,
+          destination_jurisdiction: "AU-PRIVACY", // not in relationship's ["EU-GDPR", "UK-GDPR"]
+          assessment_required: false,
+        },
+        identity
+      );
+
+      const isTriggered =
+        trigRes.ok &&
+        trigRes.data.result === "REVIEW_REQUIRED" &&
+        trigRes.data.reason_codes.some((c) => c.includes("NEW_DESTINATION_JURISDICTION"));
+
+      results.push({
+        id: "TC-PRV05-12",
+        name: "Negative: Mandatory Reassessment Trigger (§17.1 Trigger 3)",
+        type: "negative",
+        description: "Evaluate transfer to destination jurisdiction outside relationship's approved jurisdictions",
+        expectedStatus: "REVIEW_REQUIRED (NEW_DESTINATION_JURISDICTION)",
+        actualResult: trigRes.ok
+          ? `Result: ${trigRes.data.result} [${trigRes.data.reason_codes.join(", ")}]`
+          : trigRes.error.message,
+        passed: isTriggered,
+        details: "Automated §17.1 trigger halts automated transfer and forces compliance reassessment.",
+      });
+    } catch (err: unknown) {
+      results.push({
+        id: "TC-PRV05-12",
+        name: "Negative: Mandatory Reassessment Trigger (§17.1 Trigger 3)",
+        type: "negative",
+        description: "Evaluate transfer outside declared jurisdictions",
+        expectedStatus: "REVIEW_REQUIRED",
+        actualResult: String(err),
+        passed: false,
+        details: "Exception thrown.",
+      });
+    }
   }
 
   return results;

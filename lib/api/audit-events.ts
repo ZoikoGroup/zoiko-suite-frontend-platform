@@ -178,18 +178,21 @@ export async function getAuditEvents(): Promise<{
 
   const raw = res.data;
   // audit-event-store-svc returns { events: [...], total, hash_chain_valid }
-  // apiGet<AuditEvent[]> passes the raw object through — extract the array safely.
+  // apiGet<AuditEvent[]> passes the raw object through — extract the array and
+  // the real chain-validity flag safely rather than assuming an intact chain.
+  const rawObj = raw as unknown as Record<string, unknown>;
   const events: AuditEvent[] = Array.isArray(raw)
     ? raw
-    : Array.isArray((raw as unknown as Record<string, unknown>)?.events)
-    ? ((raw as unknown as Record<string, unknown>).events as AuditEvent[])
+    : Array.isArray(rawObj?.events)
+    ? (rawObj.events as AuditEvent[])
     : [];
+  const hashChainVerified: boolean = Array.isArray(raw) ? true : rawObj?.hash_chain_valid === true;
 
   return {
     data: events,
     summary: {
       totalEvents: events.length,
-      hashChainVerified: true,
+      hashChainVerified,
       authorizedCount: events.filter((e) => e.status === "AUTHORIZED").length,
       escalatedCount: events.filter((e) => e.status === "ESCALATED").length,
       deniedCount: events.filter((e) => e.status === "DENIED").length,
@@ -215,11 +218,10 @@ export async function verifyAuditChain(): Promise<{
   );
 
   if (!res.ok) {
-    return {
-      verified: true,
-      timestamp: new Date().toISOString(),
-      checkedEvents: FALLBACK_AUDIT_EVENTS.length,
-    };
+    // Do not report a passing verification when the service could not be
+    // reached — an outage must surface as "could not verify", never as a
+    // silent, false "chain intact".
+    throw new Error(res.error.message);
   }
 
   return {

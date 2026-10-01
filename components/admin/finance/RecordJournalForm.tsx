@@ -270,23 +270,38 @@ export function RecordJournalForm() {
         </div>
       </div>
 
-      <div>
-        <label htmlFor="book_id" className={LABEL}>
-          Accounting book <span className={OPTIONAL}>(optional)</span>
-        </label>
-        <input
-          id="book_id"
-          name="book_id"
-          placeholder="BOOK-STAT-GB"
-          className={FIELD}
-          autoComplete="off"
-        />
-        <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
-          Which book or reporting basis this posting belongs to. Recorded as typed and validated by
-          nothing: no Accounting Book service exists yet, so the statutory / management / tax split
-          the architecture calls for cannot be enforced here. Leaving it blank is the honest default
-          until one ships.
-        </p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="book_id" className={LABEL}>
+            Accounting book <span className={OPTIONAL}>(optional)</span>
+          </label>
+          <input
+            id="book_id"
+            name="book_id"
+            placeholder="BOOK-STAT-GB"
+            className={FIELD}
+            autoComplete="off"
+          />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            Which book or reporting basis this posting belongs to.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="journal_correlation_id" className={LABEL}>
+            Correlation ID / Invoice ID <span className={OPTIONAL}>(optional)</span>
+          </label>
+          <input
+            id="journal_correlation_id"
+            name="correlation_id"
+            placeholder="Paste Customer Invoice ID (UUID)"
+            className={FIELD}
+            autoComplete="off"
+          />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            Required when recording a payment in accounts-receivable-svc: paste the invoice UUID here so the ledger journal correlates with the invoice.
+          </p>
+        </div>
       </div>
 
       <div className="space-y-2">

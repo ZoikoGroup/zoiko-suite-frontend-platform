@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Calculator,
@@ -15,9 +16,11 @@ import {
   Download,
   RefreshCw,
   WifiOff,
+  Landmark,
 } from "lucide-react";
 import { exportToCSV } from "@/lib/export";
 import type { TaxHealthResponse } from "@/app/api/backend/tax-health/route";
+import { createCorporateTaxAction } from "@/app/admin/tax/actions";
 
 // ── New-Rule overlay ───────────────────────────────────────────────────────────
 function NewRuleModal({ onClose }: { onClose: () => void }) {
@@ -545,6 +548,303 @@ function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ── Create Corporate Tax Return overlay ────────────────────────────────────────
+function CreateCorporateTaxModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [step, setStep] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ return_id: string; fiscal_year: number; message?: string } | null>(null);
+  const [form, setForm] = useState({
+    jurisdiction: "us-fed-01",
+    taxRegistrationNumber: "US-EIN-77104235",
+    fiscalYear: String(new Date().getFullYear()),
+    currency: "USD",
+    grossRevenue: "1200000",
+    allowableDeductions: "450000",
+    taxRatePercent: "21",
+  });
+
+  const grossRevenue = parseFloat(form.grossRevenue) || 0;
+  const allowableDeductions = parseFloat(form.allowableDeductions) || 0;
+  const taxableIncome = grossRevenue - allowableDeductions;
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.set("jurisdiction_id", form.jurisdiction);
+      fd.set("tax_registration_number", form.taxRegistrationNumber);
+      fd.set("fiscal_year", form.fiscalYear);
+      fd.set("currency", form.currency);
+      fd.set("gross_revenue", form.grossRevenue);
+      fd.set("allowable_deductions", form.allowableDeductions);
+      fd.set("taxable_income", String(taxableIncome));
+      fd.set("tax_rate_percent", form.taxRatePercent);
+
+      const res = await createCorporateTaxAction(fd);
+      if (!res.ok) {
+        setError(res.error);
+        setSubmitting(false);
+        return;
+      }
+      const raw = res.data as { return_id?: string; fiscal_year?: number };
+      setResult({
+        return_id: String(raw.return_id ?? "unknown"),
+        fiscal_year: Number(raw.fiscal_year ?? form.fiscalYear),
+        message: res.message,
+      });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create corporate tax return");
+    }
+    setSubmitting(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-navy-100 dark:bg-navy-500/20">
+              <Landmark className="h-3.5 w-3.5 text-navy-600 dark:text-navy-400" />
+            </span>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Add Corporate Tax Return</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-md p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Step indicator */}
+        {!result && !error && (
+          <div className="flex border-b border-slate-100 dark:border-slate-800">
+            {["Jurisdiction & Period", "Financials", "Review"].map((label, i) => (
+              <div
+                key={label}
+                className={`flex-1 py-2.5 text-center text-[11px] font-medium transition-colors ${step === i + 1
+                  ? "border-b-2 border-navy-500 text-navy-600 dark:text-navy-400"
+                  : "text-slate-400 dark:text-slate-500"
+                  }`}
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="p-5">
+          {result ? (
+            <div className="flex flex-col items-center gap-3 py-6 text-center">
+              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+              <p className="font-semibold text-slate-800 dark:text-slate-200">Corporate tax return created</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Return <span className="font-mono text-slate-700 dark:text-slate-300">{result.return_id}</span> for
+                fiscal year {result.fiscal_year} registered in corporate-tax-svc (:8128).
+              </p>
+              {result.message && (
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">{result.message}</p>
+              )}
+              <button
+                onClick={onClose}
+                className="mt-2 rounded-lg bg-navy-600 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center gap-3 py-6 text-center">
+              <AlertCircle className="h-10 w-10 text-red-500" />
+              <p className="font-semibold text-slate-800 dark:text-slate-200">Could not create return</p>
+              <p className="max-w-xs text-xs text-slate-500 dark:text-slate-400">{error}</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setError(null)}
+                  className="mt-1 rounded-lg border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Try again
+                </button>
+                <button
+                  onClick={onClose}
+                  className="mt-1 rounded-lg bg-navy-600 px-4 py-2 text-xs font-medium text-white hover:bg-navy-700 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : step === 1 ? (
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Jurisdiction
+                </label>
+                <select
+                  value={form.jurisdiction}
+                  onChange={(e) => setForm((f) => ({ ...f, jurisdiction: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <option value="us-fed-01">🇺🇸 United States (IRS)</option>
+                  <option value="uk-gov-01">🇬🇧 United Kingdom (HMRC)</option>
+                  <option value="sg-iras-01">🇸🇬 Singapore (IRAS)</option>
+                  <option value="de-bzst-01">🇩🇪 Germany (BZSt)</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Tax Registration Number
+                </label>
+                <input
+                  type="text"
+                  value={form.taxRegistrationNumber}
+                  onChange={(e) => setForm((f) => ({ ...f, taxRegistrationNumber: e.target.value }))}
+                  placeholder="e.g. US-EIN-77104235"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Fiscal Year
+                  </label>
+                  <input
+                    type="number"
+                    value={form.fiscalYear}
+                    onChange={(e) => setForm((f) => ({ ...f, fiscalYear: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                    Currency
+                  </label>
+                  <select
+                    value={form.currency}
+                    onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    {["USD", "GBP", "SGD", "EUR"].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          ) : step === 2 ? (
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Gross Revenue
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.grossRevenue}
+                  onChange={(e) => setForm((f) => ({ ...f, grossRevenue: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Allowable Deductions
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.allowableDeductions}
+                  onChange={(e) => setForm((f) => ({ ...f, allowableDeductions: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                  Tax Rate (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={form.taxRatePercent}
+                  onChange={(e) => setForm((f) => ({ ...f, taxRatePercent: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800/60">
+                <span className="text-slate-500 dark:text-slate-400">Taxable Income (computed)</span>
+                <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                  {taxableIncome.toLocaleString("en-US")} {form.currency}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Review the new corporate tax return before submitting:
+              </p>
+              {[
+                ["Jurisdiction", form.jurisdiction],
+                ["Tax Registration No.", form.taxRegistrationNumber],
+                ["Fiscal Year", form.fiscalYear],
+                ["Gross Revenue", `${grossRevenue.toLocaleString("en-US")} ${form.currency}`],
+                ["Allowable Deductions", `${allowableDeductions.toLocaleString("en-US")} ${form.currency}`],
+                ["Taxable Income", `${taxableIncome.toLocaleString("en-US")} ${form.currency}`],
+                ["Tax Rate", `${form.taxRatePercent}%`],
+                ["Target Service", "corporate-tax-svc (:8128)"],
+              ].map(([label, value]) => (
+                <div key={label} className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">{label}</span>
+                  <span className="font-medium text-slate-800 dark:text-slate-200 font-mono">{value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {!result && !error && (
+          <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3.5 dark:border-slate-800">
+            <button
+              onClick={() => setStep((s) => Math.max(1, s - 1))}
+              disabled={step === 1}
+              className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 disabled:opacity-30 transition-colors"
+            >
+              Back
+            </button>
+            {step < 3 ? (
+              <button
+                onClick={() => setStep((s) => s + 1)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-navy-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-navy-700 transition-colors"
+              >
+                Next <ChevronRight className="h-3 w-3" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-navy-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-navy-700 disabled:opacity-60 transition-colors"
+              >
+                {submitting ? (
+                  <><Loader2 className="h-3 w-3 animate-spin" /> Creating…</>
+                ) : (
+                  <><CheckCircle2 className="h-3 w-3" /> Create Return</>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Service Health Strip (live) ────────────────────────────────────────────────
 const emptySubscribe = () => () => {};
 
@@ -677,10 +977,11 @@ function ServiceHealthStrip() {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-type Modal = "new-rule" | "determination" | "filing" | null;
+type Modal = "new-rule" | "determination" | "filing" | "corporate-tax" | null;
 
 export function TaxActionHeader() {
   const [modal, setModal] = useState<Modal>(null);
+  const router = useRouter();
 
   return (
     <>
@@ -688,6 +989,9 @@ export function TaxActionHeader() {
       {modal === "new-rule" && <NewRuleModal onClose={() => setModal(null)} />}
       {modal === "determination" && <DeterminationWizard onClose={() => setModal(null)} />}
       {modal === "filing" && <FilingAssemblyPanel onClose={() => setModal(null)} />}
+      {modal === "corporate-tax" && (
+        <CreateCorporateTaxModal onClose={() => setModal(null)} onCreated={() => router.refresh()} />
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         {/* Top toolbar */}
@@ -707,6 +1011,14 @@ export function TaxActionHeader() {
             >
               <Plus className="h-3.5 w-3.5" />
               New Tax Rule
+            </button>
+            <button
+              id="tax-action-add-corporate-tax"
+              onClick={() => setModal("corporate-tax")}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-navy-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-navy-700 active:scale-95 transition-all"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Corporate Tax Return
             </button>
             <button
               id="tax-action-evaluate"

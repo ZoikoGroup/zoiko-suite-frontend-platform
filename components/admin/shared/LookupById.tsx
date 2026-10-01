@@ -50,33 +50,38 @@ export function LookupById<T = unknown>({
   });
 
   return (
-    <form action={submit} className="space-y-3">
-      <div>
-        <label htmlFor={inputName} className={LABEL}>
-          {label}
-        </label>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            id={inputName}
-            name={inputName}
-            required
-            placeholder={placeholder}
-            className={`${FIELD} font-mono text-xs`}
-            autoComplete="off"
-          />
-          <Button type="submit" size="sm" loading={pending} className="shrink-0">
-            {!pending && <Search className="h-3.5 w-3.5" aria-hidden="true" />}
-            {pending ? "Reading…" : buttonLabel}
-          </Button>
+    <div className="space-y-3">
+      <form action={submit}>
+        <div>
+          <label htmlFor={inputName} className={LABEL}>
+            {label}
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              id={inputName}
+              name={inputName}
+              required
+              placeholder={placeholder}
+              className={`${FIELD} font-mono text-xs`}
+              autoComplete="off"
+            />
+            <Button type="submit" size="sm" loading={pending} className="shrink-0">
+              {!pending && <Search className="h-3.5 w-3.5" aria-hidden="true" />}
+              {pending ? "Reading…" : buttonLabel}
+            </Button>
+          </div>
+          {hint && <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">{hint}</p>}
         </div>
-        {hint && <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">{hint}</p>}
-      </div>
+      </form>
 
+      {/* Outside the form: renderRecord may itself contain forms (e.g. a
+          governed approval workflow's action buttons), and HTML forbids
+          nesting <form> inside <form>. */}
       <ResultBanner tone={TONE[state.status]} message={state.message}>
         {state.status === "found" &&
           state.record !== undefined &&
           (renderRecord ? renderRecord(state.record) : <JsonBlock value={state.record} />)}
       </ResultBanner>
-    </form>
+    </div>
   );
 }

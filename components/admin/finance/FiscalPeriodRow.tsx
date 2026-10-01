@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { AlertCircle, CheckCircle2, Lock, Search, ShieldAlert, TriangleAlert } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
 import { CopyableId } from "@/components/admin/shared";
@@ -33,6 +33,7 @@ export function FiscalPeriodRow({
   period: FiscalPeriod;
   columnCount: number;
 }) {
+  const [lastAction, setLastAction] = useState<"check" | "close" | null>(null);
   const [checkState, checkAction, checkPending] = useActionState<CloseActionState, FormData>(
     checkCloseReadiness,
     IDLE_CLOSE_STATE,
@@ -42,12 +43,18 @@ export function FiscalPeriodRow({
     IDLE_CLOSE_STATE,
   );
 
-  // Whichever ran, preferring the close — a close can only follow a check, so
-  // if both have fired the close is the later news. Deliberately NOT selected
-  // by the period's own status: a successful close changes that status, so
-  // choosing on it would swap the banner to the other hook's idle state in the
-  // same render that delivered the result.
-  const state = closeState.status !== "idle" ? closeState : checkState;
+  // Whichever action was triggered most recently takes precedence. If the user
+  // previously attempted a close that was refused, but then resolved the issue
+  // and clicked "Check readiness", checkState must be displayed rather than
+  // being permanently masked by the stale closeState.
+  const state =
+    lastAction === "check"
+      ? checkState
+      : lastAction === "close"
+        ? closeState
+        : closeState.status !== "idle"
+          ? closeState
+          : checkState;
 
   const locked = isLocked(period);
   const status = describeCloseStatus(period.close_status);
@@ -121,7 +128,13 @@ export function FiscalPeriodRow({
             </span>
           ) : (
             <div className="flex flex-col items-end gap-2">
-              <form action={checkAction} className="inline-flex">
+              <form
+                action={(formData) => {
+                  setLastAction("check");
+                  return checkAction(formData);
+                }}
+                className="inline-flex"
+              >
                 <input type="hidden" name="fiscal_period_id" value={period.fiscal_period_id} />
                 <Button
                   type="submit"
@@ -136,7 +149,13 @@ export function FiscalPeriodRow({
                 </Button>
               </form>
 
-              <form action={closeAction} className="inline-flex">
+              <form
+                action={(formData) => {
+                  setLastAction("close");
+                  return closeAction(formData);
+                }}
+                className="inline-flex"
+              >
                 <input type="hidden" name="fiscal_period_id" value={period.fiscal_period_id} />
                 <Button
                   type="submit"

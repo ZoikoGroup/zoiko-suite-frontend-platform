@@ -311,7 +311,14 @@ export type CorporateTaxReturn = {
   updated_at: string;
 };
 
-type CorporateTaxResponse = { returns: CorporateTaxReturn[]; total: number };
+// The real corporate-tax-svc uses the top-level key "corporate_tax_returns";
+// the local mock (scratch/mock-tax-services.mjs) uses "filings". Accept both
+// so the panel reflects real data instead of always resolving to empty.
+type CorporateTaxResponse = {
+  corporate_tax_returns?: CorporateTaxReturn[];
+  filings?: CorporateTaxReturn[];
+  total: number;
+};
 
 export async function listCorporateTaxReturns(
   identity?: Identity,
@@ -328,7 +335,7 @@ export async function listCorporateTaxReturns(
     base,
     "corporate-tax-svc",
     identity,
-    (d) => d.returns ?? [],
+    (d) => d.corporate_tax_returns ?? d.filings ?? [],
   );
 }
 

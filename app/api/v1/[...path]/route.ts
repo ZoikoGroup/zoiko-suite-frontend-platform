@@ -42,8 +42,9 @@ import { listJournals } from "@/lib/api/general-ledger";
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
 import { listPayrollRuns, listCompensationStructures, listBenefitPlans, listPayrollTaxProfiles, listPayrollExceptions } from "@/lib/api/payroll";
 import { listEmployees, listLeaveRequests, listDepartments, listWorkforceAlerts, listReviews, listReviewCycles } from "@/lib/api/hr";
-import { listFilingRequirements, listComplianceEvaluations, listEscalatedExceptions } from "@/lib/api/compliance";
+import { listFilingRequirements, createFilingRequirement, listComplianceEvaluations, listEscalatedExceptions, evaluateCompliance } from "@/lib/api/compliance";
 import { getAuditEvents } from "@/lib/api/audit-events";
+import { apiPost } from "@/lib/api/client";
 import { listPurchaseRequests } from "@/lib/api/purchase-requests";
 import { listEvidenceRequirements } from "@/lib/api/evidence";
 import { listVendorChecks } from "@/lib/api/vendor-due-diligence";
@@ -53,7 +54,7 @@ import { listEntities, listEntityJurisdictions, listTaxIdentityBundles, listResi
 import { listJurisdictions, getRules, isDriftedInForce } from "@/lib/api/jurisdictions";
 import { listFeatureFlags, listConfigEntries } from "@/lib/api/configuration";
 import { listApplicablePolicyVersions, listPolicyVersionHistory } from "@/lib/api/policies";
-import { listEventNames, listVersions as listSchemaVersions, getLatest as getLatestSchema } from "@/lib/api/schemas";
+import { listEventNames, listVersions as listSchemaVersions, getLatest as getLatestSchema, registerVersion } from "@/lib/api/schemas";
 import { listDocuments, listVersions as listDocumentVersions, listAccessLog } from "@/lib/api/documents";
 import { listDelegations, getDelegation } from "@/lib/api/delegations";
 import { listNotifications } from "@/lib/api/notifications";
@@ -272,6 +273,33 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       identity,
     );
     return NextResponse.json({ evaluations: res.ok ? res.data : [], note: "returns evidence requirements catalog" });
+  }
+  if (endpoint.startsWith("evidence-manifests") || endpoint.startsWith("evidence/manifests")) {
+    const base = (process.env.ZOIKO_EVIDENCE_MANIFEST_URL ?? "http://localhost:8095").replace(/\/$/, "");
+    const subPath = endpoint.replace(/^(evidence-manifests|evidence\/manifests)/, "");
+    try {
+      const upstream = await fetch(`${base}/v1/evidence-manifests${subPath}`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "X-Tenant-Id": identity.tenantId,
+          "X-Principal-Id": identity.principalId,
+          "X-Legal-Entity-Id": identity.legalEntityId,
+          "X-Request-Id": crypto.randomUUID(),
+          "X-Correlation-ID": crypto.randomUUID(),
+          "X-Source-Channel": "web",
+          "X-Purpose-Context": "AUDIT_DISCOVERY",
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await upstream.json().catch(() => ({}));
+      return NextResponse.json(data, { status: upstream.status });
+    } catch {
+      return NextResponse.json(
+        { error: "evidence_manifest_svc_unreachable", detail: "evidence-manifest-svc did not respond" },
+        { status: 503 }
+      );
+    }
   }
   if (endpoint === "tamper/alerts") {
     const result = await getAuditEvents();
@@ -573,17 +601,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
 
   if (endpoint === "filing-preparation/drafts") {
     const res = await createFilingDraft(body as unknown as CreateFilingDraftInput, identity);
-    if (res.ok) {
-      return NextResponse.json(res.data, { status: 201 });
+    if (!res.ok) {
+      return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
     }
+    return NextResponse.json(res.data, { status: 201 });
   }
 
   if (endpoint.startsWith("filing-preparation/drafts/") && endpoint.endsWith("/finalize")) {
     const draftId = path[2];
     const res = await finalizeFilingDraft(draftId, body as { notes?: string }, identity);
-    if (res.ok) {
-      return NextResponse.json(res.data, { status: 200 });
+    if (!res.ok) {
+      return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
     }
+    return NextResponse.json(res.data, { status: 200 });
   }
 
   if (endpoint === "tax-authority/interfaces") {
@@ -760,11 +790,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
 
   if (endpoint === "benefits/plans") {
-    return NextResponse.json({
-      plan_id: `bp-${Date.now()}`,
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const base = (process.env.ZOIKO_BENEFITS_URL ?? "http://localhost:8112").replace(/\/$/, "");
+    try {
+      const upstream = await fetch(`${base}/v1/benefits/plans`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-Tenant-Id": identity.tenantId,
+          "X-Principal-Id": identity.principalId,
+          "X-Legal-Entity-Id": identity.legalEntityId,
+          "X-Correlation-ID": crypto.randomUUID(),
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await upstream.json().catch(() => ({}));
+      return NextResponse.json(data, { status: upstream.status });
+    } catch {
+      return NextResponse.json(
+        { error_code: "benefits_svc_unreachable", error_message: "benefits-svc did not respond" },
+        { status: 503 }
+      );
+    }
   }
 
   if (endpoint === "payroll-exceptions") {
@@ -778,12 +826,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
 
   // ── Compliance & Risk POST Handlers ─────────────────────────────────────────
   if (endpoint === "filing-tracker/requirements") {
-    return NextResponse.json({
-      req_id: `ft-${Date.now()}`,
-      status: "PENDING",
-      created_at: new Date().toISOString(),
-      ...body,
-    }, { status: 201 });
+    const res = await createFilingRequirement(body as unknown as Parameters<typeof createFilingRequirement>[0], identity);
+    if (!res.ok) {
+      return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+    }
+    return NextResponse.json(res.data, { status: 201 });
   }
 
   if (endpoint === "exception-escalation/exceptions") {
@@ -795,15 +842,74 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     }, { status: 201 });
   }
 
+  if (endpoint === "compliance-status/evaluate") {
+    const res = await evaluateCompliance(body as Parameters<typeof evaluateCompliance>[0], identity);
+    if (!res.ok) {
+      return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+    }
+    return NextResponse.json(res.data, { status: 200 });
+  }
+
   // ── Audit Event Store POST Handlers ─────────────────────────────────────────
   if (endpoint === "audit/events") {
-    return NextResponse.json({
-      event_id: `ae-${Date.now()}`,
-      outcome: "SUCCESS",
-      hash: "e7b8c9d0123456789abcdef...",
-      occurred_at: new Date().toISOString(),
+    const res = await apiPost("auditEventStore", "/v1/events", {
       ...body,
-    }, { status: 201 });
+      tenant_id: identity.tenantId,
+      legal_entity_id: identity.legalEntityId,
+      principal_id: identity.principalId,
+    }, { identity, purposeContext: "AUDIT_EVENT_INGESTION" });
+    if (!res.ok) {
+      return NextResponse.json({ error: res.error.message }, { status: res.error.status ?? 500 });
+    }
+    return NextResponse.json(res.data, { status: 201 });
+  }
+
+  // ── Event Schemas POST Handler ───────────────────────────────────────────────
+  if (path[0] === "schemas" && path[2] === "versions" && path[1]) {
+    const res = await registerVersion(path[1], body as any, identity);
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: res.error.message, violations: (res.error as any).body?.violations },
+        { status: res.error.status ?? 500 }
+      );
+    }
+    return NextResponse.json(res.data, { status: 201 });
+  }
+
+  if (endpoint === "evidence-manifests" || endpoint === "evidence/manifests") {
+    const base = (process.env.ZOIKO_EVIDENCE_MANIFEST_URL ?? "http://localhost:8095").replace(/\/$/, "");
+    try {
+      const payload = {
+        tenant_id: identity.tenantId,
+        legal_entity_id: identity.legalEntityId,
+        requested_by: identity.principalId,
+        ...body,
+      };
+      const upstream = await fetch(`${base}/v1/evidence-manifests`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-Tenant-Id": identity.tenantId,
+          "X-Principal-Id": identity.principalId,
+          "X-Legal-Entity-Id": identity.legalEntityId,
+          "X-Request-Id": crypto.randomUUID(),
+          "X-Correlation-ID": crypto.randomUUID(),
+          "X-Source-Channel": "web",
+          "Idempotency-Key": crypto.randomUUID(),
+          "X-Purpose-Context": "AUDIT_DISCOVERY",
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await upstream.json().catch(() => ({}));
+      return NextResponse.json(data, { status: upstream.status });
+    } catch {
+      return NextResponse.json(
+        { error: "evidence_manifest_svc_unreachable", detail: "evidence-manifest-svc did not respond" },
+        { status: 503 }
+      );
+    }
   }
 
   // Generic fallback for any other write

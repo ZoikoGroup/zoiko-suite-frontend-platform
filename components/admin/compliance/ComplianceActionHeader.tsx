@@ -4,9 +4,9 @@ import { useState } from "react";
 import { Plus, ShieldCheck, FileCheck, CheckCircle2, X, Server, Zap, Loader2 } from "lucide-react";
 
 const SERVICES = [
-  { name: "filing-tracker-svc",       port: "8136", color: "bg-emerald-500" },
-  { name: "compliance-status-svc",    port: "8137", color: "bg-emerald-500" },
-  { name: "exception-escalation-svc", port: "8138", color: "bg-emerald-500" },
+  { name: "filing-tracker-svc",       port: "8131", color: "bg-emerald-500" },
+  { name: "compliance-status-svc",    port: "8132", color: "bg-emerald-500" },
+  { name: "exception-escalation-svc", port: "8133", color: "bg-emerald-500" },
   { name: "evidence-manifest-svc",    port: "8095", color: "bg-emerald-500" },
   { name: "obligations-svc",          port: "8088", color: "bg-emerald-500" },
 ];
@@ -203,7 +203,7 @@ function EvaluateComplianceModal({ onClose }: { onClose: () => void }) {
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <CheckCircle2 className="h-10 w-10 text-emerald-500" />
               <p className="font-semibold text-slate-800 dark:text-slate-200">Compliance Evaluated</p>
-              <p className="text-xs text-slate-500">Evaluation recorded in compliance-status-svc (:8137).</p>
+              <p className="text-xs text-slate-500">Evaluation recorded in compliance-status-svc (:8132).</p>
               <button onClick={onClose} className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white">Done</button>
             </div>
           ) : (
@@ -286,25 +286,38 @@ function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [scenarioType, setScenarioType] = useState("COMPLIANCE_REVIEW");
   const [requestedBy, setRequestedBy] = useState("");
+  const [fromDate, setFromDate] = useState("2026-01-01");
+  const [toDate, setToDate] = useState("2026-12-31");
+  const [generatedManifest, setGeneratedManifest] = useState<{
+    manifest_id: string;
+    checksum_sha256?: string;
+    status: string;
+  } | null>(null);
 
   async function handleUpload() {
     setSubmitting(true);
     setError(null);
     try {
+      const fromISO = fromDate ? `${fromDate}T00:00:00Z` : "2026-01-01T00:00:00Z";
+      const toISO = toDate ? `${toDate}T23:59:59Z` : "2026-12-31T23:59:59Z";
+
       const res = await fetch("/api/v1/evidence-manifests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scenario_type: scenarioType,
           requested_by: requestedBy || "admin@zoiko.com",
+          governance_decisions_from: fromISO,
+          governance_decisions_to: toISO,
         }),
       });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Failed to generate evidence manifest");
+        setError(data.detail || data.error || "Failed to generate evidence manifest");
         setSubmitting(false);
         return;
       }
+      setGeneratedManifest(data);
     } catch (err) {
       console.warn("API call degraded safely:", err);
       setError("Network error - service may be unavailable");
@@ -330,12 +343,34 @@ function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <div className="p-5">
-          {done ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
+          {done && generatedManifest ? (
+            <div className="flex flex-col items-center gap-3 py-4 text-center">
               <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-              <p className="font-semibold text-slate-800 dark:text-slate-200">Evidence Manifest Generated</p>
-              <p className="text-xs text-slate-500">Manifest created in evidence-manifest-svc (:8095).</p>
-              <button onClick={onClose} className="mt-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white">Done</button>
+              <div>
+                <p className="font-semibold text-slate-800 dark:text-slate-200">Evidence Manifest Generated</p>
+                <p className="text-xs text-slate-500 mt-0.5">Verified & registered in evidence-manifest-svc (:8095)</p>
+              </div>
+
+              <div className="w-full rounded-lg bg-slate-50 p-3 text-left dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2 mt-2">
+                <div>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Manifest ID</span>
+                  <p className="font-mono text-xs text-slate-800 dark:text-slate-200 select-all break-all">{generatedManifest.manifest_id}</p>
+                </div>
+                {generatedManifest.checksum_sha256 && (
+                  <div>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">SHA-256 Checksum</span>
+                    <p className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400 select-all break-all">{generatedManifest.checksum_sha256}</p>
+                  </div>
+                )}
+                <div>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Status</span>
+                  <span className="ml-2 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    {generatedManifest.status}
+                  </span>
+                </div>
+              </div>
+
+              <button onClick={onClose} className="mt-3 w-full rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors">Done</button>
             </div>
           ) : (
             <div className="space-y-4">
@@ -349,13 +384,33 @@ function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
                 <select
                   value={scenarioType}
                   onChange={(e) => setScenarioType(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700 text-slate-800 dark:text-slate-200"
                 >
                   <option value="COMPLIANCE_REVIEW">Compliance Review</option>
                   <option value="AUDIT">Audit</option>
                   <option value="REGULATOR">Regulator Request</option>
                   <option value="LEGAL_DISCOVERY">Legal Discovery</option>
                 </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Decisions From</label>
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Decisions To</label>
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Requested By</label>
@@ -364,13 +419,13 @@ function UploadEvidenceModal({ onClose }: { onClose: () => void }) {
                   value={requestedBy}
                   onChange={(e) => setRequestedBy(e.target.value)}
                   placeholder="admin@zoiko.com"
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700 text-slate-800 dark:text-slate-200"
                 />
               </div>
               <button
                 onClick={handleUpload}
                 disabled={submitting}
-                className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-medium text-white flex items-center justify-center gap-1.5"
+                className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-medium text-white flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-colors"
               >
                 {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Generate Evidence Manifest"}
               </button>

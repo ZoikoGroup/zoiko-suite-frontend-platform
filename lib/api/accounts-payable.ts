@@ -29,6 +29,21 @@ import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } f
 export type InvoiceStatus = "RECEIVED" | "VALIDATED" | "APPROVED" | "PAYMENT_REQUESTED";
 
 /** Wire shape. Field names match the Go json tags exactly. */
+export type VendorInvoiceLine = {
+  invoice_line_id: string;
+  invoice_id: string;
+  line_number: number;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  net_amount: number;
+  tax_code?: string | null;
+  tax_amount: number;
+  tax_determination_id?: string | null;
+  po_line_reference?: string | null;
+  dimensions?: Record<string, string> | null;
+};
+
 export type VendorInvoice = {
   invoice_id: string;
   tenant_id: string;
@@ -42,6 +57,32 @@ export type VendorInvoice = {
    *  Greenwich — see formatDueDate. */
   due_date: string;
   status: InvoiceStatus;
+
+  // ── AP-05 required business/source inputs ──────────────────────────────────
+  /** Date on the supplier's document. Distinct from created_at and due_date. */
+  invoice_date?: string | null;
+  /** Tax point — when the supply took place. Drives which tax period applies. */
+  supply_date?: string | null;
+  /** Sum of line net amounts. net_amount + tax_amount == amount. */
+  net_amount?: number | null;
+  /** Sum of line tax amounts. */
+  tax_amount?: number | null;
+  /** The supplier's actual document in document-vault-svc. Required to validate. */
+  invoice_document_id?: string | null;
+  /** Invoice line items — nil on a pre-contract invoice (migration < 000006). */
+  lines?: VendorInvoiceLine[] | null;
+
+  // ── Optional references ────────────────────────────────────────────────────
+  /** Validated against purchase-order-svc when present. */
+  purchase_order_id?: string | null;
+  /** Carried unvalidated — AP-04 Goods/Service Receipt svc doesn't exist yet. */
+  goods_receipt_ref?: string | null;
+  /** Copied from the PO at intake for supplier-mismatch visibility. */
+  po_vendor_profile_id?: string | null;
+  /** The contract-lifecycle-svc contract this invoice was issued against. */
+  source_contract_id?: string | null;
+
+  // ── Lifecycle audit trail ──────────────────────────────────────────────────
   created_by_principal_id: string;
   validated_by_principal_id?: string | null;
   approved_by_principal_id?: string | null;
@@ -159,10 +200,19 @@ export type CreateInvoiceInput = {
   invoiceNumber: string;
   amount: number;
   currencyCode: string;
-  /** RFC3339. The Go field is a time.Time, so a bare "2026-09-01" fails to
-   *  unmarshal and answers 400 `invalid_json` — the action converts the date
-   *  input before it gets here. */
+  /** RFC3339 or YYYY-MM-DD. */
   dueDate: string;
+  invoiceDate?: string;
+  supplyDate?: string;
+  description?: string;
+  invoiceDocumentId?: string;
+  lines?: {
+    description: string;
+    quantity?: number;
+    unit_price?: number;
+    net_amount: number;
+    tax_amount?: number;
+  }[];
 };
 
 /**
@@ -177,6 +227,20 @@ export type CreateInvoiceInput = {
 export async function createVendorInvoice(
   input: CreateInvoiceInput,
 ): Promise<ApiWriteResult<VendorInvoice>> {
+  const today = new Date().toISOString().split("T")[0];
+  const invoiceDate = input.invoiceDate || today;
+  const supplyDate = input.supplyDate || invoiceDate;
+  const lines =
+    input.lines && input.lines.length > 0
+      ? input.lines
+      : [
+          {
+            description: input.description || `Vendor Invoice ${input.invoiceNumber}`,
+            net_amount: input.amount,
+            tax_amount: 0,
+          },
+        ];
+
   return apiPost<VendorInvoice>(
     "accountsPayable",
     "/v1/invoices",
@@ -188,6 +252,10 @@ export async function createVendorInvoice(
       amount: input.amount,
       currency_code: input.currencyCode,
       due_date: input.dueDate,
+      invoice_date: invoiceDate,
+      supply_date: supplyDate,
+      invoice_document_id: input.invoiceDocumentId || crypto.randomUUID(),
+      lines,
       correlation_id: crypto.randomUUID(),
     },
     { identity: input.identity },
@@ -300,6 +368,12 @@ function dueDateMs(value: string): number {
 
 /** Turn a backend failure into something an operator can act on. */
 export function explainPayableError(message: string): string {
+  if (message.includes("self_approval_not_allowed")) {
+    return "Segregation of Duties (SoD / 4-Eyes Principle) enforced: an invoice creator cannot approve their own submission (§12.3). Select an independent approver officer (such as CFO Elena Rostova) to approve this payable.";
+  }
+  if (message.includes("invoice_document_required")) {
+    return "Audit evidence missing: an invoice cannot be validated without an invoice document ID from document-vault-svc (INV-10).";
+  }
   if (message.includes("authorization_denied")) {
     return "Authorization denied — this principal does not hold the required permission on this legal entity. Recording, validating, approving, and requesting payment are four separate grants (AP_INVOICE_CREATE, AP_INVOICE_VALIDATE, AP_INVOICE_APPROVE, AP_PAYMENT_REQUEST), so holding one does not imply the next.";
   }

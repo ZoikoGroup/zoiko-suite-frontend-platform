@@ -1,17 +1,16 @@
 import { FileJson } from "lucide-react";
 import { cookies } from "next/headers";
 import { PanelEmptyState } from "@/components/admin/shared";
-import { CELL, HEAD } from "@/components/admin/shared/form";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
-  describeContract,
   describeVersionDiscipline,
   explainRegistryFailure,
   getLatest,
   listEventNames,
+  MAX_EVENT_NAMES_PAGE,
   type EventSchema,
 } from "@/lib/api/schemas";
-import { formatDate } from "@/lib/format";
+import { SchemaRegisterTable, type SchemaRegisterRow } from "./SchemaRegisterTable";
 
 async function sessionIdentity() {
   const store = await cookies();
@@ -21,42 +20,6 @@ async function sessionIdentity() {
     tenantId: session?.tenantId,
     legalEntityId: session?.legalEntityId,
   };
-}
-
-/**
- * Whether a version was checked, in the words of the question it answers.
- *
- * This used to print the stored code — BACKWARD or NONE — coloured green or
- * amber. The colour carried the entire meaning, and only to a reader who
- * already knew which code meant what. The code is still here, under the answer,
- * because it is what an auditor quotes.
- */
-function ModeCell({ mode, version }: { mode: string; version: number }) {
-  const explained = describeVersionDiscipline(mode, version);
-  // A single-version contract is neither checked nor unchecked: nothing was
-  // compared, because there was nothing to compare it with. This cell used to
-  // read as a clean green "checked" for every such event — a comparison the
-  // registry never made.
-  const first = version <= 1;
-  const tone = first
-    ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-    : explained.checked
-    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-    : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
-
-  return (
-    <div className="space-y-1">
-      <span
-        className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${tone}`}
-        title={explained.meaning}
-      >
-        {first ? "First version" : explained.checked ? "Checked" : "Not checked"}
-      </span>
-      <span className="block font-mono text-[11px] text-slate-400 dark:text-slate-500">
-        {explained.raw}
-      </span>
-    </div>
-  );
 }
 
 /**
@@ -70,7 +33,13 @@ function ModeCell({ mode, version }: { mode: string; version: number }) {
  */
 export async function SchemaRegisterPanel() {
   const identity = await sessionIdentity();
-  const namesResult = await listEventNames(identity);
+  // Ask for the service's own paging ceiling rather than its default page of
+  // 100 — the register was previously read with no limit at all, which meant
+  // the backend's default silently applied with no way for a reader to know
+  // whether the table in front of them was the whole register or its first
+  // page. MAX_EVENT_NAMES_PAGE is that same ceiling, so a truncation notice
+  // below can now say so honestly when there are more than that.
+  const namesResult = await listEventNames(identity, { limit: MAX_EVENT_NAMES_PAGE });
 
   if (!namesResult.ok) {
     return (
@@ -118,6 +87,7 @@ export async function SchemaRegisterPanel() {
       !describeVersionDiscipline(row.schema.compatibility_mode, row.schema.version).checked,
   ).length;
   const unreadable = latest.filter((row) => !row.schema).length;
+  const truncated = eventNames.length === MAX_EVENT_NAMES_PAGE;
 
   return (
     <div className="space-y-4">
@@ -145,54 +115,15 @@ export async function SchemaRegisterPanel() {
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-          <thead className="bg-slate-50 dark:bg-slate-800/50">
-            <tr>
-              <th className={HEAD}>Event</th>
-              <th className={HEAD}>In use now</th>
-              <th className={HEAD}>What it must contain</th>
-              <th className={HEAD}>Was the change checked?</th>
-              <th className={HEAD}>Published by</th>
-              <th className={HEAD}>Registered</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
-            {latest.map(({ name, schema }) => (
-              <tr key={name} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                <td className={`${CELL} font-mono text-xs`}>{name}</td>
-                {schema ? (
-                  <>
-                    <td className={CELL}>Version {schema.version}</td>
-                    <td className={CELL}>{describeContract(schema.json_schema)}</td>
-                    <td className={CELL}>
-                      <ModeCell mode={schema.compatibility_mode} version={schema.version} />
-                    </td>
-                    <td className={CELL}>
-                      {/* Truthy, not nullish: the column is omitted when empty,
-                          but a stored "" would otherwise render a blank cell
-                          that reads as a value nobody wrote down. */}
-                      {schema.owning_service ? (
-                        schema.owning_service
-                      ) : (
-                        <span className="text-slate-400 dark:text-slate-500">Not recorded</span>
-                      )}
-                    </td>
-                    <td className={CELL}>{formatDate(schema.registered_at)}</td>
-                  </>
-                ) : (
-                  // The name came back from the register, so the event exists;
-                  // only this read of its current version failed. Saying so
-                  // beats five dashes, which read as "nothing is registered".
-                  <td className={`${CELL} text-slate-400 dark:text-slate-500`} colSpan={5}>
-                    Its current version could not be read just now
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {truncated && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300">
+          This register holds at least {MAX_EVENT_NAMES_PAGE} distinct events — the registry's own page
+          ceiling — so more may exist beyond what is shown below. Look a specific event up directly if it
+          is not in this list.
+        </div>
+      )}
+
+      <SchemaRegisterTable rows={latest as SchemaRegisterRow[]} />
     </div>
   );
 }

@@ -9,12 +9,20 @@ type Step = {
   title: string;
   service: string;
   port: string;
-  count: number;
+  count: number | null;
   status: "complete" | "active" | "pending";
   detail: string;
-  examples: string[];
 };
 
+// Only three of these six steps have a real, correctly-sourced proxy
+// endpoint (see app/api/v1/[...path]/route.ts): journal-entries
+// (general-ledger-svc), fiscal-periods (financial-close-svc), and
+// accounts-receivable's own invoice list. bank-reconciliation-svc,
+// accounts-payable-svc and intercompany-accounting-svc have no proxied list
+// endpoint at all — this widget previously "counted" them by reading
+// cash-positions (treasury) or journal-entries (GL) instead and displaying
+// the result under the wrong service's name. Rather than keep guessing,
+// those three steps show no live count.
 function useLiveStepCounts(): Record<string, number> {
   const [counts, setCounts] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -23,12 +31,6 @@ function useLiveStepCounts(): Record<string, number> {
       const endpoints: [string, string][] = [
         ["journal-entries", "ar-invoice"],
         ["journal-entries", "gl-posting"],
-        ["cash-positions", "bank-rec"],
-        ["journal-entries", "ap-settle"],
-        ["journal-entries", "intercompany"],
-        // The close stage counts fiscal periods, not journals. It read
-        // journal-entries until now, so the card labelled financial-close-svc
-        // was showing the ledger's figure under the close service's name.
         ["fiscal-periods", "close"],
       ];
       const results = await Promise.allSettled(
@@ -71,51 +73,46 @@ export function FinanceProcessTimeline() {
       count: liveCounts["ar-invoice"] ?? 0,
       status: "complete",
       detail: "Customer invoice generated in AR service and transmitted to counterparty with payment terms.",
-      examples: ["INV-2026-0891 · $120,000 USD", "INV-2026-0892 · £45,000 GBP"],
     },
     {
       id: "gl-posting",
       icon: Scale,
       title: "GL Voucher Posted",
       service: "general-ledger-svc",
-      port: ":8100",
+      port: ":8098",
       count: liveCounts["gl-posting"] ?? 0,
       status: "complete",
-      detail: "Double-entry debit/credit vouchers posted to Chart of Accounts (1100-AR Dr / 4000-REV Cr).",
-      examples: ["jv-2026-001 (Dr 1100-AR $120K)", "jv-2026-002 (Cr 4000-REV $120K)"],
+      detail: "Double-entry debit/credit journals posted to the Chart of Accounts.",
     },
     {
       id: "bank-rec",
       icon: Landmark,
       title: "Bank Rec Matched",
       service: "bank-reconciliation-svc",
-      port: ":8103",
-      count: liveCounts["bank-rec"] ?? 0,
+      port: ":8102",
+      count: null,
       status: "active",
-      detail: "Bank feed transactions matched against GL posting records with automated rule clearance.",
-      examples: ["JPMorgan Feed #99812 · Matched $120,000"],
+      detail: "Bank feed transactions matched against GL posting records with automated rule clearance. No count is shown here — this page has no real query into bank-reconciliation-svc's own match register; see the Bank Reconciliation panel for live figures.",
     },
     {
       id: "ap-settle",
       icon: DollarSign,
       title: "AP Disbursement",
       service: "accounts-payable-svc",
-      port: ":8102",
-      count: liveCounts["ap-settle"] ?? 0,
+      port: ":8099",
+      count: null,
       status: "active",
-      detail: "Vendor bill payment execution and disbursement voucher posting.",
-      examples: ["BILL-2026-0412 · $450,000 USD to Acme Cloud Inc."],
+      detail: "Vendor bill payment execution and disbursement voucher posting. No count is shown here — this page has no real query into accounts-payable-svc.",
     },
     {
       id: "intercompany",
       icon: Building2,
       title: "IC Elimination",
       service: "intercompany-accounting-svc",
-      port: ":8106",
-      count: liveCounts["intercompany"] ?? 0,
+      port: ":8105",
+      count: null,
       status: "pending",
-      detail: "Cross-entity transfer pricing and intercompany balance eliminations.",
-      examples: ["IC-US-UK-2026-07 · £35,000 management fee elimination"],
+      detail: "Cross-entity transfer pricing and intercompany balance eliminations. No count is shown here — this page has no real query into intercompany-accounting-svc.",
     },
     {
       id: "close",
@@ -125,8 +122,7 @@ export function FinanceProcessTimeline() {
       port: ":8104",
       count: liveCounts["close"] ?? 0,
       status: "pending",
-      detail: "Month-end period lock, consolidation run, and financial statement publication.",
-      examples: ["Close Period 2026-M07 · Status: OPEN"],
+      detail: "Month-end period lock, consolidation run, and financial statement publication. Count is the fiscal periods financial-close-svc tracks, not a transaction count.",
     },
   ];
 
@@ -166,7 +162,7 @@ export function FinanceProcessTimeline() {
                     {step.title}
                   </span>
                   <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
-                    {step.count} items
+                    {step.count === null ? "—" : `${step.count} items`}
                   </span>
                   <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{step.port}</span>
                 </button>
@@ -191,14 +187,7 @@ export function FinanceProcessTimeline() {
                 <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{openStep.title}</h4>
                 <span className="font-mono text-[11px] text-slate-500">{openStep.service} {openStep.port}</span>
               </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">{openStep.detail}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {openStep.examples.map((ex) => (
-                  <span key={ex} className="rounded-md bg-white border border-slate-200 px-2.5 py-1 text-[11px] font-mono text-slate-600 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400">
-                    {ex}
-                  </span>
-                ))}
-              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400">{openStep.detail}</p>
             </div>
             <button onClick={() => setActiveStep(null)} className="rounded-md p-1 text-slate-400 hover:text-slate-600">
               <X className="h-3.5 w-3.5" />

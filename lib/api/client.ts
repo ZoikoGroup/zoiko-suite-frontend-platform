@@ -111,6 +111,7 @@ export async function apiGet<T>(
   let response: Response;
   try {
     response = await fetch(url, {
+      cache: "no-store",
       headers: {
         Accept: "application/json",
         // materialWrite: false — a read carries no idempotency key. See envelope.ts.
@@ -175,13 +176,26 @@ export async function apiGet<T>(
 async function readErrorDetail(response: Response): Promise<{ detail: string; body?: unknown }> {
   return response
     .json()
-    .then((body: { error?: string; field?: string; message?: string; detail?: string }) => ({
-      detail: [body.error, body.field, body.message, body.detail].filter(Boolean).join(": "),
-      // Returned alongside the folded string, not instead of it: a caller that
-      // needs a structured member (schema-registry-svc's `violations`) reads it
-      // here rather than trying to recover it from prose. See ApiError.body.
-      body: body as unknown,
-    }))
+    .then((body: { error?: string; field?: string; message?: string; detail?: string }) => {
+      const extra = body as Record<string, unknown>;
+      return {
+        detail: [
+          body.error,
+          body.field,
+          body.message,
+          body.detail,
+          extra.mismatch_reason as string,
+          extra.error_code as string,
+          extra.error_message as string,
+        ]
+          .filter(Boolean)
+          .join(": "),
+        // Returned alongside the folded string, not instead of it: a caller that
+        // needs a structured member (schema-registry-svc's `violations`) reads it
+        // here rather than trying to recover it from prose. See ApiError.body.
+        body: body as unknown,
+      };
+    })
     .catch(() => ({ detail: "" }));
 }
 

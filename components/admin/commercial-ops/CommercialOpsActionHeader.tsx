@@ -63,9 +63,9 @@ export function CommercialOpsActionHeader() {
             <span className="text-slate-400 dark:text-slate-500">:{svc.port}</span>
           </span>
         ))}
-        <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
+        <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
           <Zap className="h-3 w-3" aria-hidden="true" />
-          four of five wired to this console
+          all five wired to this console
         </span>
       </div>
     </div>

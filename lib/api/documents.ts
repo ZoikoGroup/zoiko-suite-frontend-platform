@@ -27,6 +27,8 @@
 //     current_version; a version is never rewritten, and nothing is deleted.
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
+import { REQUEST_TIMEOUT_MS, serviceLabel, serviceUrl } from "./config";
+import { envelopeHeaders } from "./envelope";
 
 export const CLASSIFICATIONS = ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const;
 export type Classification = (typeof CLASSIFICATIONS)[number];
@@ -83,6 +85,9 @@ export type DocumentAccessEntry = {
  * read from but never browsed, which is why it had no console page: there was
  * nothing to put on one.
  */
+/** The service's own paging ceiling. */
+export const MAX_DOCUMENTS_PAGE = 500;
+
 export async function listDocuments(params: {
   identity: Identity;
   legalEntityId: string;
@@ -179,8 +184,91 @@ export async function createDocument(params: {
       ...(params.retentionPolicy ? { retention_policy: params.retentionPolicy } : {}),
       ...(params.residencyRegionCode ? { residency_region_code: params.residencyRegionCode } : {}),
     },
-    { identity: params.identity },
+    { identity: params.identity, purposeContext: "DOCUMENT_FILING" },
   );
+}
+
+export type DocumentContent = {
+  contentBase64: string;
+  contentType: string;
+  checksumSha256: string;
+};
+
+/**
+ * Fetch a document's actual bytes.
+ *
+ * This does not go through apiGet: the endpoint answers with the raw file
+ * body (Content-Type set to whatever was filed), not JSON, and apiGet always
+ * calls response.json(). The bytes are base64-encoded here so a Server
+ * Action can hand them to the browser the same way createDocument accepts
+ * them going in — inline, not as a second multipart round trip.
+ *
+ * Needs DOCUMENT_DOWNLOAD, a separate grant from DOCUMENT_READ, and appends
+ * a DOWNLOAD row to the document's access log — same as every other read
+ * path on this service.
+ */
+export async function getDocumentContent(params: {
+  identity: Identity;
+  documentId: string;
+  version?: number;
+}): Promise<ApiResult<DocumentContent>> {
+  const service = "documentVault" as const;
+  const url = new URL(
+    serviceUrl(service) + `/v1/documents/${encodeURIComponent(params.documentId)}/content`,
+  );
+  if (params.version !== undefined) {
+    url.searchParams.set("version", String(params.version));
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      cache: "no-store",
+      headers: envelopeHeaders({ identity: params.identity, materialWrite: false }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceLabel(service)} did not respond within ${REQUEST_TIMEOUT_MS}ms`
+          : `${serviceLabel(service)} is unreachable at ${serviceUrl(service)}`,
+      },
+    };
+  }
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const body = (await response.json()) as { error?: string; field?: string; message?: string };
+      detail = [body.error, body.field, body.message].filter(Boolean).join(": ");
+    } catch {
+      // Body was not JSON — fall through with no extra detail.
+    }
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: response.status,
+        message: detail
+          ? `${serviceLabel(service)} rejected the request (${response.status}) — ${detail}`
+          : `${serviceLabel(service)} returned ${response.status} for document content`,
+      },
+    };
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return {
+    ok: true,
+    data: {
+      contentBase64: buffer.toString("base64"),
+      contentType: response.headers.get("Content-Type") ?? "application/octet-stream",
+      checksumSha256: response.headers.get("X-Checksum-SHA256") ?? "",
+    },
+  };
 }
 
 /** Append a new version. The previous one is never rewritten. */
@@ -194,7 +282,7 @@ export async function addVersion(params: {
     "documentVault",
     `/v1/documents/${encodeURIComponent(params.documentId)}/versions`,
     { content_type: params.contentType, content_base64: params.contentBase64 },
-    { identity: params.identity },
+    { identity: params.identity, purposeContext: "DOCUMENT_VERSION_APPEND" },
   );
 }
 

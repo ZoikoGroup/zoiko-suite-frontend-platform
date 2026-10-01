@@ -101,7 +101,7 @@ export type BenefitPlan = {
   tenant_id: string;
   legal_entity_id: string;
   name: string;
-  benefit_type: string;
+  plan_type: string;
   provider_name: string;
   employer_contribution_percent: number;
   currency: string;

@@ -145,6 +145,8 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; port: number }[]> = {
   // ports belonging to jurisdiction-svc and policy-svc — so they reported READY.
   "audit-events": [{ name: "audit-event-store-svc", port: 8084 }],
   "purchase-requests": [{ name: "purchase-request-svc", port: 8100 }],
+  "evidence-manifests": [{ name: "evidence-manifest-svc", port: 8095 }],
+  "workflow-history": [{ name: "workflow-history-svc", port: 8097 }],
 };
 
 export type DomainHealth = {

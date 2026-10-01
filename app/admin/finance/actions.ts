@@ -36,9 +36,29 @@ import {
   formatAmount,
   NEXT_STEP as JOURNAL_NEXT_STEP,
   JOURNAL_TYPES,
+  submitJournal,
+  approveJournal,
+  rejectJournal,
+  requestPosting,
+  getAvailableActions,
+  getJournalHistory,
+  type JournalHistoryEntry,
+  createAccount,
+  deactivateAccount,
+  setAccountMapping,
+  compileTrialBalance,
+  getTrialBalance,
+  queryLedgerEntries,
+  queryAccountBalance,
+  ACCOUNT_TYPES,
+  type TrialBalanceSnapshot,
+  type LedgerEntry,
+  type LedgerBalance,
   type CreateJournalLineInput,
   type JournalAction,
   type JournalType,
+  type JournalWithLines,
+  type AccountType,
 } from "@/lib/api/general-ledger";
 import {
   ingestStatementLine,
@@ -70,11 +90,15 @@ import { formatMoney } from "@/lib/format";
 import type { LookupState } from "@/components/admin/shared/lookup";
 import {
   isReceivableHop,
+  type AccountActionState,
+  type ApprovalActionState,
   type CloseActionState,
   type LedgerActionState,
+  type MappingActionState,
   type PayableActionState,
   type ReceivableActionState,
   type ReconciliationActionState,
+  type TrialBalanceActionState,
 } from "./state";
 
 // Writes end in refresh(), not revalidatePath. Nothing on this route is cached
@@ -123,6 +147,13 @@ export async function recordVendorInvoice(
   const amountRaw = String(formData.get("amount") ?? "").trim();
   const currencyCode = String(formData.get("currency_code") ?? "").trim();
   const dueDateRaw = String(formData.get("due_date") ?? "").trim();
+  const invoiceDateRaw = String(formData.get("invoice_date") ?? "").trim();
+  const supplyDateRaw = String(formData.get("supply_date") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  // Operator-supplied document vault UUID. Required at the validate step (INV-10).
+  // Optional at intake — an invoice keyed before its scan arrives is a legitimate draft.
+  const invoiceDocumentIdRaw = String(formData.get("invoice_document_id") ?? "").trim();
+  const invoiceDocumentId = invoiceDocumentIdRaw || undefined;
 
   if (!vendorId) {
     return {
@@ -141,15 +172,14 @@ export async function recordVendorInvoice(
   }
   if (!currencyCode) return { status: "error", message: "Currency is required." };
 
-  // The service now accepts a bare "2026-09-01" as well as RFC3339 — due_date is
-  // a DATE column, so a day is the honest unit. This still sends the explicit
-  // instant: it pins the value to UTC midnight rather than relying on the
-  // service's parsing, and a date input is validated here anyway so a direct POST
-  // is held to the same contract.
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDateRaw)) {
     return { status: "error", message: "A due date is required, as YYYY-MM-DD." };
   }
   const dueDate = `${dueDateRaw}T00:00:00Z`;
+
+  const today = new Date().toISOString().split("T")[0];
+  const invoiceDate = /^\d{4}-\d{2}-\d{2}$/.test(invoiceDateRaw) ? invoiceDateRaw : today;
+  const supplyDate = /^\d{4}-\d{2}-\d{2}$/.test(supplyDateRaw) ? supplyDateRaw : invoiceDate;
 
   const result = await createVendorInvoice({
     identity,
@@ -158,6 +188,10 @@ export async function recordVendorInvoice(
     amount,
     currencyCode,
     dueDate,
+    invoiceDate,
+    supplyDate,
+    description: description || `Vendor Invoice ${invoiceNumber}`,
+    invoiceDocumentId,
   });
 
   if (!result.ok) {
@@ -215,6 +249,7 @@ export async function advanceInvoice(
 
   const invoiceId = String(formData.get("invoice_id") ?? "").trim();
   const rawAction = String(formData.get("action") ?? "").trim();
+  const approverPrincipalId = String(formData.get("approver_principal_id") ?? "").trim();
 
   if (!invoiceId) return { status: "error", message: "Missing invoice ID." };
   if (!isUuid(invoiceId)) {
@@ -228,7 +263,15 @@ export async function advanceInvoice(
   }
   const action: InvoiceAction = rawAction;
 
-  const result = await advanceVendorInvoice(invoiceId, action, identity);
+  // Maker-Checker Segregation of Duties:
+  // For the 'approve' step, if an independent approver principal is selected
+  // (e.g. Elena Rostova / CFO), use that principal so the 4-eyes check is satisfied.
+  const effectiveIdentity: SessionIdentity = {
+    ...identity,
+    principalId: rawAction === "approve" && approverPrincipalId ? approverPrincipalId : identity.principalId,
+  };
+
+  const result = await advanceVendorInvoice(invoiceId, action, effectiveIdentity);
 
   if (!result.ok) {
     if (result.error.status === 422) {
@@ -398,6 +441,7 @@ export async function recordJournal(
   // Optional, and unvalidatable: REF-06 Accounting Book / Ledger Basis does not
   // exist, so a book named here is recorded as supplied and checked by nothing.
   const bookId = String(formData.get("book_id") ?? "").trim() || undefined;
+  const correlationId = String(formData.get("correlation_id") ?? "").trim() || undefined;
 
   const accountCodes = formData.getAll("account_code").map((value) => String(value).trim());
   const debits = formData.getAll("debit").map((value) => String(value).trim());
@@ -464,6 +508,7 @@ export async function recordJournal(
     postingDate,
     currencyCode,
     bookId,
+    correlationId,
   });
 
   if (!result.ok) {
@@ -634,9 +679,9 @@ export async function reverseJournalEntry(
  * upstream event or governance decision that caused it.
  */
 export async function lookupJournal(
-  _previous: LookupState,
+  _previous: LookupState<JournalWithLines>,
   formData: FormData,
-): Promise<LookupState> {
+): Promise<LookupState<JournalWithLines>> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -1416,4 +1461,386 @@ export async function advanceCustomerInvoice(
     stage: invoice.status,
     message: detail,
   };
+}
+
+// ─── ACC-03 approval lifecycle (general-ledger-svc) ──────────────────────────
+
+const APPROVAL_EXPIRED: ApprovalActionState = {
+  status: "error",
+  message: "Your session has expired — sign in again.",
+};
+
+/** Shared result handling for the four plain lifecycle commands below — none
+ *  of them take more than a journal id (reject also takes a reason), and all
+ *  four fail the same three ways. */
+function approvalResult(
+  journalId: string,
+  result: Awaited<ReturnType<typeof submitJournal>>,
+  verb: string,
+): ApprovalActionState {
+  if (!result.ok) {
+    const { status, message } = result.error;
+    if (status === 403) return { status: "refused", journalId, message: explainLedgerError(message) };
+    if (status === 409 || status === 422) {
+      return { status: "out-of-sequence", journalId, message: explainLedgerError(message) };
+    }
+    return { status: "error", journalId, message: explainLedgerError(message) };
+  }
+  refresh();
+  const journal = result.data;
+  return {
+    status: "done",
+    journalId: journal.journal_id,
+    approvalStatus: journal.approval_status,
+    message: `Journal ${journal.journal_id} ${verb} — now ${journal.approval_status}.`,
+  };
+}
+
+export async function submitJournalAction(
+  _previous: ApprovalActionState,
+  formData: FormData,
+): Promise<ApprovalActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return APPROVAL_EXPIRED;
+  }
+  const journalId = String(formData.get("journal_id") ?? "").trim();
+  if (!journalId || !isUuid(journalId)) return { status: "error", message: "A journal ID (UUID) is required." };
+
+  const result = await submitJournal(journalId, identity);
+  return approvalResult(journalId, result, "submitted for approval");
+}
+
+export async function approveJournalAction(
+  _previous: ApprovalActionState,
+  formData: FormData,
+): Promise<ApprovalActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return APPROVAL_EXPIRED;
+  }
+  const journalId = String(formData.get("journal_id") ?? "").trim();
+  if (!journalId || !isUuid(journalId)) return { status: "error", message: "A journal ID (UUID) is required." };
+
+  const result = await approveJournal(journalId, identity);
+  return approvalResult(journalId, result, "approved");
+}
+
+export async function rejectJournalAction(
+  _previous: ApprovalActionState,
+  formData: FormData,
+): Promise<ApprovalActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return APPROVAL_EXPIRED;
+  }
+  const journalId = String(formData.get("journal_id") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!journalId || !isUuid(journalId)) return { status: "error", message: "A journal ID (UUID) is required." };
+  if (!reason) return { status: "error", message: "A reason is required to reject a journal." };
+
+  const result = await rejectJournal(journalId, reason, identity);
+  return approvalResult(journalId, result, "rejected");
+}
+
+export async function requestPostingAction(
+  _previous: ApprovalActionState,
+  formData: FormData,
+): Promise<ApprovalActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return APPROVAL_EXPIRED;
+  }
+  const journalId = String(formData.get("journal_id") ?? "").trim();
+  if (!journalId || !isUuid(journalId)) return { status: "error", message: "A journal ID (UUID) is required." };
+
+  const result = await requestPosting(journalId, identity);
+  return approvalResult(journalId, result, "moved to posting-requested");
+}
+
+/** Which lifecycle commands the service reports as legal on this journal
+ *  right now, derived from its own ValidApprovalTransitions — never guessed
+ *  client-side. Returns an empty list on any failure; the panel treats that
+ *  the same as "nothing more to do here" rather than surfacing a second error
+ *  banner beside whatever the lookup itself already reported. */
+export async function fetchAvailableActionsAction(journalId: string): Promise<string[]> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return [];
+  }
+  const result = await getAvailableActions(journalId, identity);
+  return result.ok ? result.data.actions : [];
+}
+
+export type JournalHistoryResult =
+  | { ok: true; entries: JournalHistoryEntry[] }
+  | { ok: false; message: string };
+
+export async function fetchJournalHistoryAction(journalId: string): Promise<JournalHistoryResult> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ok: false, message: "Your session has expired — sign in again." };
+  }
+  const result = await getJournalHistory(journalId, identity);
+  if (!result.ok) return { ok: false, message: explainLedgerError(result.error.message) };
+  return { ok: true, entries: result.data };
+}
+
+// ─── ACC-01 Chart of Accounts (general-ledger-svc) ───────────────────────────
+
+export async function createAccountAction(
+  _previous: AccountActionState,
+  formData: FormData,
+): Promise<AccountActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const accountCode = String(formData.get("account_code") ?? "").trim();
+  const accountName = String(formData.get("account_name") ?? "").trim();
+  const accountType = String(formData.get("account_type") ?? "").trim();
+  const isControlAccount = formData.get("is_control_account") === "on";
+  const directPostingRestricted = formData.get("direct_posting_restricted") === "on";
+
+  if (!accountCode) return { status: "error", message: "An account code is required." };
+  if (!accountName) return { status: "error", message: "An account name is required." };
+  if (!ACCOUNT_TYPES.some((t) => t.value === accountType)) {
+    return { status: "error", message: "Choose an account type: Asset, Liability, Equity, Revenue, or Expense." };
+  }
+
+  const result = await createAccount({
+    identity,
+    accountCode,
+    accountName,
+    accountType: accountType as AccountType,
+    isControlAccount,
+    directPostingRestricted,
+  });
+
+  if (!result.ok) {
+    if (result.error.status === 409) {
+      return {
+        status: "duplicate",
+        accountCode,
+        message: `An account with code ${accountCode} already exists in the Chart of Accounts.`,
+      };
+    }
+    return { status: "error", message: explainLedgerError(result.error.message) };
+  }
+
+  refresh();
+  const account = result.data;
+  return {
+    status: "created",
+    accountCode: account.account_code,
+    message: `Account ${account.account_code} (${account.account_name}) created as ${account.account_type}, status ACTIVE.${
+      account.direct_posting_restricted ? " Direct posting is restricted — an explicit override is required to post to it manually." : ""
+    }`,
+  };
+}
+
+export async function deactivateAccountAction(
+  _previous: AccountActionState,
+  formData: FormData,
+): Promise<AccountActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const accountCode = String(formData.get("account_code") ?? "").trim();
+  if (!accountCode) return { status: "error", message: "An account code is required." };
+
+  const result = await deactivateAccount(accountCode, identity);
+  if (!result.ok) {
+    return { status: "error", message: explainLedgerError(result.error.message) };
+  }
+
+  refresh();
+  const account = result.data;
+  return {
+    status: "deactivated",
+    accountCode: account.account_code,
+    message: `Account ${account.account_code} is now INACTIVE. This never deletes it — postings that already reference it are untouched, and it is refused for any new one.`,
+  };
+}
+
+// ─── ACC-02 Account Mapping (general-ledger-svc) ─────────────────────────────
+
+export async function setAccountMappingAction(
+  _previous: MappingActionState,
+  formData: FormData,
+): Promise<MappingActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const mappingKey = String(formData.get("mapping_key") ?? "").trim();
+  const accountCode = String(formData.get("account_code") ?? "").trim();
+  if (!mappingKey) return { status: "error", message: "A mapping key is required." };
+  if (!accountCode) return { status: "error", message: "An account code is required." };
+
+  const result = await setAccountMapping(mappingKey, accountCode, identity);
+  if (!result.ok) {
+    return { status: "error", message: explainLedgerError(result.error.message) };
+  }
+
+  refresh();
+  const mapping = result.data;
+  return {
+    status: "set",
+    mappingKey: mapping.mapping_key,
+    message: `"${mapping.mapping_key}" now maps to account ${mapping.account_code}, effective ${new Date(mapping.effective_from).toLocaleString()}. Any prior mapping for this key ended at the same instant — the mapping is versioned, never edited in place.`,
+  };
+}
+
+// ─── ACC-15 Trial Balance (general-ledger-svc) ───────────────────────────────
+
+export async function compileTrialBalanceAction(
+  _previous: TrialBalanceActionState,
+  formData: FormData,
+): Promise<TrialBalanceActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const legalEntityId = String(formData.get("legal_entity_id") ?? "").trim();
+  const fiscalPeriod = String(formData.get("fiscal_period") ?? "").trim();
+  if (!legalEntityId || !isUuid(legalEntityId)) {
+    return { status: "error", message: "A legal entity ID (UUID) is required." };
+  }
+  if (!FISCAL_PERIOD_RE.test(fiscalPeriod)) {
+    return { status: "error", message: "A fiscal period is required, as YYYY-MM." };
+  }
+
+  const result = await compileTrialBalance(legalEntityId, fiscalPeriod, identity);
+  if (!result.ok) {
+    return { status: "error", message: explainLedgerError(result.error.message) };
+  }
+
+  refresh();
+  const snap = result.data;
+  return {
+    status: "compiled",
+    snapshotId: snap.trial_balance_snapshot_id,
+    message: `Trial balance compiled for ${snap.fiscal_period} — ID ${snap.trial_balance_snapshot_id}, watermarked at ledger sequence ${snap.ledger_watermark}, ${snap.lines.length} account${snap.lines.length === 1 ? "" : "s"}. This snapshot is permanent and will not change even if more journals post afterward — compile again for an updated one.`,
+  };
+}
+
+/** Read one previously-compiled trial balance snapshot by id. Never
+ *  recompiled — a snapshot is permanent from the moment it exists. */
+export async function lookupTrialBalance(
+  _previous: LookupState<TrialBalanceSnapshot>,
+  formData: FormData,
+): Promise<LookupState<TrialBalanceSnapshot>> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: "Your session has expired — sign in again." };
+  }
+
+  const snapshotId = String(formData.get("lookup_trial_balance_id") ?? "").trim();
+  if (!snapshotId) return { status: "error", message: "Enter a trial balance snapshot ID." };
+  if (!isUuid(snapshotId)) return { status: "error", message: "A snapshot ID must be a UUID." };
+
+  const result = await getTrialBalance(snapshotId, identity);
+  if (!result.ok) {
+    if (result.error.status === 404) {
+      return { status: "missing", message: "No trial balance snapshot with that id exists for this tenant." };
+    }
+    return { status: "error", message: explainLedgerError(result.error.message) };
+  }
+
+  return { status: "found", record: result.data, message: "" };
+}
+
+// ─── ACC-05 General Ledger — posted entries and derived balances ─────────────
+
+export type LedgerQueryResult =
+  | { ok: true; entries: LedgerEntry[] }
+  | { ok: false; message: string };
+
+/** ACC-05's own append-only ledger — one row per journal line, written
+ *  exactly once when its journal reaches FINALIZED. legal_entity_id is
+ *  mandatory: there is no all-entities view, deliberately, so a query can
+ *  never accidentally return every entity's entries at once. */
+export async function queryLedgerEntriesAction(
+  _previous: LedgerQueryResult,
+  formData: FormData,
+): Promise<LedgerQueryResult> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ok: false, message: "Your session has expired — sign in again." };
+  }
+
+  const legalEntityId = String(formData.get("le_legal_entity_id") ?? "").trim();
+  if (!legalEntityId || !isUuid(legalEntityId)) {
+    return { ok: false, message: "A legal entity ID (UUID) is required — there is no all-entities view." };
+  }
+  const accountCode = String(formData.get("le_account_code") ?? "").trim() || undefined;
+  const fiscalPeriod = String(formData.get("le_fiscal_period") ?? "").trim() || undefined;
+
+  const result = await queryLedgerEntries({ identity, legalEntityId, accountCode, fiscalPeriod });
+  if (!result.ok) return { ok: false, message: explainLedgerError(result.error.message) };
+  return { ok: true, entries: result.data };
+}
+
+export type BalanceQueryResult =
+  | { ok: true; balance: LedgerBalance }
+  | { ok: false; notFound: true }
+  | { ok: false; message: string };
+
+/** ACC-05's derived, rebuildable projection over ledger_entries — never
+ *  itself a source of truth. */
+export async function queryAccountBalanceAction(
+  _previous: BalanceQueryResult,
+  formData: FormData,
+): Promise<BalanceQueryResult> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ok: false, message: "Your session has expired — sign in again." };
+  }
+
+  const legalEntityId = String(formData.get("bal_legal_entity_id") ?? "").trim();
+  const accountCode = String(formData.get("bal_account_code") ?? "").trim();
+  if (!legalEntityId || !isUuid(legalEntityId)) {
+    return { ok: false, message: "A legal entity ID (UUID) is required." };
+  }
+  if (!accountCode) return { ok: false, message: "An account code is required." };
+  const fiscalPeriod = String(formData.get("bal_fiscal_period") ?? "").trim() || undefined;
+
+  const result = await queryAccountBalance({ identity, legalEntityId, accountCode, fiscalPeriod });
+  if (!result.ok) {
+    if (result.error.status === 404) return { ok: false, notFound: true };
+    return { ok: false, message: explainLedgerError(result.error.message) };
+  }
+  return { ok: true, balance: result.data };
 }

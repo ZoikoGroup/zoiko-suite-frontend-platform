@@ -18,7 +18,7 @@
 //    the caller applies them.
 
 import { cookies } from "next/headers";
-import { refresh } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   createLegalHold,
@@ -150,6 +150,7 @@ export async function createPolicyAction(
   }
 
   refresh();
+  revalidatePath("/admin/retention");
 
   const scope = platformWide ? "every tenant" : "this tenant";
   return {
@@ -213,6 +214,7 @@ export async function createHoldAction(
   }
 
   refresh();
+  revalidatePath("/admin/retention");
 
   const narrowing = [
     recordClassRaw ? `record class ${asRecordClass(recordClassRaw)}` : null,
@@ -279,6 +281,7 @@ export async function releaseHoldAction(
   }
 
   refresh();
+  revalidatePath("/admin/retention");
 
   return {
     status: "released",

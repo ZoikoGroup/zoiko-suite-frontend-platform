@@ -16,6 +16,7 @@
 //   consolidation-svc           (8106)
 
 import { type ApiResult, type Identity } from "./client";
+import type { CashPosition } from "./treasury";
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
 
@@ -55,21 +56,14 @@ export type JournalHeader = {
   tenant_id: string;
   legal_entity_id: string;
   fiscal_period: string;
-  status: "DRAFT" | "VALIDATED" | "FINALIZED" | "REVERSED";
+  status: "PENDING" | "VALIDATED" | "FINALIZED" | "REVERSED";
   reversal_of_journal_id?: string | null;
   description: string;
   created_at: string;
 };
 
-export type CashPosition = {
-  account_id: string;
-  bank_name?: string;
-  currency: string;
-  available_balance: number;
-  swept_balance?: number;
-  balance?: number;
-  status: "ACTIVE" | "LOCKED";
-};
+// treasury-svc's GET /v1/treasury/positions row — one definition, in treasury.ts.
+export type { CashPosition } from "@/lib/api/treasury";
 
 /**
  * accounts-receivable-svc's customer invoice, as it actually comes back.
@@ -229,12 +223,11 @@ async function fetchFinanceSvc<TRaw, TOut>(
 //   /v1/journal-entries     | /v1/journals          | bare array   | fixed
 //   /v1/reconciliations     | /v1/statement-lines   | bare array   | fixed
 //   /v1/close-periods       | /v1/close/periods     | bare array   | fixed
-//   /v1/cash-positions      | treasury-svc, unknown | unverified   | STILL WRONG
+//   /v1/cash-positions      | /v1/treasury/positions| bare array   | fixed
 //
-// treasury-svc is the one left: it is not one of the gap-closed services, it has
-// never run on this machine, and nothing in this repo says what it serves. Rather
-// than guess a path, the call is left as it is and its failure is now reported as
-// unavailable rather than folded into a zero — see FinanceSummaryStats.
+// treasury-svc re-verified 24 Sep 2026 against its RegisterRoutes: positions
+// require ?legal_entity_id= and return one row per account with its latest
+// balance, balance_source and is_stale flag.
 //
 // This layer also duplicates apiGet: its own URL helpers bypass the DEFAULTS
 // registry in config.ts, and its own fetchFinanceSvc drops structured error
@@ -284,8 +277,9 @@ export async function listARInvoices(identity?: Identity): Promise<ApiResult<ARI
 
 export async function listCashPositions(identity?: Identity): Promise<ApiResult<CashPosition[]>> {
   const base = treasuryUrl();
+  const entity = identity?.legalEntityId ?? "22222222-2222-2222-2222-222222222222";
   return fetchFinanceSvc<unknown, CashPosition[]>(
-    `${base}/v1/cash-positions`,
+    `${base}/v1/treasury/positions?legal_entity_id=${entity}`,
     base,
     "treasury-svc",
     identity,
@@ -360,7 +354,9 @@ export async function getFinanceSummaryStats(identity?: Identity): Promise<ApiRe
   ]);
 
   const cashTotal = treasuryRes.ok
-    ? treasuryRes.data.reduce((sum, p) => sum + (p.available_balance ?? p.balance ?? 0), 0)
+    ? treasuryRes.data
+        .filter((p) => p.account_status === "ACTIVE")
+        .reduce((sum, p) => sum + (p.available_balance ?? 0), 0)
     : null;
 
   // Everything not yet paid. This filtered on `OUTSTANDING || OVERDUE`, and

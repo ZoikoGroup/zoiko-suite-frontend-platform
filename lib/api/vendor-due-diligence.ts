@@ -198,7 +198,7 @@ export async function startVendorCheck(
       // pointer to nothing.
       ...(input.documentReference ? { document_reference: input.documentReference } : {}),
     },
-    { identity: input.identity },
+    { identity: input.identity, purposeContext: "VENDOR_DUE_DILIGENCE_SCREENING" },
   );
 }
 

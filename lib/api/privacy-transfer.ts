@@ -64,20 +64,26 @@ export type TransferAssessment = {
   reviewer_principal_id: string;
   residual_risk?: string;
   evidence_ref?: string;
+  government_access_risk?: string;
+  technical_measures?: string;
+  organizational_measures?: string;
   review_trigger_at?: string;
   created_at: string;
 };
 
-export type DecisionResult = "AUTHORIZED" | "BLOCKED" | "REVIEW_REQUIRED";
+export type DecisionResult = "AUTHORIZED" | "CONDITIONAL" | "BLOCKED" | "REVIEW_REQUIRED";
 
 export type TransferDecision = {
   decision_id: string;
+  authorization_id?: string;
   tenant_id?: string;
   relationship_id: string;
   transfer_mechanism_id: string;
   destination_jurisdiction?: string;
   assessment_id?: string;
   result: DecisionResult;
+  conditions?: string;
+  expires_at?: string;
   reason_codes: string[];
   actor_principal_id: string;
   correlation_id?: string;
@@ -122,6 +128,9 @@ export type RecordTransferAssessmentInput = {
   outcome: AssessmentOutcome;
   residual_risk?: string;
   evidence_ref?: string;
+  government_access_risk?: string;
+  technical_measures?: string;
+  organizational_measures?: string;
   review_trigger_at?: string;
 };
 
@@ -130,6 +139,11 @@ export type EvaluateTransferInput = {
   transfer_mechanism_id: string;
   destination_jurisdiction?: string;
   assessment_required: boolean;
+  conditions?: string;
+  enforce_conditions?: boolean;
+  reassessment_trigger?: string;
+  data_categories?: string[];
+  subject_classes?: string[];
 };
 
 function toRFC3339(dateStr?: string): string | undefined {
@@ -282,6 +296,9 @@ export async function recordTransferAssessment(
   };
   if (input.residual_risk?.trim()) body.residual_risk = input.residual_risk.trim();
   if (input.evidence_ref?.trim()) body.evidence_ref = input.evidence_ref.trim();
+  if (input.government_access_risk?.trim()) body.government_access_risk = input.government_access_risk.trim();
+  if (input.technical_measures?.trim()) body.technical_measures = input.technical_measures.trim();
+  if (input.organizational_measures?.trim()) body.organizational_measures = input.organizational_measures.trim();
   const reviewTriggerIso = toRFC3339(input.review_trigger_at);
   if (reviewTriggerIso) body.review_trigger_at = reviewTriggerIso;
 
@@ -308,16 +325,23 @@ export async function evaluateTransfer(
   input: EvaluateTransferInput,
   identity: Identity
 ): Promise<ApiWriteResult<TransferDecision>> {
+  const body: Record<string, unknown> = {
+    tenant_id: identity.tenantId,
+    relationship_id: input.relationship_id,
+    transfer_mechanism_id: input.transfer_mechanism_id,
+    destination_jurisdiction: input.destination_jurisdiction,
+    assessment_required: input.assessment_required,
+  };
+  if (input.conditions?.trim()) body.conditions = input.conditions.trim();
+  if (input.enforce_conditions) body.enforce_conditions = true;
+  if (input.reassessment_trigger?.trim()) body.reassessment_trigger = input.reassessment_trigger.trim();
+  if (input.data_categories && input.data_categories.length > 0) body.data_categories = input.data_categories;
+  if (input.subject_classes && input.subject_classes.length > 0) body.subject_classes = input.subject_classes;
+
   return apiPost<TransferDecision>(
     "privacyTransfer",
     "/privacy/transfer-decisions",
-    {
-      tenant_id: identity.tenantId,
-      relationship_id: input.relationship_id,
-      transfer_mechanism_id: input.transfer_mechanism_id,
-      destination_jurisdiction: input.destination_jurisdiction,
-      assessment_required: input.assessment_required,
-    },
+    body,
     { identity }
   );
 }

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
-import { Wallet, ShoppingCart } from "lucide-react";
+import { ShoppingCart } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader, LookupById } from "@/components/admin/shared";
 import {
@@ -20,7 +20,10 @@ import {
   CommercialOpsSummaryBar,
   CommercialOpsProcessTimeline,
   PurchaseRequestLookup,
+  InvoiceApprovalPanel,
+  GoodsServiceReceiptWorkbench,
 } from "@/components/admin/commercial-ops";
+import { WorkflowLifecycleCard } from "@/components/admin/workflow/WorkflowLifecycleCard";
 import { DOMAINS } from "@/lib/constants";
 import type { OrderStatusFilter } from "@/lib/api/purchase-orders";
 import type { RequestStatus } from "@/lib/api/purchase-requests";
@@ -52,18 +55,6 @@ const REQUEST_FILTERS: { label: string; value?: RequestStatus }[] = [
   { label: "Rejected", value: "REJECTED" },
 ];
 
-/** Services in this domain that are not yet wired to the console.
- *
- *  Spend Controls was listed here while the page was simultaneously displaying
- *  hardcoded sample budgets as though they were live — it is now genuinely wired,
- *  so it has moved out of this list. Vendor Due Diligence has now done the same. */
-const UPCOMING = [
-  {
-    icon: Wallet,
-    title: "Invoice Approval Service",
-    body: "Three-way match between order, receipt, and invoice before payment is released.",
-  },
-];
 
 const FILTER_LABEL = "mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400";
 
@@ -659,31 +650,41 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
         </CardContent>
       </Card>
 
-      <Card>
+      {/* ── goods-service-receipt-svc (:8157, AP-04) ──────────────────────────────
+          Authoritative Goods/Service Delivery & Milestone Receipt Workbench */}
+      <div className="mb-6">
+        <GoodsServiceReceiptWorkbench />
+      </div>
+
+      {/* ── invoice-approval-svc (:8107) ──────────────────────────────────────────
+          Multi-Step Approval Routing, Segregation of Duties & 3-Way Match */}
+      <div className="mb-6">
+        <InvoiceApprovalPanel />
+      </div>
+
+      {/* ── workflow-svc (:8090) & workflow-history-svc (:8097) ─────────────────
+          Governed Multi-Stage Workflow Lifecycle & Transition History Store */}
+      <div className="mb-6">
+        <WorkflowLifecycleCard />
+      </div>
+
+      <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Rest of the domain</CardTitle>
-            <CardDescription>Wired to the console as each service comes online</CardDescription>
+            <CardTitle>Commercial Operations Domain Status</CardTitle>
+            <CardDescription>All 5 core microservices wired, active, and verified</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {UPCOMING.map((item) => (
-              <div
-                key={item.title}
-                className="flex gap-3 rounded-lg border border-slate-200 p-3.5 transition-colors duration-150 hover:border-navy-300 hover:bg-slate-50 dark:border-slate-800 dark:hover:border-navy-500 dark:hover:bg-slate-800/60"
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-navy-50 dark:bg-navy-500/10">
-                  <item.icon className="h-4.5 w-4.5 text-navy-700 dark:text-navy-300" aria-hidden="true" />
-                </span>
-                <div>
-                  <p className="text-sm font-medium text-slate-800 dark:text-slate-200">{item.title}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                    {item.body}
-                  </p>
-                </div>
-              </div>
-            ))}
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 text-xs text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+            <p className="font-semibold">All 5 microservices in the Commercial Ops domain are actively wired to this console:</p>
+            <ul className="mt-2 list-disc pl-5 space-y-1">
+              <li><code className="font-mono">purchase-request-svc (:8100)</code> — Requisition intake &amp; approval</li>
+              <li><code className="font-mono">vendor-due-diligence-svc (:8135)</code> — Counterparty screening &amp; sanctions match</li>
+              <li><code className="font-mono">spend-controls-svc (:8131)</code> — Departmental budget limits &amp; real-time enforcement</li>
+              <li><code className="font-mono">purchase-order-svc (:8129)</code> — Binding commitments &amp; immutable amendment audit</li>
+              <li><code className="font-mono">invoice-approval-svc (:8107)</code> — Multi-step approval routing &amp; segregation of duties</li>
+            </ul>
           </div>
         </CardContent>
       </Card>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, FilePlus, Scale, ShieldAlert, ShoppingCart, Receipt, X } from "lucide-react";
+import { ArrowRight, FilePlus, Scale, ShieldAlert, ShoppingCart, Receipt, PackageCheck, X } from "lucide-react";
 
 /**
  * The procurement sequence, as an explanatory diagram of how the domain fits
@@ -72,10 +72,20 @@ const STEPS: Step[] = [
     icon: ShoppingCart,
     title: "PO Issued",
     service: "purchase-order-svc",
-    port: ":8139",
+    port: ":8129",
     wired: true,
     detail:
       "The binding commitment, issued only against an APPROVED requisition owned by the same tenant and legal entity. Amending restates the total and appends an immutable amendment record; closing is terminal.",
+  },
+  {
+    id: "goods-receipt",
+    icon: PackageCheck,
+    title: "Goods/Service Receipt",
+    service: "goods-service-receipt-svc",
+    port: ":8157",
+    wired: true,
+    detail:
+      "Authoritative delivery and milestone receipt basis (AP-04). Validates PO aggregate tolerance against purchase-order-svc (:8129), records append-only evidence, and posts real GRNI accrual journal entries to general-ledger-svc (:8098).",
   },
   {
     id: "invoice-match",
@@ -83,9 +93,9 @@ const STEPS: Step[] = [
     title: "3-Way Match & Pay",
     service: "invoice-approval-svc",
     port: ":8107",
-    wired: false,
+    wired: true,
     detail:
-      "Matches order, receipt, and invoice before payment is released. The service exists and is in compose, but it is not yet wired to this console — nothing on this page reads or writes it.",
+      "Matches order, receipt, and invoice before payment is released. Live and fully wired to invoice-approval-svc (:8107) with Segregation of Duties (SoD / 4-eyes principle) and multi-step routing.",
   },
 ];
 

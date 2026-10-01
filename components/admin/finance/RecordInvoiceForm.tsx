@@ -100,6 +100,40 @@ export function RecordInvoiceForm() {
           </p>
         </div>
 
+        <div className="lg:col-span-2">
+          <label htmlFor="invoice_date" className={LABEL}>
+            Invoice date <span className={OPTIONAL}>(document date)</span>
+          </label>
+          <input
+            id="invoice_date"
+            name="invoice_date"
+            type="date"
+            defaultValue={new Date().toISOString().split("T")[0]}
+            className={FIELD}
+            autoComplete="off"
+          />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            Date on supplier&apos;s invoice document (defaults to today).
+          </p>
+        </div>
+
+        <div className="lg:col-span-2">
+          <label htmlFor="supply_date" className={LABEL}>
+            Supply date <span className={OPTIONAL}>(tax point)</span>
+          </label>
+          <input
+            id="supply_date"
+            name="supply_date"
+            type="date"
+            defaultValue={new Date().toISOString().split("T")[0]}
+            className={FIELD}
+            autoComplete="off"
+          />
+          <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+            Tax point when goods or services were delivered.
+          </p>
+        </div>
+
         <div className="lg:col-span-3">
           <label htmlFor="amount" className={LABEL}>
             Amount <span className={OPTIONAL}>(greater than zero)</span>
@@ -129,6 +163,29 @@ export function RecordInvoiceForm() {
             ))}
           </select>
         </div>
+
+      {/* invoice_document_id: required by the validate step (INV-10). An invoice
+          keyed without one is a legitimate draft (§7 allows intake before the
+          scan arrives), but the service refuses to advance it to VALIDATED until
+          this is present. Supply a real document-vault-svc UUID here; the random
+          fallback is a dev convenience only. */}
+      <div>
+        <label htmlFor="invoice_document_id" className={LABEL}>
+          Invoice document ID <span className={OPTIONAL}>(vault UUID — required to validate)</span>
+        </label>
+        <input
+          id="invoice_document_id"
+          name="invoice_document_id"
+          placeholder="00000000-0000-0000-0000-000000000000"
+          className={`${FIELD} font-mono text-xs`}
+          autoComplete="off"
+        />
+        <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+          The supplier&apos;s invoice document in document-vault-svc. Required before this invoice
+          can be validated (INV-10). Leave blank in dev — a random UUID is used, which passes
+          intake but will be refused at validate if document-vault-svc is not wired.
+        </p>
+      </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

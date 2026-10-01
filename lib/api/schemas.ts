@@ -68,9 +68,24 @@ export function isExempt(mode: string): boolean {
   return mode === "NONE";
 }
 
-/** Every event name with at least one registered version. */
-export function listEventNames(identity: Identity): Promise<ApiResult<string[]>> {
-  return apiGet<string[]>("schemaRegistry", "/v1/schemas", { identity });
+/** The service's own paging ceiling for the event-name list. */
+export const MAX_EVENT_NAMES_PAGE = 500;
+
+/**
+ * Every event name with at least one registered version, paged by the
+ * service (default 100, up to MAX_EVENT_NAMES_PAGE per call).
+ */
+export function listEventNames(
+  identity: Identity,
+  paging: { limit?: number; offset?: number } = {},
+): Promise<ApiResult<string[]>> {
+  return apiGet<string[]>("schemaRegistry", "/v1/schemas", {
+    identity,
+    query: {
+      ...(paging.limit === undefined ? {} : { limit: paging.limit }),
+      ...(paging.offset === undefined ? {} : { offset: paging.offset }),
+    },
+  });
 }
 
 /**
