@@ -7,29 +7,37 @@
 // - counterparty-management-svc (8124)
 
 import { type ApiResult, type ApiWriteResult, type Identity, apiPost } from "./client";
+import { serviceUrl } from "./config";
+
+// Each of these previously built its own URL from a raw env var, bypassing the
+// central registry in config.ts — so ZOIKO_USE_GATEWAY had no effect on this
+// file's calls even though it did for every other domain's client. Routing
+// through serviceUrl() keeps behavior identical in the default (direct, no
+// gateway) mode this app runs in today, while making gateway mode work here
+// too instead of silently skipping it.
 
 function contractLifecycleUrl(): string {
-  return (process.env.ZOIKO_CONTRACT_LIFECYCLE_URL ?? "http://localhost:8119").replace(/\/$/, "");
+  return serviceUrl("contracts");
 }
 
 function clauseTemplateUrl(): string {
-  return (process.env.ZOIKO_CLAUSE_TEMPLATE_URL ?? "http://localhost:8120").replace(/\/$/, "");
+  return serviceUrl("clauseTemplate");
 }
 
 function obligationTrackingUrl(): string {
-  return (process.env.ZOIKO_OBLIGATION_TRACKING_URL ?? "http://localhost:8121").replace(/\/$/, "");
+  return serviceUrl("obligationTracking");
 }
 
 function boardResolutionsUrl(): string {
-  return (process.env.ZOIKO_BOARD_RESOLUTIONS_URL ?? "http://localhost:8122").replace(/\/$/, "");
+  return serviceUrl("boardResolutions");
 }
 
 function corporateActionsUrl(): string {
-  return (process.env.ZOIKO_CORPORATE_ACTIONS_URL ?? "http://localhost:8123").replace(/\/$/, "");
+  return serviceUrl("corporateActions");
 }
 
 function counterpartyManagementUrl(): string {
-  return (process.env.ZOIKO_COUNTERPARTY_MANAGEMENT_URL ?? "http://localhost:8124").replace(/\/$/, "");
+  return serviceUrl("counterparty");
 }
 
 // ─── 1. Contract Lifecycle ───────────────────────────────────────────────────
@@ -137,6 +145,7 @@ export async function listTemplates(identity?: Identity): Promise<ApiResult<Cont
     (d) => d.templates ?? [],
   );
 }
+
 
 // ─── 3. Obligation Tracking ──────────────────────────────────────────────────
 
@@ -1070,6 +1079,7 @@ export async function listCorporateActions(identity?: Identity): Promise<ApiResu
   );
 }
 
+
 // ─── 6. Counterparty Management ──────────────────────────────────────────────
 
 export type Counterparty = {
@@ -1100,6 +1110,157 @@ export async function listCounterparties(identity?: Identity): Promise<ApiResult
     identity,
     (d) => d.counterparties ?? [],
   );
+}
+
+// ─── Write Operations ────────────────────────────────────────────────────────
+
+export type CreateContractInput = {
+  title: string;
+  contract_type: ContractType;
+  counterparty_id: string;
+  counterparty_name: string;
+  currency: string;
+  total_value: number;
+  effective_from: string;
+  status?: ContractStatus;
+  description?: string;
+};
+
+export async function createContract(
+  body: CreateContractInput,
+  identity?: Identity,
+): Promise<ApiResult<Contract>> {
+  const base = contractLifecycleUrl();
+  const url = `${base}/v1/contracts`;
+  return fetchDomainServicePost<{ contract?: Contract } | Contract, Contract>(
+    url, base, "contract-lifecycle-svc", body, identity,
+    (d) => (d as { contract?: Contract }).contract ?? (d as Contract),
+  );
+}
+
+export type CreateClauseInput = {
+  title: string;
+  category: string;
+  body: string;
+  jurisdiction_id: string;
+  is_standard?: boolean;
+  status?: string;
+};
+
+export async function createClause(
+  body: CreateClauseInput,
+  identity?: Identity,
+): Promise<ApiResult<Clause>> {
+  const base = clauseTemplateUrl();
+  const url = `${base}/v1/clauses`;
+  return fetchDomainServicePost<{ clause?: Clause } | Clause, Clause>(
+    url, base, "clause-template-svc", body, identity,
+    (d) => (d as { clause?: Clause }).clause ?? (d as Clause),
+  );
+}
+
+export type CreateObligationInput = {
+  title: string;
+  description?: string;
+  due_date: string;
+  risk_level: RiskLevel;
+  status?: ObligationStatus;
+  contract_id?: string;
+  source_type?: ObligationType;
+};
+
+export async function createObligation(
+  body: CreateObligationInput,
+  identity?: Identity,
+): Promise<ApiResult<Obligation>> {
+  const base = obligationTrackingUrl();
+  const url = `${base}/v1/obligations`;
+  return fetchDomainServicePost<{ obligation?: Obligation } | Obligation, Obligation>(
+    url, base, "obligation-tracking-svc", body, identity,
+    (d) => (d as { obligation?: Obligation }).obligation ?? (d as Obligation),
+  );
+}
+
+export type CreateCorporateActionInput = {
+  action_type: string;
+  description: string;
+  authorized_shares?: number;
+  share_class?: string;
+  status?: string;
+};
+
+export async function createCorporateAction(
+  body: CreateCorporateActionInput,
+  identity?: Identity,
+): Promise<ApiResult<CorporateAction>> {
+  const base = corporateActionsUrl();
+  const url = `${base}/v1/corporate-actions`;
+  return fetchDomainServicePost<{ action?: CorporateAction } | CorporateAction, CorporateAction>(
+    url, base, "corporate-actions-svc", body, identity,
+    (d) => (d as { action?: CorporateAction }).action ?? (d as CorporateAction),
+  );
+}
+
+// ─── Shared Fetch Helpers ─────────────────────────────────────────────────────
+
+async function fetchDomainServicePost<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  body: unknown,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1200)),
+    });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} timed out`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for POST`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
+  }
 }
 
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
@@ -1139,7 +1300,7 @@ async function fetchDomainService<TRaw, TOut>(
 
   let res: Response;
   try {
-    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(3000) });
+    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1200)) });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     return {
@@ -1147,7 +1308,7 @@ async function fetchDomainService<TRaw, TOut>(
       error: {
         kind: isTimeout ? "timeout" : "unreachable",
         message: isTimeout
-          ? `${serviceName} did not respond within 3000ms`
+          ? `${serviceName} timed out`
           : `${serviceName} is unreachable at ${base}`,
       },
     };

@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: zoiko-suite-frontend
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -25,4 +25,20 @@ services:
       - ZOIKO_CORPORATE_ACTIONS_URL=http://host.docker.internal:8123
       - ZOIKO_LEGAL_APPROVALS_URL=http://host.docker.internal:8123
       - ZOIKO_COUNTERPARTY_URL=http://host.docker.internal:8124
-    restart: unless-stop
+      - ZOIKO_CONTRACTS_URL=http://host.docker.internal:8119
+      - ZOIKO_OBLIGATIONS_URL=http://host.docker.internal:8121
+      - ZOIKO_GENERAL_LEDGER_URL=http://host.docker.internal:8098
+      - ZOIKO_PURCHASE_ORDER_URL=http://host.docker.internal:8150
+      - ZOIKO_SPEND_CONTROLS_URL=http://host.docker.internal:8131
+      - ZOIKO_EMPLOYEE_MASTER_URL=http://host.docker.internal:8108
+      - ZOIKO_LEAVE_ABSENCE_URL=http://host.docker.internal:8115
+      - ZOIKO_ORG_STRUCTURE_URL=http://host.docker.internal:8116
+      - ZOIKO_WORKFORCE_COMPLIANCE_URL=http://host.docker.internal:8118
+      - ZOIKO_PAYROLL_RUN_URL=http://host.docker.internal:8110
+      - ZOIKO_COMPENSATION_URL=http://host.docker.internal:8111
+      - ZOIKO_BENEFITS_URL=http://host.docker.internal:8112
+      - ZOIKO_PAYROLL_EXCEPTIONS_URL=http://host.docker.internal:8114
+      - ZOIKO_FILING_TRACKER_URL=http://host.docker.internal:8151
+      - ZOIKO_EXCEPTION_ESCALATION_URL=http://host.docker.internal:8133
+      - ZOIKO_AUDIT_EVENT_STORE_URL=http://host.docker.internal:8084
+    restart: unless-stopped

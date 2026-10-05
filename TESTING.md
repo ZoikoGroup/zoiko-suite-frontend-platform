@@ -29,12 +29,13 @@ docker compose -f deployments/docker-compose.yml up -d `
   contract-lifecycle-svc obligations-svc
 ```
 
-**No `gateway`, deliberately.** The console's `.env.local` ships
-`ZOIKO_USE_GATEWAY=false`, so it talks to service ports directly. Starting Traefik
-drags in its whole `depends_on` chain — eight support containers for a routing
-layer. Add `gateway` (with `$env:GATEWAY_PORT = "8000"`) only when you want to
-exercise the path prefixes, which is a real failure mode: a wrong prefix gives a
-404 indistinguishable from a dead service.
+**No `gateway` for most listed services, deliberately.** The console's
+`.env.local` ships `ZOIKO_USE_GATEWAY=false`, so it talks to their service ports
+directly. AI Governance is gateway-only: its protected actions require
+ForwardAuth to verify the signed identity envelope, and port 8146 is not
+published. To test AI Governance, add `gateway` (with
+`$env:GATEWAY_PORT = "8000"`) and its dependencies. Without it, AI Governance
+requests fail closed rather than bypassing identity verification.
 
 `authorization-svc` is **not** optional. Payables, Commercial Ops and Evidence
 check it before every write and all fail closed, so without it those writes are
@@ -1367,7 +1368,7 @@ behaviour:
 | Re-retiring an evidence requirement is 409 | **422 `already_retired`** |
 | Re-activating an already-`ACTIVE` policy version conflicts | **200** — the store short-circuits. The 409 fires for re-activating a **SUPERSEDED** version |
 | secret-vault leases never expire | They **do** — status is computed on every read, and revoking an expired lease is a genuine 409 |
-| Section 0's gateway setup | The console's `.env.local` ships `ZOIKO_USE_GATEWAY=false`, so it talks to service ports directly and the gateway is not needed |
+| Section 0's gateway setup | Direct service ports remain the default except AI Governance, which always uses ForwardAuth |
 
 ---
 

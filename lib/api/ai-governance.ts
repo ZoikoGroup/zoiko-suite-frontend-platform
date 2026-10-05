@@ -2,6 +2,106 @@
 
 import { apiGet, apiPost, type ApiResult, type Identity } from "./client";
 
+export type AIExecution = {
+  execution_id: string;
+  tenant_id: string;
+  use_case_id: string;
+  model_release_id: string;
+  package_id: string;
+  package_version: string;
+  status: "BLOCKED";
+  block_reason: string;
+  blocked_by: string[];
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export async function createGovernedExecution(
+  body: {
+    use_case_id: string;
+    model_release_id: string;
+    package_id: string;
+    package_version: string;
+    input: unknown;
+  },
+  idempotencyKey: string,
+  identity?: Identity,
+): Promise<ApiResult<AIExecution>> {
+  return apiPost<AIExecution>("aiGovernance", "/v1/ai/executions", body, {
+    idempotencyKey,
+    identity,
+  });
+}
+
+export type AIIncident = {
+  incident_id: string;
+  tenant_id: string;
+  severity: "AI-P0" | "AI-P1" | "AI-P2" | "AI-P3";
+  model_release_id: string;
+  description: string;
+  evidence_references: string[];
+  status: "OPEN";
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export async function createAIIncident(
+  body: {
+    severity: AIIncident["severity"];
+    model_release_id: string;
+    description: string;
+    evidence_references?: string[];
+  },
+  idempotencyKey: string,
+  identity?: Identity,
+): Promise<ApiResult<AIIncident>> {
+  return apiPost<AIIncident>("aiGovernance", "/v1/ai/incidents", body, {
+    idempotencyKey,
+    identity,
+  });
+}
+
+// AIG-04: Human Oversight, Output Disposition & Decision Boundary
+// (ZS-SVC-X-001 §7). O4 ("AI prohibited") is refused server-side, fail
+// closed, before any record is created.
+export type AIOutputDisposition = {
+  disposition_id: string;
+  tenant_id: string;
+  ai_run_id: string;
+  oversight_class: "O0" | "O1" | "O2" | "O3" | "O4";
+  status: "DRAFT_ASSISTIVE" | "REVIEW_REQUIRED" | "ACCEPTED" | "REJECTED";
+  reason?: string;
+  created_at: string;
+  created_by_principal_id: string;
+  decided_at?: string;
+  decided_by_principal_id?: string;
+};
+
+export async function createOutputDisposition(
+  body: { ai_run_id: string; oversight_class: AIOutputDisposition["oversight_class"] },
+  idempotencyKey: string,
+  identity?: Identity,
+): Promise<ApiResult<AIOutputDisposition>> {
+  return apiPost<AIOutputDisposition>("aiGovernance", "/v1/ai/output-dispositions", body, {
+    idempotencyKey,
+    identity,
+  });
+}
+
+export async function decideOutputDisposition(
+  dispositionId: string,
+  decision: "ACCEPTED" | "REJECTED",
+  reason?: string,
+  identity?: Identity,
+): Promise<ApiResult<AIOutputDisposition>> {
+  return apiPost<AIOutputDisposition>(
+    "aiGovernance",
+    `/v1/ai/output-dispositions/${dispositionId}/decision`,
+    { decision, reason },
+    { identity },
+  );
+}
+
 export type AIRun = {
   run_id: string;
   ai_run_id?: string;
@@ -536,5 +636,469 @@ export async function decidePolicyChange(
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AIG-01: AI Use-Case, Risk & Impact Registry
+// ─────────────────────────────────────────────────────────────────────────────
 
+export type UseCaseLifecycleState =
+  | "DRAFT"
+  | "ASSESSING"
+  | "APPROVED"
+  | "ACTIVE"
+  | "LIMITED"
+  | "SUSPENDED"
+  | "REJECTED"
+  | "RETIRED";
 
+export type OperationalClass = "A0" | "A1" | "A2" | "A3" | "A4";
+
+export type AutomationLevel =
+  | "DRAFT"
+  | "RECOMMENDATION"
+  | "EXTRACTION"
+  | "CLASSIFICATION"
+  | "RANKING"
+  | "AUTONOMOUS_TOOL_PLANNING"
+  | "PROHIBITED";
+
+export type AssessmentDecision = "PENDING" | "APPROVED" | "REJECTED";
+
+export type HumanRole = {
+  accountable_principal_id: string;
+  reviewer_principal_id?: string;
+  can_reject: boolean;
+};
+
+export type AIUseCase = {
+  use_case_id: string;
+  tenant_id: string;
+  domain: string;
+  purpose: string;
+  outcome_type: string;
+  operational_class: OperationalClass;
+  legal_classification_ref?: string;
+  owner_principal_id: string;
+  business_outcome: string;
+  affected_decisions?: string[];
+  data_profile?: Record<string, unknown>;
+  automation_level: AutomationLevel;
+  human_role: HumanRole;
+  fallback?: string;
+  success_measures?: string;
+  prohibited_boundary?: string;
+  retirement_criteria?: string;
+  lifecycle_state: UseCaseLifecycleState;
+  created_at: string;
+  created_by_principal_id: string;
+  updated_at: string;
+};
+
+export type AIImpactAssessment = {
+  assessment_id: string;
+  use_case_id: string;
+  tenant_id: string;
+  version: number;
+  affected_groups?: string[];
+  rights_impact?: string;
+  financial_impact?: string;
+  employment_impact?: string;
+  mitigations?: string;
+  approvers?: string[];
+  decision: AssessmentDecision;
+  decided_by_principal_id?: string;
+  decision_reason?: string;
+  decided_at?: string;
+  expires_at?: string;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export type EffectiveUseCaseControl = {
+  use_case: AIUseCase;
+  latest_assessment?: AIImpactAssessment;
+};
+
+export type CreateUseCaseRequest = {
+  domain: string;
+  purpose: string;
+  outcome_type: string;
+  operational_class: OperationalClass;
+  legal_classification_ref?: string;
+  owner_principal_id: string;
+  business_outcome: string;
+  affected_decisions?: string[];
+  data_profile?: Record<string, unknown>;
+  automation_level: AutomationLevel;
+  human_role: HumanRole;
+  fallback?: string;
+  success_measures?: string;
+  prohibited_boundary?: string;
+  retirement_criteria?: string;
+  client_request_id: string;
+  correlation_id?: string;
+};
+
+export type StartAssessmentRequest = {
+  affected_groups?: string[];
+  rights_impact?: string;
+  financial_impact?: string;
+  employment_impact?: string;
+  mitigations?: string;
+  approvers?: string[];
+  expires_at?: string;
+  correlation_id?: string;
+};
+
+export type DecideAssessmentRequest = {
+  decision: "APPROVED" | "REJECTED";
+  reason?: string;
+};
+
+export type ActivateUseCaseRequest = {
+  limited?: boolean;
+  correlation_id?: string;
+};
+
+export type SuspendUseCaseRequest = {
+  reason: string;
+  correlation_id?: string;
+};
+
+export type RequestReassessmentRequest = {
+  reason: string;
+  correlation_id?: string;
+};
+
+export type RetireUseCaseRequest = {
+  reason: string;
+  correlation_id?: string;
+};
+
+export async function createUseCase(
+  body: CreateUseCaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIUseCase>> {
+  return apiPost<AIUseCase>("aiGovernance", "/v1/ai/use-cases", body, { identity });
+}
+
+export async function getUseCase(
+  useCaseId: string,
+  identity?: Identity
+): Promise<ApiResult<AIUseCase>> {
+  const res = await apiGet<any>("aiGovernance", `/v1/ai/use-cases/${useCaseId}`, { identity });
+  if (!res.ok) return res;
+  return { ok: true, data: res.data };
+}
+
+export async function startAssessment(
+  useCaseId: string,
+  body: StartAssessmentRequest,
+  identity?: Identity
+): Promise<ApiResult<AIImpactAssessment>> {
+  return apiPost<AIImpactAssessment>(
+    "aiGovernance",
+    `/v1/ai/use-cases/${useCaseId}/assess`,
+    body,
+    { identity }
+  );
+}
+
+export async function decideAssessment(
+  assessmentId: string,
+  body: DecideAssessmentRequest,
+  identity?: Identity
+): Promise<ApiResult<AIImpactAssessment>> {
+  return apiPost<AIImpactAssessment>(
+    "aiGovernance",
+    `/v1/ai/use-cases/assessments/${assessmentId}/decision`,
+    body,
+    { identity }
+  );
+}
+
+export async function activateUseCase(
+  useCaseId: string,
+  body: ActivateUseCaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIUseCase>> {
+  return apiPost<AIUseCase>("aiGovernance", `/v1/ai/use-cases/${useCaseId}/activate`, body, { identity });
+}
+
+export async function suspendUseCase(
+  useCaseId: string,
+  body: SuspendUseCaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIUseCase>> {
+  return apiPost<AIUseCase>("aiGovernance", `/v1/ai/use-cases/${useCaseId}/suspend`, body, { identity });
+}
+
+export async function requestReassessment(
+  useCaseId: string,
+  body: RequestReassessmentRequest,
+  identity?: Identity
+): Promise<ApiResult<AIUseCase>> {
+  return apiPost<AIUseCase>("aiGovernance", `/v1/ai/use-cases/${useCaseId}/reassess`, body, { identity });
+}
+
+export async function retireUseCase(
+  useCaseId: string,
+  body: RetireUseCaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIUseCase>> {
+  return apiPost<AIUseCase>("aiGovernance", `/v1/ai/use-cases/${useCaseId}/retire`, body, { identity });
+}
+
+export async function getEffectiveUseCaseControl(
+  useCaseId: string,
+  identity?: Identity
+): Promise<ApiResult<EffectiveUseCaseControl>> {
+  const res = await apiGet<any>(
+    "aiGovernance",
+    `/v1/ai/use-cases/${useCaseId}/effective`,
+    { identity }
+  );
+  if (!res.ok) return res;
+  return { ok: true, data: res.data };
+}
+
+export async function listUseCases(
+  identity?: Identity
+): Promise<ApiResult<AIUseCase[]>> {
+  const res = await apiGet<any>("aiGovernance", "/v1/ai/use-cases", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data)
+    ? res.data
+    : Array.isArray(res.data?.use_cases)
+    ? res.data.use_cases
+    : [];
+  return { ok: true, data: list };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AIG-02: Model, Provider & Capability Registry
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ReleaseState =
+  | "DISCOVERED"
+  | "DUE_DILIGENCE"
+  | "EVALUATING"
+  | "APPROVED"
+  | "ACTIVE"
+  | "RESTRICTED"
+  | "QUARANTINED"
+  | "REJECTED"
+  | "BLOCKED"
+  | "RETIRED";
+
+export type TrainingUse = "NO_TRAINING" | "OPT_OUT_AVAILABLE" | "ALLOWED";
+
+export type AIModelRelease = {
+  model_release_id: string;
+  provider: string;
+  provider_model_id: string;
+  deployment_region: string;
+  capability_set?: string[];
+  context_limit?: number;
+  training_use: TrainingUse;
+  retention?: string;
+  approved_scopes?: string[];
+  control_evidence?: Record<string, unknown>;
+  release_state: ReleaseState;
+  status_reason?: string;
+  created_at: string;
+  created_by_principal_id: string;
+  updated_at: string;
+};
+
+export type RegisterModelReleaseRequest = {
+  provider: string;
+  provider_model_id: string;
+  deployment_region: string;
+  capability_set?: string[];
+  context_limit?: number;
+  training_use?: TrainingUse;
+  retention?: string;
+  approved_scopes?: string[];
+  control_evidence?: Record<string, unknown>;
+  client_request_id: string;
+  correlation_id?: string;
+};
+
+export type AdvanceReleaseRequest = {
+  control_evidence?: Record<string, unknown>;
+  reason?: string;
+  correlation_id?: string;
+};
+
+export type ApproveReleaseRequest = {
+  privacy_contract_cleared: boolean;
+  residency_cleared: boolean;
+  security_cleared: boolean;
+  evaluation_cleared: boolean;
+  explainability_cleared: boolean;
+  continuity_cleared: boolean;
+  legal_cleared: boolean;
+  control_evidence?: Record<string, unknown>;
+  correlation_id?: string;
+};
+
+export async function registerModelRelease(
+  body: RegisterModelReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>("aiGovernance", "/v1/ai/model-releases", body, { identity });
+}
+
+export async function getModelRelease(
+  modelReleaseId: string,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  const res = await apiGet<any>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}`,
+    { identity }
+  );
+  if (!res.ok) return res;
+  return { ok: true, data: res.data };
+}
+
+export async function recordDueDiligence(
+  modelReleaseId: string,
+  body: AdvanceReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/due-diligence`,
+    body,
+    { identity }
+  );
+}
+
+export async function recordEvaluation(
+  modelReleaseId: string,
+  body: AdvanceReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/evaluation`,
+    body,
+    { identity }
+  );
+}
+
+export async function approveRelease(
+  modelReleaseId: string,
+  body: ApproveReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/approve`,
+    body,
+    { identity }
+  );
+}
+
+export async function rejectRelease(
+  modelReleaseId: string,
+  body: AdvanceReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/reject`,
+    body,
+    { identity }
+  );
+}
+
+export async function blockRelease(
+  modelReleaseId: string,
+  body: AdvanceReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/block`,
+    body,
+    { identity }
+  );
+}
+
+export async function activateRelease(
+  modelReleaseId: string,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/activate`,
+    {},
+    { identity }
+  );
+}
+
+export async function restrictRelease(
+  modelReleaseId: string,
+  body: AdvanceReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/restrict`,
+    body,
+    { identity }
+  );
+}
+
+export async function unrestrictRelease(
+  modelReleaseId: string,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/unrestrict`,
+    {},
+    { identity }
+  );
+}
+
+export async function quarantineRelease(
+  modelReleaseId: string,
+  body: AdvanceReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/quarantine`,
+    body,
+    { identity }
+  );
+}
+
+export async function retireRelease(
+  modelReleaseId: string,
+  body: AdvanceReleaseRequest,
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease>> {
+  return apiPost<AIModelRelease>(
+    "aiGovernance",
+    `/v1/ai/model-releases/${modelReleaseId}/retire`,
+    body,
+    { identity }
+  );
+}
+
+export async function listModelReleases(
+  identity?: Identity
+): Promise<ApiResult<AIModelRelease[]>> {
+  const res = await apiGet<any>("aiGovernance", "/v1/ai/model-releases", { identity });
+  if (!res.ok) return res;
+  const list = Array.isArray(res.data)
+    ? res.data
+    : Array.isArray(res.data?.model_releases)
+    ? res.data.model_releases
+    : [];
+  return { ok: true, data: list };
+}

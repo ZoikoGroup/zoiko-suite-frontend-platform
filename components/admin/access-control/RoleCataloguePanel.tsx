@@ -38,7 +38,7 @@ export async function RoleCataloguePanel({ identity }: { identity: Identity }) {
     );
   }
 
-  const roles = rolesResult.data ?? [];
+  const roles = Array.isArray(rolesResult.data) ? rolesResult.data : [];
   if (roles.length === 0) {
     return (
       <PanelEmptyState
@@ -53,7 +53,10 @@ export async function RoleCataloguePanel({ identity }: { identity: Identity }) {
   await Promise.all(
     roles.map(async (role) => {
       const res = await listPermissionBundles(role.role_definition_id, identity);
-      bundlesByRole.set(role.role_definition_id, res.ok ? (res.data ?? []) : null);
+      bundlesByRole.set(
+        role.role_definition_id,
+        res.ok && Array.isArray(res.data) ? res.data : null,
+      );
     }),
   );
 

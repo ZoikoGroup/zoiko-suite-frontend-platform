@@ -297,7 +297,7 @@ export default function LegalPage() {
           icon={FileText}
           title="Contract Lifecycle Management"
           subtitle="contract-lifecycle-svc — active contracts, negotiations, and signature status"
-          ports="8118"
+          ports="8119"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ContractLifecyclePanel />
@@ -308,7 +308,7 @@ export default function LegalPage() {
           icon={Scale}
           title="Clause Library & Template Governance"
           subtitle="clause-template-svc & legal-approvals-svc — pre-vetted indemnity and liability templates"
-          ports="8119, 8123"
+          ports="8120, 8123"
         >
           <Suspense fallback={<PanelSkeleton rows={3} />}>
             <ClausesAndTemplatesPanel />
@@ -319,7 +319,7 @@ export default function LegalPage() {
           icon={CheckSquare}
           title="Legal Obligation Tracking"
           subtitle="obligation-tracking-svc — compliance milestones, audit triggers, and SLA deadlines"
-          ports="8120"
+          ports="8121"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ObligationTrackingPanel />
@@ -330,7 +330,7 @@ export default function LegalPage() {
           icon={Vote}
           title="Board Governance & Resolutions"
           subtitle="board-resolutions-svc — board meeting minutes, voting logs, and shareholder resolutions"
-          ports="8121"
+          ports="8122"
         >
           <Suspense fallback={<PanelSkeleton rows={3} />}>
             <BoardResolutionsPanel />
@@ -341,7 +341,7 @@ export default function LegalPage() {
           icon={Building2}
           title="Corporate Actions & Counterparty Risk"
           subtitle="corporate-actions-svc & counterparty-management-svc — entity changes, share issuances, and UBO verification"
-          ports="8122, 8124"
+          ports="8123, 8124"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <CorporateActionsAndCounterpartiesPanel />

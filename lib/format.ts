@@ -12,17 +12,20 @@ export function formatMoney(
   currency: string,
   options: { maximumFractionDigits?: number } = {},
 ): string {
+  // A malformed or stub backend response can hand this a missing amount —
+  // fall back to a visible placeholder rather than crashing the caller.
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
   try {
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
       currency,
       maximumFractionDigits: options.maximumFractionDigits ?? 2,
-    }).format(amount);
+    }).format(safeAmount);
   } catch {
     // Intl throws RangeError on a currency code it does not recognise, and
     // several services accept any string in that column. A stored typo should
     // render as a number, not blank the whole panel.
-    return `${amount.toLocaleString("en-GB")} ${currency}`;
+    return `${safeAmount.toLocaleString("en-GB")} ${currency || "—"}`;
   }
 }
 

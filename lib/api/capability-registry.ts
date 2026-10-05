@@ -3,13 +3,16 @@ import type { Identity } from "./envelope";
 
 // ── Domain Types (doc7 §7: Five Independent Registries) ─────────────────────
 
+export type ExecutionRiskClass = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type LegalApprovalStatus = "APPROVED" | "PENDING" | "REJECTED";
+
 export type Capability = {
   capability_id: string;
   capability_code: string;
   module_domain: string;
   version: number;
   dependencies?: string;
-  execution_risk_class: string;
+  execution_risk_class: ExecutionRiskClass;
   created_at: string;
   created_by_principal_id: string;
 };
@@ -19,7 +22,7 @@ export type CreateCapabilityInput = {
   module_domain: string;
   version?: number;
   dependencies?: string;
-  execution_risk_class: string;
+  execution_risk_class: ExecutionRiskClass;
 };
 
 export type MarketRelease = {
@@ -27,7 +30,7 @@ export type MarketRelease = {
   capability_id: string;
   market_code: string;
   language_code?: string;
-  legal_approval_status: "APPROVED" | "PENDING" | "REJECTED";
+  legal_approval_status: LegalApprovalStatus;
   state: "INTERNAL" | "PILOT" | "BETA" | "GA" | "RESTRICTED" | "SUSPENDED" | "RETIRED";
   effective_from: string;
   effective_to?: string;
@@ -38,7 +41,7 @@ export type MarketRelease = {
 export type CreateMarketReleaseInput = {
   market_code: string;
   language_code?: string;
-  legal_approval_status: string;
+  legal_approval_status: LegalApprovalStatus;
   state: string;
   effective_from: string;
 };
@@ -112,9 +115,10 @@ export type CapabilityResolution = {
 
 export async function createCapability(
   input: CreateCapabilityInput,
-  identity?: Identity
+  identity?: Identity,
+  idempotencyKey?: string
 ): Promise<ApiWriteResult<Capability>> {
-  return apiPost<Capability>("capabilityRegistry", "/v1/capabilities", input, { identity });
+  return apiPost<Capability>("capabilityRegistry", "/v1/capabilities", input, { identity, idempotencyKey });
 }
 
 export async function getCapability(
@@ -129,26 +133,28 @@ export async function getCapability(
 export async function createMarketRelease(
   capabilityId: string,
   input: CreateMarketReleaseInput,
-  identity?: Identity
+  identity?: Identity,
+  idempotencyKey?: string
 ): Promise<ApiWriteResult<MarketRelease>> {
   return apiPost<MarketRelease>(
     "capabilityRegistry",
     `/v1/capabilities/${encodeURIComponent(capabilityId)}/market-releases`,
     input,
-    { identity }
+    { identity, idempotencyKey }
   );
 }
 
 export async function createIntegrationCapability(
   capabilityId: string,
   input: CreateIntegrationCapabilityInput,
-  identity?: Identity
+  identity?: Identity,
+  idempotencyKey?: string
 ): Promise<ApiWriteResult<IntegrationCapability>> {
   return apiPost<IntegrationCapability>(
     "capabilityRegistry",
     `/v1/capabilities/${encodeURIComponent(capabilityId)}/integration-capabilities`,
     input,
-    { identity }
+    { identity, idempotencyKey }
   );
 }
 
@@ -174,39 +180,42 @@ export async function listIntegrationCapabilities(
 export async function updateIntegrationHealth(
   integrationId: string,
   healthStatus: string,
-  identity?: Identity
+  identity?: Identity,
+  idempotencyKey?: string
 ): Promise<ApiWriteResult<{ status: string }>> {
   return apiPut<{ status: string }>(
     "capabilityRegistry",
     `/v1/integration-capabilities/${encodeURIComponent(integrationId)}/health`,
     { health_status: healthStatus },
-    { identity }
+    { identity, idempotencyKey }
   );
 }
 
 export async function setReleaseState(
   capabilityId: string,
   input: SetReleaseStateInput,
-  identity?: Identity
+  identity?: Identity,
+  idempotencyKey?: string
 ): Promise<ApiWriteResult<Release>> {
   return apiPost<Release>(
     "capabilityRegistry",
     `/v1/capabilities/${encodeURIComponent(capabilityId)}/release-state`,
     input,
-    { identity }
+    { identity, idempotencyKey }
   );
 }
 
 export async function createCapabilityClaim(
   capabilityId: string,
   input: CreateCapabilityClaimInput,
-  identity?: Identity
+  identity?: Identity,
+  idempotencyKey?: string
 ): Promise<ApiWriteResult<CapabilityClaim>> {
   return apiPost<CapabilityClaim>(
     "capabilityRegistry",
     `/v1/capabilities/${encodeURIComponent(capabilityId)}/claims`,
     input,
-    { identity }
+    { identity, idempotencyKey }
   );
 }
 

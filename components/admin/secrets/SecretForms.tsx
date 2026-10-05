@@ -470,13 +470,13 @@ export function RotateSecretForm() {
         </div>
         <div>
           <label htmlFor="request_id" className={LABEL}>
-            Request ID <span className={OPTIONAL}>(blank = new rotation)</span>
+            Request ID <span className={OPTIONAL}>(optional)</span>
           </label>
           <input
             id="request_id"
             name="request_id"
             className={`${FIELD} font-mono text-xs`}
-            placeholder="Reuse one to exercise the replay path"
+            placeholder="Leave blank to generate a new ID"
             autoComplete="off"
           />
         </div>
@@ -487,7 +487,8 @@ export function RotateSecretForm() {
           {pending ? "Rotating…" : "Rotate secret"}
         </Button>
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          Revokes every live lease on this path. Not reversible.
+          Leave Request ID blank for a new rotation. Reuse an earlier ID only to test replay;
+          every live lease on this path is revoked and the change is not reversible.
         </p>
       </div>
 

@@ -10,6 +10,11 @@ import {
   verifyModelProvider,
   listAutomationPolicies,
   listAutomationActions,
+  listPolicyChangeApprovals,
+  listUseCases,
+  listModelReleases,
+  type AIUseCase,
+  type AIModelRelease,
 } from "@/lib/api/ai-governance";
 import { resolveKillSwitch, listKillSwitchStates } from "@/lib/api/kill-switch";
 import {
@@ -129,7 +134,19 @@ export default async function AiGovernancePage() {
   const actionsRes2 = await listAutomationActions(identity);
   const initialAutomationActions = actionsRes2.ok ? actionsRes2.data : [];
 
-  // 5. Check live operational kill switch states from kill-switch-registry-svc (:8147)
+  // 5. Live policy change approvals from DB
+  const policyChangesRes = await listPolicyChangeApprovals(identity);
+  const initialPolicyChanges = policyChangesRes.ok ? policyChangesRes.data : [];
+
+  // 6. Live use cases from DB (AIG-01)
+  const useCasesRes = await listUseCases(identity);
+  const initialUseCases = useCasesRes.ok ? useCasesRes.data : [];
+
+  // 7. Live model releases from DB (AIG-02)
+  const modelReleasesRes = await listModelReleases(identity);
+  const initialModelReleases = modelReleasesRes.ok ? modelReleasesRes.data : [];
+
+  // 8. Check live operational kill switch states from kill-switch-registry-svc (:8147)
   const statesRes = await listKillSwitchStates(identity);
   const activeAiKillSwitches = statesRes.ok
     ? statesRes.data.filter(
@@ -236,6 +253,9 @@ export default async function AiGovernancePage() {
         initialActions={actionClassifications}
         initialPolicies={initialPolicies}
         initialAutomationActions={initialAutomationActions}
+        initialPolicyChanges={initialPolicyChanges}
+        initialUseCases={initialUseCases}
+        initialModelReleases={initialModelReleases}
       />
     </div>
   );

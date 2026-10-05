@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
@@ -16,6 +17,8 @@ import {
   resolveCapability,
   type CreateCapabilityInput,
   type CreateMarketReleaseInput,
+  type ExecutionRiskClass,
+  type LegalApprovalStatus,
   type CreateIntegrationCapabilityInput,
   type SetReleaseStateInput,
   type CreateCapabilityClaimInput,
@@ -34,15 +37,24 @@ const EXPIRED: CapabilityActionState = {
   message: "Session expired — please log in again.",
 };
 
+function isExecutionRiskClass(value: string): value is ExecutionRiskClass {
+  return value === "LOW" || value === "MEDIUM" || value === "HIGH" || value === "CRITICAL";
+}
+
+function isLegalApprovalStatus(value: string): value is LegalApprovalStatus {
+  return value === "APPROVED" || value === "PENDING" || value === "REJECTED";
+}
+
 export async function createCapabilityAction(
   _previous: CapabilityActionState,
   formData: FormData
 ): Promise<CapabilityActionState> {
+  const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim() || randomUUID();
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
   } catch {
-    return EXPIRED;
+    return { ...EXPIRED, idempotencyKey };
   }
 
   const capabilityCode = String(formData.get("capability_code") ?? "").trim().toUpperCase();
@@ -52,11 +64,12 @@ export async function createCapabilityAction(
   const dependencies = String(formData.get("dependencies") ?? "").trim();
   const executionRiskClass = String(formData.get("execution_risk_class") ?? "MEDIUM").trim().toUpperCase();
 
-  if (!capabilityCode || !moduleDomain || !executionRiskClass) {
+  if (!capabilityCode || !moduleDomain || !isExecutionRiskClass(executionRiskClass)) {
     return {
       status: "error",
       action: "create_capability",
-      message: "capability_code, module_domain, and execution_risk_class are mandatory.",
+      message: "capability_code and module_domain are required; execution_risk_class must be LOW, MEDIUM, HIGH, or CRITICAL.",
+      idempotencyKey,
     };
   }
 
@@ -68,7 +81,7 @@ export async function createCapabilityAction(
     execution_risk_class: executionRiskClass,
   };
 
-  const res = await createCapability(input, identity);
+  const res = await createCapability(input, identity, idempotencyKey);
   if (!res.ok) {
     let friendly = res.error.message;
     if (res.error.status === 409) {
@@ -79,6 +92,7 @@ export async function createCapabilityAction(
       action: "create_capability",
       message: friendly,
       error: res.error.message,
+      idempotencyKey,
     };
   }
 
@@ -86,6 +100,7 @@ export async function createCapabilityAction(
   return {
     status: "success",
     action: "create_capability",
+    idempotencyKey: randomUUID(),
     message: `Capability Created: ${res.data.capability_code} (ID: ${res.data.capability_id}, Domain: ${res.data.module_domain}, Risk: ${res.data.execution_risk_class})`,
     capability: res.data,
   };
@@ -133,11 +148,12 @@ export async function createMarketReleaseAction(
   _previous: CapabilityActionState,
   formData: FormData
 ): Promise<CapabilityActionState> {
+  const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim() || randomUUID();
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
   } catch {
-    return EXPIRED;
+    return { ...EXPIRED, idempotencyKey };
   }
 
   const capabilityId = String(formData.get("capability_id") ?? "").trim();
@@ -147,11 +163,12 @@ export async function createMarketReleaseAction(
   const state = String(formData.get("state") ?? "GA").trim().toUpperCase();
   const effectiveFrom = String(formData.get("effective_from") ?? new Date().toISOString()).trim();
 
-  if (!capabilityId || !marketCode || !legalApprovalStatus || !state) {
+  if (!capabilityId || !marketCode || !isLegalApprovalStatus(legalApprovalStatus) || !state) {
     return {
       status: "error",
       action: "create_market_release",
-      message: "capability_id, market_code, legal_approval_status, and state are required.",
+      message: "capability_id and market_code are required; legal_approval_status must be APPROVED, PENDING, or REJECTED.",
+      idempotencyKey,
     };
   }
 
@@ -163,13 +180,14 @@ export async function createMarketReleaseAction(
     effective_from: effectiveFrom,
   };
 
-  const res = await createMarketRelease(capabilityId, input, identity);
+  const res = await createMarketRelease(capabilityId, input, identity, idempotencyKey);
   if (!res.ok) {
     return {
       status: "error",
       action: "create_market_release",
       message: res.error.message || "Failed to register market release.",
       error: res.error.message,
+      idempotencyKey,
     };
   }
 
@@ -177,6 +195,7 @@ export async function createMarketReleaseAction(
   return {
     status: "success",
     action: "create_market_release",
+    idempotencyKey: randomUUID(),
     message: `Market Release Registered: Market=${res.data.market_code}, State=${res.data.state}, LegalStatus=${res.data.legal_approval_status} (Release ID: ${res.data.market_release_id})`,
     marketRelease: res.data,
   };
@@ -186,11 +205,12 @@ export async function createIntegrationCapabilityAction(
   _previous: CapabilityActionState,
   formData: FormData
 ): Promise<CapabilityActionState> {
+  const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim() || randomUUID();
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
   } catch {
-    return EXPIRED;
+    return { ...EXPIRED, idempotencyKey };
   }
 
   const capabilityId = String(formData.get("capability_id") ?? "").trim();
@@ -203,6 +223,7 @@ export async function createIntegrationCapabilityAction(
       status: "error",
       action: "create_integration",
       message: "capability_id and provider_code are required.",
+      idempotencyKey,
     };
   }
 
@@ -212,13 +233,14 @@ export async function createIntegrationCapabilityAction(
     health_status: healthStatus,
   };
 
-  const res = await createIntegrationCapability(capabilityId, input, identity);
+  const res = await createIntegrationCapability(capabilityId, input, identity, idempotencyKey);
   if (!res.ok) {
     return {
       status: "error",
       action: "create_integration",
       message: res.error.message || "Failed to attach integration capability.",
       error: res.error.message,
+      idempotencyKey,
     };
   }
 
@@ -229,6 +251,7 @@ export async function createIntegrationCapabilityAction(
   return {
     status: "success",
     action: "create_integration",
+    idempotencyKey: randomUUID(),
     message: `Integration Connector Created: Provider=${res.data.provider_code}, Certified=${res.data.certified}, Health=${res.data.health_status} (ID: ${res.data.integration_capability_id})`,
     integration: res.data,
     integrations: listRes.ok ? listRes.data : [res.data],
@@ -239,11 +262,12 @@ export async function updateIntegrationHealthAction(
   _previous: CapabilityActionState,
   formData: FormData
 ): Promise<CapabilityActionState> {
+  const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim() || randomUUID();
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
   } catch {
-    return EXPIRED;
+    return { ...EXPIRED, idempotencyKey };
   }
 
   const integrationId = String(formData.get("integration_capability_id") ?? "").trim();
@@ -255,16 +279,18 @@ export async function updateIntegrationHealthAction(
       status: "error",
       action: "update_health",
       message: "integration_capability_id and health_status are required.",
+      idempotencyKey,
     };
   }
 
-  const res = await updateIntegrationHealth(integrationId, healthStatus, identity);
+  const res = await updateIntegrationHealth(integrationId, healthStatus, identity, idempotencyKey);
   if (!res.ok) {
     return {
       status: "error",
       action: "update_health",
       message: res.error.message || "Failed to update integration health.",
       error: res.error.message,
+      idempotencyKey,
     };
   }
 
@@ -281,6 +307,7 @@ export async function updateIntegrationHealthAction(
   return {
     status: "success",
     action: "update_health",
+    idempotencyKey: randomUUID(),
     message: `Integration Health Updated: ${providerDisplay} (ID: ${integrationId.slice(0, 8)}...), New Health=${healthStatus}`,
     integration: updatedIntegration,
     integrations: integrationsList,
@@ -291,11 +318,12 @@ export async function setReleaseStateAction(
   _previous: CapabilityActionState,
   formData: FormData
 ): Promise<CapabilityActionState> {
+  const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim() || randomUUID();
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
   } catch {
-    return EXPIRED;
+    return { ...EXPIRED, idempotencyKey };
   }
 
   const capabilityId = String(formData.get("capability_id") ?? "").trim();
@@ -307,6 +335,7 @@ export async function setReleaseStateAction(
       status: "error",
       action: "set_release_state",
       message: "capability_id and state are required.",
+      idempotencyKey,
     };
   }
 
@@ -315,13 +344,14 @@ export async function setReleaseStateAction(
     reason: reason || undefined,
   };
 
-  const res = await setReleaseState(capabilityId, input, identity);
+  const res = await setReleaseState(capabilityId, input, identity, idempotencyKey);
   if (!res.ok) {
     return {
       status: "error",
       action: "set_release_state",
       message: res.error.message || "Failed to set operational release state.",
       error: res.error.message,
+      idempotencyKey,
     };
   }
 
@@ -329,6 +359,7 @@ export async function setReleaseStateAction(
   return {
     status: "success",
     action: "set_release_state",
+    idempotencyKey: randomUUID(),
     message: `Operational Release State Set: State=${res.data.state} (Release ID: ${res.data.release_id}${res.data.reason ? `, Reason: '${res.data.reason}'` : ""})`,
     release: res.data,
   };
@@ -338,11 +369,12 @@ export async function createCapabilityClaimAction(
   _previous: CapabilityActionState,
   formData: FormData
 ): Promise<CapabilityActionState> {
+  const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim() || randomUUID();
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
   } catch {
-    return EXPIRED;
+    return { ...EXPIRED, idempotencyKey };
   }
 
   const capabilityId = String(formData.get("capability_id") ?? "").trim();
@@ -357,6 +389,7 @@ export async function createCapabilityClaimAction(
       status: "error",
       action: "create_claim",
       message: "capability_id, claim_text, wording_owner_principal_id, and approved_by_principal_id are required.",
+      idempotencyKey,
     };
   }
 
@@ -368,13 +401,14 @@ export async function createCapabilityClaimAction(
     expiry_review_date: expiryDate || undefined,
   };
 
-  const res = await createCapabilityClaim(capabilityId, input, identity);
+  const res = await createCapabilityClaim(capabilityId, input, identity, idempotencyKey);
   if (!res.ok) {
     return {
       status: "error",
       action: "create_claim",
       message: res.error.message || "Failed to record marketing claim.",
       error: res.error.message,
+      idempotencyKey,
     };
   }
 
@@ -384,6 +418,7 @@ export async function createCapabilityClaimAction(
   return {
     status: "success",
     action: "create_claim",
+    idempotencyKey: randomUUID(),
     message: `Marketing Claim Recorded: ID=${res.data.claim_id}, Scope=${res.data.market_scope ?? "GLOBAL"}, ApprovedBy=${res.data.approved_by_principal_id}`,
     claim: res.data,
     claims: listRes.ok ? listRes.data : [res.data],

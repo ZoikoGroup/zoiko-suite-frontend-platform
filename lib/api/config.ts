@@ -3,7 +3,8 @@
 // Every service in the backend listens on its own port (8080–8130) and, in a
 // real deployment, is reachable only through the Traefik gateway on :80 — the
 // service ports are not published. Locally the ports ARE published, so we talk
-// to services directly and keep the gateway out of the loop.
+// to services directly and keep the gateway out of the loop. AI Governance is
+// the exception: its protected actions always traverse gateway-auth-svc.
 //
 // Switching to the gateway later is a two-line change: point GATEWAY_URL at it
 // and set ZOIKO_USE_GATEWAY=true. Everything downstream reads serviceUrl().
@@ -337,7 +338,9 @@ export function serviceLabel(service: ServiceName): string {
  * because all calls go through the server (see client.ts).
  */
 export function serviceUrl(service: ServiceName): string {
-  if (useGateway) {
+  // AI Governance trusts the gateway-verified identity envelope and has no
+  // host-published service port; never route its requests around ForwardAuth.
+  if (useGateway || service === "aiGovernance") {
     const gateway = process.env.ZOIKO_GATEWAY_URL ?? DEFAULTS.gateway;
     return stripTrailingSlash(gateway) + GATEWAY_PREFIX[service];
   }

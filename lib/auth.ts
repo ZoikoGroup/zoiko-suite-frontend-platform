@@ -108,9 +108,9 @@ export type SessionIdentity = {
   /**
    * The signed envelope, when the session has one. Optional so the ~50 places
    * that build this object from three literal fields keep compiling and keep
-   * working — they simply do not present a bearer token, which changes nothing
-   * while ZOIKO_USE_GATEWAY is false and the console talks to service ports
-   * directly. Use toIdentity() below rather than constructing it by hand.
+   * working — they simply do not present a bearer token. AI Governance calls
+   * require this envelope and always traverse gateway-auth-svc. Use toIdentity()
+   * below rather than constructing it by hand.
    */
   envelopeJwt?: string;
 };
@@ -143,11 +143,9 @@ export type SessionPayload = {
    * login went through the real identity provider.
    *
    * Optional on purpose. A session minted before this field existed, or one
-   * from the offline fallback below, has no envelope — and every read path
-   * still works, because the console sends the §4 identity headers directly and
-   * ZOIKO_USE_GATEWAY is false, so nothing is verifying a bearer token today.
-   * Once the gateway is in front, an absent envelope is what will start failing,
-   * and it fails as a 401 from gateway-auth-svc rather than silently.
+   * from the offline fallback below, has no envelope. Non-AI local reads may
+   * still use the local identity headers, but AI Governance actions reject this
+   * session and route through gateway-auth-svc for signed-envelope validation.
    */
   envelopeJwt?: string;
 

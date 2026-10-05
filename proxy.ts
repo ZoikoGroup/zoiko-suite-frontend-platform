@@ -9,6 +9,18 @@ export async function proxy(request: NextRequest) {
   if (!session) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
+
+    // When an unauthenticated Server Action is called, a standard HTTP 307 redirect
+    // causes Next.js's client-side serverActionReducer to receive HTML instead of
+    // flight data and throw "An unexpected response was received from the server."
+    // Returning x-action-redirect allows Next.js to handle the redirect cleanly.
+    if (request.headers.get("next-action")) {
+      const redirectPath = `${loginUrl.pathname}${loginUrl.search};replace`;
+      const res = new NextResponse(null, { status: 200 });
+      res.headers.set("x-action-redirect", redirectPath);
+      return res;
+    }
+
     return NextResponse.redirect(loginUrl);
   }
 

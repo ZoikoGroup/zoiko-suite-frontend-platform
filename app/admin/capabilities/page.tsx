@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { PageHeader } from "@/components/admin/shared";
 import { CapabilityWorkbench } from "@/components/admin/capabilities/CapabilityWorkbench";
@@ -23,7 +24,17 @@ export default async function CapabilitiesPage() {
 
       <KillSwitchRegistryPanel initialPrincipalId={principalId} />
 
-      <CapabilityWorkbench initialPrincipalId={principalId} />
+      <CapabilityWorkbench
+        initialPrincipalId={principalId}
+        initialIdempotencyKeys={{
+          createCapability: randomUUID(),
+          createMarketRelease: randomUUID(),
+          createIntegrationCapability: randomUUID(),
+          updateIntegrationHealth: randomUUID(),
+          setReleaseState: randomUUID(),
+          createCapabilityClaim: randomUUID(),
+        }}
+      />
     </div>
   );
 }

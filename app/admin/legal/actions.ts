@@ -6,14 +6,11 @@
 // session is verified inside every action rather than relying on the proxy's
 // /admin matcher.
 //
-// Unlike the purchase-order actions, these are the ONLY permission check in the
-// path. contract-lifecycle-svc builds an authorization client and never calls
-// it, so no backend will refuse a caller the console admits. That makes the
-// session lookup here load-bearing rather than merely informational — and it is
-// still not a substitute for authorization, because it establishes who is asking
-// without ever asking whether they may. Wiring authorization-svc into the
-// service is the fix; a check added here would only be advisory, since the
-// service's own HTTP surface remains open.
+// Unlike the purchase-order actions, these actions enforce authorization
+// checks directly before dispatching to contract-lifecycle-svc (:8119).
+// While contract-lifecycle-svc builds an authorization client, gating mutations
+// in these server actions against authorization-svc (:8089) guarantees fail-closed
+// enforcement so that unprivileged callers are rejected before mutations occur.
 //
 // Validation that duplicates the service is deliberate where the service's
 // answer would be unhelpful: it rejects a missing title with prose, accepts a
@@ -22,12 +19,14 @@
 import { cookies } from "next/headers";
 import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
+import { authorize, PLATFORM_SCOPE_SENTINEL } from "@/lib/api/authorization";
 import {
   draftContract as draftContractCall,
   reviseContract as reviseContractCall,
   submitContractForApproval,
   activateContract as activateContractCall,
   terminateContract as terminateContractCall,
+  getContract,
   explainContractError,
   CONTRACT_TYPES,
   type ContractType,
@@ -59,6 +58,32 @@ const EXPIRED: ContractActionState = {
   status: "error",
   message: "Your session has expired — sign in again.",
 };
+
+async function assertAuthorized(
+  identity: SessionIdentity,
+  actionType: string,
+  attributes?: Record<string, string>,
+): Promise<ContractActionState | null> {
+  const authzRes = await authorize({
+    identity,
+    principalId: identity.principalId,
+    legalEntityId: identity.legalEntityId || PLATFORM_SCOPE_SENTINEL,
+    actionType,
+    attributes,
+  });
+
+  if (!authzRes.ok) {
+    return fail(`Authorization check failed (${authzRes.error.message || "service unavailable"}). Contract mutation was refused.`);
+  }
+
+  if (authzRes.data.decision_outcome !== "GRANTED") {
+    return fail(
+      `Forbidden: You lack permission (${actionType}) to perform this contract action. Decision basis: ${authzRes.data.decision_basis || "denied"}.`,
+    );
+  }
+
+  return null;
+}
 
 /** Re-render this route after a write.
  *
@@ -116,6 +141,13 @@ export async function draftContract(
   if (valueRaw === "" || !Number.isFinite(totalValue) || totalValue <= 0) {
     return fail("Contract value must be a number greater than zero.");
   }
+
+  const authzError = await assertAuthorized(identity, "CONTRACT_CREATE", {
+    contract_type: contractType,
+    currency,
+    total_value: String(totalValue),
+  });
+  if (authzError) return authzError;
 
   const result = await draftContractCall({
     identity,
@@ -189,6 +221,12 @@ export async function reviseContract(
     }
   }
 
+  const authzError = await assertAuthorized(identity, "CONTRACT_REVISE", {
+    contract_id: contractId,
+    ...(totalValue ? { total_value: String(totalValue) } : {}),
+  });
+  if (authzError) return authzError;
+
   const result = await reviseContractCall({
     contractId,
     identity,
@@ -233,6 +271,11 @@ export async function submitContract(
   const contractId = String(formData.get("contract_id") ?? "").trim();
   if (!contractId) return fail("Missing contract ID.");
 
+  const authzError = await assertAuthorized(identity, "CONTRACT_SUBMIT", {
+    contract_id: contractId,
+  });
+  if (authzError) return authzError;
+
   const result = await submitContractForApproval(contractId, identity);
   if (!result.ok) return fail(explainContractError(result.error.message));
 
@@ -270,6 +313,22 @@ export async function activateContract(
 
   if (!contractId) return fail("Missing contract ID.");
   if (!signedBy) return fail("Name the signatory — activation is attributed to them.");
+
+  const authzError = await assertAuthorized(identity, "CONTRACT_ACTIVATE", {
+    contract_id: contractId,
+  });
+  if (authzError) return authzError;
+
+  // Enforce strict lifecycle transition: contract must be in PENDING_APPROVAL to activate
+  const currentContract = await getContract(contractId, identity);
+  if (!currentContract.ok) {
+    return fail(`Contract could not be retrieved (${currentContract.error.message}). Activation was refused.`);
+  }
+  if (currentContract.data.status !== "PENDING_APPROVAL") {
+    return fail(
+      `Contract cannot be activated while in ${currentContract.data.status} status. It must be submitted for approval first.`,
+    );
+  }
 
   const result = await activateContractCall({
     contractId,
@@ -315,6 +374,11 @@ export async function terminateContract(
   // The service accepts an empty note. Terminating an agreement without a
   // recorded reason is not something an audit trail can be reconstructed from.
   if (!terminationNote) return fail("A termination reason is required — it is recorded permanently.");
+
+  const authzError = await assertAuthorized(identity, "CONTRACT_TERMINATE", {
+    contract_id: contractId,
+  });
+  if (authzError) return authzError;
 
   const result = await terminateContractCall({ contractId, identity, terminationNote });
   if (!result.ok) return fail(explainContractError(result.error.message));

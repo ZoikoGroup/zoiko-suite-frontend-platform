@@ -11,6 +11,9 @@ import type {
   UsageMeterEvent,
   ContractEntitlementOverlay,
   BillingSourceTransfer,
+  EvaluateEntitlementResult,
+  CommercialBillingAccount,
+  CommercialInvoice,
 } from "@/lib/api/commercial-account";
 
 export type CommercialAccountActionState = {
@@ -24,6 +27,7 @@ export type CommercialAccountActionState = {
     | "list_memberships"
     | "create_catalog"
     | "create_plan"
+    | "approve_publish_price_version"
     | "set_limit"
     | "create_subscription"
     | "get_subscription"
@@ -34,7 +38,10 @@ export type CommercialAccountActionState = {
     | "create_evaluation_program"
     | "record_usage_event"
     | "create_overlay"
-    | "transfer_billing";
+    | "transfer_billing"
+    | "evaluate_commercial_entitlement"
+    | "open_billing_account"
+    | "get_invoice";
   account?: CommercialAccount;
   memberships?: Membership[];
   catalog?: PriceCatalog;
@@ -47,6 +54,9 @@ export type CommercialAccountActionState = {
   usageEvent?: UsageMeterEvent;
   overlay?: ContractEntitlementOverlay;
   transfer?: BillingSourceTransfer;
+  commercialEntitlement?: EvaluateEntitlementResult;
+  billingAccount?: CommercialBillingAccount;
+  invoice?: CommercialInvoice;
   error?: string;
 };
 

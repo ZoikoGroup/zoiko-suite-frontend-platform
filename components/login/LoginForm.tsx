@@ -27,20 +27,25 @@ export function LoginForm({ redirectTo = "/admin" }: { redirectTo?: string }) {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ email, password }),
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "Unable to sign in. Please try again.");
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.success) {
+        setError(data?.error ?? "Unable to sign in. Please try again.");
         setShake(true);
         setTimeout(() => setShake(false), 400);
         setLoading(false);
         return;
       }
 
-      router.push(redirectTo);
-      router.refresh();
+      // The server sets the auth cookie on a successful response. Use a full
+      // browser navigation after the cookie is established so the protected
+      // admin route loads with the correct session state instead of producing
+      // the app-router "unexpected response from the server" error.
+      window.location.assign(redirectTo);
     } catch {
       setError("Network error — please try again.");
       setLoading(false);

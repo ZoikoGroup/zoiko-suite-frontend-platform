@@ -520,10 +520,14 @@ export type CreateProductInput = {
   product_kind: "PLAN" | "ADD_ON";
 };
 
+// The backend's canonical set (domain.ValidateDraftHeader / pricebook.go's
+// billingIntervals) — exactly these three, case-sensitive. Not "MONTHLY".
+export type BillingInterval = "MONTH" | "QUARTER" | "YEAR";
+
 export type CreatePriceVersionInput = {
   product_id: string;
   display_name: string;
-  billing_interval: string;
+  billing_interval: BillingInterval;
   billing_interval_count?: number;
   currency_code: string;
   market_codes?: string[];
@@ -673,16 +677,29 @@ export async function getCommercialSubscriptionV2(
   );
 }
 
+// Field names match the backend's evaluateRequest struct
+// (com03_entitlement_handler.go) exactly: organization_id, capability_key,
+// requested_quantity. A prior version of this type used feature_key/
+// LIMIT_EXCEEDED, which do not exist in the real contract.
 export type EvaluateEntitlementInput = {
-  feature_key: string;
+  organization_id: string;
+  capability_key: string;
   requested_quantity?: number;
 };
 
+// Matches domain.CapabilityDecision (com03_entitlement.go) exactly.
 export type EvaluateEntitlementResult = {
-  outcome: "ALLOW" | "DENY" | "LIMIT_EXCEEDED";
-  feature_key: string;
-  remaining?: number;
-  reason?: string;
+  capability_key: string;
+  outcome: "ALLOW" | "ALLOW_WITH_LIMIT" | "READ_ONLY" | "RESTRICTED" | "DENY";
+  limit_value?: number;
+  limit_unit?: string;
+  subscription_outcome: "ALLOW" | "ALLOW_WITH_LIMIT" | "READ_ONLY" | "RESTRICTED" | "DENY";
+  restriction_outcome?: "ALLOW" | "ALLOW_WITH_LIMIT" | "READ_ONLY" | "RESTRICTED" | "DENY";
+  applied_restriction_id?: string;
+  policy_version?: number;
+  subscription_id?: string;
+  reason: string;
+  decided_at: string;
 };
 
 export async function evaluateCommercialEntitlement(
@@ -697,15 +714,33 @@ export async function evaluateCommercialEntitlement(
   );
 }
 
+// Field names match domain.BillingAccount (com05_billing.go) exactly.
 export type CommercialBillingAccount = {
   billing_account_id: string;
   organization_id: string;
-  currency_code: string;
+  selling_entity: string;
+  billing_currency_code: string;
+  invoice_numbering_profile: string;
+  payment_provider_ref: string;
+  accounting_mapping_key: string;
   status: string;
 };
 
+// Field names match the backend's openBillingAccountRequest struct exactly;
+// all six are required by domain.ValidateBillingAccount. A prior version of
+// this input only had organization_id/currency_code, which does not satisfy
+// the real contract.
+export type OpenBillingAccountInput = {
+  organization_id: string;
+  selling_entity: string;
+  billing_currency_code: string;
+  invoice_numbering_profile: string;
+  payment_provider_ref: string;
+  accounting_mapping_key: string;
+};
+
 export async function openCommercialBillingAccount(
-  input: { organization_id: string; currency_code: string },
+  input: OpenBillingAccountInput,
   identity?: Identity
 ): Promise<ApiWriteResult<CommercialBillingAccount>> {
   return apiPost<CommercialBillingAccount>(
@@ -727,13 +762,24 @@ export async function getCommercialBillingAccount(
   );
 }
 
+// Field names match domain.PlatformCommercialInvoice (com05_billing.go); a
+// prior version of this type claimed a "status" field that does not exist
+// on the real response and was missing several real fields (invoice_number,
+// lines, tax fields).
 export type CommercialInvoice = {
   invoice_id: string;
+  invoice_number: string;
   organization_id: string;
   billing_account_id: string;
-  total_amount: string;
+  candidate_id: string;
+  subscription_id: string;
+  term_no: number;
   currency_code: string;
-  status: string;
+  subtotal_amount: string;
+  tax_jurisdiction_code: string;
+  tax_rate_basis_points: number;
+  tax_amount: string;
+  total_amount: string;
   issued_at: string;
 };
 

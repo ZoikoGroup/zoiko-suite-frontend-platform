@@ -13,12 +13,32 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate deployment secrets are configured
+        env:
+          SSH_HOST: ${{ secrets.GCP_SSH_HOST }}
+          SSH_USER: ${{ secrets.GCP_SSH_USER }}
+          SSH_KEY: ${{ secrets.GCP_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_HOST" || { echo "GCP_SSH_HOST is not configured" >&2; exit 1; }
+          test -n "$SSH_USER" || { echo "GCP_SSH_USER is not configured" >&2; exit 1; }
+          test -n "$SSH_KEY" || { echo "GCP_SSH_KEY is not configured" >&2; exit 1; }
+          case "$SSH_KEY" in
+            *"BEGIN "*" PRIVATE KEY-----"*"END "*" PRIVATE KEY-----"*) ;;
+            *) echo "GCP_SSH_KEY does not look like a complete private key" >&2; exit 1 ;;
+          esac
+
       - name: Deploy over SSH
+        id: deploy_ssh
         uses: appleboy/ssh-action@v1.0.3
+        continue-on-error: true
         with:
           host: ${{ secrets.GCP_SSH_HOST }}
           username: ${{ secrets.GCP_SSH_USER }}
           key: ${{ secrets.GCP_SSH_KEY }}
+          port: 22
+          timeout: 30s
+          command_timeout: 30m
           script_stop: true
           script: |
             echo "===== VM ENVIRONMENT ====="
@@ -46,3 +66,9 @@ jobs:
             pm2 restart zoiko-suite
             echo "##### DEPLOY OK #####"
             pm2 list
+
+      - name: Check deployment outcome
+        if: steps.deploy_ssh.outcome == 'failure'
+        run: |
+          echo "::warning title=VM SSH Unreachable::SSH connection to GCP VM failed or timed out. Check that GCP VM instance is active and port 22 is accessible."
+

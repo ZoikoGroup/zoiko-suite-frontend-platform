@@ -45,7 +45,19 @@ import type {
   CapabilityResolution,
 } from "@/lib/api/capability-registry";
 
-export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId: string }) {
+type CapabilityWorkbenchProps = {
+  initialPrincipalId: string;
+  initialIdempotencyKeys: {
+    createCapability: string;
+    createMarketRelease: string;
+    createIntegrationCapability: string;
+    updateIntegrationHealth: string;
+    setReleaseState: string;
+    createCapabilityClaim: string;
+  };
+};
+
+export function CapabilityWorkbench({ initialPrincipalId, initialIdempotencyKeys }: CapabilityWorkbenchProps) {
   // Action States
   const [capState, capAction, capPending] = useActionState(createCapabilityAction, IDLE_CAPABILITY_STATE);
   const [getCapState, getCapAction, getCapPending] = useActionState(getCapabilityAction, IDLE_CAPABILITY_STATE);
@@ -98,6 +110,7 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
   const [claimScope, setClaimScope] = useState("UK_EEA");
   const [wordingOwner, setWordingOwner] = useState(initialPrincipalId);
   const [claimApprover, setClaimApprover] = useState("44444444-4444-4444-4444-444444444444");
+  const [claimExpiryReviewDate, setClaimExpiryReviewDate] = useState("");
 
   // Resolution Form Fields
   const [capCodeInput, setCapCodeInput] = useState("PAYMENT_ROUTING_SEPA");
@@ -329,6 +342,7 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
 
             <CardContent className="space-y-4">
               <form action={capAction} className="space-y-4">
+                <input type="hidden" name="idempotency_key" value={capState.idempotencyKey ?? initialIdempotencyKeys.createCapability} />
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
                     <label className={LABEL}>
@@ -497,6 +511,7 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
               {/* Subtab 1: Market Releases */}
               {registryTab === "market" && (
                 <form action={marketAction} className="space-y-4">
+                  <input type="hidden" name="idempotency_key" value={marketState.idempotencyKey ?? initialIdempotencyKeys.createMarketRelease} />
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                     <span className="font-bold">Market Release Gate (doc7 §Q1):</span> Controls whether this capability is approved in a specific jurisdiction/entity and language code.
                   </div>
@@ -599,6 +614,7 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
               {registryTab === "integration" && (
                 <div className="space-y-6">
                   <form action={integrationAction} className="space-y-4">
+                    <input type="hidden" name="idempotency_key" value={integrationState.idempotencyKey ?? initialIdempotencyKeys.createIntegrationCapability} />
                     <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                       <span className="font-bold">Integration Readiness (doc7 §29):</span> Links required external providers/connectors (e.g. Stripe, Plaid, Modulr) and asserts certified operational readiness.
                     </div>
@@ -677,6 +693,7 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
                   {/* Active Integration Health Quick-Switch */}
                   {activeIntegration && (
                     <form action={healthAction} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/30">
+                      <input type="hidden" name="idempotency_key" value={healthState.idempotencyKey ?? initialIdempotencyKeys.updateIntegrationHealth} />
                       <input type="hidden" name="integration_capability_id" value={activeIntegration.integration_capability_id} />
                       <input type="hidden" name="capability_id" value={activeCapability?.capability_id ?? ""} />
                       <div className="flex items-center justify-between">
@@ -718,6 +735,7 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
               {/* Subtab 3: Operational Release & Incident State */}
               {registryTab === "operational" && (
                 <form action={releaseAction} className="space-y-4">
+                  <input type="hidden" name="idempotency_key" value={releaseState.idempotencyKey ?? initialIdempotencyKeys.setReleaseState} />
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
                     <span className="font-bold">Operational Kill-Switch & Release State (doc7 §32.1):</span> Controls active system runtime execution. Flipped to <span className="font-mono">INCIDENT_RESTRICTED</span> during an incident without modifying market approval or commercial entitlement! Append-only: committed history is never erased.
                   </div>
@@ -783,6 +801,7 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
               {/* Subtab 4: Public Marketing Claims */}
               {registryTab === "claims" && (
                 <form action={claimAction} className="space-y-4">
+                  <input type="hidden" name="idempotency_key" value={claimState.idempotencyKey ?? initialIdempotencyKeys.createCapabilityClaim} />
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                     <span className="font-bold">Public Claim Governance (doc7 §C2):</span> Authoritative statements sales and marketing may make. Never auto-generated from roadmap state; requires a named wording owner and legal approver.
                   </div>
@@ -841,6 +860,17 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
                         required
                         value={claimApprover}
                         onChange={(e) => setClaimApprover(e.target.value)}
+                        className={`${FIELD} font-mono text-xs`}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={LABEL}>Expiry / Review Date (doc7 §C2)</label>
+                      <input
+                        name="expiry_review_date"
+                        value={claimExpiryReviewDate}
+                        onChange={(e) => setClaimExpiryReviewDate(e.target.value)}
+                        placeholder="RFC3339, e.g. 2027-01-01T00:00:00Z"
                         className={`${FIELD} font-mono text-xs`}
                       />
                     </div>
@@ -1106,6 +1136,11 @@ export function CapabilityWorkbench({ initialPrincipalId }: { initialPrincipalId
                               <span>Scope: {cl.market_scope ?? "GLOBAL"}</span>
                               <span className="font-mono">Owner: {cl.wording_owner_principal_id?.slice(0, 8) ?? ""}...</span>
                             </div>
+                            {cl.expiry_review_date && (
+                              <div className="pt-0.5 text-[10px] text-slate-500">
+                                Review by: {new Date(cl.expiry_review_date).toLocaleDateString()}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

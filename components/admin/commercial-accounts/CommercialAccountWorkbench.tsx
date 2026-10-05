@@ -35,6 +35,7 @@ import {
   deactivateMembershipAction,
   listMembershipsAction,
   createCatalogAndPlanAction,
+  approveAndPublishPriceVersionAction,
   createSubscriptionAction,
   getSubscriptionAction,
   setSubscriptionStatusAction,
@@ -45,6 +46,9 @@ import {
   resolveEntitlementAction,
   createOverlayAction,
   transferBillingSourceAction,
+  evaluateCommercialEntitlementAction,
+  openBillingAccountAction,
+  getInvoiceAction,
 } from "@/app/admin/commercial-accounts/commercial-account-actions";
 import { IDLE_COMMERCIAL_STATE, type CommercialAccountActionState } from "@/app/admin/commercial-accounts/commercial-account-state";
 import type {
@@ -83,6 +87,10 @@ export function CommercialAccountWorkbench({ initialTenantId }: { initialTenantI
   );
   const [catalogPlanState, catalogPlanAction, catalogPlanPending] = useActionState(
     createCatalogAndPlanAction,
+    IDLE_COMMERCIAL_STATE
+  );
+  const [approvePublishState, approvePublishAction, approvePublishPending] = useActionState(
+    approveAndPublishPriceVersionAction,
     IDLE_COMMERCIAL_STATE
   );
   const [subState, subAction, subPending] = useActionState(
@@ -125,6 +133,18 @@ export function CommercialAccountWorkbench({ initialTenantId }: { initialTenantI
     transferBillingSourceAction,
     IDLE_COMMERCIAL_STATE
   );
+  const [evalCommercialEntitlementState, evalCommercialEntitlementFormAction, evalCommercialEntitlementPending] = useActionState(
+    evaluateCommercialEntitlementAction,
+    IDLE_COMMERCIAL_STATE
+  );
+  const [openBillingAccountState, openBillingAccountFormAction, openBillingAccountPending] = useActionState(
+    openBillingAccountAction,
+    IDLE_COMMERCIAL_STATE
+  );
+  const [getInvoiceState, getInvoiceFormAction, getInvoicePending] = useActionState(
+    getInvoiceAction,
+    IDLE_COMMERCIAL_STATE
+  );
 
   // Active Loaded Objects
   const [activeAccount, setActiveAccount] = useState<CommercialAccount | null>(null);
@@ -154,6 +174,9 @@ export function CommercialAccountWorkbench({ initialTenantId }: { initialTenantI
   const [planCode, setPlanCode] = useState("ENTERPRISE-PRO");
   const [displayName, setDisplayName] = useState("Enterprise Pro Suite");
   const [planPrice, setPlanPrice] = useState("999.00");
+  // Backend's canonical set is exactly MONTH | QUARTER | YEAR
+  // (domain.ValidateDraftHeader) — never "MONTHLY".
+  const [planBillingInterval, setPlanBillingInterval] = useState<"MONTH" | "QUARTER" | "YEAR">("MONTH");
   const [planMetric, setPlanMetric] = useState("api_calls_monthly");
   const [planLimit, setPlanLimit] = useState("50000");
 
@@ -911,6 +934,19 @@ export function CommercialAccountWorkbench({ initialTenantId }: { initialTenantI
                         <input name="base_price_amount" value={planPrice} onChange={(e) => setPlanPrice(e.target.value)} className={FIELD} />
                       </div>
                       <div>
+                        <label className={LABEL}>Billing Interval</label>
+                        <select
+                          name="billing_interval"
+                          value={planBillingInterval}
+                          onChange={(e) => setPlanBillingInterval(e.target.value as "MONTH" | "QUARTER" | "YEAR")}
+                          className={FIELD}
+                        >
+                          <option value="MONTH">Monthly</option>
+                          <option value="QUARTER">Quarterly</option>
+                          <option value="YEAR">Yearly</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className={LABEL}>Metric Type</label>
                         <input name="metric_type" value={planMetric} onChange={(e) => setPlanMetric(e.target.value)} className={FIELD} />
                       </div>
@@ -922,13 +958,48 @@ export function CommercialAccountWorkbench({ initialTenantId }: { initialTenantI
                     <div className="flex justify-end pt-1">
                       <Button type="submit" variant="secondary" disabled={catalogPlanPending} className="text-xs">
                         {catalogPlanPending ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                        Publish Catalog & Plan
+                        Submit Catalog & Plan for Review
                       </Button>
                     </div>
                     {catalogPlanState.status !== "idle" && (
                       <ResultBanner
                         tone={catalogPlanState.status === "success" ? "success" : "error"}
                         message={catalogPlanState.message || "Catalog & Plan processed."}
+                      />
+                    )}
+                  </form>
+
+                  {/* Step A1b: Approve & Publish — must be performed by a different
+                      logged-in operator than the one who submitted above. The
+                      backend blocks self-approval (decider != proposer); this
+                      action always uses the current session's own real identity,
+                      never a fabricated one. */}
+                  <form action={approvePublishAction} className="space-y-3 rounded-lg border border-amber-200 p-3 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20">
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Step A1b: Approve & Publish Price Version (requires a different operator)
+                    </h4>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Log in as a different user than the one who submitted the version above, then approve and publish it here. The backend rejects this step with 403 if performed by the same principal who proposed it — that is Segregation of Duties working as intended, not a bug.
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 items-end">
+                      <div className="sm:col-span-2">
+                        <label className={LABEL}>Price Version ID</label>
+                        <input
+                          name="price_version_id"
+                          defaultValue={activeCatalog?.catalog_version_id ?? ""}
+                          placeholder="pv_..."
+                          className={FIELD}
+                        />
+                      </div>
+                      <Button type="submit" variant="secondary" disabled={approvePublishPending} className="text-xs">
+                        {approvePublishPending ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <UserCheck className="h-3 w-3 mr-1" />}
+                        Approve & Publish (as current user)
+                      </Button>
+                    </div>
+                    {approvePublishState.status !== "idle" && (
+                      <ResultBanner
+                        tone={approvePublishState.status === "success" ? "success" : "error"}
+                        message={approvePublishState.message || "Approval processed."}
                       />
                     )}
                   </form>
@@ -1343,6 +1414,36 @@ export function CommercialAccountWorkbench({ initialTenantId }: { initialTenantI
                     )}
                   </form>
 
+                  {/* COM-03: Evaluate Commercial Entitlement (dry-run capability check) */}
+                  <form action={evalCommercialEntitlementFormAction} className="space-y-3 rounded-lg border border-slate-200 p-3 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30">
+                    <input type="hidden" name="organization_id" value={activeAccount?.organization_id ?? ""} />
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      COM-03: Evaluate Commercial Entitlement (Capability Decision)
+                    </h4>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={LABEL}>Capability Key</label>
+                        <input name="capability_key" defaultValue="api_access" className={FIELD} />
+                      </div>
+                      <div>
+                        <label className={LABEL}>Requested Quantity (optional)</label>
+                        <input name="requested_quantity" type="number" className={FIELD} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-1">
+                      <Button type="submit" variant="secondary" disabled={evalCommercialEntitlementPending} className="text-xs">
+                        {evalCommercialEntitlementPending ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <Search className="h-3 w-3 mr-1" />}
+                        Evaluate Entitlement
+                      </Button>
+                    </div>
+                    {evalCommercialEntitlementState.status !== "idle" && (
+                      <ResultBanner
+                        tone={evalCommercialEntitlementState.status === "success" ? "success" : "error"}
+                        message={evalCommercialEntitlementState.message || "Entitlement evaluated."}
+                      />
+                    )}
+                  </form>
+
                   {/* Create Contract Overlay */}
                   <form action={overlayAction} className="space-y-3 rounded-lg border border-slate-200 p-3 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30">
                     <input type="hidden" name="organization_id" value={activeAccount?.organization_id ?? ""} />
@@ -1571,6 +1672,74 @@ export function CommercialAccountWorkbench({ initialTenantId }: { initialTenantI
                       </div>
                     </div>
                   </div>
+
+                  {/* Open Billing Account */}
+                  <form action={openBillingAccountFormAction} className="space-y-3 rounded-lg border border-slate-200 p-3 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30">
+                    <input type="hidden" name="organization_id" value={activeAccount?.organization_id ?? ""} />
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Open Platform Billing Account (Seller Authority)
+                    </h4>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div>
+                        <label className={LABEL}>Selling Entity</label>
+                        <input name="selling_entity" defaultValue="Zoiko Suite Inc." className={FIELD} />
+                      </div>
+                      <div>
+                        <label className={LABEL}>Billing Currency Code</label>
+                        <input name="billing_currency_code" defaultValue="USD" className={FIELD} />
+                      </div>
+                      <div>
+                        <label className={LABEL}>Invoice Numbering Profile</label>
+                        <input name="invoice_numbering_profile" defaultValue="DEFAULT" className={FIELD} />
+                      </div>
+                      <div>
+                        <label className={LABEL}>Payment Provider Ref</label>
+                        <input name="payment_provider_ref" defaultValue="stripe-default" className={FIELD} />
+                      </div>
+                      <div>
+                        <label className={LABEL}>Accounting Mapping Key</label>
+                        <input name="accounting_mapping_key" defaultValue="GL-COMMERCIAL-DEFAULT" className={FIELD} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-1">
+                      <Button type="submit" variant="secondary" disabled={openBillingAccountPending} className="text-xs">
+                        {openBillingAccountPending ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <DollarSign className="h-3 w-3 mr-1" />}
+                        Open Billing Account
+                      </Button>
+                    </div>
+                    {openBillingAccountState.status !== "idle" && (
+                      <ResultBanner
+                        tone={openBillingAccountState.status === "success" ? "success" : "error"}
+                        message={openBillingAccountState.message || "Billing account processed."}
+                      />
+                    )}
+                  </form>
+
+                  {/* Get Invoice */}
+                  <form action={getInvoiceFormAction} className="space-y-3 rounded-lg border border-slate-200 p-3 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30">
+                    <input type="hidden" name="organization_id" value={activeAccount?.organization_id ?? ""} />
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Retrieve Platform Invoice
+                    </h4>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className={LABEL}>Invoice ID</label>
+                        <input name="invoice_id" placeholder="inv_..." className={`${FIELD} font-mono text-xs`} />
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-1">
+                      <Button type="submit" variant="secondary" disabled={getInvoicePending} className="text-xs">
+                        {getInvoicePending ? <RefreshCw className="h-3 w-3 animate-spin mr-1" /> : <Search className="h-3 w-3 mr-1" />}
+                        Get Invoice
+                      </Button>
+                    </div>
+                    {getInvoiceState.status !== "idle" && (
+                      <ResultBanner
+                        tone={getInvoiceState.status === "success" ? "success" : "error"}
+                        message={getInvoiceState.message || "Invoice retrieved."}
+                      />
+                    )}
+                  </form>
                 </div>
               )}
             </CardContent>

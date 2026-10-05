@@ -33,7 +33,8 @@ name**. Getting one wrong produces a Traefik 404 that looks exactly like the
 service being down.
 
 `ZOIKO_USE_GATEWAY=false` falls back to direct per-service ports — useful when
-the gateway itself is the suspect. See `.env.example`.
+the gateway itself is the suspect. AI Governance remains gateway-only because
+its protected actions require a verified identity envelope. See `.env.example`.
 
 ### The identity headers
 
@@ -186,3 +187,4 @@ above does not apply here.
 - Server Actions verify the session themselves. They are reachable by direct
   POST, not only through the UI, so they do not rely on the `/admin` proxy
   matcher.
+# CI/CD verification 2026-09-15T10:58:03Z

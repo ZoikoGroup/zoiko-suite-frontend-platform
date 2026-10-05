@@ -49,6 +49,7 @@ import {
   type Plan,
   type CommercialSubscription,
   type BillingSource,
+  type BillingInterval,
 } from "@/lib/api/commercial-account";
 import type { CommercialAccountActionState } from "./commercial-account-state";
 
@@ -302,7 +303,23 @@ export async function createCatalogAndPlanAction(
   const catalogCode = String(formData.get("catalog_code") ?? "CAT-2026-Q1").trim();
   const planCode = String(formData.get("plan_code") ?? "ENTERPRISE-PRO").trim();
   const displayName = String(formData.get("display_name") ?? "Enterprise Pro Edition").trim();
-  const billingInterval = String(formData.get("billing_interval") ?? "MONTHLY").trim();
+
+  // Backend's canonical set is exactly MONTH | QUARTER | YEAR (domain.
+  // ValidateDraftHeader) — never "MONTHLY". The Step A1 form below submits a
+  // <select> constrained to these three, so this check only guards against a
+  // missing/tampered field; it does not translate or coerce an invalid value.
+  const VALID_BILLING_INTERVALS: readonly BillingInterval[] = ["MONTH", "QUARTER", "YEAR"];
+  const billingIntervalRaw = String(formData.get("billing_interval") ?? "").trim().toUpperCase();
+  if (!VALID_BILLING_INTERVALS.includes(billingIntervalRaw as BillingInterval)) {
+    return {
+      status: "error",
+      action: "create_plan",
+      message: `billing_interval must be one of MONTH, QUARTER, YEAR (got "${billingIntervalRaw || "none"}").`,
+      error: "invalid billing_interval",
+    };
+  }
+  const billingInterval: BillingInterval = billingIntervalRaw as BillingInterval;
+
   const basePriceAmount = parseFloat(String(formData.get("base_price_amount") ?? "999.00"));
   const currencyCode = String(formData.get("currency_code") ?? "USD").trim().toUpperCase();
   const metricType = String(formData.get("metric_type") ?? "api_calls_monthly").trim();
@@ -383,28 +400,24 @@ export async function createCatalogAndPlanAction(
     identity
   );
 
-  // 4. Submit, Approve and Publish the Price Version (COM-01 Lifecycle)
+  // 4. Submit the Price Version for review (COM-01 Lifecycle: DRAFT -> REVIEW).
+  //
+  // Approve and publish are deliberately NOT performed here. The backend
+  // enforces maker-checker (decider != proposer) on both steps — the only
+  // way to honor that is to require a second, genuinely distinct, logged-in
+  // operator to perform them using their own real session identity (see
+  // approveAndPublishPriceVersionAction below). A prior version of this
+  // action auto-chained submit+approve+publish using three fabricated,
+  // never-authenticated principal ID strings, which satisfied the backend's
+  // proposer != approver string check without any real second approver ever
+  // existing — a segregation-of-duties bypass. Removed; do not reintroduce.
   await executePriceVersionAction(versionId, "submit", {}, identity);
-
-  // Independent checker/approver identity to satisfy Segregation of Duties (decider != proposer)
-  const checkerIdentity: SessionIdentity = {
-    ...identity,
-    principalId: identity.principalId !== "finance-checker-01" ? "finance-checker-01" : "compliance-officer-01",
-  };
-  await executePriceVersionAction(versionId, "approve", {}, checkerIdentity);
-
-  const publisherIdentity: SessionIdentity = {
-    ...identity,
-    principalId: "publisher-authority-01",
-  };
-  const pubRes = await executePriceVersionAction(versionId, "publish", {}, publisherIdentity);
-  const finalStatus: "PUBLISHED" | "DRAFT" = pubRes.ok ? "PUBLISHED" : "DRAFT";
 
   const syntheticCatalog: PriceCatalog = {
     catalog_version_id: versionId,
     catalog_code: catalogCode,
     effective_from: effectiveFrom,
-    status: finalStatus,
+    status: "DRAFT",
     created_at: new Date().toISOString(),
     created_by_principal_id: identity.principalId,
   };
@@ -435,9 +448,64 @@ export async function createCatalogAndPlanAction(
   return {
     status: "success",
     action: "create_plan",
-    message: `COM-01 Price Book Version Published: ${catalogCode} / ${displayName} (Version ID: ${versionId}, Currency: ${currencyCode}, ${metricType} limit: ${limitValue}).`,
+    message: `COM-01 Price Book Version submitted for review: ${catalogCode} / ${displayName} (Version ID: ${versionId}, Currency: ${currencyCode}, ${metricType} limit: ${limitValue}). A different operator must approve and publish it below — the proposer cannot self-approve.`,
     catalog: syntheticCatalog,
     plan: syntheticPlan,
+  };
+}
+
+// approveAndPublishPriceVersionAction performs the checker half of COM-01's
+// maker-checker lifecycle (REVIEW -> APPROVED -> PUBLISHED), using only the
+// real, currently-authenticated session's identity — never a synthesized
+// one. If the signed-in operator is the same principal who proposed the
+// version, the backend correctly refuses with 403 (self-approval blocked);
+// that is the control working as intended, not an error to route around.
+export async function approveAndPublishPriceVersionAction(
+  _previous: CommercialAccountActionState,
+  formData: FormData
+): Promise<CommercialAccountActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const versionId = String(formData.get("price_version_id") ?? "").trim();
+  if (!versionId) {
+    return {
+      status: "error",
+      action: "approve_publish_price_version",
+      message: "Price version ID is required.",
+      error: "price_version_id is required",
+    };
+  }
+
+  const approveRes = await executePriceVersionAction(versionId, "approve", {}, identity);
+  if (!approveRes.ok) {
+    return {
+      status: "error",
+      action: "approve_publish_price_version",
+      message: `Approval refused: ${approveRes.error.message}`,
+      error: approveRes.error.message,
+    };
+  }
+
+  const publishRes = await executePriceVersionAction(versionId, "publish", {}, identity);
+  if (!publishRes.ok) {
+    return {
+      status: "error",
+      action: "approve_publish_price_version",
+      message: `Approved, but publish failed: ${publishRes.error.message}`,
+      error: publishRes.error.message,
+    };
+  }
+
+  revalidatePath("/admin/commercial-accounts");
+  return {
+    status: "success",
+    action: "approve_publish_price_version",
+    message: `Price version ${versionId} approved and published by ${identity.principalId}.`,
   };
 }
 
@@ -984,5 +1052,161 @@ export async function transferBillingSourceAction(
     action: "transfer_billing",
     message: `Billing Source Transferred: Transfer ID=${res.data.transfer_id}, New Source=${res.data.new_billing_source}, New Subscription ID=${res.data.new_subscription_id}.`,
     transfer: res.data,
+  };
+}
+
+// COM-03: dry-run entitlement evaluation against a live subscription.
+export async function evaluateCommercialEntitlementAction(
+  _previous: CommercialAccountActionState,
+  formData: FormData
+): Promise<CommercialAccountActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const organizationId = String(formData.get("organization_id") ?? "").trim();
+  const capabilityKey = String(formData.get("capability_key") ?? "").trim();
+  const requestedQuantityRaw = formData.get("requested_quantity");
+  const requestedQuantity =
+    requestedQuantityRaw !== null && String(requestedQuantityRaw).trim() !== ""
+      ? parseInt(String(requestedQuantityRaw), 10)
+      : undefined;
+
+  if (!organizationId || !capabilityKey) {
+    return {
+      status: "error",
+      action: "evaluate_commercial_entitlement",
+      message: "organization_id and capability_key are required.",
+    };
+  }
+
+  const effectiveIdentity = { ...identity, tenantId: organizationId };
+  const res = await evaluateCommercialEntitlement(
+    { organization_id: organizationId, capability_key: capabilityKey, requested_quantity: requestedQuantity },
+    effectiveIdentity
+  );
+  if (!res.ok) {
+    return {
+      status: "error",
+      action: "evaluate_commercial_entitlement",
+      message: res.error.message || "Failed to evaluate entitlement.",
+      error: res.error.message,
+    };
+  }
+
+  revalidatePath("/admin/commercial-accounts");
+  return {
+    status: "success",
+    action: "evaluate_commercial_entitlement",
+    message: `Entitlement for ${res.data.capability_key}: ${res.data.outcome} (${res.data.reason}).`,
+    commercialEntitlement: res.data,
+  };
+}
+
+// COM-05: open a platform billing account for an organization (seller-authority action).
+export async function openBillingAccountAction(
+  _previous: CommercialAccountActionState,
+  formData: FormData
+): Promise<CommercialAccountActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const organizationId = String(formData.get("organization_id") ?? "").trim();
+  const sellingEntity = String(formData.get("selling_entity") ?? "").trim();
+  const billingCurrencyCode = String(formData.get("billing_currency_code") ?? "").trim().toUpperCase();
+  const invoiceNumberingProfile = String(formData.get("invoice_numbering_profile") ?? "").trim();
+  const paymentProviderRef = String(formData.get("payment_provider_ref") ?? "").trim();
+  const accountingMappingKey = String(formData.get("accounting_mapping_key") ?? "").trim();
+
+  if (
+    !organizationId ||
+    !sellingEntity ||
+    !billingCurrencyCode ||
+    !invoiceNumberingProfile ||
+    !paymentProviderRef ||
+    !accountingMappingKey
+  ) {
+    return {
+      status: "error",
+      action: "open_billing_account",
+      message:
+        "organization_id, selling_entity, billing_currency_code, invoice_numbering_profile, payment_provider_ref, and accounting_mapping_key are all required.",
+    };
+  }
+
+  const res = await openCommercialBillingAccount(
+    {
+      organization_id: organizationId,
+      selling_entity: sellingEntity,
+      billing_currency_code: billingCurrencyCode,
+      invoice_numbering_profile: invoiceNumberingProfile,
+      payment_provider_ref: paymentProviderRef,
+      accounting_mapping_key: accountingMappingKey,
+    },
+    identity
+  );
+  if (!res.ok) {
+    return {
+      status: "error",
+      action: "open_billing_account",
+      message: res.error.message || "Failed to open billing account.",
+      error: res.error.message,
+    };
+  }
+
+  revalidatePath("/admin/commercial-accounts");
+  return {
+    status: "success",
+    action: "open_billing_account",
+    message: `Billing account opened: ${res.data.billing_account_id} (${res.data.status}).`,
+    billingAccount: res.data,
+  };
+}
+
+// COM-05: retrieve a single platform commercial invoice by ID.
+export async function getInvoiceAction(
+  _previous: CommercialAccountActionState,
+  formData: FormData
+): Promise<CommercialAccountActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const invoiceId = String(formData.get("invoice_id") ?? "").trim();
+  const organizationId = String(formData.get("organization_id") ?? "").trim();
+  if (!invoiceId || !organizationId) {
+    return {
+      status: "error",
+      action: "get_invoice",
+      message: "invoice_id and organization_id are required.",
+    };
+  }
+
+  const res = await getCommercialInvoice(invoiceId, organizationId, identity);
+  if (!res.ok) {
+    return {
+      status: "error",
+      action: "get_invoice",
+      message: res.error.message || "Failed to retrieve invoice.",
+      error: res.error.message,
+    };
+  }
+
+  revalidatePath("/admin/commercial-accounts");
+  return {
+    status: "success",
+    action: "get_invoice",
+    message: `Invoice ${res.data.invoice_number}: ${res.data.total_amount} ${res.data.currency_code}.`,
+    invoice: res.data,
   };
 }

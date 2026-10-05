@@ -20,6 +20,7 @@ export type CapabilityActionState = {
     | "resolve_capability";
   message?: string;
   error?: string;
+  idempotencyKey?: string;
   capability?: Capability;
   marketRelease?: MarketRelease;
   integration?: IntegrationCapability;

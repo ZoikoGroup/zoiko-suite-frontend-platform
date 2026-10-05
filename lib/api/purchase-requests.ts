@@ -60,7 +60,7 @@ export type ListRequestsInput = {
 export async function listPurchaseRequests(
   input: ListRequestsInput,
 ): Promise<ApiResult<PurchaseRequest[]>> {
-  const result = await apiGet<PurchaseRequest[] | null>(
+  const result = await apiGet<any>(
     "purchaseRequest",
     "/v1/purchase-requests",
     {
@@ -74,9 +74,20 @@ export async function listPurchaseRequests(
   );
 
   if (!result.ok) return result;
-  if (result.data === null) return { ok: true, data: [] };
+  if (result.data === null || result.data === undefined) return { ok: true, data: [] };
 
-  if (!Array.isArray(result.data)) {
+  const raw = result.data;
+  const list: PurchaseRequest[] | null = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.data)
+    ? raw.data
+    : Array.isArray(raw?.requests)
+    ? raw.requests
+    : Array.isArray(raw?.purchase_requests)
+    ? raw.purchase_requests
+    : null;
+
+  if (!list) {
     return {
       ok: false,
       error: {
@@ -86,7 +97,7 @@ export async function listPurchaseRequests(
     };
   }
 
-  const requests = [...result.data].sort(
+  const requests = [...list].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
   return { ok: true, data: requests };
@@ -103,11 +114,18 @@ export async function getPurchaseRequest(
   requestId: string,
   identity: Identity & { tenantId: string },
 ): Promise<ApiResult<PurchaseRequest>> {
-  return apiGet<PurchaseRequest>(
+  const res = await apiGet<any>(
     "purchaseRequest",
     `/v1/purchase-requests/${requestId}`,
     { identity },
   );
+  if (!res.ok) return res;
+  const raw = res.data;
+  const item =
+    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
+      ? raw.data
+      : raw?.request ?? raw;
+  return { ok: true, data: item as PurchaseRequest };
 }
 
 export type CreateRequestInput = {
@@ -129,7 +147,7 @@ export type CreateRequestInput = {
 export async function createPurchaseRequest(
   input: CreateRequestInput,
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  return apiPost<PurchaseRequest>(
+  const res = await apiPost<any>(
     "purchaseRequest",
     "/v1/purchase-requests",
     {
@@ -142,6 +160,13 @@ export async function createPurchaseRequest(
     },
     { identity: input.identity },
   );
+  if (!res.ok) return res;
+  const raw = res.data;
+  const item =
+    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
+      ? raw.data
+      : raw?.request ?? raw;
+  return { ...res, data: item as PurchaseRequest };
 }
 
 /** Approve a PENDING request. Terminal — a second call answers 422. */
@@ -149,12 +174,19 @@ export async function approvePurchaseRequest(
   requestId: string,
   identity: Identity & { principalId: string; tenantId: string },
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  return apiPost<PurchaseRequest>(
+  const res = await apiPost<any>(
     "purchaseRequest",
     `/v1/purchase-requests/${requestId}/approve`,
     { correlation_id: crypto.randomUUID() },
     { identity },
   );
+  if (!res.ok) return res;
+  const raw = res.data;
+  const item =
+    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
+      ? raw.data
+      : raw?.request ?? raw;
+  return { ...res, data: item as PurchaseRequest };
 }
 
 /**
@@ -169,12 +201,19 @@ export async function rejectPurchaseRequest(
   reason: string,
   identity: Identity & { principalId: string; tenantId: string },
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  return apiPost<PurchaseRequest>(
+  const res = await apiPost<any>(
     "purchaseRequest",
     `/v1/purchase-requests/${requestId}/reject`,
     { reason, correlation_id: crypto.randomUUID() },
     { identity },
   );
+  if (!res.ok) return res;
+  const raw = res.data;
+  const item =
+    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
+      ? raw.data
+      : raw?.request ?? raw;
+  return { ...res, data: item as PurchaseRequest };
 }
 
 // ─── Derived views ───────────────────────────────────────────────────────────

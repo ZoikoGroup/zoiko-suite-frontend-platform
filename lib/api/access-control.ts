@@ -89,10 +89,40 @@ export async function listRoleDefinitions(
   identity?: Identity,
   options?: { status?: RoleStatus },
 ): Promise<ApiResult<RoleDefinition[]>> {
-  return apiGet<RoleDefinition[]>(SERVICE, `${BASE}/`, {
+  const res = await apiGet<
+    RoleDefinition[] | { roles?: RoleDefinition[]; role_definitions?: RoleDefinition[]; items?: RoleDefinition[]; data?: RoleDefinition[] }
+  >(SERVICE, `${BASE}/`, {
     identity,
     query: options?.status ? { status: options.status } : undefined,
   });
+
+  if (!res.ok) return res;
+
+  const raw = res.data;
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.roles)
+    ? raw.roles
+    : Array.isArray(raw?.role_definitions)
+    ? raw.role_definitions
+    : Array.isArray(raw?.items)
+    ? raw.items
+    : Array.isArray(raw?.data)
+    ? raw.data
+    : null;
+
+  if (!list) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "access-control-svc returned an unexpected response structure",
+        body: raw,
+      },
+    };
+  }
+
+  return { ok: true, data: list };
 }
 
 export async function getRoleDefinition(
@@ -109,11 +139,41 @@ export async function listPermissionBundles(
   roleDefinitionId: string,
   identity?: Identity,
 ): Promise<ApiResult<PermissionBundleDef[]>> {
-  return apiGet<PermissionBundleDef[]>(
+  const res = await apiGet<
+    PermissionBundleDef[] | { bundles?: PermissionBundleDef[]; permission_bundles?: PermissionBundleDef[]; items?: PermissionBundleDef[]; data?: PermissionBundleDef[] }
+  >(
     SERVICE,
     `${BASE}/${encodeURIComponent(roleDefinitionId)}/permission-bundles`,
     { identity },
   );
+
+  if (!res.ok) return res;
+
+  const raw = res.data;
+  const list = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.bundles)
+    ? raw.bundles
+    : Array.isArray(raw?.permission_bundles)
+    ? raw.permission_bundles
+    : Array.isArray(raw?.items)
+    ? raw.items
+    : Array.isArray(raw?.data)
+    ? raw.data
+    : null;
+
+  if (!list) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "access-control-svc returned an unexpected response structure for permission bundles",
+        body: raw,
+      },
+    };
+  }
+
+  return { ok: true, data: list };
 }
 
 // ── writes ───────────────────────────────────────────────────────────────────
