@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { cookies } from "next/headers";
 import { History } from "lucide-react";
 import { DOMAINS } from "@/lib/constants";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { getAuditEvents } from "@/lib/api/audit-events";
 import {
   AuditEventLedgerPanel,
@@ -58,7 +60,12 @@ function SectionCard({
 
 export default async function AuditEventsPage() {
   const domain = DOMAINS.find((d) => d.key === "audit-events")!;
-  const auditRes = await getAuditEvents();
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  const identity = session
+    ? { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId }
+    : undefined;
+  const auditRes = await getAuditEvents(identity);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 p-6">

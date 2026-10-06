@@ -10,8 +10,6 @@ import {
   ShieldCheck,
   Lock,
   History,
-  FileCheck,
-  Globe,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button } from "@/components/ui";
 import { FIELD, LABEL, HINT } from "@/components/admin/shared/form";
@@ -362,6 +360,22 @@ export function PrivacyDecisionWorkbench() {
                 />
                 <p className={HINT}>Must resolve to PUBLISHED and be bound to the activity (PRV-C01).</p>
               </div>
+
+              {/* Secondary Purpose ID */}
+              <div className="sm:col-span-2">
+                <label htmlFor="secondary_purpose_id" className={LABEL}>
+                  Secondary Purpose ID <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  id="secondary_purpose_id"
+                  name="secondary_purpose_id"
+                  value={secondaryPurposeId}
+                  onChange={(e) => setSecondaryPurposeId(e.target.value)}
+                  placeholder="e.g. 22222222-3333-4444-5555-666666666666"
+                  className={`${FIELD} font-mono text-xs`}
+                />
+                <p className={HINT}>A proposed re-use of this data under a different purpose (§12.1).</p>
+              </div>
             </div>
 
             {/* §12.1 Extended Input Dimensions Accordion / Container */}
@@ -423,7 +437,7 @@ export function PrivacyDecisionWorkbench() {
                 <span className="text-xs font-bold text-slate-700 dark:text-slate-200 block border-b pb-2 dark:border-slate-800">
                   Data Context (§12.1)
                 </span>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   <div>
                     <label htmlFor="data_category" className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">
                       Category
@@ -466,6 +480,19 @@ export function PrivacyDecisionWorkbench() {
                       <option value="PUBLIC">PUBLIC</option>
                       <option value="ANONYMOUS">ANONYMOUS</option>
                     </select>
+                  </div>
+                  <div>
+                    <label htmlFor="deidentification_control_ref" className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 block mb-1">
+                      De-identification Control Ref
+                    </label>
+                    <input
+                      id="deidentification_control_ref"
+                      name="deidentification_control_ref"
+                      value={deidentRef}
+                      onChange={(e) => setDeidentRef(e.target.value)}
+                      placeholder="Required if Classification = ANONYMOUS"
+                      className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                    />
                   </div>
                 </div>
               </div>
@@ -521,14 +548,24 @@ export function PrivacyDecisionWorkbench() {
                       Legal Hold (DRC :8148)
                     </label>
                     {checkLegalHold && (
-                      <input
-                        id="legal_hold_record_class"
-                        name="legal_hold_record_class"
-                        value={recordClass}
-                        onChange={(e) => setRecordClass(e.target.value)}
-                        placeholder="Record Class"
-                        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800"
-                      />
+                      <div className="space-y-1">
+                        <input
+                          id="legal_hold_record_class"
+                          name="legal_hold_record_class"
+                          value={recordClass}
+                          onChange={(e) => setRecordClass(e.target.value)}
+                          placeholder="Record Class"
+                          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800"
+                        />
+                        <input
+                          id="legal_hold_entity_ref"
+                          name="legal_hold_entity_ref"
+                          value={entityRef}
+                          onChange={(e) => setEntityRef(e.target.value)}
+                          placeholder="Entity Ref (optional)"
+                          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800"
+                        />
+                      </div>
                     )}
                   </div>
                 </div>
@@ -564,6 +601,14 @@ export function PrivacyDecisionWorkbench() {
                           value={transferMechId}
                           onChange={(e) => setTransferMechId(e.target.value)}
                           placeholder="Mechanism ID"
+                          className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800"
+                        />
+                        <input
+                          id="destination_jurisdiction"
+                          name="destination_jurisdiction"
+                          value={destJurisdiction}
+                          onChange={(e) => setDestJurisdiction(e.target.value)}
+                          placeholder="Destination Jurisdiction (e.g. US)"
                           className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-800"
                         />
                       </div>
@@ -717,7 +762,7 @@ export function PrivacyDecisionWorkbench() {
                 Decision Durability Evidence Lookup (GET /privacy/decisions)
               </CardTitle>
               <CardDescription className="text-xs text-slate-500">
-                Retrieve permanent, immutable decision evidence from PostgreSQL storage (§13.2 "decision durability").
+                Retrieve permanent, immutable decision evidence from PostgreSQL storage (§13.2 &ldquo;decision durability&rdquo;).
               </CardDescription>
             </div>
           </div>

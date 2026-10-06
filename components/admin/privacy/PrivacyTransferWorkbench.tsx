@@ -297,6 +297,14 @@ export function PrivacyTransferWorkbench() {
   const [qaResults, setQaResults] = useState<QAScenarioResult[]>([]);
   const [qaRunning, setQaRunning] = useState(false);
 
+  // "Now" for mechanism-expiry display only — read from state rather than
+  // calling Date.now() during render, which react-hooks/purity flags as an
+  // impure render.
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  useEffect(() => {
+    setNowMs(Date.now());
+  }, []);
+
   // Load Initial Data
   const loadDashboard = async () => {
     setLoading(true);
@@ -1455,7 +1463,7 @@ export function PrivacyTransferWorkbench() {
                   className="mt-1 w-full rounded-md border border-slate-300 p-2 text-xs font-mono dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
                   {createdMechanisms.map((m) => {
-                    const isExpired = m.valid_until && new Date(m.valid_until).getTime() < Date.now();
+                    const isExpired = !!m.valid_until && nowMs !== null && new Date(m.valid_until).getTime() < nowMs;
                     return (
                       <option key={m.mechanism_id} value={m.mechanism_id}>
                         {m.mechanism_type} — {m.mechanism_id.slice(0, 8)}... {isExpired ? "(EXPIRED ⚠️)" : "(VALID ✓)"} — {m.evidence_ref || m.conditions || ""}
@@ -1479,7 +1487,9 @@ export function PrivacyTransferWorkbench() {
                 {/* Live Mechanism Validity Indicator */}
                 {(() => {
                   const currentMech = createdMechanisms.find((m) => m.mechanism_id === gateMechId);
-                  const isExpired = gateMechId === "1b853a5c-6eec-4bfe-a716-41b7d82b94d0" || (currentMech?.valid_until && new Date(currentMech.valid_until).getTime() < Date.now());
+                  const isExpired =
+                    gateMechId === "1b853a5c-6eec-4bfe-a716-41b7d82b94d0" ||
+                    (!!currentMech?.valid_until && nowMs !== null && new Date(currentMech.valid_until).getTime() < nowMs);
                   if (isExpired) {
                     return (
                       <div className="mt-1.5 rounded-md border border-rose-200 bg-rose-50/70 p-2 text-[11px] text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">

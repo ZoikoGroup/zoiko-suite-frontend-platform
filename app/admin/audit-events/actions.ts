@@ -18,8 +18,25 @@
 // None of these actions are authorised decisions about the data — they surface
 // what audit-event-store-svc returns without adding policy.
 
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import { getAuditEvents, verifyAuditChain } from "@/lib/api/audit-events";
 import type { VerifyChainState, ExportState } from "./state";
+
+// The service now requires a verified principal (401 without one) and tenant
+// scope (400 without X-Tenant-Id) on every read — see lib/api/audit-events.ts.
+// Mirrors governance/actions.ts's requireIdentity: same session cookie, same
+// shape, no separate login flow for this page.
+async function requireIdentity(): Promise<SessionIdentity> {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.email) throw new Error("Unauthorized");
+  return {
+    principalId: session.principalId,
+    tenantId: session.tenantId,
+    legalEntityId: session.legalEntityId,
+  };
+}
 
 /**
  * Trigger a cryptographic hash-chain verification on the audit event log.
@@ -33,7 +50,8 @@ export async function verifyChainAction(
   _formData: FormData,
 ): Promise<VerifyChainState> {
   try {
-    const result = await verifyAuditChain();
+    const identity = await requireIdentity();
+    const result = await verifyAuditChain(identity);
     if (result.verified) {
       return {
         status: "verified",
@@ -67,7 +85,8 @@ export async function exportAuditLogAction(
   _previous: ExportState,
   _formData: FormData,
 ): Promise<ExportState> {
-  const result = await getAuditEvents();
+  const identity = await requireIdentity();
+  const result = await getAuditEvents(identity);
 
   if (result.data.length === 0) {
     return {

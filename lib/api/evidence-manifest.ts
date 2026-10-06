@@ -1,27 +1,25 @@
 // evidence-manifest-svc (:8095) — assembles structured, checksummed evidence
 // sets for audit/regulator/legal-discovery/compliance-review scenarios.
 //
-// Doc 03 §14.4. Four properties shape this page:
-//
-//  1. THERE IS NO LIST ENDPOINT for manifests themselves. The service exposes
-//     only generate (create), get-one-by-id, and list-records-of-one — never
-//     "every manifest for this tenant". That is the service's own real scope,
-//     not a gap in this client: there is nothing to page here.
-//  2. GENERATION FAILS CLOSED. If any requested source (governance-svc,
+// Key Service Properties:
+//  1. MANIFEST CATALOG & LIST: The service exposes list-manifests with tenant
+//     isolation and optional legal_entity_id filtering (GET /v1/evidence-manifests).
+//  2. GENERATION FAILS CLOSED: If any requested source (governance-svc,
 //     authorization-svc's access decisions, workflow-svc, or
 //     workflow-history-svc for a requested workflow instance) cannot be
 //     reached, the WHOLE manifest is marked FAILED — never a silent partial
 //     one. A FAILED manifest cannot be resumed; the only recourse is to
 //     generate again.
-//  3. A MANIFEST IS IMMUTABLE ONCE TERMINAL. GENERATED and FAILED are both
-//     terminal, and the records under a manifest are append-only at the
-//     database level (a mutation trigger rejects even an UPDATE/DELETE from
-//     the service's own superuser connection).
-//  4. RECORD SNAPSHOTS ARRIVE BASE64-ENCODED. record_snapshot is stored as raw
+//  3. IMMUTABILITY & VERIFICATION: Manifests are immutable once terminal
+//     (GENERATED or FAILED). Cryptographic integrity is verified via SHA-256
+//     record hashing (POST /v1/evidence-manifests/{id}/verify).
+//  4. RECORD SNAPSHOTS ARRIVE BASE64-ENCODED: record_snapshot is stored as raw
 //     JSON bytes on the Go side (`[]byte`), and Go's encoding/json marshals a
-//     byte slice as a base64 string — not as an embedded JSON object. This
-//     client decodes it back into the original object; render the decoded
-//     result, never the raw field.
+//     byte slice as a base64 string. This client decodes it back into the original
+//     object.
+//  5. BUNDLE EXPORT: Complete audit zip bundles containing manifest metadata,
+//     checksum, and all JSON snapshots can be downloaded via
+//     GET /v1/evidence-manifests/{id}/download.
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 
@@ -108,6 +106,47 @@ export async function getManifest(params: {
     "evidenceManifest",
     `/v1/evidence-manifests/${encodeURIComponent(params.manifestId)}`,
     { identity: params.identity },
+  );
+}
+
+/** List all manifests for tenant with optional legalEntityId filter and pagination. */
+export async function listManifests(params: {
+  identity: Identity;
+  legalEntityId?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ApiResult<EvidenceManifest[]>> {
+  const search = new URLSearchParams();
+  if (params.legalEntityId) search.set("legal_entity_id", params.legalEntityId);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  const qs = search.toString();
+  return apiGet<EvidenceManifest[]>(
+    "evidenceManifest",
+    `/v1/evidence-manifests${qs ? `?${qs}` : ""}`,
+    { identity: params.identity },
+  );
+}
+
+export type VerificationResult = {
+  manifest_id: string;
+  valid: boolean;
+  stored_checksum: string;
+  recalculated_checksum: string;
+  record_count: number;
+  verified_at: string;
+};
+
+/** Verify cryptographic integrity (SHA-256) of a manifest against its stored records. */
+export async function verifyManifest(params: {
+  identity: Identity;
+  manifestId: string;
+}): Promise<ApiResult<VerificationResult>> {
+  return apiPost<VerificationResult>(
+    "evidenceManifest",
+    `/v1/evidence-manifests/${encodeURIComponent(params.manifestId)}/verify`,
+    {},
+    { identity: params.identity, purposeContext: "EVIDENCE_INTEGRITY_VERIFICATION" },
   );
 }
 

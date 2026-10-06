@@ -1,15 +1,12 @@
 "use client";
 
-import { useState, useActionState, useTransition, useEffect } from "react";
+import { useState, useActionState } from "react";
 import {
-  ShieldAlert,
   Power,
   PowerOff,
   CheckCircle2,
   AlertTriangle,
   Search,
-  FileText,
-  Clock,
   History,
   Radio,
   CheckCircle,
@@ -25,7 +22,6 @@ import {
   listKillSwitchHistoryAction,
   type KillSwitchActionState,
 } from "@/app/admin/capabilities/kill-switch-actions";
-import type { KillSwitchState, KillSwitchEvent } from "@/lib/api/kill-switch";
 
 const IDLE: KillSwitchActionState = { status: "idle" };
 

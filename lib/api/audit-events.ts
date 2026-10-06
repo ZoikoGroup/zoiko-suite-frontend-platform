@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, type Identity } from "./client";
 
 export interface AuditEvent {
   id: string;
@@ -151,14 +151,22 @@ const FALLBACK_AUDIT_EVENTS: AuditEvent[] = [
 
 /**
  * Fetch all logged audit events from audit-event-store-svc.
+ *
+ * `identity` is required in practice: the service now gates this endpoint on
+ * both a verified principal (401 without one) and tenant scope (400 without
+ * X-Tenant-Id) rather than returning whatever the caller claims. Omitting it
+ * does not throw — the existing fallback-to-mock-data path below already
+ * handles any non-ok response — but it does mean the page silently shows
+ * synthetic data instead of the real ledger, which is the one failure mode
+ * this function must not reintroduce now that the backend is live.
  */
-export async function getAuditEvents(): Promise<{
+export async function getAuditEvents(identity?: Identity): Promise<{
   data: AuditEvent[];
   summary: AuditEventSummary;
   isMock: boolean;
   error: string | null;
 }> {
-  const res = await apiGet<AuditEvent[]>("auditEventStore", "/v1/events");
+  const res = await apiGet<AuditEvent[]>("auditEventStore", "/v1/events", { identity });
 
   if (!res.ok) {
     return {
@@ -206,7 +214,7 @@ export async function getAuditEvents(): Promise<{
 /**
  * Perform cryptographic hash verification on an audit event log chain.
  */
-export async function verifyAuditChain(): Promise<{
+export async function verifyAuditChain(identity?: Identity): Promise<{
   verified: boolean;
   timestamp: string;
   checkedEvents: number;
@@ -214,7 +222,8 @@ export async function verifyAuditChain(): Promise<{
   const res = await apiPost<{ verified?: boolean; checkedEvents?: number; hash_chain_valid?: boolean; status?: string }>(
     "auditEventStore",
     "/v1/events/verify",
-    {}
+    {},
+    { identity }
   );
 
   if (!res.ok) {

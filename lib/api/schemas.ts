@@ -12,11 +12,13 @@
 //     Evolution registers a new version; the old one stays readable forever.
 //     So there is no "update schema" form here, and there should not be.
 //
-//  2. COMPATIBILITY IS CHECKED AGAINST THE LATEST VERSION ONLY, and only at
-//     the top level — the checker reads `properties` and `required` and does
-//     not descend into nested objects or arrays. That is a documented v1 limit
-//     in the service, not an oversight, and the page says so rather than
-//     letting a reader assume a nested breaking change would be caught.
+//  2. COMPATIBILITY IS CHECKED AGAINST THE LATEST VERSION ONLY. The checker
+//     recurses into nested object properties and array item schemas (not just
+//     top-level `properties`/`required`), so a breaking change buried in a
+//     nested object or an array's item schema is caught the same way a
+//     top-level one is. What is NOT checked is a consumer still pinned to an
+//     older version — compatibility here means "compatible with the current
+//     latest", not "compatible with everything ever published".
 //
 //  3. COMPATIBILITY MODE IS PER VERSION, not per event. A contract can be
 //     registered BACKWARD for years and then NONE once during a controlled

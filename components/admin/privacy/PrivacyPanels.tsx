@@ -26,7 +26,7 @@ import {
   setPreferenceAction,
   type ConsentActionState,
 } from "@/app/admin/privacy/actions";
-import { IDLE_LOOKUP, type LookupState } from "@/components/admin/shared/lookup";
+import { IDLE_LOOKUP } from "@/components/admin/shared/lookup";
 
 const IDLE_CONSENT: ConsentActionState = { status: "idle" };
 

@@ -93,7 +93,7 @@ function CreatePurposeForm() {
           <p className={HINT}>Data only — e.g. PRIMARY or SECONDARY_COMPATIBLE.</p>
         </div>
         <div>
-          <label htmlFor="lawful_basis_refs" className={LABEL}>Lawful basis refs <span className="font-normal text-slate-400">(comma-separated, optional)</span></label>
+          <label htmlFor="lawful_basis_refs" className={LABEL}>Lawful basis refs <span className="font-normal text-slate-400">(comma-separated; required before any linked activity can validate)</span></label>
           <input
             id="lawful_basis_refs"
             name="lawful_basis_refs"
@@ -186,7 +186,7 @@ function CreateActivityForm() {
           <input id="retention_rule_refs" name="retention_rule_refs" required placeholder="retention-drc-standard-7y" className={FIELD} autoComplete="off" />
         </div>
         <div>
-          <label htmlFor="transfer_refs" className={LABEL}>Transfer refs <span className="font-normal text-slate-400">(optional)</span></label>
+          <label htmlFor="transfer_refs" className={LABEL}>Transfer refs <span className="font-normal text-slate-400">(Gate 6 — required when more than one jurisdiction is listed)</span></label>
           <input id="transfer_refs" name="transfer_refs" placeholder="transfer-mech-eu-us-dpf" className={FIELD} autoComplete="off" />
         </div>
         <div>

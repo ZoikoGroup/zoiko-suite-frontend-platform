@@ -15,6 +15,8 @@ import {
   generateManifest,
   getManifest,
   listManifestRecords,
+  listManifests,
+  verifyManifest,
   explainManifestError,
   type ScenarioType,
 } from "@/lib/api/evidence-manifest";
@@ -22,6 +24,8 @@ import {
   type GenerateManifestState,
   type LookupState,
   type RecordsState,
+  type CatalogState,
+  type VerifyState,
 } from "./state";
 
 async function requireIdentity(): Promise<SessionIdentity & { principalId: string }> {
@@ -171,4 +175,53 @@ export async function fetchManifestRecordsAction(manifestId: string): Promise<Re
   });
 
   return { status: "loaded", manifestId, records };
+}
+
+export async function listManifestsAction(legalEntityId?: string): Promise<CatalogState> {
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: EXPIRED };
+  }
+
+  const result = await listManifests({
+    identity,
+    legalEntityId: legalEntityId || undefined,
+  });
+
+  if (!result.ok) {
+    const { message } = result.error;
+    const explained = explainManifestError(message);
+    return { status: "error", message: explained };
+  }
+
+  return { status: "loaded", manifests: result.data };
+}
+
+export async function verifyManifestAction(manifestId: string): Promise<VerifyState> {
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", manifestId, message: EXPIRED };
+  }
+
+  const result = await verifyManifest({ identity, manifestId });
+
+  if (!result.ok) {
+    const { message } = result.error;
+    const explained = explainManifestError(message);
+    return { status: "error", manifestId, message: explained };
+  }
+
+  return {
+    status: "verified",
+    manifestId: result.data.manifest_id,
+    valid: result.data.valid,
+    storedChecksum: result.data.stored_checksum,
+    recalculatedChecksum: result.data.recalculated_checksum,
+    recordCount: result.data.record_count,
+    verifiedAt: result.data.verified_at,
+  };
 }

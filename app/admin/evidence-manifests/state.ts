@@ -47,3 +47,19 @@ export type RecordsState =
   | { status: "error"; message: string };
 
 export const IDLE_RECORDS: RecordsState = { status: "idle" };
+
+export type CatalogState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; manifests: EvidenceManifest[] }
+  | { status: "error"; message: string };
+
+export const IDLE_CATALOG: CatalogState = { status: "idle" };
+
+export type VerifyState =
+  | { status: "idle" }
+  | { status: "verifying"; manifestId: string }
+  | { status: "verified"; manifestId: string; valid: boolean; storedChecksum: string; recalculatedChecksum: string; recordCount: number; verifiedAt: string }
+  | { status: "error"; manifestId: string; message: string };
+
+export const IDLE_VERIFY: VerifyState = { status: "idle" };

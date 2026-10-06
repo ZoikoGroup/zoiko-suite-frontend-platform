@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader } from "@/components/admin/shared";
-import { GenerateManifestForm, ManifestLookupPanel } from "@/components/admin/evidence-manifests";
+import { GenerateManifestForm, ManifestLookupPanel, ManifestCatalogTable } from "@/components/admin/evidence-manifests";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Evidence Manifests | Zoiko Suite" };
@@ -25,6 +25,13 @@ async function GenerateForm() {
   return <GenerateManifestForm legalEntityId={session.legalEntityId ?? ""} />;
 }
 
+async function CatalogSection() {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.principalId) return null;
+  return <ManifestCatalogTable legalEntityId={session.legalEntityId ?? ""} />;
+}
+
 export default function EvidenceManifestsPage() {
   return (
     <div>
@@ -32,6 +39,22 @@ export default function EvidenceManifestsPage() {
         title="Evidence Manifests"
         description="Assembles structured, checksummed evidence sets for audit, regulator, legal-discovery and compliance-review scenarios — pulling governance decisions, access decisions and workflow history from their owning services and fixing them in an immutable snapshot."
       />
+
+      <Card className="mb-6">
+        <CardHeader>
+          <div>
+            <CardTitle>Manifest Catalog & Integrity Verification</CardTitle>
+            <CardDescription>
+              Browse all immutable evidence manifests generated for your organization, verify cryptographic SHA-256 integrity against stored record snapshots, and export complete audit zip bundles.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<PanelSkeleton rows={4} />}>
+            <CatalogSection />
+          </Suspense>
+        </CardContent>
+      </Card>
 
       <Card className="mb-6">
         <CardHeader>
@@ -54,11 +77,9 @@ export default function EvidenceManifestsPage() {
       <Card className="mb-6">
         <CardHeader>
           <div>
-            <CardTitle>Look up a manifest</CardTitle>
+            <CardTitle>Inspect Manifest Records</CardTitle>
             <CardDescription>
-              This service has no endpoint to list every manifest for a tenant — only generate, get-one-by-id,
-              and list-records-of-one. Paste the ID of a manifest you already have (for example, one just
-              generated above) to read it and its fixed records.
+              Directly look up a manifest by ID to inspect each individual source snapshot (governance decisions, access decisions, workflow instances, and execution history) decoded in full.
             </CardDescription>
           </div>
         </CardHeader>
@@ -83,11 +104,11 @@ export default function EvidenceManifestsPage() {
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  A FAILED manifest cannot be looked up by ID afterwards unless you already have the ID.
+                  Every manifest attempt is tracked in the catalog.
                 </strong>{" "}
                 When generation fails closed because a source service was unreachable, the manifest row is
-                real and persisted — but its ID is never returned in that error response, so there is no
-                way to browse to it from this console. Generate again once the source is back.
+                real and persisted with FAILED status and failure reason visible in the catalog above.
+                Generate again once the source is restored.
               </span>
             </li>
             <li className="flex gap-2.5">
