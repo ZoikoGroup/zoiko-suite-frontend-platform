@@ -27,12 +27,11 @@ import {
   GenerationTransitionForm,
   RegisterSourceForm,
   RestrictionForm,
-  SearchForm,
 } from "@/components/admin/search/SearchForms";
 import { SESSION_COOKIE, decodeSession, toIdentity, type SessionIdentity } from "@/lib/auth";
 import { listContracts, listGenerations, listScopes, listSources } from "@/lib/api/search";
 
-export const metadata: Metadata = { title: "Search" };
+export const metadata: Metadata = { title: "Search administration" };
 
 type PageProps = { searchParams: Promise<Record<string, string | string[] | undefined>> };
 
@@ -52,18 +51,17 @@ function TableSkeleton({ rows = 3 }: { rows?: number }) {
 }
 
 /**
- * The Search control plane.
+ * Search administration — search-indexer-svc's control plane.
  *
- * THE PAGE IS ORDERED THE WAY THE SERVICE IS GOVERNED, not the way a reader
- * would guess. Search comes first because it is what people come here to do;
- * but Registry and Lifecycle come before Restrictions and Evidence because
- * nothing is searchable until a source is registered, a contract published and
- * a generation activated — and a reader whose search box is empty needs to see
- * why in the order the fix happens.
+ * Searching itself is done from the box in the top bar, on every page; this
+ * page is reached from that box's "Manage search" link and is not in the
+ * sidebar. It starts with the surfaces that are serving, because a reader who
+ * arrives here from an empty search needs that answer first, then follows the
+ * order the fix happens in: nothing is searchable until a source is registered,
+ * a contract published and a generation activated.
  *
- * Every panel is its own Suspense boundary. This page reads seven endpoints
- * across two authorization planes, and a control-plane outage must still leave
- * the search box usable.
+ * Every panel is its own Suspense boundary: this page reads seven endpoints
+ * across two authorization planes, and one outage should not blank the rest.
  */
 export default async function SearchPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -131,28 +129,13 @@ export default async function SearchPage({ searchParams }: PageProps) {
   return (
     <div>
       <PageHeader
-        title="Search"
+        title="Search administration"
         description={
-          "The secure retrieval plane. Search is a rebuildable projection over authoritative sources — " +
-          "an index entry is never business truth and never grants access, so every result is " +
-          "re-authorized against current policy before its content is returned."
+          "What can be searched, what is serving, and what has been removed from search. To search, " +
+          "use the box at the top of any page — every result there is re-authorized against current " +
+          "policy before its content is returned, because an index entry never grants access."
         }
       />
-
-      {/* ── Search ─────────────────────────────────────────────────────── */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Governed search</CardTitle>
-          <CardDescription>
-            Your tenant, identity and purpose come from your session and are not yours to assert —
-            a tenant sent in the request body is refused rather than ignored, so an empty result can
-            never be mistaken for a cross-tenant search that found nothing.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SearchForm scopes={scopes} />
-        </CardContent>
-      </Card>
 
       <div className="mt-6">
         <Suspense fallback={<TableSkeleton rows={4} />}>

@@ -17,5 +17,7 @@ export {
   GenerationTransitionForm,
   RegisterSourceForm,
   RestrictionForm,
-  SearchForm,
 } from "./SearchForms";
+// The search box is in the top bar (components/admin/layout/GlobalSearch.tsx);
+// these render its results.
+export { ReasonBadge, SearchOutcomeNotes, SearchResultList } from "./SearchResults";

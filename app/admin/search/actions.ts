@@ -34,6 +34,7 @@ import {
   createSource,
   explainReason,
   isPartial,
+  listScopes,
   reasonCodeOf,
   requestExport,
   runSearch,
@@ -45,7 +46,6 @@ import {
   type RetrievalClass,
 } from "@/lib/api/search";
 import {
-  IDLE_ADMIN,
   type AdminWriteState,
   type ExportState,
   type RestrictionState,
@@ -73,6 +73,43 @@ async function requireIdentity(): Promise<SessionIdentity> {
 const EXPIRED = "Your session has expired — sign in again.";
 
 // ── Governed search ──────────────────────────────────────────────────────────
+
+/** A search surface as the top-bar picker needs it — name and class only. */
+export type SearchSurfaceOption = { scope: string; retrievalClass: string };
+
+/**
+ * The surfaces the signed-in user can search, for the top-bar picker.
+ *
+ * Read when the search box is first used rather than on every page render:
+ * the top bar is on every page, and a search-indexer-svc outage must not add
+ * its timeout to pages that never search. Narrowed to name and class before it
+ * reaches the browser — the catalogue carries field lists the picker has no
+ * use for.
+ */
+export async function loadSearchSurfaces(): Promise<
+  { ok: true; surfaces: SearchSurfaceOption[] } | { ok: false; message: string }
+> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { ok: false, message: EXPIRED };
+  }
+  const result = await listScopes({ ...identity, principalId: identity.principalId, tenantId: identity.tenantId });
+  if (!result.ok) {
+    const code = reasonCodeOf(result.error.body);
+    return {
+      ok: false,
+      message: code ? explainReason(code, detailOf(result.error.body)) : result.error.message,
+    };
+  }
+  return {
+    ok: true,
+    surfaces: (result.data.scopes ?? [])
+      .filter((s) => s.active)
+      .map((s) => ({ scope: s.scope, retrievalClass: s.retrieval_class })),
+  };
+}
 
 export async function submitSearch(
   _previous: SearchState,
@@ -602,4 +639,7 @@ function parseFields(raw: string) {
     .filter((f) => f.name);
 }
 
-export { IDLE_ADMIN };
+// No re-exports of state.ts values here. A "use server" module may export only
+// async functions; an `export { IDLE_ADMIN }` that used to sit on this line
+// made the whole module throw on evaluation, so every action in it — every
+// search and every registry write — failed before running.

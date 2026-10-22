@@ -1,25 +1,18 @@
 "use client";
 
-// Forms for the Search control plane.
+// Forms for the Search control plane — registry, lifecycle, restrictions and
+// export.
 //
-// THE SEARCH FORM IS THE ONE THAT MATTERS, and the reason is its banner tone.
-//
-// A partial result set gets an AMBER banner and a count of what was withheld —
-// never a green one. INV-24: "search degradation or partial results are
-// explicit and never silently represented as complete evidence." A reader who
-// saw twelve results under a green banner would reasonably conclude that was
-// all of them; if eight were suppressed because their authorization could not
-// be obtained, that conclusion is wrong in the direction that matters.
-//
-// A refusal gets a NEUTRAL banner, not a red one. ESR-003 and ESR-006 are
-// answers — they say exactly what to change — and showing them as errors sends
-// the reader looking for an outage instead of fixing their query.
+// The search box itself is not here: it lives in the top bar
+// (components/admin/layout/GlobalSearch.tsx) and renders its results through
+// SearchResults.tsx. A refusal on any form below gets a NEUTRAL or AMBER
+// banner, not a red one — ESR codes are answers that say what to change, and
+// red sends the reader looking for an outage instead.
 
 import { useActionState } from "react";
-import { Badge } from "@/components/ui";
 import { ResultBanner, type BannerTone } from "@/components/admin/shared";
 import { FIELD, HINT, LABEL, OPTIONAL } from "@/components/admin/shared/form";
-import { REASON_MEANINGS, type Scope, type SearchResponse } from "@/lib/api/search";
+import { type Scope } from "@/lib/api/search";
 import {
   submitContract,
   submitContractTransition,
@@ -27,16 +20,15 @@ import {
   submitGeneration,
   submitGenerationTransition,
   submitRestriction,
-  submitSearch,
   submitSource,
 } from "@/app/admin/search/actions";
 import {
   IDLE_ADMIN,
   IDLE_EXPORT,
   IDLE_RESTRICTION,
-  IDLE_SEARCH,
   type AdminWriteState,
 } from "@/app/admin/search/state";
+import { ReasonBadge } from "./SearchResults";
 
 const SUBMIT =
   "h-9 shrink-0 rounded-lg bg-navy-900 px-3 text-sm font-medium text-white shadow-sm transition-all duration-200 " +
@@ -55,228 +47,6 @@ const ADMIN_TONE: Record<AdminWriteState["status"], BannerTone> = {
   refused: "warning",
   error: "error",
 };
-
-function ReasonBadge({ code }: { code?: string }) {
-  if (!code) return null;
-  return (
-    <Badge tone="neutral" title={REASON_MEANINGS[code] ?? code}>
-      {code} · {REASON_MEANINGS[code] ?? "refused"}
-    </Badge>
-  );
-}
-
-// ── Governed search ──────────────────────────────────────────────────────────
-
-export function SearchForm({ scopes }: { scopes: Scope[] }) {
-  const [state, action, pending] = useActionState(submitSearch, IDLE_SEARCH);
-
-  const servable = scopes.filter((s) => s.active);
-  const response = state.response;
-
-  const tone: BannerTone =
-    state.status === "ok"
-      ? "success"
-      : state.status === "partial"
-        ? "warning"
-        : state.status === "refused"
-          ? "warning"
-          : state.status === "error"
-            ? "error"
-            : "neutral";
-
-  return (
-    <form action={action} className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,14rem)_1fr_auto]">
-        <div>
-          <label className={LABEL} htmlFor="scope">
-            Search surface
-          </label>
-          <select id="scope" name="scope" className={FIELD} defaultValue={state.submitted?.scope ?? ""}>
-            <option value="">Select…</option>
-            {servable.map((s) => (
-              <option key={s.scope} value={s.scope}>
-                {s.scope} ({s.retrieval_class})
-              </option>
-            ))}
-          </select>
-          {servable.length === 0 && (
-            <p className={HINT}>
-              No surface is serving. A scope needs a published contract and an active generation.
-            </p>
-          )}
-        </div>
-
-        <div>
-          <label className={LABEL} htmlFor="query">
-            Query <span className={OPTIONAL}>— plain terms</span>
-          </label>
-          <input
-            id="query"
-            name="query"
-            className={FIELD}
-            defaultValue={state.submitted?.query ?? ""}
-            placeholder="invoice description"
-          />
-          <p className={HINT}>
-            At least two characters. Wildcards, regular expressions and engine field names are
-            refused — this is not a query language, and a term that looked like one would otherwise
-            be matched literally with no indication it was never interpreted.
-          </p>
-        </div>
-
-        <div className="flex items-end">
-          <button type="submit" className={SUBMIT} disabled={pending}>
-            {pending ? "Searching…" : "Search"}
-          </button>
-        </div>
-      </div>
-
-      <details className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-        <summary className="cursor-pointer text-xs font-medium text-slate-600 dark:text-slate-400">
-          Filters, facets and snippets
-        </summary>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <div>
-            <label className={LABEL} htmlFor="filter_field">
-              Filter field
-            </label>
-            <input id="filter_field" name="filter_field" className={FIELD} placeholder="doc_status" />
-          </div>
-          <div>
-            <label className={LABEL} htmlFor="filter_value">
-              Filter value
-            </label>
-            <input id="filter_value" name="filter_value" className={FIELD} placeholder="OPEN" />
-          </div>
-          <div>
-            <label className={LABEL} htmlFor="facets">
-              Facets <span className={OPTIONAL}>comma-separated</span>
-            </label>
-            <input id="facets" name="facets" className={FIELD} placeholder="doc_status" />
-            <p className={HINT}>
-              Counted only over what you may see, and buckets below the minimum cell are suppressed
-              — a count of one can reveal a single record.
-            </p>
-          </div>
-        </div>
-        <label className="mt-3 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-          <input type="checkbox" name="snippets" className="rounded border-slate-300" />
-          Return snippets, where the contract allows them
-        </label>
-      </details>
-
-      <ResultBanner tone={tone} message={state.message} testId="search-result">
-        {state.reasonCode && <ReasonBadge code={state.reasonCode} />}
-
-        {response && response.suppressions && response.suppressions.length > 0 && (
-          <div className="space-y-1">
-            <p className="text-xs font-medium">Withheld candidates</p>
-            {response.suppressions.map((s) => (
-              <p key={s.reason_code} className="text-xs">
-                <span className="font-mono">{s.reason_code}</span> {s.meaning} — {s.count}
-              </p>
-            ))}
-            {/* TC-06: a reason code and a count, and nothing that names what was
-                withheld. That absence is the control, not a missing feature. */}
-            <p className="text-xs opacity-80">
-              Withheld records are not named. A suppression that identified them would be an
-              existence disclosure.
-            </p>
-          </div>
-        )}
-
-        {response && !response.total_is_exact && (
-          <p className="text-xs opacity-80">
-            The total is approximate: once anything is withheld, the engine&apos;s count no longer
-            describes what you may see, and adjusting it downward would say exactly how much you
-            may not.
-          </p>
-        )}
-      </ResultBanner>
-
-      {response && response.results.length > 0 && <Results response={response} />}
-
-      {response && response.facets && Object.keys(response.facets).length > 0 && (
-        <div className="flex flex-wrap gap-4 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-          {Object.entries(response.facets).map(([field, buckets]) => (
-            <div key={field}>
-              <p className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">{field}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {buckets.map((b) => (
-                  <Badge key={b.value} tone="neutral">
-                    {b.value} · {b.count}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </form>
-  );
-}
-
-function Results({ response }: { response: SearchResponse }) {
-  return (
-    <div className="space-y-2">
-      {response.results.map((r) => (
-        <div
-          key={`${r.source_type}:${r.source_id}`}
-          className="rounded-lg border border-slate-200 p-3 dark:border-slate-800"
-        >
-          <div className="mb-1.5 flex flex-wrap items-center gap-2">
-            <code className="text-xs text-slate-500 dark:text-slate-400">
-              {r.source_type}/{r.source_id}
-            </code>
-            <Badge tone="neutral">v{r.source_version}</Badge>
-            <Badge tone="neutral">{r.retrieval_class}</Badge>
-            {/* Whether the content shown came from the index or from the
-                authoritative source. §7.1 does not let index content be
-                trusted as a current display value for material records, so
-                the reader has to be able to tell which they are looking at. */}
-            <Badge tone={r.freshness === "SOURCE" ? "success" : "neutral"}>
-              {r.freshness === "SOURCE" ? "current source" : "indexed copy"}
-            </Badge>
-          </div>
-
-          <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
-            {Object.entries(r.fields).map(([k, v]) => (
-              <div key={k} className="flex gap-2">
-                <dt className="text-slate-500 dark:text-slate-400">{k}</dt>
-                <dd className="min-w-0 truncate text-slate-800 dark:text-slate-200">{String(v)}</dd>
-              </div>
-            ))}
-          </dl>
-
-          {r.snippets &&
-            Object.entries(r.snippets).map(([field, fragments]) => (
-              <div key={field} className="mt-2">
-                <p className="text-xs text-slate-500 dark:text-slate-400">{field}</p>
-                {fragments.map((f, i) => (
-                  <p
-                    key={i}
-                    className="text-sm text-slate-700 [&_mark]:rounded [&_mark]:bg-amber-100 [&_mark]:px-0.5 dark:text-slate-300 dark:[&_mark]:bg-amber-500/20"
-                    // Safe, and only because of where the escaping happened.
-                    // The service escapes the whole fragment FIRST and then
-                    // substitutes its own <mark> for the match markers, so
-                    // stored source markup arrives as visible text and the only
-                    // real tags are ones it added. Escaping again here would
-                    // show those tags as literal text; not escaping there would
-                    // let stored markup execute.
-                    dangerouslySetInnerHTML={{ __html: f }}
-                  />
-                ))}
-              </div>
-            ))}
-
-          <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
-            Served by {r.index_generation}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 

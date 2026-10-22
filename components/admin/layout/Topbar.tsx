@@ -1,8 +1,9 @@
 "use client";
 
-import { Menu, Search } from "lucide-react";
+import { Menu } from "lucide-react";
 import { UserMenu } from "./UserMenu";
 import { NotificationBell } from "./NotificationBell";
+import { GlobalSearch } from "./GlobalSearch";
 import { ThemeToggle } from "@/components/theme";
 
 type TopbarProps = {
@@ -21,14 +22,9 @@ export function Topbar({ onMenuClick, user }: TopbarProps) {
         <Menu className="h-5 w-5" />
       </button>
 
-      <div className="relative hidden max-w-sm flex-1 sm:block">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-        <input
-          type="search"
-          placeholder="Search entities, obligations, contracts…"
-          className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-700 outline-none transition-all duration-150 placeholder:text-slate-400 focus:border-navy-400 focus:bg-white focus:ring-2 focus:ring-navy-500/15 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200 dark:placeholder:text-slate-500 dark:focus:border-navy-400 dark:focus:bg-slate-800"
-        />
-      </div>
+      {/* search-indexer-svc's governed search. This was a decorative input
+          that searched nothing; Search is no longer a page of its own. */}
+      <GlobalSearch />
 
       <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
         <ThemeToggle />

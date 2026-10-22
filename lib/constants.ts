@@ -16,7 +16,6 @@ import {
   ToggleLeft,
   KeyRound,
   DoorOpen,
-  Search,
   Bell,
   Handshake,
   KeySquare,
@@ -216,7 +215,8 @@ const DOMAIN_1_IDENTITY: typeof SECONDARY_NAV = [
   { label: "Feature Flags & Config", href: "/admin/settings", icon: ToggleLeft },       // configuration-feature-flag-svc
   { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },                    // secret-vault-integration-svc
   { label: "Gateway Authentication", href: "/admin/gateway", icon: DoorOpen },          // gateway-auth-svc
-  { label: "Search", href: "/admin/search", icon: Search },                             // search-indexer-svc
+  // search-indexer-svc has no sidebar entry: searching is the top-bar box on
+  // every page, and its admin page (/admin/search) opens from that box.
   { label: "Notifications", href: "/admin/notifications", icon: Bell },                 // notification-svc
   { label: "Delegated Authority", href: "/admin/delegations", icon: Handshake },        // delegated-authority-svc
   { label: "Roles & Access", href: "/admin/access-control", icon: KeySquare },          // access-control-svc
