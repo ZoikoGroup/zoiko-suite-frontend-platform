@@ -219,8 +219,8 @@ export function AssignmentsPanel({
   if (assignments.length === 0) {
     return (
       <p className="text-sm text-slate-500 dark:text-slate-400">
-        No live assignments in this tenant. Roles defined above grant nothing until one exists —
-        assign one to make a role take effect.
+        No live assignments in this tenant. Roles defined on Roles &amp; Access grant nothing until
+        one exists — assign one to make a role take effect.
       </p>
     );
   }

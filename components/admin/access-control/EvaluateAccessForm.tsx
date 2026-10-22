@@ -68,7 +68,7 @@ export function EvaluateAccessForm({
             />
             <p className={HINT}>
               The person whose access is being checked — not you, unless you are checking your
-              own. Copy a reference from the grants register below.
+              own. Copy a reference from the live grants register on this page.
             </p>
           </div>
 

@@ -94,7 +94,7 @@ function RolePermissionSets({
     return (
       <p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
         This role has no permission sets, so it grants nothing — to anybody, however it is
-        assigned. Attach one above before granting it to somebody.
+        assigned. Attach one on Roles &amp; Access before granting it to somebody.
       </p>
     );
   }
@@ -165,7 +165,7 @@ export async function EvaluationRolesPanel({ identity }: { identity: Identity })
       <PanelEmptyState
         icon={KeySquare}
         label="No roles exist in the enforcing plane"
-        hint="Nobody can be granted anything until one does. Note that a role defined in the catalogue above is a different record — if one exists there and not here, it was never provisioned, and it grants nothing."
+        hint="Nobody can be granted anything until one does. Note that a role defined in the Roles & Access catalogue is a different record — if one exists there and not here, it was never provisioned, and it grants nothing."
       />
     );
   }
