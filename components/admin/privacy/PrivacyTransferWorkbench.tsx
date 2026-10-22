@@ -12,6 +12,8 @@ import {
   runAutomatedQASuiteAction,
   type QAScenarioResult,
 } from "@/app/admin/privacy/transfer-actions";
+import { getRopaList } from "@/app/admin/privacy/purpose-registry-actions";
+import type { ProcessingActivityVersion } from "@/lib/api/privacy-purpose-registry";
 import type {
   ProcessorRelationship,
   Subprocessor,
@@ -43,199 +45,6 @@ import {
   Info,
 } from "lucide-react";
 
-// Realistic Presets for QA manual testing
-const REALISTIC_PRESETS = [
-  {
-    id: "preset-aws",
-    title: "1. AWS Cloud Hosting (EU-GDPR to US-East-1)",
-    badge: "SCC + Compliant TIA (AUTHORIZED)",
-    mechanism: {
-      type: "STANDARD_CONTRACTUAL_CLAUSES" as MechanismType,
-      evidenceRef: "EUR-LEX-L-2021-199-SCC-V1",
-      conditions: "Module 2: Controller-to-Processor. Mandates Schrems II supplementary HSM encryption.",
-      validUntil: "2027-12-31",
-    },
-    relationship: {
-      controller: "ZOIKO-HOLDINGS-EU",
-      processor: "AWS-EMEA-SOCIETE",
-      service: "Multi-Tenant Kubernetes Cloud Hosting & Dedicated VPC",
-      instructions: "Store and process personal data solely on documented instructions; zero access without explicit authorization.",
-      contractRef: "DPA-2026-AWS-EMEA-0091",
-      categories: "Customer_PII, Financial_Transactions, Auth_Telemetry",
-      subjects: "Platform_Users, Corporate_Employees",
-      jurisdictions: "EU-GDPR, UK-GDPR",
-    },
-    subprocessor: {
-      identity: "Snowflake Inc.",
-      service: "Analytics Cloud Data Warehouse",
-      purpose: "Telemetry and pseudonymized aggregation",
-      scope: "Pseudonymized billing logs and audit records",
-      locations: "US-East-1, EU-Central-1",
-      onward: "AWS S3, Azure Blob",
-      notification: "PRIOR_WRITTEN_NOTICE_30_DAYS",
-      contractRef: "SUB-DPA-2026-SNOWFLAKE-04",
-    },
-    assessment: {
-      outcome: "APPROVE" as AssessmentOutcome,
-      risk: "LOW - FISA 702 foreign surveillance risk mitigated by customer-held HSM envelope encryption.",
-      evidenceRef: "TIA-2026-AWS-EU-01",
-      reviewTrigger: "2027-09-11",
-    },
-    destination: "US",
-    expectDecision: "AUTHORIZED",
-  },
-  {
-    id: "preset-stripe",
-    title: "2. Stripe International Payments (UK to Global)",
-    badge: "BCR + Tokenized Data (AUTHORIZED)",
-    mechanism: {
-      type: "BINDING_CORPORATE_RULES" as MechanismType,
-      evidenceRef: "BCR-C-STRIPE-GLOBAL-2025",
-      conditions: "PCI-DSS Level 1 certified tokenization; direct bank settlement across global entities.",
-      validUntil: "2028-06-30",
-    },
-    relationship: {
-      controller: "ZOIKO-PAYMENTS-UK",
-      processor: "STRIPE-PAYMENTS-EUROPE",
-      service: "Card Acquiring & Merchant Cross-Border Settlement",
-      instructions: "Tokenize cardholder data at edge; execute cross-border settlement under approved Stripe BCR.",
-      contractRef: "DPA-2026-STRIPE-0882",
-      categories: "Payment_Card_Tokens, Billing_Address, Transaction_Amounts",
-      subjects: "Billing_Contacts, Cardholders",
-      jurisdictions: "UK-GDPR, EU-GDPR, PCI-DSS",
-    },
-    subprocessor: {
-      identity: "Visa Direct Europe",
-      service: "Card Network Clearing Engine",
-      purpose: "Interbank clearing and fraud prevention",
-      scope: "Card transaction payloads and auth tokens",
-      locations: "EU-West-1, US-East-2",
-      onward: "VisaNet",
-      notification: "IMMEDIATE_NOTIFICATION_48_HOURS",
-      contractRef: "SUB-DPA-VISA-2026-09",
-    },
-    assessment: {
-      outcome: "APPROVE" as AssessmentOutcome,
-      risk: "NEGLIGIBLE - Tokenized payloads with zero raw PAN exposure.",
-      evidenceRef: "TIA-2026-STRIPE-BCR-02",
-      reviewTrigger: "2027-06-30",
-    },
-    destination: "US",
-    expectDecision: "AUTHORIZED",
-  },
-  {
-    id: "preset-salesforce",
-    title: "3. Salesforce CRM Suite (Remediate Assessment)",
-    badge: "SCC + Pending Audit (REVIEW_REQUIRED)",
-    mechanism: {
-      type: "STANDARD_CONTRACTUAL_CLAUSES" as MechanismType,
-      evidenceRef: "SFDC-SCC-2024-V2",
-      conditions: "Requires Schrems II technical audit and dedicated tenant key.",
-      validUntil: "2027-03-31",
-    },
-    relationship: {
-      controller: "ZOIKO-ENTERPRISE-DE",
-      processor: "SALESFORCE-EMEA-LTD",
-      service: "Customer Relationship Management & Pipeline Tracking",
-      instructions: "Process sales leads, opportunity records, and executive contact details.",
-      contractRef: "DPA-2026-SFDC-DE-0144",
-      categories: "Contact_PII, Contract_Values, Executive_Phone_Numbers",
-      subjects: "Enterprise_Clients, Sales_Leads",
-      jurisdictions: "EU-GDPR",
-    },
-    subprocessor: {
-      identity: "Twilio SendGrid",
-      service: "Transactional Email Delivery",
-      purpose: "Lead notification dispatch",
-      scope: "Recipient email addresses and delivery timestamps",
-      locations: "US-West-2",
-      onward: "AWS EC2",
-      notification: "PRIOR_NOTICE_60_DAYS",
-      contractRef: "SUB-DPA-SENDGRID-2026",
-    },
-    assessment: {
-      outcome: "REMEDIATE" as AssessmentOutcome,
-      risk: "MEDIUM - Additional encryption required for unmasked mobile phone fields.",
-      evidenceRef: "TIA-2026-SFDC-AUDIT-03",
-      reviewTrigger: "2026-12-31",
-    },
-    destination: "US",
-    expectDecision: "REVIEW_REQUIRED",
-  },
-  {
-    id: "preset-unvetted",
-    title: "4. Unvetted Offshore Pipeline (Schrems II Rejection)",
-    badge: "Derogation + REJECT (BLOCKED)",
-    mechanism: {
-      type: "DEROGATION" as MechanismType,
-      evidenceRef: "DEROG-ART-49-1-B",
-      conditions: "Temporary raw export without adequacy or SCCs.",
-      validUntil: "2026-12-31",
-    },
-    relationship: {
-      controller: "ZOIKO-ANALYTICS-FR",
-      processor: "DATA-HARVEST-OVERSEAS-INC",
-      service: "Raw Telemetry Log Parsing & Model Training",
-      instructions: "Export unfiltered server logs for exploratory machine learning.",
-      contractRef: "DPA-2026-RAW-LOGS",
-      categories: "Raw_IP_Addresses, Session_Cookies, User_Agent_Headers",
-      subjects: "Website_Visitors",
-      jurisdictions: "EU-GDPR",
-    },
-    subprocessor: {
-      identity: "CloudScrape Ltd",
-      service: "Edge Scraping Cache",
-      purpose: "Raw log caching",
-      scope: "Unsanitized web traffic dumps",
-      locations: "CN-Beijing",
-      onward: "None",
-      notification: "NO_COMMITMENT",
-      contractRef: "NONE",
-    },
-    assessment: {
-      outcome: "REJECT" as AssessmentOutcome,
-      risk: "CRITICAL - Unbounded destination surveillance laws permit warrantless mass interception with no judicial redress.",
-      evidenceRef: "TIA-REJECT-2026-OVERSEAS",
-      reviewTrigger: "2026-10-01",
-    },
-    destination: "CN",
-    expectDecision: "BLOCKED",
-  },
-];
-
-// Pre-registered mechanisms from PostgreSQL database
-const DEFAULT_KNOWN_MECHANISMS: TransferMechanism[] = [
-  {
-    mechanism_id: "c095ab0f-898b-41da-b4bf-ff56c454a42e",
-    mechanism_type: "STANDARD_CONTRACTUAL_CLAUSES",
-    evidence_ref: "EUR-LEX-L-2021-199-SCC-V1",
-    conditions: "Module 2: Controller-to-Processor (Valid until 2028-12-31)",
-    valid_from: "2026-09-17T00:00:00Z",
-    valid_until: "2028-12-31T23:59:59Z",
-    created_at: "2026-09-17T00:00:00Z",
-    created_by_principal_id: "33333333-3333-3333-3333-333333333333",
-  },
-  {
-    mechanism_id: "52c0f914-5b9a-4ae6-8f11-775bb4dda6d8",
-    mechanism_type: "STANDARD_CONTRACTUAL_CLAUSES",
-    evidence_ref: "EUR-LEX-L-2021-199-SCC-PERPETUAL",
-    conditions: "Module 2: Perpetual Standard Contractual Clauses (No Expiry)",
-    valid_from: "2026-09-17T00:00:00Z",
-    created_at: "2026-09-17T00:00:00Z",
-    created_by_principal_id: "33333333-3333-3333-3333-333333333333",
-  },
-  {
-    mechanism_id: "1b853a5c-6eec-4bfe-a716-41b7d82b94d0",
-    mechanism_type: "STANDARD_CONTRACTUAL_CLAUSES",
-    evidence_ref: "EXPIRED-SCC-2010",
-    conditions: "Legacy Clauses (EXPIRED on 2026-09-01) [Negative Test Case]",
-    valid_from: "2026-09-17T00:00:00Z",
-    valid_until: "2026-09-01T23:59:59Z",
-    created_at: "2026-09-17T00:00:00Z",
-    created_by_principal_id: "33333333-3333-3333-3333-333333333333",
-  },
-];
-
 export function PrivacyTransferWorkbench() {
   const [activeTab, setActiveTab] = useState<"mechanisms" | "relationships" | "assessments" | "gate" | "qa">("mechanisms");
   const [isPending, startTransition] = useTransition();
@@ -245,53 +54,73 @@ export function PrivacyTransferWorkbench() {
   const [relationships, setRelationships] = useState<ProcessorRelationship[]>([]);
   const [subprocessors, setSubprocessors] = useState<Record<string, Subprocessor[]>>({});
   const [assessments, setAssessments] = useState<Record<string, TransferAssessment | null>>({});
-  const [createdMechanisms, setCreatedMechanisms] = useState<TransferMechanism[]>(DEFAULT_KNOWN_MECHANISMS);
+  // Mechanisms created in this session. privacy-transfer-svc exposes GET by id only (no
+  // list route), so nothing else can be listed; an existing mechanism is used by pasting its UUID.
+  const [createdMechanisms, setCreatedMechanisms] = useState<TransferMechanism[]>([]);
   const [lastDecision, setLastDecision] = useState<TransferDecision | null>(null);
   const [loading, setLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Form states - Mechanism (Pre-filled by default)
+  // Form states - Mechanism (no pre-filled records)
   const [mechType, setMechType] = useState<MechanismType>("STANDARD_CONTRACTUAL_CLAUSES");
-  const [mechEvidenceRef, setMechEvidenceRef] = useState("EUR-LEX-L-2021-199-SCC-V1");
-  const [mechConditions, setMechConditions] = useState("Module 2: Controller-to-Processor. Mandates Schrems II supplementary HSM encryption.");
-  const [mechValidUntil, setMechValidUntil] = useState("2028-12-31");
+  const [mechEvidenceRef, setMechEvidenceRef] = useState("");
+  const [mechConditions, setMechConditions] = useState("");
+  const [mechValidUntil, setMechValidUntil] = useState("");
 
-  // Form states - Relationship (Pre-filled by default)
-  const [relController, setRelController] = useState("ZOIKO-HOLDINGS-EU");
-  const [relProcessor, setRelProcessor] = useState("AWS-EMEA-SOCIETE");
-  const [relService, setRelService] = useState("Multi-Tenant Kubernetes Cloud Hosting & Dedicated VPC");
-  const [relInstructions, setRelInstructions] = useState("Store and process personal data solely on documented instructions; zero access without explicit authorization.");
-  const [relContractRef, setRelContractRef] = useState("DPA-2026-AWS-EMEA-0091");
-  const [relCategories, setRelCategories] = useState("Customer_PII, Financial_Transactions, Auth_Telemetry");
-  const [relSubjects, setRelSubjects] = useState("Platform_Users, Corporate_Employees");
-  const [relJurisdictions, setRelJurisdictions] = useState("EU-GDPR, UK-GDPR");
+  // Form states - Relationship (no pre-filled records)
+  const [relController, setRelController] = useState("");
+  const [relProcessor, setRelProcessor] = useState("");
+  const [relService, setRelService] = useState("");
+  const [relInstructions, setRelInstructions] = useState("");
+  const [relContractRef, setRelContractRef] = useState("");
+  const [relCategories, setRelCategories] = useState("");
+  const [relSubjects, setRelSubjects] = useState("");
+  const [relJurisdictions, setRelJurisdictions] = useState("");
 
-  // Form states - Subprocessor (Pre-filled by default)
-  const [selectedRelForSub, setSelectedRelForSub] = useState("d3b9b5a0-5452-42a1-a3ba-2e85246fbf1d");
-  const [subIdentity, setSubIdentity] = useState("Snowflake Inc.");
-  const [subService, setSubService] = useState("Analytics Cloud Data Warehouse");
-  const [subPurpose, setSubPurpose] = useState("Telemetry and pseudonymized aggregation");
-  const [subScope, setSubScope] = useState("Pseudonymized billing logs and audit records");
-  const [subLocations, setSubLocations] = useState("US-East-1, EU-Central-1");
-  const [subOnward, setSubOnward] = useState("AWS S3, Azure Blob");
-  const [subNotification, setSubNotification] = useState("PRIOR_WRITTEN_NOTICE_30_DAYS");
-  const [subContractRef, setSubContractRef] = useState("SUB-DPA-2026-SNOWFLAKE-04");
+  // Form states - Subprocessor (no pre-filled records)
+  const [selectedRelForSub, setSelectedRelForSub] = useState("");
+  const [subIdentity, setSubIdentity] = useState("");
+  const [subService, setSubService] = useState("");
+  const [subPurpose, setSubPurpose] = useState("");
+  const [subScope, setSubScope] = useState("");
+  const [subLocations, setSubLocations] = useState("");
+  const [subOnward, setSubOnward] = useState("");
+  const [subNotification, setSubNotification] = useState("");
+  const [subContractRef, setSubContractRef] = useState("");
 
-  // Form states - Assessment (Pre-filled by default)
-  const [assessmentRelId, setAssessmentRelId] = useState("d3b9b5a0-5452-42a1-a3ba-2e85246fbf1d");
+  // Form states - Assessment (no pre-filled records)
+  const [assessmentRelId, setAssessmentRelId] = useState("");
   const [assessmentOutcome, setAssessmentOutcome] = useState<AssessmentOutcome>("APPROVE");
-  const [residualRisk, setResidualRisk] = useState("LOW - FISA 702 foreign surveillance risk mitigated by customer-held HSM envelope encryption.");
-  const [assessmentEvidenceRef, setAssessmentEvidenceRef] = useState("TIA-2026-AWS-EU-01");
-  const [governmentAccessRisk, setGovernmentAccessRisk] = useState("MINIMAL - FISA 702 / EO 14086 Redress Safeguards Verified");
-  const [technicalMeasures, setTechnicalMeasures] = useState("TLS 1.3 in-transit, AES-256 envelope encryption with customer HSM keys");
-  const [organizationalMeasures, setOrganizationalMeasures] = useState("Quarterly access logging review and prompt deletion on termination");
-  const [reviewTriggerAt, setReviewTriggerAt] = useState("2027-09-11");
+  const [residualRisk, setResidualRisk] = useState("");
+  const [assessmentEvidenceRef, setAssessmentEvidenceRef] = useState("");
+  const [governmentAccessRisk, setGovernmentAccessRisk] = useState("");
+  const [technicalMeasures, setTechnicalMeasures] = useState("");
+  const [organizationalMeasures, setOrganizationalMeasures] = useState("");
+  const [reviewTriggerAt, setReviewTriggerAt] = useState("");
 
-  // Form states - Decision Gate (Pre-filled by default)
-  const [gateRelId, setGateRelId] = useState("d3b9b5a0-5452-42a1-a3ba-2e85246fbf1d");
-  const [gateMechId, setGateMechId] = useState("c095ab0f-898b-41da-b4bf-ff56c454a42e");
-  const [gateDestination, setGateDestination] = useState("US");
+  // Form states - Decision Gate (no pre-filled records)
+  const [gateRelId, setGateRelId] = useState("");
+  const [gateMechId, setGateMechId] = useState("");
+  const [gateDestination, setGateDestination] = useState("");
   const [gateAssessmentReq, setGateAssessmentReq] = useState(true);
+
+  // Controller activities (privacy-purpose-registry-svc, ACTIVE versions) a relationship may bind to.
+  const [activityOptions, setActivityOptions] = useState<ProcessingActivityVersion[]>([]);
+  const [relActivityRefs, setRelActivityRefs] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    getRopaList()
+      .then((list) => {
+        if (live) setActivityOptions(list);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // Service status shown in the header is derived from the last dashboard load, not asserted.
+  const [serviceStatus, setServiceStatus] = useState<{ state: "checking" | "ok" | "error"; detail?: string }>({ state: "checking" });
 
   // QA Suite state
   const [qaResults, setQaResults] = useState<QAScenarioResult[]>([]);
@@ -310,6 +139,7 @@ export function PrivacyTransferWorkbench() {
     setLoading(true);
     try {
       const data = await fetchTransferDashboardData();
+      setServiceStatus(data.error ? { state: "error", detail: data.error } : { state: "ok" });
       if (data.relationships) {
         setRelationships(data.relationships);
         setSubprocessors(data.subprocessors);
@@ -323,6 +153,7 @@ export function PrivacyTransferWorkbench() {
       }
     } catch (e) {
       console.error(e);
+      setServiceStatus({ state: "error", detail: "request failed" });
     } finally {
       setLoading(false);
     }
@@ -331,52 +162,6 @@ export function PrivacyTransferWorkbench() {
   useEffect(() => {
     loadDashboard();
   }, []);
-
-  // Quick-Fill Preset Function
-  const applyPreset = (presetId: string) => {
-    const p = REALISTIC_PRESETS.find((x) => x.id === presetId);
-    if (!p) return;
-
-    // Mechanism fields
-    setMechType(p.mechanism.type);
-    setMechEvidenceRef(p.mechanism.evidenceRef);
-    setMechConditions(p.mechanism.conditions);
-    setMechValidUntil(p.mechanism.validUntil);
-
-    // Relationship fields
-    setRelController(p.relationship.controller);
-    setRelProcessor(p.relationship.processor);
-    setRelService(p.relationship.service);
-    setRelInstructions(p.relationship.instructions);
-    setRelContractRef(p.relationship.contractRef);
-    setRelCategories(p.relationship.categories);
-    setRelSubjects(p.relationship.subjects);
-    setRelJurisdictions(p.relationship.jurisdictions);
-
-    // Subprocessor fields
-    setSubIdentity(p.subprocessor.identity);
-    setSubService(p.subprocessor.service);
-    setSubPurpose(p.subprocessor.purpose);
-    setSubScope(p.subprocessor.scope);
-    setSubLocations(p.subprocessor.locations);
-    setSubOnward(p.subprocessor.onward);
-    setSubNotification(p.subprocessor.notification);
-    setSubContractRef(p.subprocessor.contractRef);
-
-    // Assessment fields
-    setAssessmentOutcome(p.assessment.outcome);
-    setResidualRisk(p.assessment.risk);
-    setAssessmentEvidenceRef(p.assessment.evidenceRef);
-    setReviewTriggerAt(p.assessment.reviewTrigger);
-
-    // Decision gate fields
-    setGateDestination(p.destination);
-
-    setFeedbackMessage({
-      type: "success",
-      text: `Loaded preset: "${p.title}" with realistic governance inputs for all fields!`,
-    });
-  };
 
   // Handlers
   const handleCreateMechanism = (e: React.FormEvent) => {
@@ -395,10 +180,9 @@ export function PrivacyTransferWorkbench() {
           const m = res.data.mechanism as TransferMechanism;
           setCreatedMechanisms((prev) => [m, ...prev]);
           setGateMechId(m.mechanism_id);
-          // Keep realistic defaults so boxes are never empty
-          setMechEvidenceRef("EUR-LEX-L-2021-199-SCC-V2027");
-          setMechConditions("Module 2: Controller-to-Processor. Mandates Schrems II supplementary HSM encryption.");
-          setMechValidUntil("2029-12-31");
+          setMechEvidenceRef("");
+          setMechConditions("");
+          setMechValidUntil("");
           setFeedbackMessage({ type: "success", text: res.message || "Mechanism registered successfully!" });
         } else {
           setFeedbackMessage({ type: "error", text: res.message || "Failed to create mechanism." });
@@ -420,6 +204,7 @@ export function PrivacyTransferWorkbench() {
     fd.append("data_categories", relCategories);
     fd.append("subject_classes", relSubjects);
     fd.append("jurisdictions", relJurisdictions);
+    fd.append("purpose_activity_refs", relActivityRefs.join(","));
 
     setPendingAction("create_relationship");
     startTransition(async () => {
@@ -431,15 +216,15 @@ export function PrivacyTransferWorkbench() {
           setSelectedRelForSub(r.relationship_id);
           setAssessmentRelId(r.relationship_id);
           setGateRelId(r.relationship_id);
-          // Keep realistic defaults so boxes are never empty
-          setRelController("ZOIKO-HOLDINGS-EU");
-          setRelProcessor("AWS-EMEA-SOCIETE");
-          setRelService("Multi-Tenant Kubernetes Cloud Hosting & Dedicated VPC");
-          setRelInstructions("Store and process personal data solely on documented instructions; zero access without explicit authorization.");
-          setRelContractRef("DPA-2026-AWS-EMEA-0092");
-          setRelCategories("Customer_PII, Financial_Transactions, Auth_Telemetry");
-          setRelSubjects("Platform_Users, Corporate_Employees");
-          setRelJurisdictions("EU-GDPR, UK-GDPR");
+          setRelController("");
+          setRelProcessor("");
+          setRelService("");
+          setRelInstructions("");
+          setRelContractRef("");
+          setRelCategories("");
+          setRelSubjects("");
+          setRelJurisdictions("");
+          setRelActivityRefs([]);
           setFeedbackMessage({ type: "success", text: res.message || "Processor relationship established!" });
         } else {
           setFeedbackMessage({ type: "error", text: res.message || "Failed to create relationship." });
@@ -591,14 +376,17 @@ export function PrivacyTransferWorkbench() {
 
   return (
     <div className="space-y-6">
-      {/* ── Live System Verification Banner ── */}
+      {/* ── Service status (derived from the last dashboard load) ── */}
       <div className="rounded-xl border border-indigo-200/60 bg-gradient-to-r from-indigo-50/70 via-purple-50/50 to-blue-50/60 p-4 shadow-sm backdrop-blur dark:border-indigo-900/50 dark:from-slate-900 dark:via-indigo-950/20 dark:to-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-4 text-xs">
             <div className="flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 font-semibold text-slate-800 shadow-sm dark:bg-slate-800 dark:text-slate-100">
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
+              <span className={`h-2.5 w-2.5 rounded-full ${serviceStatus.state === "ok" ? "bg-emerald-500" : serviceStatus.state === "error" ? "bg-rose-500" : "bg-slate-400"}`} />
               <Server className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>privacy-transfer-svc (:8155) — LIVE</span>
+              <span>
+                privacy-transfer-svc (:8155) —{" "}
+                {serviceStatus.state === "ok" ? "reachable (relationship list loaded)" : serviceStatus.state === "error" ? `unreachable: ${serviceStatus.detail}` : "checking…"}
+              </span>
             </div>
             <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
               <Database className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -607,10 +395,6 @@ export function PrivacyTransferWorkbench() {
             <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
               <Layers className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
               <span>Kafka: zoiko.privacy-transfer.events</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-              <ShieldCheck className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-              <span>PRV-01 Prerequisite: privacy-purpose-registry-svc (:8151) Verified</span>
             </div>
           </div>
           <button
@@ -621,27 +405,6 @@ export function PrivacyTransferWorkbench() {
             <RotateCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh State
           </button>
-        </div>
-      </div>
-
-      {/* ── Realistic Scenario Quick-Fill Bar ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-purple-200/70 bg-purple-50/40 p-3 text-xs dark:border-purple-900/40 dark:bg-purple-950/20">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-purple-600" />
-          <span className="font-bold text-slate-800 dark:text-slate-200">
-            Quick-Fill Realistic Enterprise Test Scenarios:
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {REALISTIC_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => applyPreset(p.id)}
-              className="rounded-lg border border-purple-300 bg-white px-3 py-1 text-xs font-semibold text-purple-900 shadow-xs hover:bg-purple-100 dark:border-purple-800 dark:bg-slate-800 dark:text-purple-300 dark:hover:bg-purple-950/60"
-            >
-              {p.title.split(". ")[1]}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -773,15 +536,15 @@ export function PrivacyTransferWorkbench() {
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <Globe className="h-4 w-4 text-emerald-600" />
-                Active Legal Safeguard Mechanisms
+                Mechanisms Created This Session
               </h3>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Live mechanisms verified against PostgreSQL table <code>transfer_mechanisms</code>.
+                Mechanisms created in this session. The service has no list endpoint (GET by id only), so an existing mechanism is used by pasting its UUID in the Runtime Transfer Decision Gate.
               </p>
 
               {createdMechanisms.length === 0 ? (
                 <div className="mt-4 rounded-lg border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400 dark:border-slate-800">
-                  No mechanisms registered in this session yet. Create one on the left or run the QA suite!
+                  No mechanism created in this session. Create one on the left, or paste an existing mechanism UUID in the Runtime Transfer Decision Gate.
                 </div>
               ) : (
                 <div className="mt-4 space-y-3">
@@ -941,6 +704,30 @@ export function PrivacyTransferWorkbench() {
                       className="mt-1 w-full rounded-md border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">
+                    Controller Processing Activities <span className="font-normal text-slate-400">(PRV-01 ACTIVE, optional)</span>
+                  </label>
+                  <select
+                    multiple
+                    size={4}
+                    value={relActivityRefs}
+                    onChange={(e) => setRelActivityRefs(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                    className="mt-1 w-full rounded-md border border-slate-300 p-2 text-xs font-mono dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    {activityOptions.map((a) => (
+                      <option key={a.activity_id} value={a.activity_id}>
+                        {a.owner} — {a.activity_id.slice(0, 8)}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    {activityOptions.length === 0
+                      ? "The registry returned no ACTIVE processing activities."
+                      : "ACTIVE activities from privacy-purpose-registry-svc. Hold Ctrl/Cmd to select several; the service validates each one."}
+                  </p>
                 </div>
 
                 <button
@@ -1438,22 +1225,6 @@ export function PrivacyTransferWorkbench() {
               <div>
                 <div className="flex items-center justify-between">
                   <label className="font-semibold text-slate-700 dark:text-slate-300">Transfer Mechanism Safeguard</label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setGateMechId("c095ab0f-898b-41da-b4bf-ff56c454a42e")}
-                      className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300"
-                    >
-                      ✓ Select Valid SCC
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGateMechId("1b853a5c-6eec-4bfe-a716-41b7d82b94d0")}
-                      className="rounded bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300"
-                    >
-                      ✕ Select Expired SCC
-                    </button>
-                  </div>
                 </div>
 
                 {/* Dropdown Selector for All Available Mechanisms */}
@@ -1462,6 +1233,7 @@ export function PrivacyTransferWorkbench() {
                   onChange={(e) => setGateMechId(e.target.value)}
                   className="mt-1 w-full rounded-md border border-slate-300 p-2 text-xs font-mono dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                 >
+                  <option value="">Paste a mechanism UUID below, or pick one created this session</option>
                   {createdMechanisms.map((m) => {
                     const isExpired = !!m.valid_until && nowMs !== null && new Date(m.valid_until).getTime() < nowMs;
                     return (
@@ -1470,8 +1242,8 @@ export function PrivacyTransferWorkbench() {
                       </option>
                     );
                   })}
-                  {!createdMechanisms.some((m) => m.mechanism_id === gateMechId) && (
-                    <option value={gateMechId}>Custom: {gateMechId}</option>
+                  {gateMechId && !createdMechanisms.some((m) => m.mechanism_id === gateMechId) && (
+                    <option value={gateMechId}>Pasted: {gateMechId}</option>
                   )}
                 </select>
 
@@ -1484,22 +1256,26 @@ export function PrivacyTransferWorkbench() {
                   required
                 />
 
-                {/* Live Mechanism Validity Indicator */}
+                {/* Validity is only shown for a mechanism created in this session (its real valid_until);
+                    for a pasted UUID the service decides at evaluation time. */}
                 {(() => {
                   const currentMech = createdMechanisms.find((m) => m.mechanism_id === gateMechId);
-                  const isExpired =
-                    gateMechId === "1b853a5c-6eec-4bfe-a716-41b7d82b94d0" ||
-                    (!!currentMech?.valid_until && nowMs !== null && new Date(currentMech.valid_until).getTime() < nowMs);
-                  if (isExpired) {
+                  if (!currentMech) {
                     return (
-                      <div className="mt-1.5 rounded-md border border-rose-200 bg-rose-50/70 p-2 text-[11px] text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-300">
-                        <strong>⚠️ Expired Safeguard:</strong> This mechanism expired on Sep 01, 2026. The evaluation gate will strictly enforce fail-closed compliance and return <strong>BLOCKED (TRANSFER_MECHANISM_INVALID_OR_EXPIRED)</strong>.
+                      <div className="mt-1.5 rounded-md border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
+                        Mechanism validity is determined by the service when the decision is evaluated.
                       </div>
                     );
                   }
-                  return (
-                    <div className="mt-1.5 rounded-md border border-emerald-200 bg-emerald-50/70 p-2 text-[11px] text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
-                      <strong>✓ Active &amp; Valid Safeguard:</strong> This mechanism is legally valid (through 2028). When combined with an active relationship and approved assessment, it evaluates to <strong>AUTHORIZED</strong>.
+                  const isExpired = !!currentMech.valid_until && nowMs !== null && new Date(currentMech.valid_until).getTime() < nowMs;
+                  return isExpired ? (
+                    <div className="mt-1.5 rounded-md border border-rose-200 bg-rose-50/70 p-2 text-[11px] text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">
+                      <strong>Expired safeguard:</strong> valid until {new Date(currentMech.valid_until as string).toLocaleDateString()}. The service will refuse it at evaluation time.
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 rounded-md border border-emerald-200 bg-emerald-50/70 p-2 text-[11px] text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+                      <strong>Within its validity window</strong>
+                      {currentMech.valid_until ? ` (until ${new Date(currentMech.valid_until).toLocaleDateString()})` : " (no expiry set)"}. The service makes the final decision.
                     </div>
                   );
                 })()}

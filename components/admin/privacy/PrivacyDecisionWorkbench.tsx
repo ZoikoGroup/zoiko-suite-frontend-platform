@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState } from "react";
+import { useState, useActionState, useEffect } from "react";
 import {
   Scale,
   CheckCircle2,
@@ -19,6 +19,8 @@ import {
   lookupDecisionAction,
 } from "@/app/admin/privacy/decision-actions";
 import { IDLE_DECISION_STATE } from "@/app/admin/privacy/decision-state";
+import { getPurposesList, getRopaList } from "@/app/admin/privacy/purpose-registry-actions";
+import type { PurposeVersion, ProcessingActivityVersion } from "@/lib/api/privacy-purpose-registry";
 
 const PROPOSED_OPERATIONS = [
   { value: "USE", label: "USE (Internal processing)" },
@@ -46,20 +48,38 @@ export function PrivacyDecisionWorkbench() {
     IDLE_DECISION_STATE
   );
 
-  // Form controlled inputs with real database records
-  const [subjectRef, setSubjectRef] = useState("subject-robert-chen@zoikosuite.com");
-  const [activityId, setActivityId] = useState("f4462c0a-4499-4fee-b039-7aff1a8dda5c");
-  const [purposeId, setPurposeId] = useState("d4a3efa3-5e18-4f28-8e41-edf800c66bbe");
+  // Controlled inputs. Nothing is pre-filled with a record: a subject, activity and
+  // purpose must be entered, and the suggestions below come from privacy-purpose-registry-svc.
+  const [subjectRef, setSubjectRef] = useState("");
+  const [activityId, setActivityId] = useState("");
+  const [purposeId, setPurposeId] = useState("");
   const [operation, setOperation] = useState("USE");
   const [secondaryPurposeId, setSecondaryPurposeId] = useState("");
 
+  // Registry suggestions (published purposes, ACTIVE activities). Free entry stays
+  // possible so any id, including an unknown one, can still be submitted.
+  const [purposeOptions, setPurposeOptions] = useState<PurposeVersion[]>([]);
+  const [activityOptions, setActivityOptions] = useState<ProcessingActivityVersion[]>([]);
+  useEffect(() => {
+    let live = true;
+    getPurposesList()
+      .then((list) => { if (live) setPurposeOptions(list); })
+      .catch(() => {});
+    getRopaList()
+      .then((list) => { if (live) setActivityOptions(list); })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
   // Subject context
-  const [subjectClass, setSubjectClass] = useState("CUSTOMER");
+  const [subjectClass, setSubjectClass] = useState("");
   const [ageBand, setAgeBand] = useState("ADULT");
-  const [residency, setResidency] = useState("GB");
+  const [residency, setResidency] = useState("");
 
   // Data context
-  const [dataCategory, setDataCategory] = useState("PROFILE");
+  const [dataCategory, setDataCategory] = useState("");
   const [sensitivityFlags, setSensitivityFlags] = useState("");
   const [classification, setClassification] = useState("CONFIDENTIAL");
   const [deidentRef, setDeidentRef] = useState("");
@@ -67,104 +87,14 @@ export function PrivacyDecisionWorkbench() {
   // Dynamic verification controls
   const [checkConsent, setCheckConsent] = useState(false);
   const [checkLegalHold, setCheckLegalHold] = useState(false);
-  const [recordClass, setRecordClass] = useState("CUSTOMER_PROFILE");
-  const [entityRef, setEntityRef] = useState("cust-uk-99201");
+  const [recordClass, setRecordClass] = useState("");
+  const [entityRef, setEntityRef] = useState("");
 
   // Transfer check
   const [checkTransfer, setCheckTransfer] = useState(false);
   const [transferRelId, setTransferRelId] = useState("");
   const [transferMechId, setTransferMechId] = useState("");
-  const [destJurisdiction, setDestJurisdiction] = useState("US");
-
-  const applyPreset = (preset: "permit" | "restrict" | "unbound" | "inactive" | "consent" | "hold" | "export") => {
-    switch (preset) {
-      case "permit":
-        setSubjectRef("subject-robert-chen@zoikosuite.com");
-        setActivityId("f4462c0a-4499-4fee-b039-7aff1a8dda5c");
-        setPurposeId("d4a3efa3-5e18-4f28-8e41-edf800c66bbe");
-        setOperation("USE");
-        setSubjectClass("CUSTOMER");
-        setAgeBand("ADULT");
-        setResidency("GB");
-        setDataCategory("PROFILE");
-        setSensitivityFlags("");
-        setSecondaryPurposeId("");
-        setCheckConsent(false);
-        setCheckLegalHold(false);
-        setCheckTransfer(false);
-        break;
-      case "restrict":
-        setSubjectRef("child-user-01@zoikosuite.com");
-        setActivityId("f4462c0a-4499-4fee-b039-7aff1a8dda5c");
-        setPurposeId("d4a3efa3-5e18-4f28-8e41-edf800c66bbe");
-        setOperation("USE");
-        setSubjectClass("MINOR");
-        setAgeBand("MINOR");
-        setResidency("GB");
-        setDataCategory("PROFILE");
-        setSensitivityFlags("");
-        setSecondaryPurposeId("");
-        setCheckConsent(false);
-        setCheckLegalHold(false);
-        setCheckTransfer(false);
-        break;
-      case "unbound":
-        setSubjectRef("subject-robert-chen@zoikosuite.com");
-        setActivityId("f4462c0a-4499-4fee-b039-7aff1a8dda5c");
-        setPurposeId("b6883652-f50d-4801-836c-a967b2554a90"); // Published, but not bound to this activity
-        setOperation("USE");
-        setAgeBand("ADULT");
-        setCheckConsent(false);
-        setCheckLegalHold(false);
-        setCheckTransfer(false);
-        break;
-      case "inactive":
-        setSubjectRef("subject-robert-chen@zoikosuite.com");
-        setActivityId("a79c9115-1685-4f56-9f06-21dec4fd10c1"); // DRAFT activity version
-        setPurposeId("b6883652-f50d-4801-836c-a967b2554a90");
-        setOperation("USE");
-        setAgeBand("ADULT");
-        setCheckConsent(false);
-        setCheckLegalHold(false);
-        setCheckTransfer(false);
-        break;
-      case "consent":
-        setSubjectRef("subject-unconsented-user@zoikosuite.com");
-        setActivityId("f4462c0a-4499-4fee-b039-7aff1a8dda5c");
-        setPurposeId("d4a3efa3-5e18-4f28-8e41-edf800c66bbe");
-        setOperation("USE");
-        setAgeBand("ADULT");
-        setCheckConsent(true);
-        setCheckLegalHold(false);
-        setCheckTransfer(false);
-        break;
-      case "hold":
-        setSubjectRef("subject-hold-targeted@zoikosuite.com");
-        setActivityId("f4462c0a-4499-4fee-b039-7aff1a8dda5c");
-        setPurposeId("d4a3efa3-5e18-4f28-8e41-edf800c66bbe");
-        setOperation("DELETE");
-        setAgeBand("ADULT");
-        setCheckConsent(false);
-        setCheckLegalHold(true);
-        setRecordClass("LITIGATION_HOLD_HR");
-        setEntityRef("emp-litigation-001");
-        setCheckTransfer(false);
-        break;
-      case "export":
-        setSubjectRef("subject-export@zoikosuite.com");
-        setActivityId("f4462c0a-4499-4fee-b039-7aff1a8dda5c");
-        setPurposeId("d4a3efa3-5e18-4f28-8e41-edf800c66bbe");
-        setOperation("EXPORT");
-        setAgeBand("ADULT");
-        setCheckConsent(false);
-        setCheckLegalHold(false);
-        setCheckTransfer(true);
-        setTransferRelId("rel-aws-global");
-        setTransferMechId("mech-scc-eu-us");
-        setDestJurisdiction("US");
-        break;
-    }
-  };
+  const [destJurisdiction, setDestJurisdiction] = useState("");
 
   const getResultBadge = (result?: string) => {
     switch (result) {
@@ -193,7 +123,7 @@ export function PrivacyDecisionWorkbench() {
         return (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-800 dark:bg-orange-950 dark:text-orange-300">
             <AlertTriangle className="h-3.5 w-3.5" />
-            REVIEW_REQUIRED (DPIA/TIA Assessment)
+            REVIEW_REQUIRED
           </span>
         );
       case "INDETERMINATE":
@@ -228,60 +158,6 @@ export function PrivacyDecisionWorkbench() {
                 </CardDescription>
               </div>
             </div>
-
-            {/* Quick Test Presets */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-medium text-slate-500 mr-1">Presets:</span>
-              <button
-                type="button"
-                onClick={() => applyPreset("permit")}
-                className="rounded-md bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300 transition-colors"
-              >
-                PERMIT
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset("restrict")}
-                className="rounded-md bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 dark:bg-blue-950/50 dark:text-blue-300 transition-colors"
-              >
-                RESTRICT (Minor)
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset("unbound")}
-                className="rounded-md bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 dark:bg-rose-950/50 dark:text-rose-300 transition-colors"
-              >
-                Unbound
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset("inactive")}
-                className="rounded-md bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 transition-colors"
-              >
-                Inactive
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset("consent")}
-                className="rounded-md bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 transition-colors"
-              >
-                Consent
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset("hold")}
-                className="rounded-md bg-purple-50 px-2.5 py-1 text-[11px] font-semibold text-purple-700 hover:bg-purple-100 dark:bg-purple-950/50 dark:text-purple-300 transition-colors"
-              >
-                Legal Hold
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset("export")}
-                className="rounded-md bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-950/50 dark:text-cyan-300 transition-colors"
-              >
-                Export (PRV-05)
-              </button>
-            </div>
           </div>
         </CardHeader>
 
@@ -298,7 +174,7 @@ export function PrivacyDecisionWorkbench() {
                   name="subject_ref"
                   value={subjectRef}
                   onChange={(e) => setSubjectRef(e.target.value)}
-                  placeholder="e.g. subject-robert-chen@zoikosuite.com"
+                  placeholder="Subject identifier (e.g. customer ID or email)"
                   className={FIELD}
                   required
                 />
@@ -337,10 +213,18 @@ export function PrivacyDecisionWorkbench() {
                   name="processing_activity_id"
                   value={activityId}
                   onChange={(e) => setActivityId(e.target.value)}
-                  placeholder="e.g. act-marketing-uk-001"
+                  placeholder="Processing activity UUID"
                   className={`${FIELD} font-mono text-xs`}
+                  list="registry-activities"
                   required
                 />
+                <datalist id="registry-activities">
+                  {activityOptions.map((a) => (
+                    <option key={a.activity_version_id} value={a.activity_id}>
+                      {a.owner} ({a.purpose_ids.map((id) => id.slice(0, 8)).join(", ")})
+                    </option>
+                  ))}
+                </datalist>
                 <p className={HINT}>Must resolve to an ACTIVE version in PRV-01.</p>
               </div>
 
@@ -354,10 +238,18 @@ export function PrivacyDecisionWorkbench() {
                   name="purpose_id"
                   value={purposeId}
                   onChange={(e) => setPurposeId(e.target.value)}
-                  placeholder="e.g. 11111111-2222-3333-4444-555555555555"
+                  placeholder="Purpose UUID"
                   className={`${FIELD} font-mono text-xs`}
+                  list="registry-purposes"
                   required
                 />
+                <datalist id="registry-purposes">
+                  {purposeOptions.map((p) => (
+                    <option key={p.purpose_version_id} value={p.purpose_id}>
+                      {p.statement.length > 70 ? `${p.statement.slice(0, 70)}…` : p.statement}
+                    </option>
+                  ))}
+                </datalist>
                 <p className={HINT}>Must resolve to PUBLISHED and be bound to the activity (PRV-C01).</p>
               </div>
 
@@ -371,7 +263,7 @@ export function PrivacyDecisionWorkbench() {
                   name="secondary_purpose_id"
                   value={secondaryPurposeId}
                   onChange={(e) => setSecondaryPurposeId(e.target.value)}
-                  placeholder="e.g. 22222222-3333-4444-5555-666666666666"
+                  placeholder="Secondary purpose UUID"
                   className={`${FIELD} font-mono text-xs`}
                 />
                 <p className={HINT}>A proposed re-use of this data under a different purpose (§12.1).</p>
@@ -395,7 +287,7 @@ export function PrivacyDecisionWorkbench() {
                       name="subject_class"
                       value={subjectClass}
                       onChange={(e) => setSubjectClass(e.target.value)}
-                      placeholder="CUSTOMER"
+                      placeholder="As registered on the activity"
                       className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
                     />
                   </div>
@@ -425,7 +317,7 @@ export function PrivacyDecisionWorkbench() {
                       name="residency"
                       value={residency}
                       onChange={(e) => setResidency(e.target.value)}
-                      placeholder="GB"
+                      placeholder="ISO country code"
                       className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
                     />
                   </div>
@@ -447,7 +339,7 @@ export function PrivacyDecisionWorkbench() {
                       name="data_category"
                       value={dataCategory}
                       onChange={(e) => setDataCategory(e.target.value)}
-                      placeholder="PROFILE"
+                      placeholder="As registered on the activity"
                       className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
                     />
                   </div>

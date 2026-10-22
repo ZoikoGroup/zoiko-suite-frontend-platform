@@ -153,7 +153,7 @@ const FALLBACK_AUDIT_EVENTS: AuditEvent[] = [
  * Fetch all logged audit events from audit-event-store-svc.
  *
  * `identity` is required in practice: the service now gates this endpoint on
- * both a verified principal (401 without one) and tenant scope (400 without
+ * both a verified principal (401 without one) and tenant scope (401 without
  * X-Tenant-Id) rather than returning whatever the caller claims. Omitting it
  * does not throw — the existing fallback-to-mock-data path below already
  * handles any non-ok response — but it does mean the page silently shows
@@ -247,36 +247,18 @@ export async function verifyAuditChain(identity?: Identity): Promise<{
   };
 }
 
-// ─── Write: Ingest Audit Event ────────────────────────────────────────────────
-
-export type IngestAuditEventInput = {
-  event_type?: string;
-  source_module?: string;
-  actor?: string;
-  action: string;
-  resource: string;
-  outcome?: string;
-  details?: string;
-};
-
-/**
- * POST a new audit event to audit-event-store-svc.
- *
- * Used by the service-inputs manual test console to record that a test run
- * was executed, leaving a tamper-evident trace in the audit log chain.
- */
-export async function ingestAuditEvent(
-  body: IngestAuditEventInput,
-): Promise<{ ok: boolean; eventId?: string; error?: string }> {
-  const res = await apiPost<{ event_id?: string; id?: string }>(
-    "auditEventStore",
-    "/v1/events",
-    body,
-  );
-
-  if (!res.ok) {
-    return { ok: false, error: res.error.message };
-  }
-
-  return { ok: true, eventId: res.data.event_id ?? res.data.id };
-}
+// ─── No HTTP write path: ingestion is Kafka-only ──────────────────────────────
+//
+// audit-event-store-svc has exactly six registered HTTP endpoints, all of them
+// reads or verifications: GET /v1/events, POST /v1/events/verify,
+// POST /v1/archives, GET /v1/archives/{id}, POST /v1/archives/{id}/verify,
+// GET /v1/archives/{id}/verifications. There is deliberately NO POST /v1/events:
+// the canonical envelope contract has the audit ledger ingest every platform
+// domain event from Kafka (AUD-01, one reader per `zoiko.*.events` topic), so an
+// HTTP ingest route is neither needed nor defined.
+//
+// A previous `ingestAuditEvent()` helper here POSTed to `/v1/events`, a route the
+// backend never registers — it would always fail with 404/405. It was unused, so
+// it has been removed rather than left advertising a nonexistent endpoint. If a
+// caller needs to record an audit fact, it publishes the domain event to Kafka;
+// it does not write to this service over HTTP.

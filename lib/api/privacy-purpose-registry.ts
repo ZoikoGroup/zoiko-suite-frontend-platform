@@ -2,12 +2,6 @@
 // the registry of lawful-processing purposes and processing activities
 // (GDPR Article 30 "Record of Processing Activities"/ROPA) that the other
 // privacy services (consent, transfer, rights) validate against.
-//
-// Field names and routes mirror the real service's domain types exactly
-// (services/privacy-purpose-registry-svc/internal/domain/types.go) — this
-// service previously had zero frontend wiring at all (only a config.ts
-// entry nobody imported, and a decorative label string on the Transfer
-// workbench that never called it).
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 
@@ -21,6 +15,8 @@ export type PurposeVersion = {
   statement: string;
   compatibility_class: string;
   lawful_basis_refs: string[];
+  necessity_rationale?: string;
+  special_condition_refs?: string[];
   version_status: PurposeVersionStatus;
   effective_from: string;
   supersedes_version_id?: string;
@@ -28,8 +24,17 @@ export type PurposeVersion = {
   created_by_principal_id: string;
 };
 
-export async function listPurposes(identity?: Identity): Promise<ApiResult<{ data: PurposeVersion[]; count: number }>> {
-  return apiGet<{ data: PurposeVersion[]; count: number }>("privacyPurposeRegistry", "/privacy/purposes", { identity });
+export async function listPurposes(identity?: Identity): Promise<ApiResult<PurposeVersion[]>> {
+  const res = await apiGet<PurposeVersion[] | { data: PurposeVersion[]; count: number }>(
+    "privacyPurposeRegistry",
+    "/privacy/purposes",
+    { identity }
+  );
+  if (!res.ok) return res;
+  if (Array.isArray(res.data)) {
+    return { ok: true, data: res.data };
+  }
+  return { ok: true, data: (res.data as { data: PurposeVersion[] }).data || [] };
 }
 
 export async function getPurpose(purposeId: string, identity?: Identity): Promise<ApiResult<PurposeVersion>> {
@@ -44,6 +49,8 @@ export type CreatePurposeInput = {
   statement: string;
   compatibility_class: string;
   lawful_basis_refs: string[];
+  necessity_rationale?: string;
+  special_condition_refs?: string[];
   effective_from?: string;
 };
 
@@ -57,8 +64,40 @@ export async function createPurpose(
     compatibility_class: input.compatibility_class,
     lawful_basis_refs: input.lawful_basis_refs,
   };
+  if (input.necessity_rationale) body.necessity_rationale = input.necessity_rationale;
+  if (input.special_condition_refs && input.special_condition_refs.length > 0) {
+    body.special_condition_refs = input.special_condition_refs;
+  }
   if (input.effective_from) body.effective_from = new Date(input.effective_from).toISOString();
   return apiPost<PurposeVersion>("privacyPurposeRegistry", "/privacy/purposes", body, { identity });
+}
+
+export type CreatePurposeVersionInput = CreatePurposeInput & {
+  parent_version_id: string;
+};
+
+export async function createPurposeVersion(
+  purposeId: string,
+  input: CreatePurposeVersionInput,
+  identity: Identity
+): Promise<ApiWriteResult<PurposeVersion>> {
+  const body: Record<string, unknown> = {
+    parent_version_id: input.parent_version_id,
+    statement: input.statement,
+    compatibility_class: input.compatibility_class,
+    lawful_basis_refs: input.lawful_basis_refs,
+  };
+  if (input.necessity_rationale) body.necessity_rationale = input.necessity_rationale;
+  if (input.special_condition_refs && input.special_condition_refs.length > 0) {
+    body.special_condition_refs = input.special_condition_refs;
+  }
+  if (input.effective_from) body.effective_from = new Date(input.effective_from).toISOString();
+  return apiPost<PurposeVersion>(
+    "privacyPurposeRegistry",
+    `/privacy/purposes/${encodeURIComponent(purposeId)}/versions`,
+    body,
+    { identity }
+  );
 }
 
 export async function publishPurposeVersion(
@@ -97,6 +136,7 @@ export type ProcessingActivityVersion = {
   activity_id: string;
   privacy_role: PrivacyRole;
   owner: string;
+  privacy_owner?: string;
   purpose_ids: string[];
   subject_classes: string[];
   data_categories: string[];
@@ -105,15 +145,40 @@ export type ProcessingActivityVersion = {
   jurisdictions: string[];
   retention_rule_refs: string[];
   transfer_refs: string[];
+  processor_refs?: string[];
   notice_consent_dependency?: NoticeConsentDependency;
   dpia_tia_status?: DPIATIAStatus;
   version_status: ActivityVersionStatus;
   validation_findings?: ValidationFinding[];
   rejection_reason?: string;
   effective_from?: string;
+  effective_to?: string;
   supersedes_version_id?: string;
+  approved_by_principal_id?: string;
+  approved_at?: string;
+  rejected_by_principal_id?: string;
+  rejected_at?: string;
+  activated_by_principal_id?: string;
+  activated_at?: string;
   created_at: string;
   created_by_principal_id: string;
+};
+
+export type ActivityLifecycleAudit = {
+  audit_id: string;
+  tenant_id?: string;
+  activity_id: string;
+  activity_version_id: string;
+  action: string;
+  from_status?: string;
+  to_status: string;
+  actor_principal_id: string;
+  correlation_id: string;
+  reason?: string;
+  superseded_by_version_id?: string;
+  effective_from?: string;
+  effective_to?: string;
+  recorded_at: string;
 };
 
 export async function listROPA(
@@ -124,6 +189,17 @@ export async function listROPA(
     identity,
     query: { role: filters.role, jurisdiction: filters.jurisdiction },
   });
+}
+
+export async function getActivity(
+  activityId: string,
+  identity?: Identity
+): Promise<ApiResult<ProcessingActivityVersion>> {
+  return apiGet<ProcessingActivityVersion>(
+    "privacyPurposeRegistry",
+    `/privacy/processing-activities/${encodeURIComponent(activityId)}`,
+    { identity }
+  );
 }
 
 export async function getActivityVersion(
@@ -138,9 +214,21 @@ export async function getActivityVersion(
   );
 }
 
+export async function getActivityAudit(
+  activityId: string,
+  identity?: Identity
+): Promise<ApiResult<ActivityLifecycleAudit[]>> {
+  return apiGet<ActivityLifecycleAudit[]>(
+    "privacyPurposeRegistry",
+    `/privacy/processing-activities/${encodeURIComponent(activityId)}/audit`,
+    { identity }
+  );
+}
+
 export type CreateActivityInput = {
   privacy_role: PrivacyRole;
   owner: string;
+  privacy_owner?: string;
   purpose_ids: string[];
   subject_classes: string[];
   data_categories: string[];
@@ -149,6 +237,7 @@ export type CreateActivityInput = {
   jurisdictions: string[];
   retention_rule_refs: string[];
   transfer_refs: string[];
+  processor_refs?: string[];
   notice_consent_dependency?: NoticeConsentDependency;
   dpia_tia_status?: DPIATIAStatus;
 };
@@ -167,6 +256,8 @@ function activityBody(input: CreateActivityInput, tenantId?: string): Record<str
     retention_rule_refs: input.retention_rule_refs,
     transfer_refs: input.transfer_refs,
   };
+  if (input.privacy_owner) body.privacy_owner = input.privacy_owner;
+  if (input.processor_refs) body.processor_refs = input.processor_refs;
   if (input.notice_consent_dependency) body.notice_consent_dependency = input.notice_consent_dependency;
   if (input.dpia_tia_status) body.dpia_tia_status = input.dpia_tia_status;
   return body;
@@ -180,6 +271,25 @@ export async function createActivity(
     "privacyPurposeRegistry",
     "/privacy/processing-activities",
     activityBody(input, identity.tenantId),
+    { identity }
+  );
+}
+
+export type CreateActivityVersionInput = CreateActivityInput & {
+  parent_version_id: string;
+};
+
+export async function createActivityVersion(
+  activityId: string,
+  input: CreateActivityVersionInput,
+  identity: Identity
+): Promise<ApiWriteResult<ProcessingActivityVersion>> {
+  const body = activityBody(input, identity.tenantId);
+  body.parent_version_id = input.parent_version_id;
+  return apiPost<ProcessingActivityVersion>(
+    "privacyPurposeRegistry",
+    `/privacy/processing-activities/${encodeURIComponent(activityId)}/versions`,
+    body,
     { identity }
   );
 }

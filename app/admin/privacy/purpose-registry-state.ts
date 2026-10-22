@@ -3,6 +3,8 @@
 // and transfer-actions.ts's equivalents (privacy-transfer-svc) — three
 // different backend services share this page.
 
+import type { ActivityLifecycleAudit } from "@/lib/api/privacy-purpose-registry";
+
 export type PurposeRegistryActionState = {
   status: "idle" | "success" | "error";
   message: string;
@@ -11,6 +13,7 @@ export type PurposeRegistryActionState = {
   activityId?: string;
   activityVersionId?: string;
   findings?: { code: string; field: string; message: string }[];
+  auditRecords?: ActivityLifecycleAudit[];
 };
 
 export const IDLE_PURPOSE_REGISTRY_STATE: PurposeRegistryActionState = { status: "idle", message: "" };

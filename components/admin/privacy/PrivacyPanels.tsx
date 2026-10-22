@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { startTransition, useActionState, useEffect, useState } from "react";
 import {
   ShieldCheck,
   FileCheck2,
@@ -26,6 +26,8 @@ import {
   setPreferenceAction,
   type ConsentActionState,
 } from "@/app/admin/privacy/actions";
+import { getPurposesList } from "@/app/admin/privacy/purpose-registry-actions";
+import type { PurposeVersion } from "@/lib/api/privacy-purpose-registry";
 import { IDLE_LOOKUP } from "@/components/admin/shared/lookup";
 
 const IDLE_CONSENT: ConsentActionState = { status: "idle" };
@@ -36,18 +38,16 @@ export function PrivacyPanels() {
     IDLE_CONSENT
   );
 
-  const [approveState, approveSubmit, approvePending] = useActionState(
-    approveNoticeAction,
-    IDLE_CONSENT
-  );
-
-  const [publishState, publishSubmit, publishPending] = useActionState(
-    publishNoticeAction,
-    IDLE_CONSENT
-  );
-
-  const [withdrawNoticeState, withdrawNoticeSubmit, withdrawNoticePending] = useActionState(
-    withdrawNoticeAction,
+  // Approve, Publish and Withdraw share one result slot: whichever ran last is
+  // what is shown, so an earlier Approve message can never hide a later Publish.
+  const [lifecycleState, lifecycleSubmit, lifecyclePending] = useActionState(
+    async (prev: ConsentActionState, formData: FormData): Promise<ConsentActionState> => {
+      const op = String(formData.get("lifecycle_op") ?? "");
+      if (op === "approve") return approveNoticeAction(prev, formData);
+      if (op === "publish") return publishNoticeAction(prev, formData);
+      if (op === "withdraw") return withdrawNoticeAction(prev, formData);
+      return { status: "error", message: "Unknown notice lifecycle action." };
+    },
     IDLE_CONSENT
   );
 
@@ -71,6 +71,47 @@ export function PrivacyPanels() {
     IDLE_CONSENT
   );
 
+  // The consent form is controlled so a rejected submit keeps what the user
+  // typed: React 19 resets an uncontrolled form after every action, success or
+  // not, which used to wipe the subject back to a demo default.
+  const [consent, setConsent] = useState({
+    subject_ref: "",
+    purpose_id: "",
+    action: "GRANTED",
+    capture_channel: "WEB_PORTAL",
+    notice_version_id: "",
+    affirmative_action_type: "EXPLICIT_CHECKBOX",
+    affirmative_evidence: "",
+    is_proxy: false,
+    representative_subject_ref: "",
+    representative_authority_ref: "",
+    representative_evidence: "",
+  });
+  const setC =
+    (key: keyof typeof consent) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const value = e.target instanceof HTMLInputElement && e.target.type === "checkbox" ? e.target.checked : e.target.value;
+      setConsent((prev) => ({ ...prev, [key]: value }));
+    };
+
+  // Purposes come from privacy-purpose-registry-svc (published versions in force).
+  const [purposes, setPurposes] = useState<PurposeVersion[]>([]);
+  const [purposesLoaded, setPurposesLoaded] = useState(false);
+  useEffect(() => {
+    let live = true;
+    getPurposesList()
+      .then((list) => {
+        if (live) setPurposes(list);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (live) setPurposesLoaded(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
   return (
     <div className="space-y-8">
       {/* ── Section 1: Record Consent ────────────────────────────────────────── */}
@@ -89,7 +130,17 @@ export function PrivacyPanels() {
           </div>
         </CardHeader>
         <CardContent>
-          <form action={consentSubmit} className="space-y-4">
+          <form
+            onSubmit={(e) => {
+              // Submitted through onSubmit rather than <form action>: React 19 resets a
+              // form with an action after it completes (success or failure), which
+              // drops the controlled <select> values. Native validation still runs first.
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              startTransition(() => consentSubmit(formData));
+            }}
+            className="space-y-4"
+          >
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
               <div className="sm:col-span-2">
                 <label htmlFor="subject_ref" className={LABEL}>
@@ -98,7 +149,8 @@ export function PrivacyPanels() {
                 <input
                   id="subject_ref"
                   name="subject_ref"
-                  defaultValue="subject-robert-chen@zoikosuite.com"
+                  value={consent.subject_ref}
+                  onChange={setC("subject_ref")}
                   placeholder="e.g. employee/customer ID or email"
                   className={FIELD}
                   required
@@ -108,30 +160,38 @@ export function PrivacyPanels() {
 
               <div>
                 <label htmlFor="purpose_id" className={LABEL}>
-                  Purpose ID (PRV-01 Verified)
+                  Purpose (PRV-01 published)
                 </label>
-                <input
+                <select
                   id="purpose_id"
                   name="purpose_id"
-                  defaultValue="11111111-2222-3333-4444-555555555555"
-                  placeholder="e.g. 11111111-2222-3333-4444-555555555555"
-                  className={`${FIELD} font-mono text-xs`}
-                  list="published-purposes"
+                  value={consent.purpose_id}
+                  onChange={setC("purpose_id")}
+                  className={`${FIELD} text-xs`}
                   required
-                />
-                <datalist id="published-purposes">
-                  <option value="11111111-2222-3333-4444-555555555555">Direct Marketing & Communications (PRV-01 Published)</option>
-                  <option value="b6883652-f50d-4801-836c-a967b2554a90">Customer Support & Post-Sale Delivery (PRV-01 Published)</option>
-                  <option value="04f3b13c-35ab-49f2-bb93-f5655080fc0e">Transaction Processing (PRV-01 Published)</option>
-                </datalist>
-                <p className={HINT}>Direct Marketing (PRV-01 Published UUID)</p>
+                  disabled={!purposesLoaded || purposes.length === 0}
+                >
+                  <option value="">
+                    {!purposesLoaded
+                      ? "Loading published purposes…"
+                      : purposes.length === 0
+                        ? "No published purposes available"
+                        : "Select a published purpose"}
+                  </option>
+                  {purposes.map((p) => (
+                    <option key={p.purpose_id} value={p.purpose_id}>
+                      {p.statement.length > 70 ? `${p.statement.slice(0, 70)}…` : p.statement} ({p.purpose_id.slice(0, 8)})
+                    </option>
+                  ))}
+                </select>
+                <p className={HINT}>Loaded from privacy-purpose-registry-svc</p>
               </div>
 
               <div>
                 <label htmlFor="action" className={LABEL}>
                   Consent Decision
                 </label>
-                <select id="action" name="action" defaultValue="GRANTED" className={FIELD}>
+                <select id="action" name="action" value={consent.action} onChange={setC("action")} className={FIELD}>
                   <option value="GRANTED">GRANTED (Affirmative Opt-in)</option>
                   <option value="DENIED">DENIED (Explicit Refusal)</option>
                 </select>
@@ -144,7 +204,7 @@ export function PrivacyPanels() {
                 <label htmlFor="capture_channel" className={LABEL}>
                   Capture Channel
                 </label>
-                <select id="capture_channel" name="capture_channel" defaultValue="WEB_PORTAL" className={FIELD}>
+                <select id="capture_channel" name="capture_channel" value={consent.capture_channel} onChange={setC("capture_channel")} className={FIELD}>
                   <option value="WEB_PORTAL">WEB_PORTAL (User Account Center)</option>
                   <option value="MOBILE_APP">MOBILE_APP (Zoiko Authenticator)</option>
                   <option value="EMAIL_OPT_IN">EMAIL_OPT_IN (Double Opt-In Link)</option>
@@ -154,14 +214,18 @@ export function PrivacyPanels() {
 
               <div>
                 <label htmlFor="notice_version_id" className={LABEL}>
-                  Linked Privacy Notice Version ID <span className="text-slate-400">(optional)</span>
+                  Linked Privacy Notice Version ID <span className="text-rose-500">*</span>
                 </label>
                 <input
                   id="notice_version_id"
                   name="notice_version_id"
-                  placeholder="Optional notice version UUID"
+                  value={consent.notice_version_id}
+                  onChange={setC("notice_version_id")}
+                  placeholder="Published notice version UUID"
                   className={`${FIELD} font-mono text-xs`}
+                  required
                 />
+                <p className={HINT}>Required: must be a currently PUBLISHED notice version (PRV-008)</p>
               </div>
             </div>
 
@@ -172,7 +236,7 @@ export function PrivacyPanels() {
                   <label htmlFor="affirmative_action_type" className={LABEL}>
                     Affirmative Action Type (§10.1)
                   </label>
-                  <select id="affirmative_action_type" name="affirmative_action_type" defaultValue="EXPLICIT_CHECKBOX" className={FIELD}>
+                  <select id="affirmative_action_type" name="affirmative_action_type" value={consent.affirmative_action_type} onChange={setC("affirmative_action_type")} className={FIELD}>
                     <option value="EXPLICIT_CHECKBOX">EXPLICIT_CHECKBOX (Active Opt-In)</option>
                     <option value="ELECTRONIC_SIGNATURE">ELECTRONIC_SIGNATURE (E-Signature)</option>
                     <option value="REPRESENTATIVE_SIGNATURE">REPRESENTATIVE_SIGNATURE (Legal Proxy)</option>
@@ -188,6 +252,8 @@ export function PrivacyPanels() {
                   <input
                     id="affirmative_evidence"
                     name="affirmative_evidence"
+                    value={consent.affirmative_evidence}
+                    onChange={setC("affirmative_evidence")}
                     placeholder="e.g. signature_sha256 or audit_log_ref"
                     className={`${FIELD} font-mono text-xs`}
                   />
@@ -202,6 +268,8 @@ export function PrivacyPanels() {
                     id="is_proxy"
                     name="is_proxy"
                     value="true"
+                    checked={consent.is_proxy}
+                    onChange={setC("is_proxy")}
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
                   <label htmlFor="is_proxy" className="text-xs font-semibold text-slate-800 dark:text-slate-200">
@@ -216,6 +284,8 @@ export function PrivacyPanels() {
                     <input
                       id="representative_subject_ref"
                       name="representative_subject_ref"
+                      value={consent.representative_subject_ref}
+                      onChange={setC("representative_subject_ref")}
                       placeholder="e.g. guardian/legal-rep-id"
                       className={`${FIELD} font-mono text-xs`}
                     />
@@ -227,6 +297,8 @@ export function PrivacyPanels() {
                     <input
                       id="representative_authority_ref"
                       name="representative_authority_ref"
+                      value={consent.representative_authority_ref}
+                      onChange={setC("representative_authority_ref")}
                       placeholder="e.g. POA-DOC-2026-001"
                       className={`${FIELD} font-mono text-xs`}
                     />
@@ -238,6 +310,8 @@ export function PrivacyPanels() {
                     <input
                       id="representative_evidence"
                       name="representative_evidence"
+                      value={consent.representative_evidence}
+                      onChange={setC("representative_evidence")}
                       placeholder="e.g. notarized_pdf_sha256"
                       className={`${FIELD} font-mono text-xs`}
                     />
@@ -466,37 +540,38 @@ export function PrivacyPanels() {
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <form action={approveSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-amber-50/30 dark:bg-amber-900/10">
+                <form action={lifecycleSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-amber-50/30 dark:bg-amber-900/10">
+                  <input type="hidden" name="lifecycle_op" value="approve" />
                   <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400">1. Approve Version</span>
                   <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
                   <input name="version_id" placeholder="Version ID (opt)" className={`${FIELD} font-mono text-xs`} />
-                  <Button type="submit" size="sm" loading={approvePending} className="w-full text-xs">
+                  <Button type="submit" size="sm" loading={lifecyclePending} className="w-full text-xs">
                     Approve (Checker)
                   </Button>
                 </form>
 
-                <form action={publishSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-emerald-50/30 dark:bg-emerald-900/10">
+                <form action={lifecycleSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-emerald-50/30 dark:bg-emerald-900/10">
+                  <input type="hidden" name="lifecycle_op" value="publish" />
                   <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">2. Publish Version</span>
                   <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
                   <input name="version_id" placeholder="Version ID (opt)" className={`${FIELD} font-mono text-xs`} />
-                  <Button type="submit" size="sm" loading={publishPending} className="w-full text-xs">
+                  <Button type="submit" size="sm" loading={lifecyclePending} className="w-full text-xs">
                     Publish (Live)
                   </Button>
                 </form>
 
-                <form action={withdrawNoticeSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-rose-50/30 dark:bg-rose-900/10">
+                <form action={lifecycleSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-rose-50/30 dark:bg-rose-900/10">
+                  <input type="hidden" name="lifecycle_op" value="withdraw" />
                   <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400">3. Withdraw Version</span>
                   <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
                   <input name="version_id" placeholder="Version ID (opt)" className={`${FIELD} font-mono text-xs`} />
-                  <Button type="submit" size="sm" loading={withdrawNoticePending} variant="secondary" className="w-full text-xs text-rose-600 border-rose-300 dark:border-rose-800">
+                  <Button type="submit" size="sm" loading={lifecyclePending} variant="secondary" className="w-full text-xs text-rose-600 border-rose-300 dark:border-rose-800">
                     Withdraw
                   </Button>
                 </form>
               </div>
-              {(approveState.message || publishState.message || withdrawNoticeState.message) && (
-                <p className="text-xs text-slate-700 dark:text-slate-300">
-                  {approveState.message || publishState.message || withdrawNoticeState.message}
-                </p>
+              {lifecycleState.message && (
+                <p className="text-xs text-slate-700 dark:text-slate-300">{lifecycleState.message}</p>
               )}
             </div>
           </CardContent>

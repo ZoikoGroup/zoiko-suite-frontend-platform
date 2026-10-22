@@ -99,6 +99,10 @@ export async function createRelationshipAction(
   const service = String(formData.get("service") ?? "").trim();
   const processingInstructions = String(formData.get("processing_instructions") ?? "").trim() || undefined;
   const contractEvidenceRef = String(formData.get("contract_evidence_ref") ?? "").trim() || undefined;
+  const purposeActivityRefs = String(formData.get("purpose_activity_refs") ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
   const categoriesRaw = String(formData.get("data_categories") ?? "Customer_PII, Telemetry").trim();
   const subjectsRaw = String(formData.get("subject_classes") ?? "Enterprise_Users, Customers").trim();
   const jurisdictionsRaw = String(formData.get("jurisdictions") ?? "EU-GDPR, UK-GDPR").trim();
@@ -117,7 +121,7 @@ export async function createRelationshipAction(
       processor_ref: processorRef,
       service,
       processing_instructions: processingInstructions,
-      purpose_activity_refs: [],
+      purpose_activity_refs: purposeActivityRefs,
       data_categories: dataCategories,
       subject_classes: subjectClasses,
       contract_evidence_ref: contractEvidenceRef,
