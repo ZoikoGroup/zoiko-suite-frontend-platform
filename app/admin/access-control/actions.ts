@@ -22,8 +22,10 @@ import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth"
 import {
   createPermissionBundle,
   createRoleDefinition,
+  detachPermissionBundle,
   explainAccessControlError,
   parsePermittedActions,
+  updatePermissionBundle,
   updateRoleDefinition,
   type RoleScopeType,
   type RoleStatus,
@@ -62,8 +64,10 @@ import {
   type EvaluateAccessState,
   type RevokeAssignmentState,
   type BundleEnforcementState,
+  type DetachBundleState,
   type RoleEnforcementState,
   type SoDRuleEnforcementState,
+  type UpdateBundleState,
   type UpdateRoleState,
 } from "./state";
 
@@ -297,6 +301,170 @@ export async function createBundleAction(
     status: "created",
     bundle: result.data,
     message: `${result.data.bundle_code} attached and provisioned into authorization-svc — ${result.data.permitted_actions.length} action(s) now granted by this role.`,
+  };
+}
+
+// ─── Edit or detach a permission bundle ─────────────────────────────────────
+//
+// The two operations that were missing from this console: once a bundle
+// existed, nothing here could change what it permits (re-attaching under the
+// same code is how authorization-svc edits, but nothing surfaced that) and
+// nothing could withdraw one set of a role's permissions without retiring the
+// whole role. Both propagate to authorization-svc before being recorded and
+// fail closed, for the same reason as every other write on this service: the
+// register must never claim a state the platform is not enforcing.
+
+/**
+ * Edit ONE bundle's permitted actions.
+ *
+ * The bundle_code is deliberately read-only here. authorization-svc has no
+ * rename, so a rename in this console could only be a label on a differently
+ * enforced reality; detaching and re-attaching under a new code is the
+ * supported rename, and that means using the detach form below and the attach
+ * form above.
+ */
+export async function updateBundleAction(
+  _prev: UpdateBundleState,
+  formData: FormData,
+): Promise<UpdateBundleState> {
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "error", message: EXPIRED };
+  }
+
+  const roleDefinitionId = String(formData.get("role_definition_id") ?? "").trim();
+  const bundleId = String(formData.get("bundle_id") ?? "").trim();
+  const legalEntityId =
+    String(formData.get("legal_entity_id") ?? "").trim() || identity.legalEntityId;
+  const permittedActions = parsePermittedActions(String(formData.get("permitted_actions") ?? ""));
+
+  if (!roleDefinitionId || !bundleId) {
+    return {
+      status: "error",
+      message: "It is not clear which bundle this applies to. Reload the page and try again.",
+    };
+  }
+  if (!legalEntityId) {
+    return { status: "error", message: "A legal entity is required — this write is authorized against it." };
+  }
+  if (permittedActions.length === 0) {
+    return {
+      status: "error",
+      message:
+        "A bundle must name at least one action. To withdraw every action from the role's principals, detach the bundle instead — an empty bundle would look like a grant while permitting nothing.",
+    };
+  }
+
+  const result = await updatePermissionBundle({
+    identity: { ...identity, principalId: identity.principalId, tenantId: identity.tenantId },
+    legalEntityId,
+    roleDefinitionId,
+    bundleId,
+    permittedActions,
+    correlationId: crypto.randomUUID(),
+  });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    if (status === 401) return { status: "unauthorized", message: explainAccessControlError(message) };
+    if (status === 403) return { status: "refused", message: explainAccessControlError(message) };
+    // 503 is the fail-closed propagation missing. Not an ordinary outage: the
+    // edit was NOT made and the bundle is still enforcing its previous actions.
+    if (status === 503) {
+      return {
+        status: "notEnforced",
+        message:
+          explainAccessControlError(message) +
+          " The bundle is unchanged, and is still enforcing the actions it permitted before.",
+      };
+    }
+    return { status: "error", message: explainAccessControlError(message) };
+  }
+
+  refresh();
+
+  const bundle = result.data;
+  const count = bundle.permitted_actions.length;
+  return {
+    status: "updated",
+    bundle,
+    message: `"${bundle.bundle_code}" now permits ${count} action${count === 1 ? "" : "s"}: ${bundle.permitted_actions.join(", ")}. This is enforced immediately — authorization-svc re-provisioned the set against the role before this was recorded.`,
+  };
+}
+
+/**
+ * Detach one bundle from its role — a withdrawal, not a deletion.
+ *
+ * The service answers both a fresh detach and a replay of an already-detached
+ * bundle with the same withdrawn record, so the console cannot tell the two
+ * apart and the state comments say why it does not pretend to. Whatever the
+ * read returned, intent is satisfied: the bundle grants nothing to this role's
+ * principals either way.
+ */
+export async function detachBundleAction(
+  _prev: DetachBundleState,
+  formData: FormData,
+): Promise<DetachBundleState> {
+  let identity: SessionIdentity & { principalId: string };
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return { status: "unauthorized", message: EXPIRED };
+  }
+
+  const roleDefinitionId = String(formData.get("role_definition_id") ?? "").trim();
+  const bundleId = String(formData.get("bundle_id") ?? "").trim();
+  const legalEntityId =
+    String(formData.get("legal_entity_id") ?? "").trim() || identity.legalEntityId;
+
+  if (!roleDefinitionId || !bundleId) {
+    return {
+      status: "error",
+      message: "It is not clear which bundle this applies to. Reload the page and try again.",
+    };
+  }
+  if (!legalEntityId) {
+    return { status: "error", message: "A legal entity is required — this write is authorized against it." };
+  }
+
+  const result = await detachPermissionBundle({
+    identity: { ...identity, principalId: identity.principalId, tenantId: identity.tenantId },
+    legalEntityId,
+    roleDefinitionId,
+    bundleId,
+    correlationId: crypto.randomUUID(),
+  });
+
+  if (!result.ok) {
+    const { status, message } = result.error;
+    if (status === 401) return { status: "unauthorized", message: explainAccessControlError(message) };
+    if (status === 403) return { status: "refused", message: explainAccessControlError(message) };
+    // 503 is the fail-closed retirement missing. The bundle is NOT detached —
+    // it is still active, in both registers, granting its actions to this
+    // role's principals. Reported as its own state for the same reason a
+    // failed retirement is at the role level.
+    if (status === 503) {
+      return {
+        status: "notEnforced",
+        message:
+          explainAccessControlError(message) +
+          " The bundle is unchanged: it is still active, and still granting its actions to this role's principals.",
+      };
+    }
+    return { status: "error", message: explainAccessControlError(message) };
+  }
+
+  refresh();
+
+  const bundle = result.data;
+  return {
+    status: "detached",
+    bundle,
+    // Works for both a fresh detach and a replay: the read came back withdrawn
+    // either way, so "required" is the wrong word — the intent is met.
+    message: `"${bundle.bundle_code}" is detached: it grants nothing to this role's principals, and it is retired in authorization-svc so the withdrawal is enforced. If it was already detached, this is a confirmation of state that was already true — the bundle keeps its contents, so re-attaching later restores the same actions.`,
   };
 }
 

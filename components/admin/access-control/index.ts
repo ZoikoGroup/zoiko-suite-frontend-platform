@@ -1,5 +1,10 @@
 export { RoleCataloguePanel } from "./RoleCataloguePanel";
 export { DefineRoleForm, UpdateRoleForm, AttachBundleForm } from "./AccessControlForms";
+// Edits one existing bundle's actions, or detaches it from its role. Both are
+// access-control-svc writes that propagate to authorization-svc and fail
+// closed — see ManageBundleForms.tsx for why "detached" here always means
+// "withdrawn there".
+export { ManageBundleForms } from "./ManageBundleForms";
 // authorization-svc, not access-control-svc — the live plane rather than the
 // definition register. See AssignmentForms.tsx for why that split matters.
 export { AssignRoleForm, AssignmentsPanel, SoDRulesPanel } from "./AssignmentForms";

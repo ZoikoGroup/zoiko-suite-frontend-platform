@@ -61,6 +61,48 @@ export type CreateBundleState =
   | { status: "error"; message: string };
 
 /**
+ * Editing ONE bundle that already exists — its permitted actions, its active
+ * state, or both. Distinct from CreateBundleState for the same reason Update
+ * is distinct from Create at the role level: "changed" and "created" are
+ * different facts, and a reader watches a live register.
+ *
+ * `notEnforced` carries the same meaning UpdateRoleState gives it. An edit
+ * propagates to authorization-svc BEFORE it is recorded and fails closed, so a
+ * 503 means the change was not made and the bundle is still enforcing exactly
+ * what it enforced before. Everything else has an ordinary reading.
+ */
+export type UpdateBundleState =
+  | { status: "idle" }
+  | { status: "updated"; bundle: PermissionBundleDef; message: string }
+  /** The change was refused because authorization-svc could not be reached.
+   *  The bundle is unchanged and is still enforcing its current actions. */
+  | { status: "notEnforced"; message: string }
+  | { status: "refused"; message: string }
+  | { status: "unauthorized"; message: string }
+  | { status: "error"; message: string };
+
+/**
+ * Detaching one bundle from its role — a withdrawal, not a deletion.
+ *
+ * Deliberately NOT broken into a "detached" / "already detached" pair the way
+ * RevokeAssignmentState keeps `alreadyRevoked`. The service answers the first
+ * detach and every replay of it with the same 200 and the same withdrawn
+ * record, so the console cannot tell a fresh withdrawal from a confirmation of
+ * one already made — and claiming the distinction would present a guess as a
+ * fact. One state carries both, and the message says so.
+ */
+export type DetachBundleState =
+  | { status: "idle" }
+  | { status: "detached"; bundle: PermissionBundleDef; message: string }
+  | { status: "notEnforced"; message: string }
+  | { status: "refused"; message: string }
+  | { status: "unauthorized"; message: string }
+  | { status: "error"; message: string };
+
+export const IDLE_UPDATE_BUNDLE: UpdateBundleState = { status: "idle" };
+export const IDLE_DETACH_BUNDLE: DetachBundleState = { status: "idle" };
+
+/**
  * Assignment states — authorization-svc, not access-control-svc.
  *
  * `granted` says what the other three cannot: this is the only action in this
