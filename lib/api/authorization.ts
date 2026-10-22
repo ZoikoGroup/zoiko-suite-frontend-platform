@@ -42,10 +42,26 @@ export type RoleAssignment = {
   principal_id: string;
   role_id: string;
   legal_entity_id: string | null;
+  book_id?: string | null;
+  org_unit_id?: string | null;
   effective_from: string;
   effective_to: string | null;
   assigned_by: string;
   created_at: string;
+  /**
+   * Maker-checker state. A privileged role (any iam.* or protected platform
+   * action) granted by someone without iam.assignment.approve_privileged is
+   * recorded PENDING_APPROVAL and grants nothing until an independent checker
+   * approves it; pending requests expire after 72 hours.
+   */
+  approval_status?: "APPROVED" | "PENDING_APPROVAL" | "REJECTED" | "EXPIRED" | string;
+  approved_by?: string | null;
+  approval_reference?: string | null;
+  approval_decided_at?: string | null;
+  approval_expires_at?: string | null;
+  last_granted_at?: string | null;
+  /** The holder's standing, projected from identity-context-svc. */
+  principal_status?: string | null;
 };
 
 /**
@@ -66,6 +82,8 @@ export type SoDRule = {
   jurisdiction_id: string | null;
   tenant_id: string | null;
   active_flag: boolean;
+  /** Optimistic-concurrency version; sent back as expected_version on retire/reactivate. */
+  version?: number;
   created_at: string;
 };
 
@@ -104,24 +122,60 @@ export async function listSoDRules(identity: Identity): Promise<ApiResult<SoDRul
 
 // ── writes ──────────────────────────────────────────────────────────────────
 
+/**
+ * The §16 fields every privileged or destructive command carries.
+ *
+ * authorization-svc runs AUTHZ_COMMAND_CONTRACT=enforce: a revoke, retire,
+ * reactivate, approve or reject without `reason_code` or `purpose` is
+ * `400 missing_field`, before anything is looked at. The reason is recorded
+ * with the change (authz_config_history) and travels on the IAM event as
+ * `command_reason`, so it is what an auditor reads later.
+ *
+ * `expectedVersion` is the row's `version` as the operator saw it. Sent where
+ * the service honours it (retire / reactivate of roles, bundles, SoD and ABAC
+ * rules); a stale one is `409 version_conflict` rather than a silent overwrite
+ * of somebody else's change.
+ */
+export type CommandReason = {
+  reasonCode: string;
+  /** Free text, sent as `purpose`. */
+  note?: string;
+  expectedVersion?: number;
+};
+
+function commandBody(reason: CommandReason, extra: Record<string, unknown> = {}) {
+  return {
+    reason_code: reason.reasonCode,
+    ...(reason.note ? { purpose: reason.note } : {}),
+    ...(reason.expectedVersion && reason.expectedVersion > 0 ? { expected_version: reason.expectedVersion } : {}),
+    ...extra,
+  };
+}
+
 export type AssignRoleInput = {
   identity: Identity;
   principalId: string;
   roleId: string;
   /** Omit for a tenant-wide assignment (role must be TENANT-scoped). */
   legalEntityId?: string;
-  /** ISO-8601. authorization-svc requires it — there is no implicit "now". */
+  /** RFC 3339. authorization-svc requires it — there is no implicit "now". */
   effectiveFrom: string;
-  correlationId: string;
+  /** RFC 3339; omit for an open-ended grant. Must be after effectiveFrom. */
+  effectiveTo?: string;
+  /** The governed request a privileged grant was approved under. */
+  approvalReference?: string;
 };
 
 /**
- * Assign a role to a principal. This is the call that actually grants access;
- * defining a role and attaching a bundle does not.
+ * Grant a role. This is the call that actually gives access.
  *
- * `assignment_id` is generated client-side so the write is idempotent under
- * the correlation id the caller already holds, matching how
- * createRoleDefinition works.
+ * TWO SUCCESSES, and they are not the same: 201 is a grant in force; 202 is a
+ * privileged role (any iam.* or protected platform action) granted by someone
+ * without iam.assignment.approve_privileged, recorded PENDING_APPROVAL and
+ * granting nothing until an independent checker approves it.
+ *
+ * No tenant_id or assigned_by in the body: both come from the verified caller,
+ * and the role must belong to that tenant.
  */
 export async function assignRole(input: AssignRoleInput): Promise<ApiWriteResult<RoleAssignment>> {
   return apiPost<RoleAssignment>(
@@ -131,44 +185,52 @@ export async function assignRole(input: AssignRoleInput): Promise<ApiWriteResult
       principal_role_assignment_id: crypto.randomUUID(),
       principal_id: input.principalId,
       role_id: input.roleId,
-      // Empty string, not null and not omitted. The handler treats "" as
-      // "tenant-wide" (`if req.LegalEntityID != ""`), and only accepts that
-      // when the role's own scope_type is TENANT.
+      // "" is tenant-wide, accepted only for a TENANT-scoped role.
       legal_entity_id: input.legalEntityId ?? "",
       effective_from: input.effectiveFrom,
-      // NOTE: no tenant_id and no assigned_by here on purpose. The handler
-      // takes both from the verified envelope — actor from X-Principal-Id,
-      // tenant from X-Tenant-Id — and then refuses if the named role does
-      // not belong to that tenant. Sending them in the body would be
-      // decorative at best and, if the handler ever started reading them,
-      // would reintroduce exactly the defect that hardening removed:
-      // tenant and actor arriving as caller-supplied data.
+      ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
+      ...(input.approvalReference ? { approval_reference: input.approvalReference } : {}),
     },
     { identity: input.identity },
   );
 }
 
-export type RevokeAssignmentInput = {
+/**
+ * End a grant — now, or on `effectiveTo` (a scheduled end). The row is kept:
+ * everyone who held the role keeps a record of having held it.
+ */
+export async function revokeRoleAssignment(input: {
   identity: Identity;
   assignmentId: string;
-  correlationId: string;
-};
-
-/**
- * End a grant. Sets effective_to = now() rather than deleting — everyone who
- * held the role keeps a record of having held it.
- *
- * A second revoke on the same assignment answers 404, not 200: the store
- * matches only rows still in force, which is the correct one-way-transition
- * behaviour and worth surfacing to the operator rather than swallowing.
- */
-export async function revokeRoleAssignment(
-  input: RevokeAssignmentInput,
-): Promise<ApiWriteResult<RoleAssignment>> {
+  reason: CommandReason;
+  effectiveTo?: string;
+}): Promise<ApiWriteResult<RoleAssignment>> {
   return apiPost<RoleAssignment>(
     SERVICE,
     `/v1/admin/role-assignments/${encodeURIComponent(input.assignmentId)}/revoke`,
-    {},
+    commandBody(input.reason, input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
+    { identity: input.identity },
+  );
+}
+
+/**
+ * Approve or reject a PENDING_APPROVAL grant (maker-checker).
+ *
+ * The checker holds iam.assignment.approve_privileged and is neither the
+ * requester nor the person being granted (`403 checker_not_independent`).
+ * Approval re-runs the SoD check (`409 sod_conflict`); a request older than
+ * 72 hours is `409 approval_expired`.
+ */
+export async function decideRoleAssignment(input: {
+  identity: Identity;
+  assignmentId: string;
+  approve: boolean;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<RoleAssignment>> {
+  return apiPost<RoleAssignment>(
+    SERVICE,
+    `/v1/admin/role-assignments/${encodeURIComponent(input.assignmentId)}/${input.approve ? "approve" : "reject"}`,
+    commandBody(input.reason),
     { identity: input.identity },
   );
 }
@@ -179,32 +241,21 @@ export type CreateSoDRuleInput = {
   actionA: string;
   actionB: string;
   conflictType: string;
-  correlationId: string;
 };
 
-export async function createSoDRule(
-  input: CreateSoDRuleInput,
-): Promise<ApiWriteResult<SoDRule>> {
+/**
+ * A pair of actions nobody may hold together.
+ *
+ * tenant_id is always the caller's own: omitting it would author a rule
+ * binding EVERY tenant (and need SOD_RULE_MANAGE_GLOBAL), which a console
+ * form must never do by accident. The endpoint does not deduplicate — posting
+ * the same pair twice stores it twice.
+ */
+export async function createSoDRule(input: CreateSoDRuleInput): Promise<ApiWriteResult<SoDRule>> {
   return apiPost<SoDRule>(
     SERVICE,
     "/v1/admin/sod-rules",
     {
-      // NO sod_rule_id, for the same reason createABACRule sends no
-      // abac_rule_id: createSoDRuleRequest has no such field and the handler
-      // builds CreateSoDRuleParams without one, so a supplied id was silently
-      // dropped and the store generated its own. Worth knowing what that
-      // means here, because unlike the ABAC table there is no unique
-      // constraint to fall back on: this endpoint has NO deduplication at
-      // all. Posting the same conflict pair twice stores it twice — verified
-      // against the running service, which listed two identical HARD rules on
-      // the same two actions. A resubmitted form duplicates the rule rather
-      // than resolving to the original.
-      //
-      // tenant_id IS sent here, unlike on assignRole — and it must be. For
-      // sod_rules the field is genuinely optional in the contract, and
-      // OMITTING it creates a rule with tenant_id NULL, which binds EVERY
-      // tenant on the platform. A console action must never silently author
-      // a global rule, so the caller's own tenant is stated explicitly.
       tenant_id: input.identity.tenantId,
       domain_code: input.domainCode,
       action_a: input.actionA,
@@ -216,53 +267,32 @@ export async function createSoDRule(
 }
 
 /**
- * Retire or reactivate a conflict rule — the only way to stop an SoD rule
- * denying.
- *
- * This route did not exist until it was added alongside this console work.
- * `active_flag` has been in `CheckSoDConflict`'s predicate since the initial
- * schema, so it was always the intended off switch, and nothing could reach
- * it: a conflict rule could be created and never retired. That mattered more
- * here than on any sibling object, because an SoD rule denies its action to
- * every principal holding the pair the moment it is authored.
- *
- * Retiring does not delete. The rule stays readable because a denial recorded
- * with `sod:conflict_with=<action>` is only explainable while the rule that
- * caused it can still be looked up.
- *
- * A platform-wide rule answers 404 from a tenant's scope, deliberately — one
- * tenant must not be able to disable a control binding all of them.
+ * Retire or reactivate a conflict rule. Retiring does not delete — a denial
+ * recorded with `sod:conflict_with=<action>` stays explainable. Somebody who
+ * holds either action of the rule cannot retire it (`403 sod_self_interest`),
+ * and a platform-wide rule answers 404 from a tenant's scope.
  */
 export async function setSoDRuleActive(input: {
   identity: Identity;
   sodRuleId: string;
   active: boolean;
+  reason: CommandReason;
 }): Promise<ApiWriteResult<SoDRule>> {
   return apiPost<SoDRule>(
     SERVICE,
     `/v1/admin/sod-rules/${encodeURIComponent(input.sodRuleId)}/${input.active ? "reactivate" : "retire"}`,
-    {},
+    commandBody(input.reason),
     { identity: input.identity },
   );
 }
 
-// ─── The rest of the service ─────────────────────────────────────────────────
+// ─── Catalogue, evaluation and the decision log ─────────────────────────────
 //
-// Everything above talks to three of authorization-svc's fifteen routes. The
-// rest were unreachable from this console — including the two that matter most.
-//
-//  - `POST /v1/authorize` is the service. Roles, bundles, assignments,
-//    delegations, SoD pairs and ABAC rules all exist to change what it answers,
-//    and there was no way to ask it anything. An operator could build a grant
-//    and had to wait for some other service to exercise it to find out whether
-//    it worked — and if the answer was DENIED, no way to see why.
-//  - `GET /v1/access-decisions/{id}` is the rationale. Every evaluation is
-//    recorded before the response returns, precisely so a decision can be
-//    explained afterwards, and nothing could read one back.
-//
-// Also here: the role catalogue and the delegation register, which had no read
-// endpoint at all until this pass added `GET /v1/admin/roles` and
-// `GET /v1/admin/delegated-authorities`, and the ABAC admin surface.
+// The roles and bundles as the evaluation engine holds them (role DEFINITIONS
+// are authored through access-control-svc, which provisions them here), the
+// inbound evaluation APIs other services call, and the decision log every
+// evaluation is written to. The rest of the admin surface — exceptions,
+// workloads, elevated sessions, GOV-03 commands — is at the end of the file.
 
 /** A role in authorization-svc's own catalogue.
  *
@@ -284,6 +314,8 @@ export type Role = {
    *  assignment is only accepted for a TENANT-scoped role. */
   role_scope_type: string;
   active_flag: boolean;
+  /** Optimistic-concurrency version; sent back as expected_version on retire/reactivate. */
+  version?: number;
   created_at: string;
   created_by_principal_id: string;
 };
@@ -296,6 +328,8 @@ export type PermissionBundle = {
   bundle_code: string;
   permitted_actions: string[];
   active_flag: boolean;
+  /** Optimistic-concurrency version; sent back as expected_version on retire/reactivate. */
+  version?: number;
   created_at: string;
 };
 
@@ -350,6 +384,8 @@ export type ABACRule = {
   operator: string;
   attribute_value: string | null;
   active_flag: boolean;
+  /** Optimistic-concurrency version; sent back as expected_version on retire/reactivate. */
+  version?: number;
   created_at: string;
   created_by_principal_id: string;
 };
@@ -363,6 +399,17 @@ export type AuthorizeDecision = {
   decision_basis: string;
   /** The recorded artifact. Quote this to retrieve the rationale later. */
   access_decision_id: string;
+  /** Why a non-grant was not a plain denial (e.g. the step-up reason). */
+  reason?: string;
+  /** The ZS-IAM-001 §8.2 canonical decision: PERMIT / DENY / STEP_UP /
+   *  REQUIRE_APPROVAL. REQUIRE_APPROVAL reads as DENIED in decision_outcome. */
+  decision?: string;
+  /** cfg.<n> — the configuration watermark the decision was made under. */
+  policy_set_version?: string;
+  /** e.g. COMPENSATING_CONTROL:<control> when an SoD exception applied. */
+  obligations?: string[];
+  reason_codes?: string[];
+  expires_at?: string;
 };
 
 /** One recorded decision, read back by id. */
@@ -376,6 +423,17 @@ export type AccessDecision = {
   tenant_id?: string | null;
   correlation_id: string;
   decided_at: string;
+  decision?: string;
+  policy_set_version?: string;
+  obligations?: string[];
+  reason_codes?: string[];
+  /** Redacted (absent) when the caller lacks iam.policy.read. */
+  matched_grants?: string[];
+  resource_type?: string;
+  resource_id?: string;
+  session_assurance?: string;
+  on_behalf_of?: string;
+  delegation_id?: string;
 };
 
 /** The operators the evaluator implements, each with the words for it and
@@ -399,28 +457,8 @@ export const ABAC_OPERATORS = [
   { raw: "not_exists", label: "is absent", takesValue: false },
 ] as const;
 
-export type ABACOperator = (typeof ABAC_OPERATORS)[number]["raw"];
-
 /** The role scope types the service accepts. Data only to it, but the choice
  *  decides whether the role can be assigned tenant-wide. */
-export const ROLE_SCOPE_TYPES = [
-  {
-    raw: "LEGAL_ENTITY",
-    label: "One company at a time",
-    meaning:
-      "Each grant of this role names the company it applies to. This is the ordinary case, " +
-      "and the safer one: the same person can hold the role in one company and not another.",
-  },
-  {
-    raw: "TENANT",
-    label: "The whole organisation",
-    meaning:
-      "This role can be granted across the whole organisation at once, without naming a " +
-      "company. Only a role scoped this way can be granted that broadly — and a grant like " +
-      "that applies in every company the organisation has, including ones added later.",
-  },
-] as const;
-
 // ── reads ───────────────────────────────────────────────────────────────────
 
 /**
@@ -680,6 +718,8 @@ export type DelegatedAccessEvaluation = {
   /** Whether they ALSO hold the named action through their own roles. Only
    *  meaningful when an actionType was given. */
   held_directly?: boolean;
+  /** Set when a delegator was named and the access is held from them. */
+  delegation_id?: string;
 };
 
 /**
@@ -699,6 +739,10 @@ export async function evaluateDelegatedAccess(input: {
   principalId: string;
   legalEntityId: string;
   actionType?: string;
+  /** Narrows the question to "held by a live delegation FROM this principal"
+   *  — the four-eyes case where a delegate acts on a stage naming its
+   *  delegator. Requires actionType. */
+  delegatorPrincipalId?: string;
 }): Promise<ApiWriteResult<DelegatedAccessEvaluation>> {
   return apiPost<DelegatedAccessEvaluation>(
     SERVICE,
@@ -707,6 +751,7 @@ export async function evaluateDelegatedAccess(input: {
       principal_id: input.principalId,
       legal_entity_id: input.legalEntityId,
       ...(input.actionType ? { action_type: input.actionType } : {}),
+      ...(input.delegatorPrincipalId ? { delegator_principal_id: input.delegatorPrincipalId } : {}),
     },
     { identity: input.identity },
   );
@@ -791,57 +836,6 @@ export async function authorize(
 
 // ── writes: roles, bundles, delegations, ABAC ───────────────────────────────
 
-export type CreateRoleInput = {
-  identity: Identity;
-  roleCode: string;
-  roleName: string;
-  roleScopeType: string;
-};
-
-/**
- * Define a role in the evaluation plane. It grants nothing yet.
- *
- * 201 means a role was created; 200 means one with this `role_code` already
- * existed in the tenant and the service resolved to it rather than creating a
- * second — the code is the idempotent key, so a retried submit cannot produce
- * two roles that could then be assigned independently.
- *
- * ── THE CONSOLE DELIBERATELY DOES NOT CALL THIS ─────────────────────────────
- *
- * It is the one function in this module with no caller, and that is by design
- * rather than an oversight — worth saying, because an unused export on a module
- * where everything else is wired reads as something somebody forgot.
- *
- * access-control-svc owns role DEFINITIONS: the governed, auditable record that
- * a role exists and what it is permitted to permit. It forwards each write on to
- * authorization-svc itself, synchronously and fail-closed. So the console
- * defines roles through `createRoleDefinition` in `./access-control`, and this
- * route is still exercised on every one of those — one hop further along.
- *
- * Calling this directly would create a role in the evaluation plane with no
- * definition behind it: enforced, assignable, and absent from the register an
- * auditor reads. Kept because it is this service's real contract and a
- * non-console caller (a migration, a seeding script) legitimately needs it —
- * `deployments/scripts/seed-demo-rbac.ps1` is exactly that caller.
- */
-export async function createRole(input: CreateRoleInput): Promise<ApiWriteResult<Role>> {
-  return apiPost<Role>(
-    SERVICE,
-    "/v1/admin/roles",
-    {
-      role_id: crypto.randomUUID(),
-      // tenant_id IS sent here. Unlike the assignment path, this service's
-      // create-role handler reads it from the body, and the tenant a role
-      // belongs to decides which tenant's principals can ever hold it.
-      tenant_id: input.identity.tenantId,
-      role_code: input.roleCode,
-      role_name: input.roleName,
-      role_scope_type: input.roleScopeType,
-    },
-    { identity: input.identity },
-  );
-}
-
 /**
  * Retire or reactivate a role — the only way to stop a role granting anything
  * without revoking every assignment to it one at a time.
@@ -854,11 +848,12 @@ export async function setRoleActive(input: {
   identity: Identity;
   roleId: string;
   active: boolean;
+  reason: CommandReason;
 }): Promise<ApiWriteResult<Role>> {
   return apiPost<Role>(
     SERVICE,
     `/v1/admin/roles/${encodeURIComponent(input.roleId)}/${input.active ? "reactivate" : "retire"}`,
-    {},
+    commandBody(input.reason),
     { identity: input.identity },
   );
 }
@@ -942,13 +937,14 @@ export async function setPermissionBundleActive(input: {
   identity: Identity;
   permissionBundleId: string;
   active: boolean;
+  reason: CommandReason;
 }): Promise<ApiWriteResult<PermissionBundle>> {
   return apiPost<PermissionBundle>(
     SERVICE,
     `/v1/admin/permission-bundles/${encodeURIComponent(input.permissionBundleId)}/${
       input.active ? "reactivate" : "retire"
     }`,
-    {},
+    commandBody(input.reason),
     { identity: input.identity },
   );
 }
@@ -964,9 +960,19 @@ export type CreateDelegationInput = {
    *  intersected with the delegator's live grants. */
   delegatedActions?: string[];
   effectiveFrom: string;
-  effectiveTo?: string;
+  /** Required: §11 makes the period "mandatory finite", and the service
+   *  refuses a delegation without an end under AUTHZ_COMMAND_CONTRACT=enforce. */
+  effectiveTo: string;
+  /** Why (absence, cover…). Required — §11. */
+  reason: string;
+  approvalReference?: string;
 };
 
+/**
+ * Lend part or all of your own authority. The delegator must be the caller,
+ * never yourself as delegate, and no iam.* or protected platform action can be
+ * lent (`400 protected_privilege_not_delegable`).
+ */
 export async function createDelegatedAuthority(
   input: CreateDelegationInput,
 ): Promise<ApiWriteResult<DelegatedAuthority>> {
@@ -981,22 +987,24 @@ export async function createDelegatedAuthority(
       ...(input.legalEntityId ? { legal_entity_id: input.legalEntityId } : {}),
       ...(input.delegatedActions?.length ? { delegated_actions: input.delegatedActions } : {}),
       effective_from: input.effectiveFrom,
-      ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
+      effective_to: input.effectiveTo,
+      reason: input.reason,
+      ...(input.approvalReference ? { approval_reference: input.approvalReference } : {}),
     },
     { identity: input.identity },
   );
 }
 
-/** Revoke a delegation. One-way — a second revoke answers 409, which is the
- *  state machine working and worth reporting rather than swallowing. */
+/** Revoke a delegation — delegator only, and one-way. */
 export async function revokeDelegatedAuthority(input: {
   identity: Identity;
   delegationId: string;
+  reason: CommandReason;
 }): Promise<ApiWriteResult<DelegatedAuthority>> {
   return apiPost<DelegatedAuthority>(
     SERVICE,
     `/v1/admin/delegated-authorities/${encodeURIComponent(input.delegationId)}/revoke`,
-    {},
+    commandBody(input.reason),
     { identity: input.identity },
   );
 }
@@ -1056,11 +1064,12 @@ export async function setABACRuleActive(input: {
   identity: Identity;
   abacRuleId: string;
   active: boolean;
+  reason: CommandReason;
 }): Promise<ApiWriteResult<ABACRule>> {
   return apiPost<ABACRule>(
     SERVICE,
     `/v1/admin/abac-rules/${encodeURIComponent(input.abacRuleId)}/${input.active ? "reactivate" : "retire"}`,
-    {},
+    commandBody(input.reason),
     { identity: input.identity },
   );
 }
@@ -1324,407 +1333,6 @@ export function explainDecisionBasis(rawBasis: string): BasisExplanation {
   };
 }
 
-export type OutcomeDescription = {
-  label: string;
-  tone: AuthzTone;
-  raw: string;
-  granted: boolean;
-  unmapped: boolean;
-};
-
-/**
- * Say whether the answer was yes or no.
- *
- * An unrecognised outcome is never reported as granted. This is the value a
- * calling service gates a write on, and the safe reading of one we cannot
- * interpret is that nothing was authorised.
- */
-export function describeDecisionOutcome(rawOutcome: string): OutcomeDescription {
-  const raw = rawOutcome?.trim() || "(empty)";
-  if (raw === "GRANTED") {
-    return { label: "Allowed", tone: "success", raw, granted: true, unmapped: false };
-  }
-  if (raw === "DENIED") {
-    return { label: "Not allowed", tone: "danger", raw, granted: false, unmapped: false };
-  }
-  return { label: "Needs review", tone: "warning", raw, granted: false, unmapped: true };
-}
-
-/** A whole decision in one line, for a banner or a table row. */
-export function summariseDecision(decision: {
-  decision_outcome: string;
-  decision_basis: string;
-  action_type?: string;
-  principal_id?: string;
-}): string {
-  const outcome = describeDecisionOutcome(decision.decision_outcome);
-  const basis = explainDecisionBasis(decision.decision_basis);
-  const who = decision.principal_id ? `${decision.principal_id} ` : "";
-  const what = decision.action_type ? `${decision.action_type}` : "this action";
-
-  return outcome.granted
-    ? `${who}may perform ${what} — ${basis.label.toLowerCase()}.`
-    : `${who}may not perform ${what} — ${basis.label.toLowerCase()}.`;
-}
-
-export type RoleStatusDescription = {
-  label: string;
-  meaning: string;
-  tone: AuthzTone;
-  raw: string;
-  enforcing: boolean;
-};
-
-/** Whether a role currently grants anything. */
-export function describeRoleStatus(role: Role): RoleStatusDescription {
-  return role.active_flag
-    ? {
-        label: "In force",
-        meaning:
-          "This role grants its permitted actions to everybody currently assigned to it. " +
-          "Retiring it suspends that for all of them at once, without removing their grants.",
-        tone: "success",
-        raw: "active_flag=true",
-        enforcing: true,
-      }
-    : {
-        label: "Retired",
-        meaning:
-          "This role grants nothing, even to people who still hold it. Their grants have not " +
-          "been removed, so reactivating it restores exactly the access that was suspended — " +
-          "which is also why a retired role is worth keeping visible.",
-        tone: "neutral",
-        raw: "active_flag=false",
-        enforcing: false,
-      };
-}
-
-export type DelegationStatusDescription = {
-  label: string;
-  meaning: string;
-  tone: AuthzTone;
-  raw: string;
-  /** True when this delegation is conferring authority right now. */
-  live: boolean;
-};
-
-/**
- * Whether a delegation is conferring anything right now.
- *
- * Deliberately checks the dates as well as the revocation status, because the
- * evaluation path does: a delegation that is ACTIVE but past its end date
- * confers nothing, and calling it active here while `/v1/authorize` treats it
- * as expired would make the register disagree with the decisions.
- */
-export function describeDelegationStatus(
-  delegation: DelegatedAuthority,
-  now: Date = new Date(),
-): DelegationStatusDescription {
-  if (delegation.revocation_status === "REVOKED") {
-    return {
-      label: "Withdrawn",
-      meaning:
-        "This delegation was revoked and confers nothing. It cannot be reinstated — a fresh " +
-        "delegation would have to be made. The record is kept because the withdrawal of " +
-        "borrowed authority is itself worth being able to prove.",
-      tone: "neutral",
-      raw: delegation.revocation_status,
-      live: false,
-    };
-  }
-
-  if (delegation.revocation_status !== "ACTIVE") {
-    return {
-      label: "Needs review",
-      meaning:
-        `The record holds the status "${delegation.revocation_status}", which is not one this ` +
-        "console knows how to read. It is deliberately not shown as live.",
-      tone: "warning",
-      raw: delegation.revocation_status,
-      live: false,
-    };
-  }
-
-  if (new Date(delegation.effective_from) > now) {
-    return {
-      label: "Not started yet",
-      meaning:
-        "This delegation has been made but its start date has not arrived, so it confers " +
-        "nothing yet. It will begin on its own, with nobody having to do anything.",
-      tone: "info",
-      raw: delegation.revocation_status,
-      live: false,
-    };
-  }
-
-  if (delegation.effective_to && new Date(delegation.effective_to) <= now) {
-    return {
-      label: "Expired",
-      meaning:
-        "This delegation has passed its end date and confers nothing. It was not withdrawn — " +
-        "it simply ran out, which is what an end date is for.",
-      tone: "neutral",
-      raw: delegation.revocation_status,
-      live: false,
-    };
-  }
-
-  return {
-    label: "Live",
-    meaning:
-      "This delegation is conferring authority right now. What it actually confers is limited " +
-      "to what the lender currently holds themselves — it can never grant more than that, " +
-      "and it shrinks automatically if the lender's own access does.",
-    tone: "success",
-    raw: delegation.revocation_status,
-    live: true,
-  };
-}
-
-/** What a delegation actually hands over, in words. */
-export function describeDelegationScope(delegation: DelegatedAuthority): string {
-  const where = delegation.legal_entity_id
-    ? "in one company"
-    : "across the whole organisation";
-
-  if (delegation.delegated_actions && delegation.delegated_actions.length > 0) {
-    const count = delegation.delegated_actions.length;
-    return (
-      `${count} named ${count === 1 ? "action" : "actions"}, ${where} — and only those the ` +
-      "lender still holds themselves."
-    );
-  }
-
-  return (
-    `Everything the lender can do, ${where} — and it tracks their access, so it shrinks if ` +
-    "theirs does."
-  );
-}
-
-/** One attribute condition as a sentence, rather than five columns. */
-export function describeABACRule(rule: ABACRule): string {
-  const operator = ABAC_OPERATORS.find((o) => o.raw === rule.operator);
-  const comparison = operator
-    ? operator.takesValue
-      ? `${operator.label} ${rule.attribute_value ?? "(nothing given)"}`
-      : operator.label
-    : `${rule.operator} ${rule.attribute_value ?? ""}`.trim();
-
-  const scope = rule.tenant_id ? "" : " This rule applies to every organisation on the platform.";
-
-  if (rule.effect === "REQUIRE") {
-    return (
-      `${rule.action_type} is refused unless ${rule.attribute_key} ${comparison}. ` +
-      `A request that does not mention ${rule.attribute_key} at all is refused too.${scope}`
-    );
-  }
-  if (rule.effect === "FORBID") {
-    return (
-      `${rule.action_type} is refused when ${rule.attribute_key} ${comparison}. ` +
-      `A request that does not mention ${rule.attribute_key} is allowed through.${scope}`
-    );
-  }
-  return (
-    `This condition on ${rule.action_type} records an effect ("${rule.effect}") this console ` +
-    `does not recognise. While it stands it may be refusing ${rule.action_type} for everyone — ` +
-    `worth raising with whoever operates the service.${scope}`
-  );
-}
-
-/**
- * One permission bundle as a sentence.
- *
- * Rendered rather than tabulated for the reason the attribute conditions are:
- * `default / true / ["PAYMENT_APPROVE","PAYMENT_VIEW"]` is three facts that
- * mean nothing apart and one thing together, and a reader should not have to
- * assemble it. The retired case is the one that has to be unmistakable — a
- * retired bundle looks exactly like a live one in a table with a boolean
- * column, and it is the difference between a role granting something and not.
- */
-export function describePermissionBundle(bundle: PermissionBundle): string {
-  const count = bundle.permitted_actions.length;
-
-  if (count === 0) {
-    return (
-      `This set is empty, so it grants nothing. A role whose every set is empty ` +
-      `permits no action at all, however it is named or assigned.`
-    );
-  }
-
-  const actions = bundle.permitted_actions.join(", ");
-  const noun = count === 1 ? "action" : "actions";
-
-  if (!bundle.active_flag) {
-    return (
-      `Not in force. ${actions} — ${count} ${noun} the role would grant, and does not, ` +
-      `because this set has been switched off. Nobody holding the role can do these, ` +
-      `and nor can anyone who was lent the role. Restoring it grants them again.`
-    );
-  }
-
-  return (
-    `In force. ${actions} — ${count} ${noun} anyone holding this role may take, ` +
-    `and anyone who has been lent this role may take too.`
-  );
-}
-
-/** One SoD pair as a sentence. */
-export function describeSoDRule(rule: SoDRule): string {
-  const scope = rule.tenant_id
-    ? ""
-    : " This rule applies to every organisation on the platform and cannot be changed from here.";
-  const where = rule.jurisdiction_id ? ` It applies only in ${rule.jurisdiction_id}.` : "";
-
-  return (
-    `Nobody may hold both ${rule.action_a} and ${rule.action_b}. Somebody who has been given ` +
-    `both is refused either one, rather than being allowed the combination.${where}${scope}`
-  );
-}
-
-/**
- * Say what a pre-flight separation-of-duties check came back with.
- *
- * Written as the sentence somebody about to click "grant" needs, because that
- * is when this runs. The two conflict sources get different words on purpose:
- * they need different remedies, and "there is a conflict" alone leaves the
- * operator to work out which.
- */
-export function describeSoDValidation(
-  result: SoDValidation,
-  context: { subjectNamed: boolean } = { subjectNamed: false },
-): { headline: string; detail: string; tone: AuthzTone } {
-  const restricted = result.own_object_restricted ?? [];
-
-  // Own-object restrictions are mentioned in every branch, including the
-  // all-clear one: the grant is fine and one use of it will still be refused,
-  // and finding that out later reads as a bug in the grant.
-  const ownObjectNote =
-    restricted.length === 0
-      ? ""
-      : ` Separately, and this does not block anything: ${restricted.join(", ")} ` +
-        `${restricted.length === 1 ? "is" : "are"} refused on items this person prepared ` +
-        "themselves. The access is real; approving your own work is what is not allowed.";
-
-  if (result.conflict_free) {
-    return {
-      headline: restricted.length === 0 ? "No conflict — safe to grant" : "No conflict — safe to grant, with one caveat",
-      detail:
-        (context.subjectNamed
-          ? "Nothing this person already holds conflicts with these actions, and the actions do not conflict with each other."
-          : "These actions do not conflict with each other. Nobody was named, so this does not say whether a particular person can hold them.") +
-        ownObjectNote,
-      tone: restricted.length === 0 ? "success" : "info",
-    };
-  }
-
-  const held = result.conflicts.filter((c) => c.source === "held");
-  const internal = result.conflicts.filter((c) => c.source === "candidate");
-
-  const parts: string[] = [];
-  if (held.length > 0) {
-    parts.push(
-      "This person ALREADY HOLDS something that conflicts: " +
-        held.map((c) => `${c.candidate_action} against ${c.conflicts_with}`).join("; ") +
-        ". Granting this would leave them refused for both halves, not allowed the combination — " +
-        "so something they currently hold has to be taken away first, or the duty has to go to " +
-        "somebody else.",
-    );
-  }
-  if (internal.length > 0) {
-    parts.push(
-      "These actions conflict WITH EACH OTHER: " +
-        internal.map((c) => `${c.candidate_action} against ${c.conflicts_with}`).join("; ") +
-        ". A role carrying both gives everybody who holds it two duties they may not combine, " +
-        "and then refuses them both — so this set has to be split across two roles.",
-    );
-  }
-
-  return {
-    headline: "Conflict — do not grant this as it stands",
-    detail: parts.join(" ") + ownObjectNote,
-    tone: "danger",
-  };
-}
-
-/**
- * Say what an entity-scope answer means for one company.
- *
- * Kept separate from `explainDecisionBasis` even though it reads the same
- * basis strings: that function explains a RECORDED DECISION about an action
- * somebody attempted, and this explains a capability nobody has exercised.
- * Reusing it would tell an operator their colleague "was refused" for a
- * question the console asked on its own.
- */
-export function describeEntityScope(result: EntityScopeResult): string {
-  if (!result.in_scope) {
-    return (
-      "Cannot act here. No role they hold covers this company, and no delegation lends them " +
-      "anything in it — a plain absence rather than a block."
-    );
-  }
-  const basis = explainDecisionBasis(result.basis);
-  const via =
-    basis.layer === "delegated"
-      ? `on authority lent by ${basis.subject ?? "somebody else"}`
-      : basis.layer === "rbac"
-        ? `through the role ${basis.subject ?? "they hold"}`
-        : "through a grant they hold";
-  const count = result.permitted_actions?.length ?? 0;
-  const what = count === 0 ? "" : ` ${count} ${count === 1 ? "action" : "actions"} available.`;
-  return `Can act here ${via}.${what}`;
-}
-
-/**
- * Say whether authority is the person's own or borrowed.
- *
- * `held_directly` is the field worth surfacing, because the decision log
- * cannot: /v1/authorize names RBAC as the basis when both paths apply, so a
- * person holding an action both ways looks like ordinary role-based access.
- * For a four-eyes step that has to know who actually satisfied it, that is
- * the whole question.
- */
-export function describeDelegatedAccess(
-  result: DelegatedAccessEvaluation,
-  options: { actionNamed: boolean } = { actionNamed: false },
-): { headline: string; detail: string; tone: AuthzTone } {
-  if (!result.has_delegated_access) {
-    return {
-      headline: "Nothing borrowed",
-      detail: options.actionNamed
-        ? "No live delegation lends this person this action in this company. If they can do it, " +
-          "it is their own access."
-        : "No live delegation lends this person anything in this company.",
-      tone: "neutral",
-    };
-  }
-
-  const basis = explainDecisionBasis(result.basis);
-  const lender = basis.subject ?? "somebody else";
-  const count = result.delegated_actions?.length ?? 0;
-
-  if (options.actionNamed && result.held_directly) {
-    return {
-      headline: "Both — their own access and borrowed authority",
-      detail:
-        `This person can do this in their own right AND has it lent to them by ${lender}. ` +
-        "That matters for any step that needs two different people: a check on the outcome " +
-        "alone would report this as ordinary role-based access and could not tell you a " +
-        "delegation was also in play. Revoking the delegation would not remove the access.",
-      tone: "warning",
-    };
-  }
-
-  return {
-    headline: "Borrowed authority only",
-    detail:
-      `This person does not hold this themselves. They are acting within authority lent by ` +
-      `${lender}, and it disappears the moment that delegation is revoked or expires, or if ` +
-      `${lender} loses the access.` +
-      (count > 0 ? ` ${count} ${count === 1 ? "action is" : "actions are"} lent in this company.` : ""),
-    tone: "info",
-  };
-}
-
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /** An assignment is live if it has started and has not been revoked. */
@@ -1970,4 +1578,623 @@ export function explainAuthorizationError(
     `wording for yet, repeated here as it was sent: “${authzDetail(message)}”. Reload the ` +
     "page to see where things stand, and report that wording if it keeps happening."
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The rest of the administration surface (ZS-IAM-001 §9–§16, GOV-03/04)
+//
+// Every route below identifies the caller by the identity envelope (sent as
+// Authorization: Bearer by envelopeHeaders when the session has one); the
+// X-*-Id headers are accepted in AUTHZ_IDENTITY_ASSERTION=warn only. Lists
+// that are another principal's business need the administering permission and
+// answer 403 without it — a refusal to show, not an empty register.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Separation of duties: exceptions and conflicts (GOV-04) ────────────────
+
+export type SoDException = {
+  sod_exception_id: string;
+  tenant_id: string;
+  sod_rule_id: string;
+  principal_id: string;
+  compensating_control: string;
+  reason: string;
+  /** REQUESTED → APPROVED | REJECTED; APPROVED → REVOKED | EXPIRED. */
+  status: string;
+  requested_by: string;
+  approved_by?: string | null;
+  decided_at?: string | null;
+  effective_from: string;
+  expires_at: string;
+  revoked_by?: string | null;
+  revoked_at?: string | null;
+  created_at: string;
+};
+
+export async function listSoDExceptions(
+  identity: Identity,
+  options: { principalId?: string; status?: string } = {},
+): Promise<ApiResult<SoDException[]>> {
+  return apiGet<SoDException[]>(SERVICE, "/v1/admin/sod-exceptions", {
+    identity,
+    query: { principal_id: options.principalId, status: options.status },
+  });
+}
+
+/**
+ * Request a compensating-control exception to one SoD rule for one person.
+ * Always time-boxed (`expires_at` required). Starts REQUESTED and permits
+ * nothing until somebody with iam.sod_rule.publish — never the requester or
+ * the subject — approves it; while approved, the conflict is permitted with
+ * obligation COMPENSATING_CONTROL:<control>.
+ */
+export async function requestSoDException(input: {
+  identity: Identity;
+  sodRuleId: string;
+  principalId: string;
+  compensatingControl: string;
+  reason: string;
+  effectiveFrom?: string;
+  expiresAt: string;
+}): Promise<ApiWriteResult<SoDException>> {
+  return apiPost<SoDException>(
+    SERVICE,
+    "/v1/admin/sod-exceptions",
+    {
+      sod_rule_id: input.sodRuleId,
+      principal_id: input.principalId,
+      compensating_control: input.compensatingControl,
+      reason: input.reason,
+      ...(input.effectiveFrom ? { effective_from: input.effectiveFrom } : {}),
+      expires_at: input.expiresAt,
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function transitionSoDException(input: {
+  identity: Identity;
+  sodExceptionId: string;
+  to: "approve" | "reject" | "revoke";
+  reason: CommandReason;
+}): Promise<ApiWriteResult<SoDException>> {
+  return apiPost<SoDException>(
+    SERVICE,
+    `/v1/admin/sod-exceptions/${encodeURIComponent(input.sodExceptionId)}/${input.to}`,
+    commandBody(input.reason),
+    { identity: input.identity },
+  );
+}
+
+export type ConflictingPermission = {
+  conflicts_with: string;
+  sod_rule_id: string;
+  conflict_type: string;
+  platform_wide: boolean;
+};
+
+/** GOV-04 ListConflictingPermissions: what may never be held with this action. */
+export async function listConflictingPermissions(
+  identity: Identity,
+  actionType: string,
+): Promise<ApiResult<{ action_type: string; conflicts: ConflictingPermission[] }>> {
+  return apiGet(SERVICE, "/v1/sod/conflicting-permissions", { identity, query: { action_type: actionType } });
+}
+
+export type SoDEvaluation = {
+  /** NO_CONFLICT | CONFLICT */
+  result: string;
+  rule_version: string;
+  /** maker_is_checker | checker_is_subject | maker_is_subject | held_duty_conflict */
+  conflict_id?: string;
+  reason?: string;
+};
+
+/**
+ * Four-eyes check for one act: may this maker do it, may this checker approve
+ * it, given who it is about? A store failure is 503 — never NO_CONFLICT.
+ */
+export async function evaluateSoD(input: {
+  identity: Identity;
+  actionType: string;
+  makerPrincipalId: string;
+  checkerPrincipalId?: string;
+  subjectPrincipalId?: string;
+}): Promise<ApiWriteResult<SoDEvaluation>> {
+  return apiPost<SoDEvaluation>(
+    SERVICE,
+    "/v1/sod/evaluate",
+    {
+      action_type: input.actionType,
+      maker_principal_id: input.makerPrincipalId,
+      ...(input.checkerPrincipalId ? { checker_principal_id: input.checkerPrincipalId } : {}),
+      ...(input.subjectPrincipalId ? { subject_principal_id: input.subjectPrincipalId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+// ── Workload bindings (§16) ─────────────────────────────────────────────────
+
+export type WorkloadBinding = {
+  workload_id: string;
+  tenant_id: string;
+  allowed_audience: string;
+  allowed_actions: string[];
+  active_flag: boolean;
+  created_at: string;
+};
+
+export async function listWorkloadBindings(
+  identity: Identity,
+): Promise<ApiResult<{ workload_bindings: WorkloadBinding[] }>> {
+  return apiGet(SERVICE, "/v1/admin/workload-bindings", { identity });
+}
+
+/**
+ * Create or replace what a workload (a service identity) may do. The binding
+ * narrows and never grants: at decision time a workload may take only the
+ * actions listed here. Wildcards and empty lists are refused.
+ */
+export async function saveWorkloadBinding(input: {
+  identity: Identity;
+  workloadId: string;
+  allowedAudience: string;
+  allowedActions: string[];
+  reason: CommandReason;
+}): Promise<ApiWriteResult<WorkloadBinding>> {
+  return apiPost<WorkloadBinding>(
+    SERVICE,
+    "/v1/admin/workload-bindings",
+    commandBody(input.reason, {
+      workload_id: input.workloadId,
+      allowed_audience: input.allowedAudience,
+      allowed_actions: input.allowedActions,
+    }),
+    { identity: input.identity },
+  );
+}
+
+export async function setWorkloadBindingActive(input: {
+  identity: Identity;
+  workloadId: string;
+  active: boolean;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<WorkloadBinding>> {
+  return apiPost<WorkloadBinding>(
+    SERVICE,
+    `/v1/admin/workload-bindings/${encodeURIComponent(input.workloadId)}/${input.active ? "reactivate" : "deactivate"}`,
+    commandBody(input.reason),
+    { identity: input.identity },
+  );
+}
+
+// ── Elevated access: JIT, break-glass and support sessions (§13–§15) ────────
+
+/** What a step-up proved, recorded on the session. */
+export type StepUpEvidence = { assurance: string; authn_at: string; session_context_id?: string };
+
+export type PrivilegedSession = {
+  session_id: string;
+  tenant_id: string;
+  principal_id: string;
+  requested_actions: string[];
+  ticket_ref: string;
+  reason: string;
+  /** PENDING_APPROVAL | ACTIVE | REJECTED | REVOKED | EXPIRED */
+  status: string;
+  duration_seconds: number;
+  expires_at: string;
+  created_at: string;
+  revoked_at?: string | null;
+  revoked_by?: string | null;
+  requested_by?: string | null;
+  resource_scope?: string | null;
+  target_environment?: string | null;
+  high_impact: boolean;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  /** NOT_REQUIRED | PENDING | ATTESTED | FLAGGED */
+  review_status: string;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_notes?: string | null;
+  requester_step_up?: StepUpEvidence | null;
+  approver_step_up?: StepUpEvidence | null;
+};
+
+export type BreakGlassSession = {
+  session_id: string;
+  tenant_id: string;
+  principal_id: string;
+  incident_id: string;
+  reason: string;
+  requested_actions: string[];
+  status: string;
+  duration_seconds: number;
+  expires_at: string;
+  created_at: string;
+  revoked_at?: string | null;
+  revoked_by?: string | null;
+  requested_by?: string | null;
+  review_status: string;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_notes?: string | null;
+  requester_step_up?: StepUpEvidence | null;
+};
+
+export type SupportSession = {
+  session_id: string;
+  tenant_id: string;
+  support_operator_id: string;
+  ticket_ref: string;
+  purpose: string;
+  read_only: boolean;
+  allow_bulk_export: boolean;
+  allowed_actions: string[];
+  status: string;
+  duration_seconds: number;
+  expires_at: string;
+  tenant_consent_obtained: boolean;
+  created_at: string;
+  revoked_at?: string | null;
+  revoked_by?: string | null;
+  requested_by?: string | null;
+};
+
+/** The service's maximums (B-01): longer is refused, never shortened. */
+export async function listPrivilegedSessions(
+  identity: Identity,
+  options: { principalId?: string; activeOnly?: boolean } = {},
+): Promise<ApiResult<{ sessions: PrivilegedSession[] }>> {
+  return apiGet(SERVICE, "/v1/admin/privileged-sessions", {
+    identity,
+    query: { principal_id: options.principalId, active_only: options.activeOnly ? "true" : undefined },
+  });
+}
+
+/**
+ * Request just-in-time elevation. Every field is mandatory (§13); the subject
+ * must hold iam.pam.eligible. Anything beyond a pure read makes it
+ * PENDING_APPROVAL (202) until an independent iam.pam.approve holder approves.
+ * Issuing needs a recent MFA step-up on the CALLER's envelope.
+ */
+export async function issuePrivilegedSession(input: {
+  identity: Identity;
+  principalId?: string;
+  requestedActions: string[];
+  ticketRef: string;
+  reason: string;
+  durationSeconds: number;
+  resourceScope: string;
+  targetEnvironment: string;
+}): Promise<ApiWriteResult<PrivilegedSession>> {
+  return apiPost<PrivilegedSession>(
+    SERVICE,
+    "/v1/admin/privileged-sessions",
+    {
+      ...(input.principalId ? { principal_id: input.principalId } : {}),
+      requested_actions: input.requestedActions,
+      ticket_ref: input.ticketRef,
+      reason: input.reason,
+      duration_seconds: input.durationSeconds,
+      resource_scope: input.resourceScope,
+      target_environment: input.targetEnvironment,
+    },
+    { identity: input.identity },
+  );
+}
+
+/** Approve (needs the approver's own step-up) or reject a pending JIT session. */
+export async function decidePrivilegedSession(input: {
+  identity: Identity;
+  sessionId: string;
+  approve: boolean;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<PrivilegedSession>> {
+  return apiPost<PrivilegedSession>(
+    SERVICE,
+    `/v1/admin/privileged-sessions/${encodeURIComponent(input.sessionId)}/${input.approve ? "approve" : "reject"}`,
+    commandBody(input.reason),
+    { identity: input.identity },
+  );
+}
+
+export type SessionKind = "privileged" | "break_glass" | "support";
+
+const SESSION_BASE: Record<SessionKind, string> = {
+  privileged: "/v1/admin/privileged-sessions",
+  break_glass: "/v1/admin/break-glass-sessions",
+  support: "/v1/support/sessions",
+};
+
+export async function revokeSession(input: {
+  identity: Identity;
+  kind: SessionKind;
+  sessionId: string;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<{ session_id: string; status: string }>> {
+  return apiPost(
+    SERVICE,
+    `${SESSION_BASE[input.kind]}/${encodeURIComponent(input.sessionId)}/revoke`,
+    commandBody(input.reason),
+    { identity: input.identity },
+  );
+}
+
+/**
+ * Attest or flag an ended high-impact JIT or break-glass session. The reviewer
+ * holds iam.session.review and is neither the subject nor the requester;
+ * FLAGGED needs notes and raises a CRITICAL security alert.
+ */
+export async function reviewSession(input: {
+  identity: Identity;
+  kind: "privileged" | "break_glass";
+  sessionId: string;
+  outcome: "ATTESTED" | "FLAGGED";
+  notes?: string;
+}): Promise<ApiWriteResult<{ session_id: string; review_status: string; reviewed_by: string }>> {
+  return apiPost(
+    SERVICE,
+    `${SESSION_BASE[input.kind]}/${encodeURIComponent(input.sessionId)}/review`,
+    { outcome: input.outcome, ...(input.notes ? { notes: input.notes } : {}) },
+    { identity: input.identity },
+  );
+}
+
+export async function listBreakGlassSessions(
+  identity: Identity,
+  options: { principalId?: string; activeOnly?: boolean } = {},
+): Promise<ApiResult<{ sessions: BreakGlassSession[] }>> {
+  return apiGet(SERVICE, "/v1/admin/break-glass-sessions", {
+    identity,
+    query: { principal_id: options.principalId, active_only: options.activeOnly ? "true" : undefined },
+  });
+}
+
+/**
+ * Emergency access tied to a declared incident (§14). Subject must hold
+ * iam.break_glass.eligible; no payment, posting or filing power is ever
+ * allowed; a CRITICAL alert fires on issue; needs the caller's step-up.
+ */
+export async function issueBreakGlassSession(input: {
+  identity: Identity;
+  principalId?: string;
+  incidentId: string;
+  reason: string;
+  requestedActions: string[];
+  durationSeconds?: number;
+}): Promise<ApiWriteResult<BreakGlassSession>> {
+  return apiPost<BreakGlassSession>(
+    SERVICE,
+    "/v1/admin/break-glass-sessions",
+    {
+      ...(input.principalId ? { principal_id: input.principalId } : {}),
+      incident_id: input.incidentId,
+      reason: input.reason,
+      requested_actions: input.requestedActions,
+      ...(input.durationSeconds ? { duration_seconds: input.durationSeconds } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function listSupportSessions(
+  identity: Identity,
+  options: { activeOnly?: boolean } = {},
+): Promise<ApiResult<{ sessions: SupportSession[] }>> {
+  return apiGet(SERVICE, "/v1/support/sessions", {
+    identity,
+    query: { active_only: options.activeOnly ? "true" : undefined },
+  });
+}
+
+/**
+ * Purpose-bound support access (§15). Read-only unless writes are named;
+ * consent must be STATED either way (no consent means the session grants
+ * nothing); bulk export is off unless asked for.
+ */
+export async function openSupportSession(input: {
+  identity: Identity;
+  supportOperatorId?: string;
+  ticketRef: string;
+  purpose: string;
+  tenantConsentObtained: boolean;
+  allowedActions: string[];
+  allowBulkExport: boolean;
+  durationSeconds?: number;
+}): Promise<ApiWriteResult<SupportSession>> {
+  return apiPost<SupportSession>(
+    SERVICE,
+    "/v1/support/sessions",
+    {
+      ...(input.supportOperatorId ? { support_operator_id: input.supportOperatorId } : {}),
+      ticket_ref: input.ticketRef,
+      purpose: input.purpose,
+      tenant_consent_obtained: input.tenantConsentObtained,
+      read_only: input.allowedActions.length === 0,
+      allowed_actions: input.allowedActions,
+      allow_bulk_export: input.allowBulkExport,
+      ...(input.durationSeconds ? { duration_seconds: input.durationSeconds } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+// ── GOV-03 commands ─────────────────────────────────────────────────────────
+
+/**
+ * Drop cached decisions for the tenant on every replica (iam.policy.publish).
+ * Decisions are cached for ~5 s, so this matters when a revocation has to bite
+ * immediately rather than within that window.
+ */
+export async function invalidateAuthorizationCache(input: {
+  identity: Identity;
+  principalId?: string;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<{ invalidated: boolean; tenant_id: string; principal_id: string; announced: string }>> {
+  return apiPost(
+    SERVICE,
+    "/v1/admin/authorization-cache/invalidate",
+    commandBody(input.reason, input.principalId ? { principal_id: input.principalId } : {}),
+    { identity: input.identity },
+  );
+}
+
+export type EffectiveAccess = {
+  principal_id: string;
+  tenant_id: string;
+  effective_actions: string[];
+  assignments: { granting: boolean; actions: string[]; [key: string]: unknown }[];
+  computed_at: string;
+};
+
+/** Recompute, from the store, what a person can do now and through which grant. */
+export async function recomputeEffectiveAccess(input: {
+  identity: Identity;
+  principalId: string;
+}): Promise<ApiWriteResult<EffectiveAccess>> {
+  return apiPost<EffectiveAccess>(
+    SERVICE,
+    `/v1/admin/subjects/${encodeURIComponent(input.principalId)}/effective-access/recompute`,
+    {},
+    { identity: input.identity },
+  );
+}
+
+// ── Read surfaces ───────────────────────────────────────────────────────────
+
+export type AvailableActions = {
+  resource_type: string;
+  resource_id: string;
+  principal_id: string;
+  available_actions: string[];
+  denied_actions?: { action: string; reason_code: string; basis: string }[];
+  step_up_actions?: { action: string; required_assurance: string; max_authn_age_seconds: number; reason: string }[];
+};
+
+/** What a person may do to one resource, classified by the full pipeline. */
+export async function getAvailableActions(input: {
+  identity: Identity;
+  resourceType: string;
+  resourceId: string;
+  principalId?: string;
+  legalEntityId?: string;
+}): Promise<ApiResult<AvailableActions>> {
+  return apiGet<AvailableActions>(
+    SERVICE,
+    `/v1/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(input.resourceId)}/available-actions`,
+    {
+      identity: input.identity,
+      query: { principal_id: input.principalId, legal_entity_id: input.legalEntityId },
+    },
+  );
+}
+
+export type Capabilities = {
+  principal_id: string;
+  tenant_id: string;
+  legal_entity_id?: string;
+  permissions: string[];
+  modules: string[];
+  features: Record<string, boolean>;
+};
+
+/** The signed-in person's own permissions, modules and features. */
+export async function getMyCapabilities(
+  identity: Identity,
+  legalEntityId?: string,
+): Promise<ApiResult<Capabilities>> {
+  return apiGet<Capabilities>(SERVICE, "/v1/me/capabilities", {
+    identity,
+    query: { legal_entity_id: legalEntityId },
+  });
+}
+
+// ── Plain-English refusals for the administration surface ───────────────────
+
+const ADMIN_ERRORS: [string, string][] = [
+  ["identity_assertion_required", "The service needs your signed sign-in to accept this, and the session has none. Sign in through the identity provider."],
+  ["identity_assertion_invalid", "Your signed sign-in could not be verified (expired or not trusted). Sign in again."],
+  ["identity_mismatch", "The request named a different person from the one signed in."],
+  ["step_up_required", "This needs a recent multi-factor sign-in (within 15 minutes). Complete the step-up with identity-context-svc, then try again."],
+  ["checker_not_independent", "You cannot decide this: the checker must be someone other than the requester and the person it is for."],
+  ["self_grant_not_allowed", "You cannot change a role or set you hold yourself."],
+  ["sod_self_interest", "You hold one of this rule's actions, so you cannot retire it."],
+  ["approval_expired", "This request waited too long and expired. Ask for it again."],
+  ["approval_not_pending", "This is no longer waiting for a decision."],
+  ["invalid_state", "This is not in a state that allows that change. Reload to see where it stands."],
+  ["invalid_transition", "This has already ended, so it cannot be changed."],
+  ["version_conflict", "Somebody changed this since you loaded the page. Reload and try again."],
+  ["sod_conflict", "Refused: this would give somebody two duties that must not be held together."],
+  ["protected_privilege_not_delegable", "Access-administration and platform powers cannot be lent."],
+  ["self_delegation_not_allowed", "You cannot lend authority to yourself."],
+  ["duration_exceeds_maximum", "That is longer than the maximum allowed (JIT 8 h, break-glass 2 h, support 4 h)."],
+  ["missing_incident_id", "Break-glass needs a declared incident reference."],
+  ["invalid_expires_at", "The end must be in the future and after the start."],
+  ["invalid_effective_to", "The end date must be in the future and after the start."],
+  ["privileged_session_not_found", "No such privileged session in your organisation."],
+  ["break_glass_session_not_found", "No such break-glass session in your organisation."],
+  ["support_session_not_found", "No such support session in your organisation."],
+  ["sod_exception_not_found", "No such exception in your organisation."],
+  ["sod_rule_not_found", "No such rule in your organisation."],
+  ["workload_binding_not_found", "No such workload binding in your organisation."],
+  ["idempotency_mismatch", "This reused an earlier request with different details. Reload and try again."],
+  ["entity_registry_unavailable", "The organisation registry could not confirm the company, so nothing was decided. Try again shortly."],
+];
+
+/**
+ * A refusal from the administration surface, in one sentence.
+ *
+ * `missing_field: reason_code` is handled first because the console always
+ * sends a reason — seeing it means the form let one through empty.
+ */
+export function explainAuthzError(error: { message: string; status?: number }): string {
+  const m = error.message;
+  // Unreachable or slow: nothing was decided either way. Said briefly — it is
+  // shown once per register on a page that may hold several.
+  if (m.includes("is unreachable at")) {
+    return "The authorization service is not reachable, so nothing was read or decided. Services that check permissions refuse to write until it is back.";
+  }
+  if (m.includes("did not respond within")) {
+    return "The authorization service did not answer in time, so nothing was decided. Try again shortly.";
+  }
+  if (m.includes("missing_field") && m.includes("reason_code")) {
+    return "A reason is required for this change. Choose one and try again.";
+  }
+  if (m.includes("authorization_denied")) {
+    const perm = m.match(/(iam\.[a-z_.]+)/)?.[1];
+    return perm
+      ? `You do not have permission to do this (needs ${perm}).`
+      : "You do not have permission to do this.";
+  }
+  for (const [code, text] of ADMIN_ERRORS) {
+    if (m.includes(code)) return text;
+  }
+  return explainAuthorizationError(m, { status: error.status });
+}
+
+/** Status words and tones shared by every register on the page. Unknown
+ *  values are shown as themselves and never as a success. */
+const STATUS: Record<string, { label: string; tone: "success" | "warning" | "danger" | "neutral" | "info" }> = {
+  ACTIVE: { label: "Active", tone: "success" },
+  APPROVED: { label: "Approved", tone: "success" },
+  ATTESTED: { label: "Attested", tone: "success" },
+  PENDING_APPROVAL: { label: "Awaiting approval", tone: "warning" },
+  REQUESTED: { label: "Requested", tone: "warning" },
+  PENDING: { label: "Review due", tone: "warning" },
+  FLAGGED: { label: "Flagged", tone: "danger" },
+  REJECTED: { label: "Rejected", tone: "neutral" },
+  REVOKED: { label: "Revoked", tone: "neutral" },
+  EXPIRED: { label: "Expired", tone: "neutral" },
+  ENDED: { label: "Ended", tone: "neutral" },
+  RETIRED: { label: "Retired", tone: "neutral" },
+  INACTIVE: { label: "Inactive", tone: "neutral" },
+  NOT_REQUIRED: { label: "Not required", tone: "neutral" },
+};
+
+export function describeAdminStatus(status: string | null | undefined) {
+  const key = (status ?? "").toUpperCase();
+  return STATUS[key] ?? { label: status || "Unknown", tone: "neutral" as const };
 }

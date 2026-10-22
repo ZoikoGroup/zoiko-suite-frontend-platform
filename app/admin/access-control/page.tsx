@@ -186,7 +186,10 @@ async function GrantsSummary() {
     );
   }
 
-  const live = (assignmentsResult.data ?? []).filter((a) => isAssignmentActive(a));
+  // A privileged grant awaiting approval grants nothing yet, so it is not live.
+  const live = (assignmentsResult.data ?? []).filter(
+    (a) => (a.approval_status ?? "APPROVED") === "APPROVED" && isAssignmentActive(a),
+  );
   const roles = rolesResult.ok ? (rolesResult.data ?? []) : [];
   const heldRoleIds = new Set(live.map((a) => a.role_id));
   const unheld = roles.filter((r) => !heldRoleIds.has(r.role_definition_id)).length;
@@ -208,10 +211,10 @@ async function GrantsSummary() {
         </div>
       </dl>
       <Link
-        href="/admin/authorization"
+        href="/admin/authorization?tab=grants"
         className="text-sm font-medium text-navy-700 underline hover:text-navy-900 dark:text-navy-300 dark:hover:text-navy-100"
       >
-        Grant, revoke and check access on Authorization
+        Grant and revoke on Authorization
       </Link>
     </div>
   );
