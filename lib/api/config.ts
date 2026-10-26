@@ -17,21 +17,26 @@ const DEFAULTS = {
   governance:                 "http://127.0.0.1:8083",  // governance-decision-log-svc
   policy:                     "http://127.0.0.1:8085",  // policy-svc
   configuration:              "http://127.0.0.1:8086",  // configuration-feature-flag-svc
-  secretVault:                "http://127.0.0.1:8087",  // secret-vault-svc
+  secretVault:                "http://127.0.0.1:8087",  // secret-vault-integration-svc
   obligations:                "http://127.0.0.1:8088",  // obligations-svc
   authorization:              "http://127.0.0.1:8089",  // authorization-svc
-  // accessControl and delegatedAuthority previously collided with
-  // reconciliationIntel (8137) and complianceRiskScoring (8136) below — both of
-  // which have real containers running locally, unlike these two. Reassigned to
-  // unused ports so every key resolves to a distinct URL; neither change alters
-  // any currently-running service's address.
-  accessControl:              "http://127.0.0.1:8181",  // access-control-svc
-  delegatedAuthority:         "http://127.0.0.1:8180",  // delegated-authority-svc
+  // 8137 and 8136 are what the backend's own compose publishes for these two
+  // (deployments/docker-compose.access-control.yml and docker-compose.yml).
+  // They were moved to 8181/8180 to dodge reconciliationIntel (8137) and
+  // complianceRiskScoring (8136) further down — but nothing listens on
+  // 8180/8181, so both Domain 1 pages read "unreachable" against a backend
+  // that was up. The two Domain 8 defaults still share these ports; whichever
+  // of a pair is not running locally needs its ZOIKO_*_URL override.
+  accessControl:              "http://127.0.0.1:8137",  // access-control-svc
+  delegatedAuthority:         "http://127.0.0.1:8136",  // delegated-authority-svc
   documentVault:              "http://127.0.0.1:8094",  // document-vault-svc
   auditEventStore:            "http://127.0.0.1:8084",  // audit-event-store-svc
   tenantRegistry:             "http://127.0.0.1:8081",  // tenant-entity-registry-svc
   identityContext:            "http://127.0.0.1:8080",  // identity-context-svc
-  gatewayAuth:                "http://127.0.0.1:8080",  // gateway-auth-svc
+  // 8092, not identity's 8080. The ForwardAuth callout listens on its own port;
+  // pointing it at 8080 sent /verify to identity-context-svc, which has no such
+  // route.
+  gatewayAuth:                "http://127.0.0.1:8092",  // gateway-auth-svc
   schemaRegistry:             "http://127.0.0.1:8093",  // schema-registry-svc
 
   // ── BLOCK 2 · General Ledger & Finance Hub ───────────────────────────────
@@ -118,18 +123,21 @@ const DEFAULTS = {
   reconciliationIntelligence: "http://127.0.0.1:8137",  // reconciliation-intelligence-svc
 
   // ── Additional Domain Services ──────────────────────────────────────────
-  jurisdictionRules:          "http://127.0.0.1:8161",  // jurisdiction-rules-svc
-  notification:               "http://127.0.0.1:8162",  // notification-svc
+  // jurisdiction-rules-svc, notification-svc, search-indexer-svc and
+  // workflow-svc below use the ports the backend compose publishes. The
+  // 816x/817x values they had were never bound by anything.
+  jurisdictionRules:          "http://127.0.0.1:8082",  // jurisdiction-rules-svc
+  notification:               "http://127.0.0.1:8133",  // notification-svc
   payeeBankingIdentity:       "http://127.0.0.1:8163",  // payee-banking-identity-svc
   privacyConsent:             "http://127.0.0.1:8165",  // privacy-consent-svc
   privacyTransfer:            "http://127.0.0.1:8166",  // privacy-transfer-svc
   retentionRegistry:          "http://127.0.0.1:8167",  // retention-registry-svc
-  searchIndexer:              "http://127.0.0.1:8169",  // search-indexer-svc
+  searchIndexer:              "http://127.0.0.1:8096",  // search-indexer-svc
   opensearch:                 "http://127.0.0.1:9200",  // opensearch (direct)
   sourceAuthority:            "http://127.0.0.1:8171",  // source-authority-svc
 
   // ── Workflow Services ────────────────────────────────────────────────────
-  workflow:                   "http://127.0.0.1:8172",  // workflow-svc
+  workflow:                   "http://127.0.0.1:8090",  // workflow-svc
   workflowHistory:            "http://127.0.0.1:8173",  // workflow-history-svc
 
   // ── Gateway ──────────────────────────────────────────────────────────────
@@ -151,8 +159,11 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   governance:                 "/governance-decision-log-svc",
   policy:                     "/policy-svc",
   configuration:              "/configuration-feature-flag-svc",
-  secretVault:                "/secret-vault-svc",
-  obligations:                "/obligation-tracking-svc",
+  // Full service names, as Traefik's all-services.yml routes them. The short
+  // forms these had (/secret-vault-svc, and obligation-tracking-svc's prefix —
+  // a different Domain 6 service) 404'd at the gateway.
+  secretVault:                "/secret-vault-integration-svc",
+  obligations:                "/obligations-svc",
   authorization:              "/authorization-svc",
   accessControl:              "/access-control-svc",
   delegatedAuthority:         "/delegated-authority-svc",

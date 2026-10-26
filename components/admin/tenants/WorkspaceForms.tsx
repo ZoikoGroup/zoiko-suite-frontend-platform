@@ -90,7 +90,7 @@ export function UpdateEntityForm({ entities }: { entities: EntityOption[] }) {
   const [tradingIntent, setTradingIntent] = useState<"unchanged" | "set" | "clear">("unchanged");
 
   return (
-    <form action={action} className="space-y-4">
+    <form action={action} data-testid="update-entity-form" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className={LABEL} htmlFor="update_entity_id">
@@ -157,7 +157,11 @@ export function UpdateEntityForm({ entities }: { entities: EntityOption[] }) {
         {pending ? "Updating…" : "Update entity"}
       </Button>
 
-      <ResultBanner tone={UPDATE_ENTITY_TONE[state.status]} message={state.message}>
+      <ResultBanner
+        testId="update-entity-result"
+        tone={UPDATE_ENTITY_TONE[state.status]}
+        message={state.message}
+      >
         {state.entity ? (
           <div className="mt-2 space-y-1.5">
             <LabelledId label="Legal entity ID" value={state.entity.legal_entity_id} />

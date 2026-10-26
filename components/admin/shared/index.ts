@@ -2,6 +2,7 @@ export { PageHeader } from "./PageHeader";
 export { PanelEmptyState } from "./PanelEmptyState";
 export { DomainPlaceholder } from "./DomainPlaceholder";
 export { DomainPlaceholderSkeleton } from "./DomainPlaceholderSkeleton";
+export { ComingSoon } from "./ComingSoon";
 export { JsonBlock } from "./JsonBlock";
 // Readable rendering of a record and of a free-form jsonb payload. Prefer these
 // over JsonBlock anywhere an operator rather than a developer is the reader —
