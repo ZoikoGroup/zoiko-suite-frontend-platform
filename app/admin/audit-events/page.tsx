@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { History } from "lucide-react";
-import { DOMAINS } from "@/lib/constants";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { getAuditEvents } from "@/lib/api/audit-events";
 import {
@@ -58,8 +57,24 @@ function SectionCard({
   );
 }
 
+// This page's own header content. It used to be read from the shared DOMAINS list
+// ("audit-events" entry), which the console redesign removed from lib/constants.ts —
+// the lookup then returned undefined and `domain.label` threw. The page owns its
+// copy so it no longer depends on a domain tile it does not control.
+const domain = {
+  label: "Audit Event Store",
+  purpose:
+    "Govern immutable, append-only cryptographic event logging, hash-chain verification, and provenance auditing across all services.",
+  coreServices: [
+    "Audit Event Ingestion Engine",
+    "Cryptographic Hash-Chain Service",
+    "Event Provenance Auditor",
+    "Correlation ID Tracing Service",
+    "Tamper Evidence Verifier",
+  ],
+};
+
 export default async function AuditEventsPage() {
-  const domain = DOMAINS.find((d) => d.key === "audit-events")!;
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
   const identity = session

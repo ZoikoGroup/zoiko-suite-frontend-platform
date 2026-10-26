@@ -117,7 +117,7 @@ export async function SchemaRegisterPanel() {
 
       {truncated && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300">
-          This register holds at least {MAX_EVENT_NAMES_PAGE} distinct events — the registry's own page
+          This register holds at least {MAX_EVENT_NAMES_PAGE} distinct events — the registry&apos;s own page
           ceiling — so more may exist beyond what is shown below. Look a specific event up directly if it
           is not in this list.
         </div>

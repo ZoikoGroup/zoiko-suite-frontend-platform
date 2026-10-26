@@ -129,16 +129,22 @@ const DEFAULTS = {
   jurisdictionRules:          "http://127.0.0.1:8082",  // jurisdiction-rules-svc
   notification:               "http://127.0.0.1:8133",  // notification-svc
   payeeBankingIdentity:       "http://127.0.0.1:8163",  // payee-banking-identity-svc
-  privacyConsent:             "http://127.0.0.1:8165",  // privacy-consent-svc
-  privacyTransfer:            "http://127.0.0.1:8166",  // privacy-transfer-svc
-  retentionRegistry:          "http://127.0.0.1:8167",  // retention-registry-svc
+  privacyConsent:             "http://127.0.0.1:8152",  // privacy-consent-svc
+  privacyPurposeRegistry:     "http://127.0.0.1:8151",  // privacy-purpose-registry-svc
+  privacyDecision:            "http://127.0.0.1:8153",  // privacy-decision-svc
+  privacyRights:              "http://127.0.0.1:8154",  // privacy-rights-svc
+  privacyTransfer:            "http://127.0.0.1:8155",  // privacy-transfer-svc
+  retentionRegistry:          "http://127.0.0.1:8148",  // retention-registry-svc
+  evidenceManifest:           "http://127.0.0.1:8095",  // evidence-manifest-svc
+  killSwitchRegistry:         "http://127.0.0.1:8147",  // kill-switch-registry-svc
+  metricRegistry:             "http://127.0.0.1:8149",  // metric-registry-svc
   searchIndexer:              "http://127.0.0.1:8096",  // search-indexer-svc
   opensearch:                 "http://127.0.0.1:9200",  // opensearch (direct)
-  sourceAuthority:            "http://127.0.0.1:8171",  // source-authority-svc
+  sourceAuthority:            "http://127.0.0.1:8150",  // source-authority-svc
 
   // ── Workflow Services ────────────────────────────────────────────────────
   workflow:                   "http://127.0.0.1:8090",  // workflow-svc
-  workflowHistory:            "http://127.0.0.1:8173",  // workflow-history-svc
+  workflowHistory:            "http://127.0.0.1:8097",  // workflow-history-svc
 
   // ── Gateway ──────────────────────────────────────────────────────────────
   gateway:                    "http://127.0.0.1:8000",
@@ -256,8 +262,14 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   notification:               "/notification-svc",
   payeeBankingIdentity:       "/payee-banking-identity-svc",
   privacyConsent:             "/privacy-consent-svc",
+  privacyPurposeRegistry:     "/privacy-purpose-registry-svc",
+  privacyDecision:            "/privacy-decision-svc",
+  privacyRights:              "/privacy-rights-svc",
   privacyTransfer:            "/privacy-transfer-svc",
   retentionRegistry:          "/retention-registry-svc",
+  evidenceManifest:           "/evidence-manifest-svc",
+  killSwitchRegistry:         "/kill-switch-registry-svc",
+  metricRegistry:             "/metric-registry-svc",
   searchIndexer:              "/search-indexer-svc",
   opensearch:                 "/opensearch",
   sourceAuthority:            "/source-authority-svc",
