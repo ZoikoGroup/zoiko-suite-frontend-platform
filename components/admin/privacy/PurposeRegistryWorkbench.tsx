@@ -677,6 +677,18 @@ export function PurposeRegistryWorkbench() {
                     </div>
                   </div>
 
+                  <div>
+                    <label className={LABEL}>
+                      Necessity Rationale <span className="text-slate-400">(Gate 3, carried onto the new version)</span>
+                    </label>
+                    <input
+                      name="necessity_rationale"
+                      defaultValue={selectedPurpose?.necessity_rationale ?? ""}
+                      placeholder="Required for fulfilment of contract terms"
+                      className={FIELD}
+                    />
+                  </div>
+
                   <Button type="submit" loading={editPurposePending} size="sm" variant="secondary" className="w-full">
                     {!editPurposePending && <PlusCircle className="h-3.5 w-3.5" />}
                     Create Amended Purpose Version
@@ -984,7 +996,7 @@ export function PurposeRegistryWorkbench() {
                   <label htmlFor="notice_consent_dependency" className={LABEL}>
                     Notice / Consent Dependency (Gate 7)
                   </label>
-                  <select id="notice_consent_dependency" name="notice_consent_dependency" defaultValue="" className={FIELD}>
+                  <select id="notice_consent_dependency" name="notice_consent_dependency" defaultValue="" required className={FIELD}>
                     <option value="">Select…</option>
                     <option value="REQUIRED">REQUIRED</option>
                     <option value="NOT_REQUIRED">NOT_REQUIRED</option>
@@ -996,7 +1008,7 @@ export function PurposeRegistryWorkbench() {
                   <label htmlFor="dpia_tia_status" className={LABEL}>
                     DPIA / TIA Status (Gate 8)
                   </label>
-                  <select id="dpia_tia_status" name="dpia_tia_status" defaultValue="" className={FIELD}>
+                  <select id="dpia_tia_status" name="dpia_tia_status" defaultValue="" required className={FIELD}>
                     <option value="">Select…</option>
                     <option value="RESOLVED">RESOLVED (Permits Activation)</option>
                     <option value="REVIEW_REQUIRED">REVIEW_REQUIRED (Blocks)</option>

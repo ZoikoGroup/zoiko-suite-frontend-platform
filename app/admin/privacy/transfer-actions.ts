@@ -346,20 +346,32 @@ export async function fetchTransferDashboardData(): Promise<{
   const subprocessors: Record<string, Subprocessor[]> = {};
   const assessments: Record<string, TransferAssessment | null> = {};
 
-  for (const rel of relationships) {
-    const subRes = await listSubprocessors(rel.relationship_id, identity);
-    if (subRes.ok) {
-      subprocessors[rel.relationship_id] = subRes.data.data || [];
-    }
-    const assRes = await getLatestAssessment(rel.relationship_id, identity);
-    if (assRes.ok) {
-      if ("assessment" in assRes.data && assRes.data.assessment === null) {
-        assessments[rel.relationship_id] = null;
-      } else {
-        assessments[rel.relationship_id] = assRes.data as TransferAssessment;
+  // Per-relationship lookups run concurrently (bounded). They used to run one
+  // after another — two backend calls per relationship, each behind an
+  // authorization check — so the dashboard took ~2s per relationship, and because
+  // Next.js queues server actions, every other click on the page waited behind it.
+  const CONCURRENCY = 8;
+  let next = 0;
+  const worker = async () => {
+    while (next < relationships.length) {
+      const rel = relationships[next++];
+      const [subRes, assRes] = await Promise.all([
+        listSubprocessors(rel.relationship_id, identity),
+        getLatestAssessment(rel.relationship_id, identity),
+      ]);
+      if (subRes.ok) {
+        subprocessors[rel.relationship_id] = subRes.data.data || [];
+      }
+      if (assRes.ok) {
+        if ("assessment" in assRes.data && assRes.data.assessment === null) {
+          assessments[rel.relationship_id] = null;
+        } else {
+          assessments[rel.relationship_id] = assRes.data as TransferAssessment;
+        }
       }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, relationships.length) }, worker));
 
   return { relationships, subprocessors, assessments };
 }
@@ -610,7 +622,7 @@ export async function runAutomatedQASuiteAction(): Promise<QAScenarioResult[]> {
         {
           relationship_id: relationshipId,
           transfer_mechanism_id: mechanismId,
-          destination_jurisdiction: "US",
+          destination_jurisdiction: "UK-GDPR",
           assessment_required: true,
         },
         identity
@@ -941,7 +953,7 @@ export async function runAutomatedQASuiteAction(): Promise<QAScenarioResult[]> {
         {
           relationship_id: relationshipId,
           transfer_mechanism_id: mechanismId,
-          destination_jurisdiction: "US",
+          destination_jurisdiction: "UK-GDPR",
           assessment_required: true,
         },
         identity

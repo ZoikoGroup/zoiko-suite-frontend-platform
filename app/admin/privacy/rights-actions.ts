@@ -100,16 +100,17 @@ export async function recordIdentityVerificationAction(
   }
 
   const requestId = String(formData.get("request_id") ?? "").trim();
-  const verifiedStr = String(formData.get("verified") ?? "true").trim();
+  // No default: a missing outcome must never be recorded as a verified identity.
+  const verifiedStr = String(formData.get("verified") ?? "").trim();
   const verified = verifiedStr === "true";
   const method = String(formData.get("method") ?? "").trim();
   const note = String(formData.get("note") ?? "").trim();
 
-  if (!requestId || !method) {
+  if (!requestId || !method || (verifiedStr !== "true" && verifiedStr !== "false")) {
     return {
       status: "error",
       action: "verify",
-      message: "request_id and method are required for identity assurance.",
+      message: "request_id, an explicit verification outcome and method are required for identity assurance.",
     };
   }
 

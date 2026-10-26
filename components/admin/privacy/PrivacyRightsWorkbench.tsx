@@ -126,34 +126,38 @@ export function PrivacyRightsWorkbench() {
     }
   }, [wfcRefState]);
 
+  // Evidence-bearing fields start EMPTY. They used to ship pre-filled with sample
+  // evidence (an identity-verification note, the SHA-256 of an empty file as the
+  // manifest hash, a canned closure reason) that a click-through would have
+  // recorded as real, immutable evidence. Only the Fast Presets fill the intake form.
   // Intake Form Controlled Inputs
-  const [intakeSubject, setIntakeSubject] = useState("subject-alice-access@zoikosuite.com");
+  const [intakeSubject, setIntakeSubject] = useState("");
   const [intakeFamily, setIntakeFamily] = useState<RightFamily>("ACCESS");
-  const [intakeJurisdiction, setIntakeJurisdiction] = useState("GDPR");
-  const [intakeRequester, setIntakeRequester] = useState("subject-alice-access@zoikosuite.com");
-  const [intakeSubmittedVia, setIntakeSubmittedVia] = useState("PRIVACY_PORTAL");
+  const [intakeJurisdiction, setIntakeJurisdiction] = useState("");
+  const [intakeRequester, setIntakeRequester] = useState("");
+  const [intakeSubmittedVia, setIntakeSubmittedVia] = useState("");
 
   // Lifecycle Tab
   const [activeTab, setActiveTab] = useState<"verify" | "manifest" | "close" | "wfc">("verify");
 
   // Verification Form Inputs
-  const [verifyVerified, setVerifyVerified] = useState("true");
-  const [verifyMethod, setVerifyMethod] = useState("MFA_AUTHENTICATOR_TOKEN");
-  const [verifyNote, setVerifyNote] = useState("Subject authenticated with hardware passkey and live biometric confirm.");
+  const [verifyVerified, setVerifyVerified] = useState("");
+  const [verifyMethod, setVerifyMethod] = useState("");
+  const [verifyNote, setVerifyNote] = useState("");
 
   // Manifest Form Inputs
-  const [manifestDomain, setManifestDomain] = useState("CRM_HUBSPOT");
-  const [manifestHash, setManifestHash] = useState("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-  const [manifestCount, setManifestCount] = useState("14");
-  const [manifestRef, setManifestRef] = useState("s3://zoiko-evidence/sar/crm-export-2026.json");
+  const [manifestDomain, setManifestDomain] = useState("");
+  const [manifestHash, setManifestHash] = useState("");
+  const [manifestCount, setManifestCount] = useState("");
+  const [manifestRef, setManifestRef] = useState("");
 
   // Close Form Inputs
   const [closeOutcome, setCloseOutcome] = useState<Outcome>("FULFILLED");
-  const [closeHash, setCloseHash] = useState("a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0");
-  const [closeReason, setCloseReason] = useState("All discovery manifests validated and exported package delivered securely to verified subject.");
+  const [closeHash, setCloseHash] = useState("");
+  const [closeReason, setCloseReason] = useState("");
 
   // WFC Process Ref Inputs
-  const [wfcProcessRef, setWFCProcessRef] = useState("wf-instance-2026-001");
+  const [wfcProcessRef, setWFCProcessRef] = useState("");
 
   // Fast Presets
   const applyPreset = (preset: "access_happy" | "erasure_strict" | "objection_fast" | "complaint") => {
@@ -252,22 +256,18 @@ export function PrivacyRightsWorkbench() {
     }
   };
 
-  // Determine latest banner to show
-  const activeFeedback = closeState.status !== "idle"
-    ? closeState
-    : wfcRefState.status !== "idle"
-    ? wfcRefState
-    : manifestState.status !== "idle"
-    ? manifestState
-    : verifyState.status !== "idle"
-    ? verifyState
-    : createState.status !== "idle"
-    ? createState
-    : lookupState.status !== "idle"
-    ? lookupState
-    : searchState.status !== "idle"
-    ? searchState
-    : null;
+  // The banner shows the MOST RECENT action's outcome. It used to pick the
+  // highest-priority non-idle form state, so after one refused close every later
+  // success or refusal (identity, manifest, WFC ref, intake) was hidden behind the
+  // stale close banner.
+  const [activeFeedback, setActiveFeedback] = useState<typeof createState | null>(null);
+  useEffect(() => { if (createState.status !== "idle") setActiveFeedback(createState); }, [createState]);
+  useEffect(() => { if (verifyState.status !== "idle") setActiveFeedback(verifyState); }, [verifyState]);
+  useEffect(() => { if (manifestState.status !== "idle") setActiveFeedback(manifestState); }, [manifestState]);
+  useEffect(() => { if (closeState.status !== "idle") setActiveFeedback(closeState); }, [closeState]);
+  useEffect(() => { if (lookupState.status !== "idle") setActiveFeedback(lookupState); }, [lookupState]);
+  useEffect(() => { if (searchState.status !== "idle") setActiveFeedback(searchState); }, [searchState]);
+  useEffect(() => { if (wfcRefState.status !== "idle") setActiveFeedback(wfcRefState); }, [wfcRefState]);
 
   return (
     <div className="space-y-6">
@@ -454,9 +454,9 @@ export function PrivacyRightsWorkbench() {
 
           {/* ── Step 2: Lifecycle Management for Active Case ── */}
           <Card className={!activeRequest ? "opacity-60 pointer-events-none" : ""}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
+            <CardHeader className="flex-col items-stretch gap-0">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
                     2
                   </span>
@@ -485,11 +485,11 @@ export function PrivacyRightsWorkbench() {
 
               {/* Lifecycle Stage Switcher Tabs */}
               {activeRequest && (
-                <div className="mt-3 flex rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900">
+                <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 sm:grid-cols-4 dark:border-slate-800 dark:bg-slate-900">
                   <button
                     type="button"
                     onClick={() => setActiveTab("verify")}
-                    className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${
+                    className={`rounded-md px-2 py-1.5 text-center text-xs font-semibold transition-all ${
                       activeTab === "verify"
                         ? "bg-white text-indigo-600 shadow-sm dark:bg-slate-800 dark:text-indigo-400"
                         : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -500,7 +500,7 @@ export function PrivacyRightsWorkbench() {
                   <button
                     type="button"
                     onClick={() => setActiveTab("manifest")}
-                    className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${
+                    className={`rounded-md px-2 py-1.5 text-center text-xs font-semibold transition-all ${
                       activeTab === "manifest"
                         ? "bg-white text-indigo-600 shadow-sm dark:bg-slate-800 dark:text-indigo-400"
                         : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -511,7 +511,7 @@ export function PrivacyRightsWorkbench() {
                   <button
                     type="button"
                     onClick={() => setActiveTab("close")}
-                    className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${
+                    className={`rounded-md px-2 py-1.5 text-center text-xs font-semibold transition-all ${
                       activeTab === "close"
                         ? "bg-white text-indigo-600 shadow-sm dark:bg-slate-800 dark:text-indigo-400"
                         : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -522,7 +522,7 @@ export function PrivacyRightsWorkbench() {
                   <button
                     type="button"
                     onClick={() => setActiveTab("wfc")}
-                    className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${
+                    className={`rounded-md px-2 py-1.5 text-center text-xs font-semibold transition-all ${
                       activeTab === "wfc"
                         ? "bg-white text-indigo-600 shadow-sm dark:bg-slate-800 dark:text-indigo-400"
                         : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -559,7 +559,9 @@ export function PrivacyRightsWorkbench() {
                             value={verifyVerified}
                             onChange={(e) => setVerifyVerified(e.target.value)}
                             className={FIELD}
+                            required
                           >
+                            <option value="">Select outcome…</option>
                             <option value="true">VERIFIED (Identity confirmed)</option>
                             <option value="false">UNVERIFIED (Verification failed / rejected)</option>
                           </select>

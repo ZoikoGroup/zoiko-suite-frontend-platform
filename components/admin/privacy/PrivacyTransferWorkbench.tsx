@@ -350,6 +350,9 @@ export function PrivacyTransferWorkbench() {
           setLastDecision(dec);
           setFeedbackMessage({ type: "success", text: res.message || "Transfer evaluated!" });
         } else {
+          // A failed evaluation must not leave the PREVIOUS decision on screen next
+          // to the error banner (it read as the outcome of this attempt).
+          setLastDecision(null);
           setFeedbackMessage({ type: "error", text: res.message || "Evaluation failed." });
         }
       } finally {
@@ -900,6 +903,11 @@ export function PrivacyTransferWorkbench() {
                             {rel.controller_ref} → {rel.processor_ref}
                           </span>
                           <span className="text-slate-500 dark:text-slate-400">({rel.service})</span>
+                          {rel.purpose_activity_refs && rel.purpose_activity_refs.length > 0 && (
+                            <span className="rounded bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+                              Bound activities: {rel.purpose_activity_refs.map((id) => id.slice(0, 8)).join(", ")}
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -1480,7 +1488,7 @@ export function PrivacyTransferWorkbench() {
                   className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
                 >
                   <Play className={`h-3.5 w-3.5 ${qaRunning ? "animate-spin" : ""}`} />
-                  {qaRunning ? "Running 10 Scenarios..." : "Run All QA Scenarios"}
+                  {qaRunning ? "Running 12 Scenarios..." : "Run All QA Scenarios"}
                 </button>
               </div>
             </div>

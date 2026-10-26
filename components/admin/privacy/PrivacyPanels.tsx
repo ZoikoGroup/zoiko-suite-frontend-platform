@@ -94,6 +94,14 @@ export function PrivacyPanels() {
       setConsent((prev) => ({ ...prev, [key]: value }));
     };
 
+  // Forms submitted through onSubmit (not <form action>) are not reset by React 19 after
+  // the action finishes, so a rejected submit keeps what the user typed.
+  const keep = (action: (payload: FormData) => void) => (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    startTransition(() => action(formData));
+  };
+
   // Purposes come from privacy-purpose-registry-svc (published versions in force).
   const [purposes, setPurposes] = useState<PurposeVersion[]>([]);
   const [purposesLoaded, setPurposesLoaded] = useState(false);
@@ -370,7 +378,7 @@ export function PrivacyPanels() {
           </div>
         </CardHeader>
         <CardContent>
-          <form action={withdrawSubmit} className="space-y-4">
+          <form onSubmit={keep(withdrawSubmit)} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="withdraw_receipt_id" className={LABEL}>
@@ -394,7 +402,7 @@ export function PrivacyPanels() {
                 <input
                   id="withdraw_channel"
                   name="channel"
-                  defaultValue="PRIVACY_PREFERENCES_DASHBOARD"
+                  placeholder="e.g. PRIVACY_PREFERENCES_DASHBOARD"
                   className={FIELD}
                   required
                 />
@@ -442,7 +450,7 @@ export function PrivacyPanels() {
           </div>
         </CardHeader>
         <CardContent>
-          <form action={lookupSubmit} className="space-y-4">
+          <form onSubmit={keep(lookupSubmit)} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="lookup_subject" className={LABEL}>
@@ -451,7 +459,6 @@ export function PrivacyPanels() {
                 <input
                   id="lookup_subject"
                   name="subject_ref"
-                  defaultValue="subject-robert-chen@zoikosuite.com"
                   placeholder="Subject email / ID"
                   className={FIELD}
                   required
@@ -462,15 +469,14 @@ export function PrivacyPanels() {
                 <label htmlFor="lookup_purpose" className={LABEL}>
                   Purpose ID
                 </label>
-                <input
-                  id="lookup_purpose"
-                  name="purpose_id"
-                  defaultValue="11111111-2222-3333-4444-555555555555"
-                  placeholder="Purpose UUID"
-                  className={`${FIELD} font-mono text-xs`}
-                  list="published-purposes"
-                  required
-                />
+                <select id="lookup_purpose" name="purpose_id" defaultValue="" className={`${FIELD} text-xs`} required>
+                  <option value="">Select a published purpose</option>
+                  {purposes.map((p) => (
+                    <option key={p.purpose_id} value={p.purpose_id}>
+                      {p.statement.length > 70 ? `${p.statement.slice(0, 70)}…` : p.statement} ({p.purpose_id.slice(0, 8)})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -502,7 +508,7 @@ export function PrivacyPanels() {
             </div>
           </CardHeader>
           <CardContent>
-            <form action={noticeSubmit} className="space-y-3">
+            <form onSubmit={keep(noticeSubmit)} className="space-y-3">
               <div>
                 <label htmlFor="locale" className={LABEL}>Locale</label>
                 <input id="locale" name="locale" defaultValue="en-GB" className={FIELD} required />
@@ -517,7 +523,7 @@ export function PrivacyPanels() {
               </div>
               <div>
                 <label htmlFor="content_hash" className={LABEL}>Content Hash (SHA-256)</label>
-                <input id="content_hash" name="content_hash" defaultValue="sha256-gdpr-notice-v1-2026" className={`${FIELD} font-mono text-xs`} required />
+                <input id="content_hash" name="content_hash" placeholder="sha256-…" className={`${FIELD} font-mono text-xs`} required />
               </div>
               <Button type="submit" size="sm" loading={noticePending}>
                 {noticePending ? "Registering…" : "Register Notice"}
@@ -540,7 +546,7 @@ export function PrivacyPanels() {
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <form action={lifecycleSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-amber-50/30 dark:bg-amber-900/10">
+                <form onSubmit={keep(lifecycleSubmit)} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-amber-50/30 dark:bg-amber-900/10">
                   <input type="hidden" name="lifecycle_op" value="approve" />
                   <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400">1. Approve Version</span>
                   <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
@@ -550,7 +556,7 @@ export function PrivacyPanels() {
                   </Button>
                 </form>
 
-                <form action={lifecycleSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-emerald-50/30 dark:bg-emerald-900/10">
+                <form onSubmit={keep(lifecycleSubmit)} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-emerald-50/30 dark:bg-emerald-900/10">
                   <input type="hidden" name="lifecycle_op" value="publish" />
                   <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">2. Publish Version</span>
                   <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
@@ -560,7 +566,7 @@ export function PrivacyPanels() {
                   </Button>
                 </form>
 
-                <form action={lifecycleSubmit} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-rose-50/30 dark:bg-rose-900/10">
+                <form onSubmit={keep(lifecycleSubmit)} className="space-y-2 rounded-lg border border-slate-200 dark:border-navy-600/30 p-2.5 bg-rose-50/30 dark:bg-rose-900/10">
                   <input type="hidden" name="lifecycle_op" value="withdraw" />
                   <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400">3. Withdraw Version</span>
                   <input name="notice_id" placeholder="Notice ID" className={`${FIELD} font-mono text-xs`} required />
@@ -591,18 +597,19 @@ export function PrivacyPanels() {
             </div>
           </CardHeader>
           <CardContent>
-            <form action={prefSubmit} className="space-y-3">
+            <form onSubmit={keep(prefSubmit)} className="space-y-3">
               <div>
                 <label htmlFor="pref_subject" className={LABEL}>Subject Reference</label>
-                <input id="pref_subject" name="subject_ref" defaultValue="subject-robert-chen@zoikosuite.com" className={FIELD} required />
+                <input id="pref_subject" name="subject_ref" placeholder="Subject email / ID" className={FIELD} required />
               </div>
               <div>
                 <label htmlFor="channel_or_purpose" className={LABEL}>Channel or Topic</label>
-                <input id="channel_or_purpose" name="channel_or_purpose" defaultValue="MARKETING_EMAIL" className={FIELD} required />
+                <input id="channel_or_purpose" name="channel_or_purpose" placeholder="e.g. MARKETING_EMAIL" className={FIELD} required />
               </div>
               <div>
                 <label htmlFor="value" className={LABEL}>Preference Value</label>
-                <select id="value" name="value" defaultValue="ENABLED" className={FIELD}>
+                <select id="value" name="value" defaultValue="" required className={FIELD}>
+                  <option value="">Select…</option>
                   <option value="ENABLED">ENABLED</option>
                   <option value="DISABLED">DISABLED</option>
                   <option value="UNSET">UNSET</option>

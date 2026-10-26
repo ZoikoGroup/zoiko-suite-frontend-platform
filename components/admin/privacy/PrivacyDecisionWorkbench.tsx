@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useActionState, useEffect } from "react";
+import { useState, useActionState, useEffect, startTransition } from "react";
 import {
   Scale,
   CheckCircle2,
@@ -660,7 +660,15 @@ export function PrivacyDecisionWorkbench() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form action={lookupAction} className="flex gap-3">
+          <form
+            onSubmit={(e) => {
+              // onSubmit (not <form action>) so React 19 does not clear the id after the lookup.
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              startTransition(() => lookupAction(formData));
+            }}
+            className="flex gap-3"
+          >
             <input
               id="decision_id"
               name="decision_id"

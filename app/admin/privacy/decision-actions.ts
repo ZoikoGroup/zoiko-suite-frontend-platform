@@ -120,7 +120,10 @@ export async function evaluateDecisionAction(
     };
   }
 
-  if (checkTransfer || proposedOperation === "EXPORT") {
+  // Only send a transfer check when the user asks for one. For EXPORT with no check the decision
+  // service answers BLOCK PRV-015 itself (§13 step 4); sending an empty object made it call
+  // privacy-transfer-svc with blank ids and fail closed to INDETERMINATE instead.
+  if (checkTransfer) {
     input.transfer_check = {
       relationship_id: transferRelationshipId || undefined,
       transfer_mechanism_id: transferMechanismId || undefined,
