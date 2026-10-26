@@ -13,6 +13,8 @@ const RESULT_TEXT: Record<AuthzResult["status"], string> = {
   pending: "text-slate-600 dark:text-slate-300",
   refused: "text-amber-700 dark:text-amber-400",
   error: "text-rose-700 dark:text-rose-400",
+  signin: "text-slate-500 dark:text-slate400",
+  step_up: "text-slate-500 dark:text-slate400",
 };
 
 /**

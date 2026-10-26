@@ -85,6 +85,17 @@ export type SoDRule = {
   /** Optimistic-concurrency version; sent back as expected_version on retire/reactivate. */
   version?: number;
   created_at: string;
+  /** Governed publication (000036): only a PUBLISHED rule can be active, and
+   *  a requested change takes effect when somebody else publishes it. */
+  publication_status?: "PENDING_APPROVAL" | "PUBLISHED" | "REJECTED" | string;
+  pending_change?: "PUBLISH" | "REACTIVATE" | "RETIRE" | null;
+  change_requested_by?: string | null;
+  change_requested_at?: string | null;
+  change_reason?: string | null;
+  published_by?: string | null;
+  published_at?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
 };
 
 // ── reads ───────────────────────────────────────────────────────────────────
@@ -388,6 +399,17 @@ export type ABACRule = {
   version?: number;
   created_at: string;
   created_by_principal_id: string;
+  /** Governed publication (000036): only a PUBLISHED rule can be active, and
+   *  a requested change takes effect when somebody else publishes it. */
+  publication_status?: "PENDING_APPROVAL" | "PUBLISHED" | "REJECTED" | string;
+  pending_change?: "PUBLISH" | "REACTIVATE" | "RETIRE" | null;
+  change_requested_by?: string | null;
+  change_requested_at?: string | null;
+  change_reason?: string | null;
+  published_by?: string | null;
+  published_at?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
 };
 
 /** What `POST /v1/authorize` answers. */
@@ -434,6 +456,9 @@ export type AccessDecision = {
   session_assurance?: string;
   on_behalf_of?: string;
   delegation_id?: string;
+  /** The JIT, break-glass or support session the decision was made in (AU-13). */
+  session_kind?: "PRIVILEGED" | "BREAK_GLASS" | "SUPPORT" | string;
+  session_id?: string;
 };
 
 /** The operators the evaluator implements, each with the words for it and
@@ -564,6 +589,8 @@ export type ListAccessDecisionsOptions = {
   decidedFrom?: string;
   /** RFC3339, exclusive. */
   decidedTo?: string;
+  /** Only the decisions made in one JIT, break-glass or support session. */
+  sessionId?: string;
   /** 1..200. Above 200 is clamped by the service, not refused. */
   limit?: number;
   cursor?: string;
@@ -588,6 +615,7 @@ export async function listAccessDecisions(
       legal_entity_id: options.legalEntityId,
       decided_from: options.decidedFrom,
       decided_to: options.decidedTo,
+      session_id: options.sessionId,
       limit: options.limit ? String(options.limit) : undefined,
       cursor: options.cursor,
     },
@@ -1822,6 +1850,15 @@ export type BreakGlassSession = {
   reviewed_at?: string | null;
   review_notes?: string | null;
   requester_step_up?: StepUpEvidence | null;
+  /** AU-02: a request is PENDING_APPROVAL until `approvals_required`
+   *  independent, stepped-up approvers approve it; its clock starts then. */
+  approvals_required?: number;
+  approvals?: { approver_id: string; approved_at: string; step_up?: StepUpEvidence | null }[];
+  approved_by?: string | null;
+  approved_at?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
+  request_expires_at?: string | null;
 };
 
 export type SupportSession = {
@@ -2197,4 +2234,171 @@ const STATUS: Record<string, { label: string; tone: "success" | "warning" | "dan
 export function describeAdminStatus(status: string | null | undefined) {
   const key = (status ?? "").toUpperCase();
   return STATUS[key] ?? { label: status || "Unknown", tone: "neutral" as const };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Governed changes (authorization-svc 000034-000036)
+//
+// Every change below is a REQUEST that takes effect only when a second person
+// decides it: break-glass (AU-02), authority limits (AU-03) and SoD / ABAC
+// rule publication (AU-17). The checker is never the maker, and for a limit
+// never the person it is for. Session activity (AU-13) is what a reviewer
+// reads before attesting a session.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Approve (needs the approver's own recent step-up) or reject a break-glass request. */
+export async function decideBreakGlassSession(input: {
+  identity: Identity;
+  sessionId: string;
+  approve: boolean;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<BreakGlassSession>> {
+  return apiPost<BreakGlassSession>(
+    SERVICE,
+    `/v1/admin/break-glass-sessions/${encodeURIComponent(input.sessionId)}/${input.approve ? "approve" : "reject"}`,
+    commandBody(input.reason),
+    { identity: input.identity },
+  );
+}
+
+export type SessionActivity = {
+  session_kind: "PRIVILEGED" | "BREAK_GLASS" | "SUPPORT";
+  session_id: string;
+  granted: number;
+  denied: number;
+  actions: string[];
+  resources: string[];
+  decisions: AccessDecision[];
+  truncated: boolean;
+};
+
+/** Every decision made in one session, with what it touched. */
+export async function getSessionActivity(
+  identity: Identity,
+  kind: SessionKind,
+  sessionId: string,
+): Promise<ApiResult<SessionActivity>> {
+  return apiGet<SessionActivity>(SERVICE, `${SESSION_BASE[kind]}/${encodeURIComponent(sessionId)}/activity`, { identity });
+}
+
+export async function getBreakGlassSession(identity: Identity, sessionId: string): Promise<ApiResult<BreakGlassSession>> {
+  return apiGet<BreakGlassSession>(SERVICE, `/v1/admin/break-glass-sessions/${encodeURIComponent(sessionId)}`, { identity });
+}
+
+export async function getSupportSession(identity: Identity, sessionId: string): Promise<ApiResult<SupportSession>> {
+  return apiGet<SupportSession>(SERVICE, `/v1/support/sessions/${encodeURIComponent(sessionId)}`, { identity });
+}
+
+/** Publish (approve) or reject the pending change on a SoD or ABAC rule. */
+export async function decideRuleChange(input: {
+  identity: Identity;
+  kind: "sod" | "abac";
+  ruleId: string;
+  approve: boolean;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<SoDRule | ABACRule>> {
+  const base = input.kind === "sod" ? "/v1/admin/sod-rules" : "/v1/admin/abac-rules";
+  return apiPost(SERVICE, `${base}/${encodeURIComponent(input.ruleId)}/${input.approve ? "approve" : "reject"}`,
+    commandBody(input.reason), { identity: input.identity });
+}
+
+export type AuthorityLimit = {
+  authority_limit_id: string;
+  tenant_id: string;
+  principal_id?: string | null;
+  role_id?: string | null;
+  authority_type: string;
+  legal_entity_id?: string | null;
+  book_id?: string | null;
+  org_unit_id?: string | null;
+  currency: string;
+  lower_limit: string;
+  upper_limit: string;
+  effective_from: string;
+  effective_to?: string | null;
+  created_at: string;
+  /** Only ACTIVE limits anything. */
+  status: "PENDING_APPROVAL" | "ACTIVE" | "REJECTED" | "RETIRED" | "SUPERSEDED" | string;
+  pending_action?: "RETIRE" | null;
+  supersedes_id?: string | null;
+  requested_by?: string | null;
+  requested_at?: string | null;
+  request_reason?: string | null;
+  decided_by?: string | null;
+  decided_at?: string | null;
+  last_decision?: "APPROVED" | "REJECTED" | null;
+  version: number;
+};
+
+/** Every limit version, newest first. */
+export async function listAuthorityLimits(identity: Identity): Promise<ApiResult<{ authority_limits: AuthorityLimit[] }>> {
+  return apiGet(SERVICE, "/v1/admin/authority-limits", { identity });
+}
+
+export type AuthorityLimitInput = {
+  principalId?: string;
+  roleId?: string;
+  authorityType?: string;
+  legalEntityId?: string;
+  currency?: string;
+  lowerLimit?: string;
+  upperLimit?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+};
+
+function limitBody(input: AuthorityLimitInput) {
+  const out: Record<string, string> = {};
+  const put = (k: string, v?: string) => { if (v) out[k] = v; };
+  put("principal_id", input.principalId);
+  put("role_id", input.roleId);
+  put("authority_type", input.authorityType);
+  put("legal_entity_id", input.legalEntityId);
+  put("currency", input.currency);
+  put("lower_limit", input.lowerLimit);
+  put("upper_limit", input.upperLimit);
+  put("effective_from", input.effectiveFrom);
+  put("effective_to", input.effectiveTo);
+  return out;
+}
+
+/** Request a new limit (202, PENDING_APPROVAL until a checker approves). */
+export async function requestAuthorityLimit(input: {
+  identity: Identity;
+  limit: AuthorityLimitInput;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<AuthorityLimit>> {
+  return apiPost<AuthorityLimit>(SERVICE, "/v1/admin/authority-limits", commandBody(input.reason, limitBody(input.limit)),
+    { identity: input.identity });
+}
+
+/** Propose new amounts or dates for a limit in force; it applies until approved. */
+export async function requestAuthorityLimitChange(input: {
+  identity: Identity;
+  limitId: string;
+  limit: AuthorityLimitInput;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<AuthorityLimit>> {
+  return apiPost<AuthorityLimit>(SERVICE, `/v1/admin/authority-limits/${encodeURIComponent(input.limitId)}/change`,
+    commandBody(input.reason, limitBody(input.limit)), { identity: input.identity });
+}
+
+/** Ask for a limit to be retired, or approve / reject what is pending on it. */
+export async function commandAuthorityLimit(input: {
+  identity: Identity;
+  limitId: string;
+  verb: "retire" | "approve" | "reject";
+  reason: CommandReason;
+}): Promise<ApiWriteResult<AuthorityLimit>> {
+  return apiPost<AuthorityLimit>(SERVICE, `/v1/admin/authority-limits/${encodeURIComponent(input.limitId)}/${input.verb}`,
+    commandBody(input.reason), { identity: input.identity });
+}
+
+/** The outcome of an authorization-svc call that a person has to act on
+ *  before anything else can happen: prove a second factor, or sign in again. */
+export function needsAttention(error: { status?: number; message: string }): "step_up" | "signin" | null {
+  if (error.status !== 401) return null;
+  if (error.message.includes("step_up_required")) return "step_up";
+  if (/identity_assertion_(required|invalid)|session_revoked/.test(error.message)) return "signin";
+  return null;
 }

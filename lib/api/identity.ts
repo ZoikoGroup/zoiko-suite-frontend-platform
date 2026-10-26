@@ -822,3 +822,69 @@ export function explainIdentityError(message: string, errorCode?: string): strin
     return "identity-context-svc could not reach its database. Nothing was written.";
   return message;
 }
+// ─── Second factor (TOTP) and step-up ────────────────────────────────────────
+//
+// identity-context-svc identifies the caller of these routes by the session
+// envelope in Authorization — never by X-Principal-Id — so every call sends
+// the signed-in person's envelope. A step-up answers a NEW login token with
+// auth_time = now and amr [pwd, otp]; resolving it gives an envelope that
+// authorization-svc accepts for the 15 minutes its session routes allow.
+
+export type TotpEnrollment = {
+  factor_id: string;
+  secret: string;
+  otpauth_uri: string;
+  algorithm: string;
+  digits: number;
+  period: number;
+  status: string;
+};
+
+export type MfaFactor = {
+  factor_id: string;
+  principal_id: string;
+  type: string;
+  status: string;
+  created_at: string;
+  activated_at?: string | null;
+  last_used_at?: string | null;
+  retired_reason?: string | null;
+  failed_attempts: number;
+  locked_until?: string | null;
+};
+
+/** Start enrolling an authenticator app; the secret is returned exactly once. */
+export async function enrollTotp(identity: CallerIdentity): Promise<ApiWriteResult<TotpEnrollment>> {
+  return apiPost<TotpEnrollment>("identityContext", "/v1/mfa/totp/enroll", {}, { identity });
+}
+
+/** Prove the app works with one code; the factor becomes ACTIVE. */
+export async function activateTotp(
+  identity: CallerIdentity,
+  factorId: string,
+  code: string,
+): Promise<ApiWriteResult<MfaFactor>> {
+  return apiPost<MfaFactor>("identityContext", "/v1/mfa/totp/activate", { factor_id: factorId, code }, { identity });
+}
+
+/** Remove a factor (needs a recent step-up). */
+export async function revokeTotp(
+  identity: CallerIdentity,
+  factorId: string,
+  reasonCode: string,
+): Promise<ApiWriteResult<{ factor_id: string; status: string }>> {
+  return apiPost("identityContext", "/v1/mfa/totp/revoke", { factor_id: factorId, reason_code: reasonCode }, { identity });
+}
+
+/** The signed-in person's own factors, without secrets. */
+export async function listMfaFactors(identity: CallerIdentity): Promise<ApiResult<{ factors: MfaFactor[]; count: number }>> {
+  return apiGet("identityContext", "/v1/mfa/factors", { identity });
+}
+
+/** Prove the second factor now: a new login token to resolve into an envelope. */
+export async function stepUp(
+  identity: CallerIdentity,
+  code: string,
+): Promise<ApiWriteResult<AuthenticateResponse>> {
+  return apiPost<AuthenticateResponse>("identityContext", "/v1/authenticate/step-up", { code }, { identity });
+}

@@ -24,7 +24,13 @@ import {
   createABACRule,
   createDelegatedAuthority,
   createSoDRule,
+  commandAuthorityLimit,
+  decideBreakGlassSession,
   decidePrivilegedSession,
+  decideRuleChange,
+  needsAttention,
+  requestAuthorityLimit,
+  requestAuthorityLimitChange,
   decideRoleAssignment,
   evaluateDelegatedAccess,
   evaluateSoD,
@@ -85,6 +91,9 @@ function rfc3339(local: string): string | null {
 }
 
 function fail(error: ApiError): AuthzResult {
+  const attention = needsAttention(error);
+  if (attention === "step_up") return { status: "step_up", message: "Verify it's you to continue." };
+  if (attention === "signin") return { status: "signin", message: explainAuthzError(error) };
   const refused = error.status === 401 || error.status === 403 || error.status === 409;
   return { status: refused ? "refused" : "error", message: explainAuthzError(error) };
 }
@@ -137,7 +146,9 @@ type Command =
   | "delegation.revoke"
   | "workload.deactivate" | "workload.reactivate"
   | "jit.approve" | "jit.reject" | "jit.revoke"
-  | "break_glass.revoke" | "support.revoke";
+  | "break_glass.approve" | "break_glass.reject" | "break_glass.revoke" | "support.revoke"
+  | "sod_rule.approve" | "sod_rule.reject" | "abac.approve" | "abac.reject"
+  | "limit.approve" | "limit.reject" | "limit.retire";
 
 const DONE: Record<Command, string> = {
   "assignment.approve": "Approved. The grant is in force from now.",
@@ -147,20 +158,29 @@ const DONE: Record<Command, string> = {
   "role.reactivate": "Role reactivated. Everyone still assigned to it has its actions again.",
   "bundle.retire": "Permission set retired. The role no longer grants its actions.",
   "bundle.reactivate": "Permission set reactivated.",
-  "sod_rule.retire": "Rule retired. That pair of actions is no longer refused.",
-  "sod_rule.reactivate": "Rule reactivated. That pair of actions is refused again.",
+  "sod_rule.retire": "Retirement requested. The rule keeps refusing that pair until someone else approves the change.",
+  "sod_rule.reactivate": "Reactivation requested. It takes effect once someone else approves it.",
+  "sod_rule.approve": "Published. The rule change is in force from now.",
+  "sod_rule.reject": "Rejected. The rule stays exactly as it was.",
   "sod_exception.approve": "Exception approved. The conflict is permitted under its control until it expires.",
   "sod_exception.reject": "Exception rejected.",
   "sod_exception.revoke": "Exception revoked. The conflict is refused again.",
-  "abac.retire": "Condition retired. It no longer takes anything away.",
-  "abac.reactivate": "Condition reactivated.",
+  "abac.retire": "Retirement requested. The condition keeps applying until someone else approves the change.",
+  "abac.reactivate": "Reactivation requested. It takes effect once someone else approves it.",
+  "abac.approve": "Published. The condition change is in force from now.",
+  "abac.reject": "Rejected. The condition stays exactly as it was.",
   "delegation.revoke": "Delegation withdrawn. The borrowed authority ends now.",
   "workload.deactivate": "Workload binding deactivated.",
   "workload.reactivate": "Workload binding reactivated.",
   "jit.approve": "Session approved. It is active from now.",
   "jit.reject": "Session rejected.",
   "jit.revoke": "Session revoked.",
+  "break_glass.approve": "Approved. Emergency access is active from now, and a security alert has been raised.",
+  "break_glass.reject": "Rejected. No emergency access was granted.",
   "break_glass.revoke": "Break-glass session revoked.",
+  "limit.approve": "Approved. The limit is in force from now.",
+  "limit.reject": "Rejected. Nothing changes.",
+  "limit.retire": "Retirement requested. The limit keeps applying until someone else approves it.",
   "support.revoke": "Support session revoked.",
 };
 
@@ -195,13 +215,20 @@ export async function commandAction(_prev: AuthzResult, fd: FormData): Promise<A
       result = await setPermissionBundleActive({ identity, permissionBundleId: id, active, reason });
       break;
     case "sod_rule":
-      result = await setSoDRuleActive({ identity, sodRuleId: id, active, reason });
+      result = verb === "approve" || verb === "reject"
+        ? await decideRuleChange({ identity, kind: "sod", ruleId: id, approve: verb === "approve", reason })
+        : await setSoDRuleActive({ identity, sodRuleId: id, active, reason });
       break;
     case "sod_exception":
       result = await transitionSoDException({ identity, sodExceptionId: id, to: verb as "approve" | "reject" | "revoke", reason });
       break;
     case "abac":
-      result = await setABACRuleActive({ identity, abacRuleId: id, active, reason });
+      result = verb === "approve" || verb === "reject"
+        ? await decideRuleChange({ identity, kind: "abac", ruleId: id, approve: verb === "approve", reason })
+        : await setABACRuleActive({ identity, abacRuleId: id, active, reason });
+      break;
+    case "limit":
+      result = await commandAuthorityLimit({ identity, limitId: id, verb: verb as "approve" | "reject" | "retire", reason });
       break;
     case "delegation":
       result = await revokeDelegatedAuthority({ identity, delegationId: id, reason });
@@ -215,7 +242,9 @@ export async function commandAction(_prev: AuthzResult, fd: FormData): Promise<A
         : await decidePrivilegedSession({ identity, sessionId: id, approve: verb === "approve", reason });
       break;
     case "break_glass":
-      result = await revokeSession({ identity, kind: "break_glass", sessionId: id, reason });
+      result = verb === "revoke"
+        ? await revokeSession({ identity, kind: "break_glass", sessionId: id, reason })
+        : await decideBreakGlassSession({ identity, sessionId: id, approve: verb === "approve", reason });
       break;
     case "support":
       result = await revokeSession({ identity, kind: "support", sessionId: id, reason });
@@ -227,7 +256,14 @@ export async function commandAction(_prev: AuthzResult, fd: FormData): Promise<A
   if (!result.ok) return fail(result.error);
   refresh();
   const scheduled = command === "assignment.revoke" && text(fd, "effective_to");
-  return { status: "done", message: scheduled ? `Scheduled to end ${when(rfc3339(text(fd, "effective_to")))}.` : DONE[command] };
+  if (scheduled) return { status: "done", message: `Scheduled to end ${when(rfc3339(text(fd, "effective_to")))}.` };
+  // A break-glass approval below the quorum is recorded, not yet in force.
+  const data = result.data as { status?: string; approvals?: unknown[]; approvals_required?: number } | undefined;
+  if (command === "break_glass.approve" && data?.status === "PENDING_APPROVAL") {
+    const left = Math.max(0, (data.approvals_required ?? 1) - (data.approvals?.length ?? 0));
+    return { status: "pending", message: `Your approval is recorded. ${left} more independent approval${left === 1 ? " is" : "s are"} needed before access starts.` };
+  }
+  return { status: result.status === 202 ? "pending" : "done", message: DONE[command] };
 }
 
 export async function reviewSessionAction(_prev: AuthzResult, fd: FormData): Promise<AuthzResult> {
@@ -313,10 +349,11 @@ export async function createSoDRuleAction(_prev: AuthzResult, fd: FormData): Pro
   if (!result.ok) return fail(result.error);
   refresh();
   return {
-    status: "done",
-    message: ownObject
-      ? `Rule created. Nobody may ${actionA} a record they prepared or own.`
-      : `Rule created. Nobody may hold both ${actionA} and ${actionB}.`,
+    status: "pending",
+    message: (ownObject
+      ? `Proposed: nobody may ${actionA} a record they prepared or own.`
+      : `Proposed: nobody may hold both ${actionA} and ${actionB}.`) +
+      " It takes effect once someone other than you publishes it.",
   };
 }
 
@@ -381,7 +418,7 @@ export async function createAbacRuleAction(_prev: AuthzResult, fd: FormData): Pr
   const result = await createABACRule({ identity, ruleCode, actionType, effect, attributeKey, operator, attributeValue: attributeValue || undefined });
   if (!result.ok) return fail(result.error);
   refresh();
-  return { status: "done", message: `Condition ${ruleCode} is in force now for ${actionType}.` };
+  return { status: "pending", message: `Condition ${ruleCode} is proposed for ${actionType}. It applies once someone other than you publishes it.` };
 }
 
 // ═══ Delegation ════════════════════════════════════════════════════════════
@@ -506,10 +543,11 @@ export async function issueBreakGlassAction(_prev: AuthzResult, fd: FormData): P
   });
   if (!result.ok) return fail(result.error);
   refresh();
+  const need = result.data.approvals_required ?? 1;
   return {
-    status: "done",
-    message: `Break-glass active until ${when(result.data.expires_at)}. A critical security alert was raised, and a review opens when it ends.`,
-    details: [{ label: "Session ID", value: result.data.session_id }],
+    status: "pending",
+    message: `Emergency access requested. Security has been alerted. It starts when ${need === 1 ? "an independent approver" : `${need} independent approvers`} approve${need === 1 ? "s" : ""} it, and lapses if nobody does within an hour.`,
+    details: [{ label: "Request ID", value: result.data.session_id }],
   };
 }
 
@@ -776,4 +814,70 @@ export async function lookupDecisionAction(_prev: AuthzResult, fd: FormData): Pr
   if (d.session_assurance) details.push({ label: "Sign-in assurance", value: d.session_assurance });
   details.push({ label: "Correlation ID", value: d.correlation_id });
   return { status: "done", message: basis.meaning, details };
+}
+
+// ═══ Authority limits (AU-03) ══════════════════════════════════════════════
+
+const AMOUNT = /^\d+(\.\d{1,4})?$/;
+
+function limitFields(fd: FormData) {
+  return {
+    currency: text(fd, "currency").toUpperCase() || undefined,
+    lowerLimit: text(fd, "lower_limit") || undefined,
+    upperLimit: text(fd, "upper_limit") || undefined,
+    effectiveFrom: rfc3339(text(fd, "effective_from")) ?? undefined,
+    effectiveTo: rfc3339(text(fd, "effective_to")) ?? undefined,
+  };
+}
+
+export async function requestLimitAction(_prev: AuthzResult, fd: FormData): Promise<AuthzResult> {
+  const identity = await requireIdentity();
+  if (!identity) return EXPIRED;
+  const target = text(fd, "target");
+  const principalId = target === "person" ? text(fd, "principal_id") : "";
+  const roleId = target === "role" ? text(fd, "role_id") : "";
+  const authorityType = text(fd, "authority_type");
+  const f = limitFields(fd);
+  if (target === "person" && !UUID.test(principalId)) return bad("Choose the person this limit is for.");
+  if (target === "role" && !roleId) return bad("Choose the role this limit is for.");
+  if (!authorityType) return bad("Choose what the limit governs.");
+  if (!f.upperLimit || !AMOUNT.test(f.upperLimit)) return bad("Enter the maximum amount, for example 25000.");
+  if (f.lowerLimit && !AMOUNT.test(f.lowerLimit)) return bad("The minimum must be an amount, for example 0.");
+  const reason = readReason(fd);
+  if (typeof reason === "string") return bad(reason);
+  const result = await requestAuthorityLimit({
+    identity, reason,
+    limit: { principalId: principalId || undefined, roleId: roleId || undefined, authorityType,
+      legalEntityId: text(fd, "legal_entity_id") || undefined, ...f },
+  });
+  if (!result.ok) return fail(result.error);
+  refresh();
+  return {
+    status: "pending",
+    message: "Limit requested. It applies only after someone other than you, and other than the person it is for, approves it.",
+    details: [
+      { label: "Governs", value: result.data.authority_type },
+      { label: "Up to", value: `${result.data.upper_limit} ${result.data.currency}` },
+    ],
+  };
+}
+
+export async function changeLimitAction(_prev: AuthzResult, fd: FormData): Promise<AuthzResult> {
+  const identity = await requireIdentity();
+  if (!identity) return EXPIRED;
+  const id = text(fd, "id");
+  const f = limitFields(fd);
+  if (!id) return bad("Nothing was selected.");
+  if (f.upperLimit && !AMOUNT.test(f.upperLimit)) return bad("The maximum must be an amount, for example 25000.");
+  if (f.lowerLimit && !AMOUNT.test(f.lowerLimit)) return bad("The minimum must be an amount, for example 0.");
+  const reason = readReason(fd);
+  if (typeof reason === "string") return bad(reason);
+  const result = await requestAuthorityLimitChange({ identity, limitId: id, reason, limit: f });
+  if (!result.ok) return fail(result.error);
+  refresh();
+  return {
+    status: "pending",
+    message: "Change requested. The current limit keeps applying until someone else approves the new one.",
+    details: [{ label: "Proposed maximum", value: `${result.data.upper_limit} ${result.data.currency}` }],
+  };
 }

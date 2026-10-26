@@ -14,6 +14,8 @@ const TONE: Record<AuthzResult["status"], BannerTone> = {
   // The control answered no. Amber, so it is not mistaken for an outage.
   refused: "warning",
   error: "error",
+  signin: "neutral",
+  step_up: "neutral",
 };
 
 const ID_LABEL = /ID$/;

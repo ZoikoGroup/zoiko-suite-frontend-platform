@@ -1,17 +1,20 @@
 /**
- * One result shape for every action on the Authorization page.
+ * One result shape for every action in the Authorization area.
  *
  *   done     — the change was made, or the check answered
- *   pending  — accepted but not yet in force (maker-checker: awaiting approval)
+ *   pending  — accepted but not yet in force (maker-checker: awaiting a second person)
  *   refused  — the service decided no (a permission, an SoD rule, a checker
  *              rule) — the control working, shown amber, not as a fault
  *   error    — nothing was decided (unreachable, store down, malformed)
+ *   step_up  — needs a fresh second-factor check; the dialog asks for a code
+ *              and retries the same request
+ *   signin   — the verified session ended; sign in again
  *
  * Results are key/value `details` and, for lists, a small `table` — never raw
  * JSON (docs/UI_DESIGN_STANDARDS.md §7).
  */
 export type AuthzResult = {
-  status: "idle" | "done" | "pending" | "refused" | "error";
+  status: "idle" | "done" | "pending" | "refused" | "error" | "step_up" | "signin";
   message: string;
   details?: { label: string; value: string }[];
   table?: { headers: string[]; rows: string[][] };
@@ -43,6 +46,7 @@ export const REASONS = {
   approve: [
     ["MEETS_POLICY", "Meets policy"],
     ["BUSINESS_NEED_CONFIRMED", "Business need confirmed"],
+    ["INCIDENT_CONFIRMED", "Incident confirmed"],
     ["OTHER", "Other (explain in the note)"],
   ],
   reject: [
@@ -53,6 +57,7 @@ export const REASONS = {
   ],
   change: [
     ["POLICY_CHANGE", "Policy change"],
+    ["NEW_CONTROL", "New control required"],
     ["INCIDENT_RESPONSE", "Incident response"],
     ["ERROR_CORRECTION", "Correcting a mistake"],
     ["OTHER", "Other (explain in the note)"],
