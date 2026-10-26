@@ -1,54 +1,54 @@
 import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
-  Landmark,
-  Wallet,
-  Users,
   Scale,
   Percent,
   ShieldCheck,
   ShoppingCart,
-  History,
-  Settings,
+  ClipboardList,
+  Sliders,
+  Lock,
+  Plug,
+  CircleDollarSign,
+  BrainCircuit,
+  Fingerprint,
+  Building2,
+  ToggleLeft,
+  KeyRound,
+  DoorOpen,
+  Bell,
+  Handshake,
+  KeySquare,
+  Globe2,
   ScrollText,
   Gavel,
+  LockKeyhole,
+  Workflow,
   ClipboardCheck,
-  ClipboardList,
-  KeyRound,
-  KeySquare,
-  Snowflake,
-  Building2,
-  FileJson,
-  Bell,
-  Globe2,
-  FileText,
-  Sliders,
-  Fingerprint,
-  Bot,
-  Layers,
-  ArrowLeftRight,
-  CreditCard,
-  BarChart3,
-  Archive,
-  Milestone,
+  Landmark,
+  Wallet,
+  Calculator,
+  Settings2,
+  House,
+  Activity,
+  SquareCheckBig,
+  ListChecks,
+  TriangleAlert,
+  UserCheck,
 } from "lucide-react";
 
 export type DomainKey =
-  | "finance"
-  | "payroll"
-  | "hr"
   | "legal"
   | "tax"
   | "compliance"
-  | "jurisdictions"
-  | "delegations"
-  | "source-authority"
-  | "documents"
   | "commercial-ops"
   | "purchase-requests"
-  | "audit-events"
-  | "evidence-manifests"
-  | "workflow-history";
+  | "security"
+  | "integrations"
+  | "integration"
+  | "intelligence"
+  | "delegations"
+  | "evidence";
 
 export type DomainStatus = "operational" | "attention" | "action-required";
 
@@ -64,66 +64,6 @@ export type Domain = {
 
 export const DOMAINS: Domain[] = [
   {
-    key: "finance",
-    label: "Finance",
-    href: "/admin/finance",
-    icon: Landmark,
-    purpose:
-      "Govern financial truth across entities, currencies, obligations, and reporting structures.",
-    status: "operational",
-    coreServices: [
-      "General Ledger Service",
-      "Accounts Receivable Service",
-      "Accounts Payable Service",
-      "Treasury & Cash Position Service",
-      "Bank Reconciliation Service",
-      "Intercompany Accounting Service",
-      "Consolidation Service",
-      "Chart of Accounts Service",
-      "Financial Close Service",
-      "Payment Initiation Adapter Service",
-      "Payment Status Service",
-    ],
-  },
-  {
-    key: "payroll",
-    label: "Payroll",
-    href: "/admin/payroll",
-    icon: Wallet,
-    purpose:
-      "Govern remuneration, deductions, benefits, employer contributions, and payroll tax obligations by jurisdiction and entity.",
-    status: "operational",
-    coreServices: [
-      "Payroll Run Orchestrator",
-      "Compensation Service",
-      "Deductions Service",
-      "Benefits Service",
-      "Payroll Tax Service",
-      "Payslip Service",
-      "Employer Contributions Service",
-      "Payroll Exceptions Service",
-    ],
-  },
-  {
-    key: "hr",
-    label: "HR & Workforce",
-    href: "/admin/hr",
-    icon: Users,
-    purpose:
-      "Govern workforce lifecycle, employment structure, people records, and employment-law-sensitive actions.",
-    status: "operational",
-    coreServices: [
-      "Employee Master Service",
-      "Onboarding Service",
-      "Contract Issuance Service",
-      "Leave & Absence Service",
-      "Position & Organization Service",
-      "Performance Review Service",
-      "Offboarding Service",
-      "Workforce Compliance Service",
-    ],
-  },
-  {
     key: "legal",
     label: "Legal & Contracts",
     href: "/admin/legal",
@@ -137,7 +77,6 @@ export const DOMAINS: Domain[] = [
       "Obligation Tracking Service",
       "Board Resolution Service",
       "Corporate Actions Service",
-      "Legal Approvals Service",
       "Counterparty Management Service",
     ],
   },
@@ -153,11 +92,9 @@ export const DOMAINS: Domain[] = [
       "Tax Rules Service",
       "Tax Determination Service",
       "VAT / GST Engine",
-      "Payroll Tax Engine",
-      "Corporate Tax Estimation Service",
+      "Corporate Tax Service",
       "Withholding Tax Service",
       "Filing Preparation Service",
-      "Tax Evidence Service",
       "Tax Authority Interface Service",
     ],
   },
@@ -169,55 +106,18 @@ export const DOMAINS: Domain[] = [
     purpose:
       "Govern statutory, regulatory, operational, and internal policy obligations as a managed, evidential system.",
     status: "operational",
-
     coreServices: [
-      "Obligations Registry",
-      "Deadline Engine",
       "Filing Tracker",
       "Compliance Status Service",
-      "Evidence Sufficiency Service",
       "Exception & Escalation Service",
+      "Anomaly Detection Service",
+      "Forecasting Service",
+      "Compliance Risk Scoring Service",
+      "Reconciliation Intelligence Service",
+      "Reporting Orchestration Service",
+      "Decision Support Service",
+      "Migration Integrity Service",
     ],
-  },
-  {
-    key: "documents",
-    label: "Document Vault",
-    href: "/admin/documents",
-    icon: FileText,
-    purpose:
-      "The store of record for governed documents — append-only version lineage, checksum-verified content, and an access log of every read.",
-    status: "operational",
-    coreServices: ["Document Vault Service"],
-  },
-  {
-    key: "delegations",
-    label: "Delegated Authority",
-    href: "/admin/delegations",
-    icon: KeyRound,
-    purpose:
-      "The register of who may act for whom — time-bound, entity-scoped grants of one principal's authority to another, revocable and never deleted.",
-    status: "operational",
-    coreServices: ["Delegated Authority Service"],
-  },
-  {
-    key: "source-authority",
-    label: "Source Authority",
-    href: "/admin/source-authority",
-    icon: Layers,
-    purpose:
-      "Decide which connected system's value to trust for a field — precedence rules over the systems, append-only observations of what each one reported, and a resolution that blocks rather than guessing when equally-ranked sources disagree.",
-    status: "operational",
-    coreServices: ["Source Authority Service"],
-  },
-  {
-    key: "jurisdictions",
-    label: "Jurisdictions & Rules",
-    href: "/admin/jurisdictions",
-    icon: Globe2,
-    purpose:
-      "Govern the jurisdiction register every other service defers to — nested jurisdictions, effective-dated applicability rules, resolved rule packs, and tracked legal drift.",
-    status: "operational",
-    coreServices: ["Jurisdiction Rules Service"],
   },
   {
     key: "commercial-ops",
@@ -231,7 +131,6 @@ export const DOMAINS: Domain[] = [
       "Procurement Workflow Service",
       "Purchase Request Service",
       "Purchase Order Service",
-      "Invoice Approval Service",
       "Vendor Due Diligence Service",
       "Spend Controls Service",
     ],
@@ -242,45 +141,61 @@ export const DOMAINS: Domain[] = [
     href: "/admin/purchase-requests",
     icon: ClipboardList,
     purpose:
-      "Govern the requisition lifecycle — raise, approve and reject requests before any purchase order can be issued against them.",
+      "Govern the requisition lifecycle — raise, approve and reject requests before any purchase order can be issued.",
     status: "operational",
     coreServices: ["Purchase Request Service"],
   },
   {
-    key: "audit-events",
-    label: "Audit Event Store",
-    href: "/admin/audit-events",
-    icon: History,
+    key: "security",
+    label: "Security & Trust",
+    href: "/admin/security",
+    icon: Lock,
     purpose:
-      "Govern immutable, append-only cryptographic event logging, hash-chain verification, and provenance auditing across all services.",
+      "Govern mTLS certificates, SIEM integrations, cryptographic key lifecycle, and cap table records.",
     status: "operational",
     coreServices: [
-      "Audit Event Ingestion Engine",
-      "Cryptographic Hash-Chain Service",
-      "Event Provenance Auditor",
-      "Correlation ID Tracing Service",
-      "Tamper Evidence Verifier",
+      "mTLS Management Service",
+      "SIEM Integration Service",
+      "Carta Cap Table Service",
+      "Key Management Service",
     ],
   },
   {
-    key: "evidence-manifests",
-    label: "Evidence Manifests",
-    href: "/admin/evidence-manifests",
-    icon: Archive,
+    key: "integrations",
+    label: "Integrations",
+    href: "/admin/integrations",
+    icon: Plug,
     purpose:
-      "Assemble structured, checksummed evidence sets for audit, regulator, legal-discovery and compliance-review scenarios — pulling governance decisions, access decisions and workflow history from their owning services and fixing them in an immutable snapshot. Fails closed: any source it cannot reach fails the whole manifest rather than returning a silent partial one.",
+      "Govern all external system connectors — banking, HRIS, tax authority, eSignature, and data feeds.",
     status: "operational",
-    coreServices: ["Evidence Manifest Service"],
+    coreServices: [
+      "Connectivity API Bridge",
+      "Banking Connector",
+      "HRIS Connector",
+      "Tax Authority Interface",
+      "eSignature Integration",
+      "External Data Feed",
+    ],
   },
   {
-    key: "workflow-history",
-    label: "Workflow History",
-    href: "/admin/workflow-history",
-    icon: Milestone,
+    key: "delegations",
+    label: "Delegated Authority",
+    href: "/admin/delegations",
+    icon: ClipboardList,
     purpose:
-      "The durable, append-only history of every workflow instance on the platform — built entirely from events every workflow-driven service publishes, replay-safe, and immutable at the database level once recorded.",
+      "The register of who may act for whom — time-bound, entity-scoped grants of one principal's authority to another.",
     status: "operational",
-    coreServices: ["Workflow History Service"],
+    coreServices: ["Delegated Authority Service"],
+  },
+  {
+    key: "evidence",
+    label: "Evidence",
+    href: "/admin/evidence",
+    icon: ClipboardList,
+    purpose:
+      "The evidence each governed action must carry before it may proceed — a catalogue of requirements and the evaluation of whether one is met.",
+    status: "operational",
+    coreServices: ["Evidence Requirements Service"],
   },
 ];
 
@@ -289,141 +204,154 @@ export const PRIMARY_NAV = [
   ...DOMAINS.map((d) => ({ label: d.label, href: d.href, icon: d.icon })),
 ];
 
-/**
- * The governance control plane.
- *
- * Separate from PRIMARY_NAV because these are not business domains — they are the
- * cross-cutting services every domain is meant to be governed BY. Grouping them
- * with Finance and Payroll would imply they sit at the same level, when in fact a
- * policy or evidence requirement configured here constrains all of them.
- */
 export const PLATFORM_NAV = [
-  // First in the list because it is first in the dependency order: nothing else
-  // in the platform can be created until a tenant and a legal entity exist here,
-  // and every other service scopes its data by the ids this registry issues.
-  { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },
-  // Identity resolution comes next: every downstream service consumes the
-  // signed envelope issued here. This is the third thing that has to exist.
-  { label: "Identity Context", href: "/admin/identity", icon: Fingerprint },
-  // Immediately after the registry, and before the pages that consume grants:
-  // a role defined here is what every other service's authz check resolves
-  // against, so this is the fourth thing that has to exist.
-  { label: "Roles & Access", href: "/admin/access-control", icon: KeySquare },
-  { label: "Governance Log", href: "/admin/governance", icon: ScrollText },
-  { label: "Policies", href: "/admin/policies", icon: Gavel },
-  { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },
-  { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },
-  { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },
-  // Event contracts constrain every domain rather than belonging to one, so
-  // this sits with the platform services and not under a business area.
-  { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
-  { label: "Notifications", href: "/admin/notifications", icon: Bell },
-  // Last, and in the platform plane rather than a domain, because it constrains
-  // every service that owns deletable data rather than belonging to one: an
-  // active legal hold here blocks deletion in Finance, HR, Legal and Tax alike.
-  { label: "Retention & Holds", href: "/admin/retention", icon: Snowflake },
-  { label: "Metric Registry", href: "/admin/metrics", icon: BarChart3 },
   { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
 ];
 
 export const SECONDARY_NAV = [
-  { label: "Settings", href: "/admin/settings", icon: Settings },
+  { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
 ];
 
 /**
- * The console's navigation, grouped by the domain each page's service belongs
- * to.
- *
- * PRIMARY_NAV and PLATFORM_NAV split the same pages two ways — "business
- * domain" and "governance plane" — which answers a question about architecture
- * rather than the one an operator asks. Somebody looking for the governance
- * decision log had to know it was a cross-cutting control rather than a
- * finance page; somebody looking for board resolutions had to know they live
- * under Legal.
- *
- * These headings name the domain a page's owning service actually sits in, so
- * a page is found where its subject is. The two lists above are kept and still
- * exported: DOMAINS carries the per-domain purpose text the overview cards
- * read, and nothing else has to change to use this grouping.
- *
- * Order runs from the controls that constrain everything else down to the
- * operational domains they constrain — the same dependency order PLATFORM_NAV
- * documented, widened to the whole console.
+ * Domains 1 and 2 of the service register (Zoiko-Suite Microservices Domain
+ * Ownership, 17 Sep 2026): one page per service, in the register's S.No order.
+ * They lead the sidebar because everything below them depends on them — no
+ * other domain can act without a tenant, an identity and an authorization
+ * decision from these two.
  */
-export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
+const DOMAIN_1_IDENTITY: typeof SECONDARY_NAV = [
+  { label: "Identity Context", href: "/admin/identity", icon: Fingerprint },            // identity-context-svc
+  { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },             // tenant-entity-registry-svc
+  { label: "Feature Flags & Config", href: "/admin/settings", icon: ToggleLeft },       // configuration-feature-flag-svc
+  { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },                    // secret-vault-integration-svc
+  { label: "Gateway Authentication", href: "/admin/gateway", icon: DoorOpen },          // gateway-auth-svc
+  // search-indexer-svc has no sidebar entry: searching is the top-bar box on
+  // every page, and its admin page (/admin/search) opens from that box.
+  { label: "Notifications", href: "/admin/notifications", icon: Bell },                 // notification-svc
+  { label: "Delegated Authority", href: "/admin/delegations", icon: Handshake },        // delegated-authority-svc
+  { label: "Roles & Access", href: "/admin/access-control", icon: KeySquare },          // access-control-svc
+];
+
+const DOMAIN_2_GOVERNANCE: typeof SECONDARY_NAV = [
+  { label: "Jurisdictions & Rules", href: "/admin/jurisdictions", icon: Globe2 },       // jurisdiction-rules-svc
+  { label: "Governance Log", href: "/admin/governance", icon: ScrollText },             // governance-decision-log-svc
+  { label: "Policies", href: "/admin/policies", icon: Gavel },                          // policy-svc
+  { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },            // obligations-svc
+  { label: "Authorization", href: "/admin/authorization", icon: LockKeyhole },          // authorization-svc
+  { label: "Workflows & Approvals", href: "/admin/workflows", icon: Workflow },         // workflow-svc
+  { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },                 // evidence-requirements-svc
+];
+
+/**
+ * The sidebar's groups. Each is a collapsible heading, and its icon is what the
+ * collapsed rail shows for the whole group.
+ */
+export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECONDARY_NAV }[] = [
+  // Overview and My Work pages are "Coming soon" shells. The live Overview
+  // dashboard stays at /admin, reached from the logo.
   {
-    title: "Governance, Compliance & Audit",
+    title: "Overview",
+    icon: House,
     items: [
-      { label: "Governance Log", href: "/admin/governance", icon: ScrollText },
-      { label: "Policies", href: "/admin/policies", icon: Gavel },
-      { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },
-      { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },
-      { label: "Compliance", href: "/admin/compliance", icon: ShieldCheck },
-      { label: "Event Schemas", href: "/admin/schemas", icon: FileJson },
-      { label: "Audit Event Store", href: "/admin/audit-events", icon: History },
-      { label: "Evidence Manifests", href: "/admin/evidence-manifests", icon: Archive },
-      { label: "Workflow History", href: "/admin/workflow-history", icon: Milestone },
-      { label: "AI Governance", href: "/admin/ai-governance", icon: Bot },
-      { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
-      { label: "Migration Integrity", href: "/admin/migrations", icon: ArrowLeftRight },
+      { label: "Executive Dashboard", href: "/admin/overview/executive-dashboard", icon: LayoutDashboard },
+      { label: "Domain Health", href: "/admin/overview/domain-health", icon: Activity },
     ],
   },
   {
-    title: "Identity, Access & Authorization",
+    title: "My Work",
+    icon: SquareCheckBig,
     items: [
-      { label: "Identity Context", href: "/admin/identity", icon: Fingerprint },
-      { label: "Roles & Access", href: "/admin/access-control", icon: KeySquare },
-      { label: "Delegated Authority", href: "/admin/delegations", icon: KeyRound },
+      { label: "Tasks & Approvals", href: "/admin/my-work/tasks", icon: ListChecks },
+      { label: "Exceptions", href: "/admin/my-work/exceptions", icon: TriangleAlert },
+      { label: "Assigned Actions", href: "/admin/my-work/assigned-actions", icon: UserCheck },
+    ],
+  },
+  { title: "Identity, Scope & Foundation", icon: Fingerprint, items: DOMAIN_1_IDENTITY },
+  { title: "Governance Platform", icon: Landmark, items: DOMAIN_2_GOVERNANCE },
+  {
+    title: "Finance & Treasury",
+    icon: Wallet,
+    items: [
+      { label: "Finance & Payments", href: "/admin/finance", icon: CircleDollarSign },
     ],
   },
   {
-    title: "Organization & Reference Data",
-    items: [
-      { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },
-      { label: "Commercial Accounts", href: "/admin/commercial-accounts", icon: CreditCard },
-      { label: "Capability Registry", href: "/admin/capabilities", icon: Sliders },
-      { label: "Metric Registry", href: "/admin/metrics", icon: BarChart3 },
-      { label: "Jurisdictions & Rules", href: "/admin/jurisdictions", icon: Globe2 },
-      // Sits here rather than under a business domain because it decides which
-      // system is believed for a field family across every domain at once —
-      // payroll, HR and billing all resolve through the same precedence rules.
-      { label: "Source Authority", href: "/admin/source-authority", icon: Layers },
-    ],
-  },
-  {
-    title: "Accounting & Finance",
-    items: [{ label: "Finance", href: "/admin/finance", icon: Landmark }],
-  },
-  {
-    title: "Workforce, HR & Payroll",
-    items: [
-      { label: "HR & Workforce", href: "/admin/hr", icon: Users },
-      { label: "Payroll", href: "/admin/payroll", icon: Wallet },
-    ],
-  },
-  {
-    title: "Procurement & Payables",
-    items: [
-      { label: "Purchase Requests", href: "/admin/purchase-requests", icon: ClipboardList },
-      { label: "Commercial Ops", href: "/admin/commercial-ops", icon: ShoppingCart },
-    ],
-  },
-  {
-    title: "Legal, Contracts & Documents",
+    title: "Legal, Corporate & Commercial",
+    icon: Scale,
     items: [
       { label: "Legal & Contracts", href: "/admin/legal", icon: Scale },
-      { label: "Document Vault", href: "/admin/documents", icon: FileText },
-      { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },
-      { label: "Retention & Holds", href: "/admin/retention", icon: Snowflake },
-      { label: "Privacy & Consent", href: "/admin/privacy", icon: ShieldCheck },
+      { label: "Commercial Ops", href: "/admin/commercial-ops", icon: ShoppingCart },
+      { label: "Purchase Requests", href: "/admin/purchase-requests", icon: ClipboardList },
     ],
   },
   {
-    title: "Tax & Regulatory",
-    items: [{ label: "Tax", href: "/admin/tax", icon: Percent }],
+    title: "Tax & Compliance",
+    icon: Calculator,
+    items: [
+      { label: "Tax", href: "/admin/tax", icon: Percent },
+      { label: "Compliance", href: "/admin/compliance", icon: ShieldCheck },
+      // Evidence (evidence-requirements-svc) and Delegated Authority
+      // (delegated-authority-svc) moved to Governance Platform and Identity,
+      // Scope & Foundation — the domains their services belong to.
+    ],
   },
   {
-    title: "Notification & Communication",
-    items: [{ label: "Notifications", href: "/admin/notifications", icon: Bell }],
+    title: "Intelligence & Reporting",
+    icon: BrainCircuit,
+    items: [
+      { label: "Intelligence & Reporting", href: "/admin/intelligence", icon: BrainCircuit },
+    ],
+  },
+  {
+    title: "Security & Trust",
+    icon: ShieldCheck,
+    items: [
+      { label: "Security & Trust", href: "/admin/security", icon: Lock },
+    ],
+  },
+  {
+    title: "Integration & Extensibility",
+    icon: Plug,
+    items: [
+      // Points at /admin/integration (singular) — the route with real panels
+      // wired to live data. /admin/integrations (plural) is a static,
+      // non-functional placeholder left over from an earlier pass; not linked.
+      { label: "Integrations", href: "/admin/integration", icon: Plug },
+    ],
+  },
+  {
+    title: "Platform",
+    icon: Settings2,
+    items: [
+      { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
+    ],
   },
 ];
+
+export type NavSection = (typeof NAV_SECTIONS)[number];
+export type NavEntry = NavSection["items"][number];
+
+/** Whether `href` is the page at `pathname` or one of its sub-pages. */
+export function isNavActive(pathname: string, href: string): boolean {
+  if (href === "/admin") return pathname === "/admin";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * The sidebar group and entry a path sits under, for the active state and the
+ * page breadcrumb. The longest matching href wins, so a sub-page such as
+ * /admin/authorization/approvals resolves to its parent entry.
+ */
+export function findNavLocation(
+  pathname: string,
+): { section: NavSection; item: NavEntry } | null {
+  let best: { section: NavSection; item: NavEntry } | null = null;
+  for (const section of NAV_SECTIONS) {
+    for (const item of section.items) {
+      if (isNavActive(pathname, item.href) && (!best || item.href.length > best.item.href.length)) {
+        best = { section, item };
+      }
+    }
+  }
+  return best;
+}

@@ -40,7 +40,7 @@ export function AdminShell({ children, user }: AdminShellProps) {
     // though every overflowing descendant was already clipped by <main>. Taking
     // the shell out of flow leaves the document with nothing to scroll, so
     // <main> and the sidebar's nav are the only scrollers.
-    <div className="fixed inset-0 flex overflow-hidden bg-slate-50 dark:bg-slate-950">
+    <div className="fixed inset-0 flex overflow-hidden bg-canvas dark:bg-slate-950">
       <Sidebar
         mobileOpen={mobileOpen}
         onClose={() => setMobileOpen(false)}
@@ -49,7 +49,7 @@ export function AdminShell({ children, user }: AdminShellProps) {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenuClick={() => setMobileOpen(true)} user={user} />
-        <main className="flex-1 overflow-y-auto scrollbar-thin px-4 py-6 sm:px-6 lg:px-8">
+        <main className="flex-1 overflow-y-auto scrollbar-thin px-4 py-6 sm:px-6 lg:px-9 lg:py-7">
           {children}
         </main>
       </div>

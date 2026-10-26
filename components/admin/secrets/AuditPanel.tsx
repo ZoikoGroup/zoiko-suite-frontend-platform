@@ -116,7 +116,7 @@ export async function AuditPanel({
       />
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[54rem] border-collapse text-left">
+        <table data-testid="audit-table" className="w-full min-w-[54rem] border-collapse text-left">
           <thead className="border-b border-slate-200 dark:border-slate-800">
             <tr>
               <th scope="col" className={HEAD}>
@@ -161,6 +161,20 @@ export async function AuditPanel({
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
                   <CopyableId value={entry.requested_by_principal_id} />
+                  {/*
+                    The actor, shown only when it differs from the subject.
+                    On REQUESTED/GRANTED/DENIED a workload asks for its own
+                    access and the two are the same id — printing it twice
+                    would be noise. On REVOKED they diverge, and that row is
+                    the reason the column exists: "who ended this lease" had
+                    no answer anywhere in the evidence before it.
+                  */}
+                  {entry.acted_by_principal_id &&
+                    entry.acted_by_principal_id !== entry.requested_by_principal_id && (
+                      <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                        by <CopyableId value={entry.acted_by_principal_id} />
+                      </p>
+                    )}
                 </td>
                 <td className={cn(CELL, "max-w-[18rem]")}>
                   <span className="break-words text-slate-600 dark:text-slate-300">

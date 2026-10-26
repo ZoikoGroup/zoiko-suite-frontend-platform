@@ -113,7 +113,6 @@ export async function apiGet<T>(
   let response: Response;
   try {
     response = await fetch(url, {
-      cache: "no-store",
       headers: {
         Accept: "application/json",
         // materialWrite: false — a read carries no idempotency key. See envelope.ts.
@@ -174,30 +173,27 @@ export async function apiGet<T>(
  * `detail`, validation failures everywhere use `field`, and machine codes come
  * back under `error`. Collect all of them rather than picking one and silently
  * losing the others.
+ *
+ * delegated-authority-svc answers business refusals with `error_code` /
+ * `error_message` — the legacy handler dialect, distinct from the envelope
+ * middleware's `error`/`detail`. Without folding those, its refusals reach an
+ * @/lib/api/delegations explainDelegationError empty, and every refusal this
+ * register produces (self_dealing, delegator_mismatch,
+ * delegator_lacks_authority, terminal revoke) renders the bare status line
+ * instead of the sentence written for it.
  */
 async function readErrorDetail(response: Response): Promise<{ detail: string; body?: unknown }> {
   return response
     .json()
-    .then((body: { error?: string; field?: string; message?: string; detail?: string }) => {
-      const extra = body as Record<string, unknown>;
-      return {
-        detail: [
-          body.error,
-          body.field,
-          body.message,
-          body.detail,
-          extra.mismatch_reason as string,
-          extra.error_code as string,
-          extra.error_message as string,
-        ]
-          .filter(Boolean)
-          .join(": "),
-        // Returned alongside the folded string, not instead of it: a caller that
-        // needs a structured member (schema-registry-svc's `violations`) reads it
-        // here rather than trying to recover it from prose. See ApiError.body.
-        body: body as unknown,
-      };
-    })
+    .then((body: { error?: string; field?: string; message?: string; detail?: string; error_code?: string; error_message?: string }) => ({
+      detail: [body.error, body.field, body.message, body.detail, body.error_code, body.error_message]
+        .filter(Boolean)
+        .join(": "),
+      // Returned alongside the folded string, not instead of it: a caller that
+      // needs a structured member (schema-registry-svc's `violations`) reads it
+      // here rather than trying to recover it from prose. See ApiError.body.
+      body: body as unknown,
+    }))
     .catch(() => ({ detail: "" }));
 }
 
@@ -269,18 +265,22 @@ export async function apiPatch<T>(
  * is removed — both set effective_to, per the no-hard-delete doctrine — and
  * both take the end date as a required `end_date` query parameter rather than
  * a body, which is why this takes `query` and no payload.
+ *
+ * identity-context-svc's revoke-support-context DELETE accepts an optional JSON
+ * body carrying the revocation reason (best-effort; the first reason stands).
+ * `data` is sent when present, omitted otherwise.
  */
 export async function apiDelete<T>(
   service: ServiceName,
   path: string,
-  options: WriteOptions & { query?: Record<string, string | number | undefined> } = {},
+  options: WriteOptions & { query?: Record<string, string | number | undefined>; data?: unknown } = {},
 ): Promise<ApiWriteResult<T>> {
   const url = new URL(serviceUrl(service) + path);
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value === undefined || value === "") continue;
     url.searchParams.set(key, String(value));
   }
-  return apiWrite<T>("DELETE", service, url.toString(), undefined, options, true);
+  return apiWrite<T>("DELETE", service, url.toString(), options.data, options, true);
 }
 
 async function apiWrite<T>(

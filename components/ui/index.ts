@@ -3,3 +3,4 @@ export { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./Car
 export { Badge } from "./Badge";
 export { Skeleton } from "./Skeleton";
 export { Logo } from "./Logo";
+export { StatCard, type StatTone } from "./StatCard";
