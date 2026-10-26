@@ -42,6 +42,27 @@ export type PurchaseRequest = {
   rejected_at?: string | null;
 };
 
+/** A response body that is an object, so its envelope keys can be read. */
+function asEnvelope(raw: unknown): Record<string, unknown> | undefined {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * One request out of a write or read response. The service has answered with
+ * the bare record, `{ data: record }` and `{ request: record }`; the first
+ * object found under those keys wins, otherwise the body itself is the record.
+ */
+function unwrapRequest(raw: unknown): PurchaseRequest {
+  const envelope = asEnvelope(raw);
+  const inner = envelope?.data;
+  if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+    return inner as PurchaseRequest;
+  }
+  return (envelope?.request ?? raw) as PurchaseRequest;
+}
+
 export type ListRequestsInput = {
   identity: Identity & { tenantId: string };
   legalEntityId?: string;
@@ -60,7 +81,7 @@ export type ListRequestsInput = {
 export async function listPurchaseRequests(
   input: ListRequestsInput,
 ): Promise<ApiResult<PurchaseRequest[]>> {
-  const result = await apiGet<any>(
+  const result = await apiGet<unknown>(
     "purchaseRequest",
     "/v1/purchase-requests",
     {
@@ -77,15 +98,16 @@ export async function listPurchaseRequests(
   if (result.data === null || result.data === undefined) return { ok: true, data: [] };
 
   const raw = result.data;
-  const list: PurchaseRequest[] | null = Array.isArray(raw)
+  const envelope = asEnvelope(raw);
+  const list = (Array.isArray(raw)
     ? raw
-    : Array.isArray(raw?.data)
-    ? raw.data
-    : Array.isArray(raw?.requests)
-    ? raw.requests
-    : Array.isArray(raw?.purchase_requests)
-    ? raw.purchase_requests
-    : null;
+    : Array.isArray(envelope?.data)
+    ? envelope.data
+    : Array.isArray(envelope?.requests)
+    ? envelope.requests
+    : Array.isArray(envelope?.purchase_requests)
+    ? envelope.purchase_requests
+    : null) as PurchaseRequest[] | null;
 
   if (!list) {
     return {
@@ -114,18 +136,13 @@ export async function getPurchaseRequest(
   requestId: string,
   identity: Identity & { tenantId: string },
 ): Promise<ApiResult<PurchaseRequest>> {
-  const res = await apiGet<any>(
+  const res = await apiGet<unknown>(
     "purchaseRequest",
     `/v1/purchase-requests/${requestId}`,
     { identity },
   );
   if (!res.ok) return res;
-  const raw = res.data;
-  const item =
-    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
-      ? raw.data
-      : raw?.request ?? raw;
-  return { ok: true, data: item as PurchaseRequest };
+  return { ok: true, data: unwrapRequest(res.data) };
 }
 
 export type CreateRequestInput = {
@@ -147,7 +164,7 @@ export type CreateRequestInput = {
 export async function createPurchaseRequest(
   input: CreateRequestInput,
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  const res = await apiPost<any>(
+  const res = await apiPost<unknown>(
     "purchaseRequest",
     "/v1/purchase-requests",
     {
@@ -161,12 +178,7 @@ export async function createPurchaseRequest(
     { identity: input.identity },
   );
   if (!res.ok) return res;
-  const raw = res.data;
-  const item =
-    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
-      ? raw.data
-      : raw?.request ?? raw;
-  return { ...res, data: item as PurchaseRequest };
+  return { ...res, data: unwrapRequest(res.data) };
 }
 
 /** Approve a PENDING request. Terminal — a second call answers 422. */
@@ -174,19 +186,14 @@ export async function approvePurchaseRequest(
   requestId: string,
   identity: Identity & { principalId: string; tenantId: string },
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  const res = await apiPost<any>(
+  const res = await apiPost<unknown>(
     "purchaseRequest",
     `/v1/purchase-requests/${requestId}/approve`,
     { correlation_id: crypto.randomUUID() },
     { identity },
   );
   if (!res.ok) return res;
-  const raw = res.data;
-  const item =
-    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
-      ? raw.data
-      : raw?.request ?? raw;
-  return { ...res, data: item as PurchaseRequest };
+  return { ...res, data: unwrapRequest(res.data) };
 }
 
 /**
@@ -201,19 +208,14 @@ export async function rejectPurchaseRequest(
   reason: string,
   identity: Identity & { principalId: string; tenantId: string },
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  const res = await apiPost<any>(
+  const res = await apiPost<unknown>(
     "purchaseRequest",
     `/v1/purchase-requests/${requestId}/reject`,
     { reason, correlation_id: crypto.randomUUID() },
     { identity },
   );
   if (!res.ok) return res;
-  const raw = res.data;
-  const item =
-    raw?.data && typeof raw.data === "object" && !Array.isArray(raw.data)
-      ? raw.data
-      : raw?.request ?? raw;
-  return { ...res, data: item as PurchaseRequest };
+  return { ...res, data: unwrapRequest(res.data) };
 }
 
 // ─── Derived views ───────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { CloudOff, GitBranch, ShieldAlert, CheckCircle, Clock, XCircle, Ban } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listProcurementWorkflows, type ProcurementWorkflow } from "@/lib/api/commercial-ops";
+import { listProcurementWorkflows } from "@/lib/api/commercial-ops";
 
 const STATUS_ICONS: Record<string, React.ElementType> = {
   IN_PROGRESS: Clock,
