@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowRight, ChevronRight, ChevronsLeft, Sparkles, X } from "lucide-react";
+import { ArrowRight, ChevronRight, ChevronsLeft, ChevronsRight, Sparkles, X } from "lucide-react";
 import {
   NAV_SECTIONS,
   SECONDARY_NAV,
@@ -20,6 +20,7 @@ const ROW =
 const ROW_IDLE = "text-navy-100 hover:bg-white/[0.06] hover:text-white";
 const ICON_IDLE = "text-navy-300 group-hover:text-white";
 const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400/70";
+const TOGGLE = "rounded-lg p-1.5 text-navy-300 transition-colors hover:bg-white/10 hover:text-white";
 
 /** The logo recoloured for the navy rail (public/logo-on-dark.png): the navy
  *  strokes of the source asset are white here, so it needs no light chip. */
@@ -327,33 +328,36 @@ export function Sidebar({
             collapsed ? "justify-center" : "justify-between pl-3 pr-4",
           )}
         >
-          {collapsed ? (
+          <Link href="/admin" aria-label="ZoikoSuite — Overview" className={cn("rounded-xl", FOCUS)}>
+            <Brand collapsed={collapsed} />
+          </Link>
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+              className={cn(TOGGLE, FOCUS)}
+            >
+              <ChevronsLeft className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+
+        {/* The 80px rail has no room beside the logo mark, so expand sits just under it. */}
+        {collapsed && (
+          <div className="flex shrink-0 justify-center border-b border-rail-line py-2">
             <button
               type="button"
               onClick={onToggleCollapse}
               aria-label="Expand sidebar"
               title="Expand sidebar"
-              className={cn("rounded-xl", FOCUS)}
+              className={cn(TOGGLE, FOCUS)}
             >
-              <Brand collapsed />
+              <ChevronsRight className="h-5 w-5" />
             </button>
-          ) : (
-            <>
-              <Link href="/admin" aria-label="ZoikoSuite — Overview" className={cn("rounded-xl", FOCUS)}>
-                <Brand />
-              </Link>
-              <button
-                type="button"
-                onClick={onToggleCollapse}
-                aria-label="Collapse sidebar"
-                title="Collapse sidebar"
-                className={cn("rounded-lg p-1.5 text-navy-300 transition-colors hover:bg-white/10 hover:text-white", FOCUS)}
-              >
-                <ChevronsLeft className="h-5 w-5" />
-              </button>
-            </>
-          )}
-        </div>
+          </div>
+        )}
 
         <NavList pathname={pathname} collapsed={collapsed} onExpand={onToggleCollapse} />
       </aside>
