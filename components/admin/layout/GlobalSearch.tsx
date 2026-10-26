@@ -132,7 +132,7 @@ export function GlobalSearch() {
   const noSurfaces = surfaces !== null && surfaces.length === 0;
 
   return (
-    <div ref={containerRef} className="relative hidden max-w-xl flex-1 sm:block">
+    <div ref={containerRef} className="relative hidden max-w-2xl flex-1 sm:block">
       {/* Controlled inputs: a form with an action is reset when the action
           finishes, and a search box that cleared itself after every search
           would make refining a query impossible. */}
@@ -141,31 +141,11 @@ export function GlobalSearch() {
         role="search"
         action={action}
         onSubmit={() => setOpen(true)}
-        className="flex items-center rounded-lg border border-slate-200 bg-slate-50 transition-colors focus-within:border-navy-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-navy-500/15 dark:border-slate-700 dark:bg-slate-800/60 dark:focus-within:border-navy-400 dark:focus-within:bg-slate-800"
+        className="flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/70 pr-2 transition-colors focus-within:border-navy-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-navy-500/10 dark:border-slate-700 dark:bg-slate-800/60 dark:focus-within:border-navy-400 dark:focus-within:bg-slate-800"
       >
         <input type="hidden" name="snippets" value="on" />
-        <select
-          name="scope"
-          aria-label="Search surface"
-          value={scope}
-          onFocus={ensureSurfaces}
-          onPointerDown={ensureSurfaces}
-          onChange={(e) => {
-            setScope(e.target.value);
-            remember(e.target.value);
-          }}
-          className="h-9 max-w-38 shrink-0 truncate rounded-l-lg border-r border-slate-200 bg-transparent pl-2 pr-1 text-xs text-slate-600 outline-none dark:border-slate-700 dark:text-slate-300"
-        >
-          {surfaces === null && <option value="">{loadingSurfaces ? "Loading…" : "Surface"}</option>}
-          {noSurfaces && <option value="">None serving</option>}
-          {surfaces?.map((s) => (
-            <option key={s.scope} value={s.scope}>
-              {s.scope}
-            </option>
-          ))}
-        </select>
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
           <input
             ref={inputRef}
             type="search"
@@ -182,10 +162,35 @@ export function GlobalSearch() {
             minLength={2}
             required
             autoComplete="off"
-            placeholder="Search…  ( / )"
-            className="h-9 w-full bg-transparent pl-8 pr-3 text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-200 dark:placeholder:text-slate-500"
+            placeholder="Search records in the selected surface…"
+            className="h-10 w-full bg-transparent pl-10 pr-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 [&::-webkit-search-cancel-button]:hidden dark:text-slate-200 dark:placeholder:text-slate-500"
           />
         </div>
+        {/* Which search-indexer surface the query runs against — one at a
+            time, never a merged cross-surface search. */}
+        <select
+          name="scope"
+          aria-label="Search surface"
+          value={scope}
+          onFocus={ensureSurfaces}
+          onPointerDown={ensureSurfaces}
+          onChange={(e) => {
+            setScope(e.target.value);
+            remember(e.target.value);
+          }}
+          className="h-7 max-w-36 shrink-0 cursor-pointer truncate rounded-lg border border-slate-200 bg-white pl-2 pr-1 text-xs font-medium text-slate-600 outline-none hover:border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
+        >
+          {surfaces === null && <option value="">{loadingSurfaces ? "Loading…" : "Surface"}</option>}
+          {noSurfaces && <option value="">None serving</option>}
+          {surfaces?.map((s) => (
+            <option key={s.scope} value={s.scope}>
+              {s.scope}
+            </option>
+          ))}
+        </select>
+        <kbd className="hidden shrink-0 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-sans text-[11px] font-medium text-slate-400 md:inline-block dark:border-slate-600 dark:bg-slate-900 dark:text-slate-500">
+          Ctrl K
+        </kbd>
         {/* Never disabled for a missing surface: the action answers "choose a
             search surface", which says why, where a dead Enter key says nothing. */}
         <button type="submit" className="sr-only" disabled={pending}>

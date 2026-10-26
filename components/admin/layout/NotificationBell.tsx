@@ -115,7 +115,7 @@ export function NotificationBell() {
     <div className="relative" ref={containerRef}>
       <button
         onClick={toggle}
-        className="relative rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gold-50 text-gold-600 ring-1 ring-gold-200 transition-colors hover:bg-gold-100 dark:bg-gold-500/10 dark:text-gold-300 dark:ring-gold-500/30 dark:hover:bg-gold-500/20"
         aria-label={
           state.error
             ? "Notifications — inbox could not be read"
@@ -133,13 +133,13 @@ export function NotificationBell() {
             are different facts and only one of them is safe to imply. */}
         {state.error ? (
           <span
-            className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-slate-400 text-[10px] font-bold text-white dark:bg-slate-500"
+            className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-400 text-[10px] font-bold text-white ring-2 ring-white dark:bg-slate-500 dark:ring-slate-900"
             title="The inbox could not be read"
           >
             ?
           </span>
         ) : hasUnread ? (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[10px] font-bold leading-none text-slate-900">
+          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white dark:ring-slate-900">
             {state.unread > 99 ? "99+" : state.unread}
           </span>
         ) : null}

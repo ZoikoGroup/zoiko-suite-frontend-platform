@@ -25,6 +25,16 @@ import {
   LockKeyhole,
   Workflow,
   ClipboardCheck,
+  Landmark,
+  Wallet,
+  Calculator,
+  Settings2,
+  House,
+  Activity,
+  SquareCheckBig,
+  ListChecks,
+  TriangleAlert,
+  UserCheck,
 } from "lucide-react";
 
 export type DomainKey =
@@ -232,17 +242,42 @@ const DOMAIN_2_GOVERNANCE: typeof SECONDARY_NAV = [
   { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },                 // evidence-requirements-svc
 ];
 
-export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
-  { title: "Identity, Scope & Foundation", items: DOMAIN_1_IDENTITY },
-  { title: "Governance Platform", items: DOMAIN_2_GOVERNANCE },
+/**
+ * The sidebar's groups. Each is a collapsible heading, and its icon is what the
+ * collapsed rail shows for the whole group.
+ */
+export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECONDARY_NAV }[] = [
+  // Overview and My Work pages are "Coming soon" shells. The live Overview
+  // dashboard stays at /admin, reached from the logo.
+  {
+    title: "Overview",
+    icon: House,
+    items: [
+      { label: "Executive Dashboard", href: "/admin/overview/executive-dashboard", icon: LayoutDashboard },
+      { label: "Domain Health", href: "/admin/overview/domain-health", icon: Activity },
+    ],
+  },
+  {
+    title: "My Work",
+    icon: SquareCheckBig,
+    items: [
+      { label: "Tasks & Approvals", href: "/admin/my-work/tasks", icon: ListChecks },
+      { label: "Exceptions", href: "/admin/my-work/exceptions", icon: TriangleAlert },
+      { label: "Assigned Actions", href: "/admin/my-work/assigned-actions", icon: UserCheck },
+    ],
+  },
+  { title: "Identity, Scope & Foundation", icon: Fingerprint, items: DOMAIN_1_IDENTITY },
+  { title: "Governance Platform", icon: Landmark, items: DOMAIN_2_GOVERNANCE },
   {
     title: "Finance & Treasury",
+    icon: Wallet,
     items: [
       { label: "Finance & Payments", href: "/admin/finance", icon: CircleDollarSign },
     ],
   },
   {
     title: "Legal, Corporate & Commercial",
+    icon: Scale,
     items: [
       { label: "Legal & Contracts", href: "/admin/legal", icon: Scale },
       { label: "Commercial Ops", href: "/admin/commercial-ops", icon: ShoppingCart },
@@ -251,6 +286,7 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   },
   {
     title: "Tax & Compliance",
+    icon: Calculator,
     items: [
       { label: "Tax", href: "/admin/tax", icon: Percent },
       { label: "Compliance", href: "/admin/compliance", icon: ShieldCheck },
@@ -261,18 +297,21 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   },
   {
     title: "Intelligence & Reporting",
+    icon: BrainCircuit,
     items: [
       { label: "Intelligence & Reporting", href: "/admin/intelligence", icon: BrainCircuit },
     ],
   },
   {
     title: "Security & Trust",
+    icon: ShieldCheck,
     items: [
       { label: "Security & Trust", href: "/admin/security", icon: Lock },
     ],
   },
   {
     title: "Integration & Extensibility",
+    icon: Plug,
     items: [
       // Points at /admin/integration (singular) — the route with real panels
       // wired to live data. /admin/integrations (plural) is a static,
@@ -282,8 +321,37 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   },
   {
     title: "Platform",
+    icon: Settings2,
     items: [
       { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
     ],
   },
 ];
+
+export type NavSection = (typeof NAV_SECTIONS)[number];
+export type NavEntry = NavSection["items"][number];
+
+/** Whether `href` is the page at `pathname` or one of its sub-pages. */
+export function isNavActive(pathname: string, href: string): boolean {
+  if (href === "/admin") return pathname === "/admin";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * The sidebar group and entry a path sits under, for the active state and the
+ * page breadcrumb. The longest matching href wins, so a sub-page such as
+ * /admin/authorization/approvals resolves to its parent entry.
+ */
+export function findNavLocation(
+  pathname: string,
+): { section: NavSection; item: NavEntry } | null {
+  let best: { section: NavSection; item: NavEntry } | null = null;
+  for (const section of NAV_SECTIONS) {
+    for (const item of section.items) {
+      if (isNavActive(pathname, item.href) && (!best || item.href.length > best.item.href.length)) {
+        best = { section, item };
+      }
+    }
+  }
+  return best;
+}
