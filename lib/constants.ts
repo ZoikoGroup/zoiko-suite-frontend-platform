@@ -161,7 +161,7 @@ export const DOMAINS: Domain[] = [
     purpose:
       "The register of who may act for whom — time-bound, entity-scoped grants of one principal's authority to another.",
     status: "operational",
-    coreServices: ["Compliance Risk Scoring Service"],
+    coreServices: ["Delegated Authority Service"],
   },
   {
     key: "evidence",
@@ -170,7 +170,7 @@ export const DOMAINS: Domain[] = [
     icon: ClipboardList,
     purpose: "Track filing evidence and preparation records required for compliance.",
     status: "operational",
-    coreServices: ["Filing Preparation Service"],
+    coreServices: ["Evidence Requirements Service"],
   },
 ];
 
