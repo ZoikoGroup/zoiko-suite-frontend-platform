@@ -16,7 +16,11 @@ import {
   createPublicAISession,
   endPublicAISession,
   getPublicAIConfig,
+  recordPublicAIHandoff,
+  sendPublicAIFeedback,
   sendPublicAITurn,
+  type FeedbackRating,
+  type FeedbackReason,
 } from "@/lib/api/public-ai";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,4 +56,20 @@ export async function endAssistantSession(grant: string, sessionId: string) {
 export async function loadAssistantConfig() {
   await requireConsoleSession();
   return getPublicAIConfig();
+}
+
+const RATINGS = new Set(["useful", "not_useful"]);
+const REASONS = new Set(["", "incorrect", "incomplete", "not_relevant", "unclear", "other"]);
+const ROUTE_KEY = /^[a-z_]{1,40}$/;
+
+export async function rateAssistantAnswer(grant: string, sessionId: string, turnId: string, rating: FeedbackRating, reason: FeedbackReason) {
+  await requireConsoleSession();
+  if (!grant || !sessionId || !turnId || !RATINGS.has(rating) || !REASONS.has(reason)) throw new Error("Invalid request");
+  return sendPublicAIFeedback(grant, sessionId, turnId, rating, reason);
+}
+
+export async function recordAssistantHandoff(grant: string, sessionId: string, routeKey: string) {
+  await requireConsoleSession();
+  if (!grant || !sessionId || !ROUTE_KEY.test(routeKey)) throw new Error("Invalid request");
+  return recordPublicAIHandoff(grant, sessionId, routeKey);
 }

@@ -136,3 +136,22 @@ export function endPublicAISession(grant: string, sessionId: string) {
 export function getPublicAIConfig() {
   return call<PublicAIConfig>("GET", "/config");
 }
+
+export type FeedbackRating = "useful" | "not_useful";
+export type FeedbackReason = "" | "incorrect" | "incomplete" | "not_relevant" | "unclear" | "other";
+
+/** Doc 01 FR-09: rate an answer. Enums only; no free text leaves the console. */
+export function sendPublicAIFeedback(grant: string, sessionId: string, turnId: string, rating: FeedbackRating, reason: FeedbackReason) {
+  return call<void>("POST", `/turns/${encodeURIComponent(turnId)}/feedback`, {
+    body: { schema_version: "1.0", session_id: sessionId, rating, ...(reason ? { reason } : {}) },
+    grant,
+  });
+}
+
+/** Doc 05 §21: record that an official route was opened (route-only; creates nothing). */
+export function recordPublicAIHandoff(grant: string, sessionId: string, routeKey: string) {
+  return call<{ route_key: string; url: string }>("POST", "/handoffs", {
+    body: { schema_version: "1.0", session_id: sessionId, route_key: routeKey },
+    grant,
+  });
+}

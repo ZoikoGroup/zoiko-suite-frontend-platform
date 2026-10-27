@@ -1,30 +1,39 @@
 "use client";
 
-// ZoikoSuite public assistant widget (Suivo, Release R0).
+// ZoikoSuite public assistant widget (public-ai-svc, Suivo Release R0).
 //
-// Doc 01 §06–§11 (layout, states S00–S09), Doc 02 §21 microcopy, Doc 07 §15
-// (WCAG 2.2 AA): non-modal panel with no focus trap, Escape closes and returns
-// focus to the launcher, polite live region for new replies, 44×44 targets,
-// motion only when the user allows it, full-screen sheet on small screens.
+// Doc 01 §06–§11 (layout; states S00 closed, S01 welcome, S02 thinking with
+// cancel, S03 grounded answer, S04 clarification, S05 uncertain, S06 safety,
+// S07 escalation, S08 error with retry + help + reference, S09 end/feedback
+// with retention notice; W02 mobile back button closes the sheet first),
+// Doc 02 §21 microcopy, Doc 07 §15 (WCAG 2.2 AA): non-modal panel with no
+// focus trap, Escape closes and returns focus to the launcher, polite live
+// region, 44×44 targets, motion only when allowed, full-screen sheet on
+// small screens.
 //
-// Trust rules the UI keeps: links come only from the service's signed route
-// and citation registries (never from answer text); the session grant stays in
-// memory only; nothing claims a booking, ticket or callback.
+// Trust rules: links come only from the service's signed route and citation
+// registries (never from answer text); the session grant lives in memory only;
+// nothing claims a booking, ticket or callback; feedback is enums only.
 
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { ExternalLink, Loader2, MessageCircle, RotateCcw, Send, X } from "lucide-react";
+import { ExternalLink, Loader2, MessageCircle, RotateCcw, Send, Square, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   askAssistant,
   endAssistantSession,
   loadAssistantConfig,
+  rateAssistantAnswer,
+  recordAssistantHandoff,
   startAssistantSession,
 } from "@/app/admin/assistant/actions";
-import type { PublicAIConfig, PublicAIError, TurnEnvelope } from "@/lib/api/public-ai";
+import type { FeedbackReason, PublicAIConfig, PublicAIError, TurnEnvelope } from "@/lib/api/public-ai";
+
+type Feedback = { rating?: "useful" | "not_useful"; reason?: FeedbackReason; sent?: boolean };
 
 type Message =
   | { id: string; role: "visitor"; text: string }
-  | { id: string; role: "assistant"; turn: TurnEnvelope }
+  | { id: string; role: "assistant"; turn: TurnEnvelope; feedback: Feedback }
+  | { id: string; role: "notice"; text: string }
   | { id: string; role: "error"; text: string; retry?: string; requestId?: string };
 
 type Session = { id: string; grant: string };
@@ -47,11 +56,21 @@ const ROUTE_LABELS: Record<string, string> = {
   signup_or_trial: "Start a trial",
 };
 
+const REASONS: { value: FeedbackReason; label: string }[] = [
+  { value: "incorrect", label: "Incorrect" },
+  { value: "incomplete", label: "Incomplete" },
+  { value: "not_relevant", label: "Not relevant" },
+  { value: "unclear", label: "Unclear" },
+];
+
+const iconButton =
+  "flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500";
+
 function errorText(e: PublicAIError): string {
   if (e.kind === "http" && e.status === 429) {
     return `You're sending messages quickly. Please wait ${e.retryAfterSeconds ?? "a few"} seconds and try again.`;
   }
-  if (e.kind === "http" && e.status === 409) return "I'm still answering your previous message.";
+  if (e.kind === "http" && e.status === 409) return "I'm still finishing your previous message. Please try again in a moment.";
   if (e.kind === "timeout") return "That took too long. Please try again.";
   return "I can't reach the assistant right now. Please try again, or use the official ZoikoSuite pages.";
 }
@@ -63,6 +82,9 @@ export function AssistantWidget() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const session = useRef<Session | null>(null);
+  const inFlight = useRef<string | null>(null); // id of the visitor message awaiting a reply
+  const pushedHistory = useRef(false);
+  const returnFocus = useRef(false);
   const launcher = useRef<HTMLButtonElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const logEnd = useRef<HTMLDivElement>(null);
@@ -79,7 +101,14 @@ export function AssistantWidget() {
   }, [open, config]);
 
   useEffect(() => {
-    if (open) composer.current?.focus();
+    if (open) {
+      composer.current?.focus();
+    } else if (returnFocus.current) {
+      // After the panel has closed (the launcher is hidden on small screens
+      // while the sheet is open), return focus to it.
+      returnFocus.current = false;
+      launcher.current?.focus();
+    }
   }, [open]);
 
   useEffect(() => {
@@ -87,9 +116,27 @@ export function AssistantWidget() {
   }, [messages, sending]);
 
   const close = useCallback(() => {
+    returnFocus.current = true;
     setOpen(false);
-    launcher.current?.focus();
+    if (pushedHistory.current) {
+      pushedHistory.current = false;
+      if (window.history.state?.zoikoAssistant) window.history.back();
+    }
   }, []);
+
+  // W02: on small screens the device back button closes the sheet first.
+  useEffect(() => {
+    if (!open || window.innerWidth >= 640) return;
+    window.history.pushState({ ...(window.history.state ?? {}), zoikoAssistant: true }, "");
+    pushedHistory.current = true;
+    const onPop = () => {
+      pushedHistory.current = false;
+      returnFocus.current = true;
+      setOpen(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [open]);
 
   async function ensureSession(fresh = false): Promise<Session | null> {
     if (session.current && !fresh) return session.current;
@@ -99,46 +146,81 @@ export function AssistantWidget() {
     return session.current;
   }
 
+  function stop() {
+    // S02 cancel: the reply is discarded when it arrives. The service still
+    // finishes the turn, so nothing is half-written on its side.
+    inFlight.current = null;
+    setSending(false);
+    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "notice", text: "Stopped. Ask again whenever you're ready." }]);
+    composer.current?.focus();
+  }
+
   async function send(text: string) {
     const message = text.trim();
     if (!message || sending || message.length > MAX_MESSAGE) return;
+    const visitorId = crypto.randomUUID();
+    inFlight.current = visitorId;
     setSending(true);
     setDraft("");
-    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "visitor", text: message }]);
+    setMessages((m) => [...m, { id: visitorId, role: "visitor", text: message }]);
+    const stillWanted = () => inFlight.current === visitorId;
     try {
       let s = await ensureSession();
       if (!s) {
-        setMessages((m) => [...m, { id: crypto.randomUUID(), role: "error", text: errorText({ kind: "unreachable" }), retry: message }]);
+        if (stillWanted()) setMessages((m) => [...m, { id: crypto.randomUUID(), role: "error", text: errorText({ kind: "unreachable" }), retry: message }]);
         return;
       }
-      const turnId = crypto.randomUUID();
-      let r = await askAssistant(s.grant, s.id, turnId, message);
+      let r = await askAssistant(s.grant, s.id, crypto.randomUUID(), message);
       if (!r.ok && r.error.kind === "http" && r.error.status === 401) {
-        // Session expired: start a new one and try once more.
-        s = await ensureSession(true);
+        s = await ensureSession(true); // session expired: start a new one, try once more
         if (s) r = await askAssistant(s.grant, s.id, crypto.randomUUID(), message);
       }
+      if (!stillWanted()) return;
       if (r.ok) {
         const turn = r.data;
-        setMessages((m) => [...m, { id: turn.turn_id, role: "assistant", turn }]);
+        setMessages((m) => [...m, { id: turn.turn_id, role: "assistant", turn, feedback: {} }]);
       } else {
         setMessages((m) => [...m, { id: crypto.randomUUID(), role: "error", text: errorText(r.error), retry: message, requestId: r.error.requestId }]);
       }
     } catch {
-      setMessages((m) => [...m, { id: crypto.randomUUID(), role: "error", text: errorText({ kind: "unreachable" }), retry: message }]);
+      if (stillWanted()) setMessages((m) => [...m, { id: crypto.randomUUID(), role: "error", text: errorText({ kind: "unreachable" }), retry: message }]);
     } finally {
-      setSending(false);
-      composer.current?.focus();
+      if (stillWanted()) {
+        inFlight.current = null;
+        setSending(false);
+        composer.current?.focus();
+      }
     }
   }
 
   async function endChat() {
     const s = session.current;
     session.current = null;
+    inFlight.current = null;
+    setSending(false);
     setMessages([]);
     setDraft("");
     if (s) await endAssistantSession(s.grant, s.id).catch(() => undefined);
     composer.current?.focus();
+  }
+
+  function setFeedback(turnId: string, fb: Feedback) {
+    setMessages((all) => all.map((m) => (m.role === "assistant" && m.turn.turn_id === turnId ? { ...m, feedback: { ...m.feedback, ...fb } } : m)));
+  }
+
+  async function rate(turnId: string, rating: "useful" | "not_useful", reason: FeedbackReason = "") {
+    const s = session.current;
+    if (!s) return;
+    setFeedback(turnId, { rating, reason, sent: false });
+    const r = await rateAssistantAnswer(s.grant, s.id, turnId, rating, reason).catch(() => null);
+    setFeedback(turnId, { sent: !!r?.ok });
+  }
+
+  function onRouteClick(routeKey: string) {
+    // Doc 05 §21: record the click (route-only; nothing is created). The link
+    // itself opens normally, so this never blocks navigation.
+    const s = session.current;
+    if (s) void recordAssistantHandoff(s.grant, s.id, routeKey).catch(() => undefined);
   }
 
   function onComposerKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -148,13 +230,9 @@ export function AssistantWidget() {
     }
   }
 
-  function routeUrl(key: string) {
-    return config?.public_routes.find((r) => r.route_key === key)?.url;
-  }
-
-  function citationLink(urlKey: string) {
-    return config?.citation_links.find((c) => c.url_key === urlKey);
-  }
+  const routeUrl = (key: string) => config?.public_routes.find((r) => r.route_key === key)?.url;
+  const citationLink = (urlKey: string) => config?.citation_links.find((c) => c.url_key === urlKey);
+  const supportUrl = routeUrl("support");
 
   return (
     <>
@@ -204,19 +282,14 @@ export function AssistantWidget() {
             <button
               type="button"
               onClick={() => void endChat()}
-              disabled={messages.length === 0 || sending}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500"
+              disabled={messages.length === 0}
+              className={iconButton}
               aria-label="End chat and clear conversation"
               title="End chat"
             >
               <RotateCcw className="h-5 w-5" aria-hidden />
             </button>
-            <button
-              type="button"
-              onClick={close}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500"
-              aria-label={`Close ${name}`}
-            >
+            <button type="button" onClick={close} className={iconButton} aria-label={`Close ${name}`}>
               <X className="h-5 w-5" aria-hidden />
             </button>
           </header>
@@ -241,6 +314,10 @@ export function AssistantWidget() {
                     </li>
                   ))}
                 </ul>
+                <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+                  Ending the chat (<RotateCcw className="inline h-3 w-3" aria-hidden />
+                  <span className="sr-only">End chat button</span>) clears this conversation.
+                </p>
               </div>
             )}
 
@@ -253,6 +330,7 @@ export function AssistantWidget() {
                       {m.text}
                     </p>
                   )}
+                  {m.role === "notice" && <p className="text-xs italic text-slate-500 dark:text-slate-400">{m.text}</p>}
                   {m.role === "assistant" && (
                     <div className="max-w-[90%] rounded-2xl rounded-bl-sm bg-slate-100 px-3 py-2 text-sm text-slate-900 dark:bg-slate-800 dark:text-slate-100">
                       <span className="sr-only">{name}: </span>
@@ -294,6 +372,7 @@ export function AssistantWidget() {
                             href={url}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={() => onRouteClick(a.route_key)}
                             className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500 focus-visible:ring-offset-2"
                           >
                             {ROUTE_LABELS[a.route_key] ?? "Open official page"}
@@ -302,35 +381,103 @@ export function AssistantWidget() {
                           </a>
                         );
                       })}
+                      {(m.turn.status === "ANSWERED" || m.turn.status === "ABSTAIN") && (
+                        <div className="mt-3 border-t border-slate-200 pt-2 dark:border-slate-700">
+                          {m.feedback.sent ? (
+                            <p className="text-xs text-slate-600 dark:text-slate-400" role="status">
+                              Thanks for the feedback.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="mr-1 text-xs text-slate-600 dark:text-slate-400">Was this helpful?</span>
+                              <button
+                                type="button"
+                                aria-pressed={m.feedback.rating === "useful"}
+                                aria-label="Yes, this was helpful"
+                                onClick={() => void rate(m.turn.turn_id, "useful")}
+                                className={cn(iconButton, "h-9 w-9", m.feedback.rating === "useful" && "text-navy-700 dark:text-navy-300")}
+                              >
+                                <ThumbsUp className="h-4 w-4" aria-hidden />
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={m.feedback.rating === "not_useful"}
+                                aria-label="No, this wasn't helpful"
+                                onClick={() => setFeedback(m.turn.turn_id, { rating: "not_useful" })}
+                                className={cn(iconButton, "h-9 w-9", m.feedback.rating === "not_useful" && "text-navy-700 dark:text-navy-300")}
+                              >
+                                <ThumbsDown className="h-4 w-4" aria-hidden />
+                              </button>
+                              {m.feedback.rating === "not_useful" && (
+                                <ul className="mt-1 flex w-full flex-wrap gap-1" aria-label="What was wrong?">
+                                  {REASONS.map((r) => (
+                                    <li key={r.value}>
+                                      <button
+                                        type="button"
+                                        onClick={() => void rate(m.turn.turn_id, "not_useful", r.value)}
+                                        className="min-h-9 rounded-full border border-slate-300 px-3 text-xs hover:bg-slate-50 dark:border-slate-600 dark:hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500"
+                                      >
+                                        {r.label}
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                   {m.role === "error" && (
                     <div className="max-w-[90%] rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
                       <p>{m.text}</p>
                       {m.requestId && <p className="mt-1 text-xs opacity-80">Reference: {m.requestId}</p>}
-                      {m.retry && (
-                        <button
-                          type="button"
-                          disabled={sending}
-                          onClick={() => {
-                            setMessages((all) => all.filter((x) => x.id !== m.id));
-                            void send(m.retry!);
-                          }}
-                          className="mt-2 min-h-11 rounded-lg px-3 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
-                        >
-                          Try again
-                        </button>
-                      )}
+                      <div className="mt-1 flex flex-wrap items-center gap-3">
+                        {m.retry && (
+                          <button
+                            type="button"
+                            disabled={sending}
+                            onClick={() => {
+                              setMessages((all) => all.filter((x) => x.id !== m.id));
+                              void send(m.retry!);
+                            }}
+                            className="min-h-11 rounded-lg px-1 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                          >
+                            Try again
+                          </button>
+                        )}
+                        {supportUrl && (
+                          <a
+                            href={supportUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex min-h-11 items-center gap-1 font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600"
+                          >
+                            Get help
+                            <ExternalLink className="h-3 w-3" aria-hidden />
+                            <span className="sr-only">(opens in a new tab)</span>
+                          </a>
+                        )}
+                      </div>
                     </div>
                   )}
                 </li>
               ))}
             </ol>
             {sending && (
-              <p className="mt-3 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
+              <div className="mt-3 flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
                 <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden />
-                Checking approved ZoikoSuite sources…
-              </p>
+                <span>Checking approved ZoikoSuite sources…</span>
+                <button
+                  type="button"
+                  onClick={stop}
+                  className="ml-auto inline-flex min-h-11 items-center gap-1 rounded-lg px-3 font-medium text-navy-700 hover:bg-slate-100 dark:text-navy-300 dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500"
+                >
+                  <Square className="h-3.5 w-3.5" aria-hidden />
+                  Stop
+                </button>
+              </div>
             )}
             <div ref={logEnd} />
           </div>
