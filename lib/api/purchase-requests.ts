@@ -242,8 +242,13 @@ export function summariseRequests(requests: PurchaseRequest[]): RequestStats {
     else if (r.status === "REJECTED") stats.rejected += 1;
     else {
       stats.pending += 1;
-      stats.pendingValueByCurrency[r.currency_code] =
-        (stats.pendingValueByCurrency[r.currency_code] ?? 0) + r.amount;
+      const rawCode = r.currency_code ?? (r as unknown as Record<string, unknown>).currency;
+      const currency = typeof rawCode === "string" && rawCode.trim().length > 0
+        ? rawCode.trim().toUpperCase()
+        : "UNSPECIFIED";
+      const amount = Number.isFinite(r.amount) ? r.amount : 0;
+      stats.pendingValueByCurrency[currency] =
+        (stats.pendingValueByCurrency[currency] ?? 0) + amount;
     }
   }
 
@@ -368,19 +373,27 @@ export type RequestExplanation = {
 /** Format an amount with its currency. Requests in different currencies are
  *  never combined anywhere in this module — there is no FX rate in this
  *  service, and a single total would be a fiction. */
-export function formatRequestAmount(amount: number, currencyCode: string): string {
-  try {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: currencyCode,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    // An unrecognised currency code throws rather than falling back, and a
-    // request whose currency the browser does not know is still a request whose
-    // amount has to be legible.
-    return `${amount.toLocaleString("en-GB", { maximumFractionDigits: 2 })} ${currencyCode}`;
+export function formatRequestAmount(amount: number, currencyCode?: string | null): string {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const cleanCode = typeof currencyCode === "string" ? currencyCode.trim().toUpperCase() : "";
+
+  if (/^[A-Z]{3}$/.test(cleanCode)) {
+    try {
+      return new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: cleanCode,
+        maximumFractionDigits: 2,
+      }).format(safeAmount);
+    } catch {
+      // Fallback for unrecognised 3-letter currency code
+    }
   }
+
+  const formatted = safeAmount.toLocaleString("en-GB", { maximumFractionDigits: 2 });
+  if (cleanCode && cleanCode !== "UNDEFINED" && cleanCode !== "UNSPECIFIED") {
+    return `${formatted} ${cleanCode}`;
+  }
+  return `${formatted} (Currency unspecified)`;
 }
 
 /**

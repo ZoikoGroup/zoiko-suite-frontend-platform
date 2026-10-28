@@ -164,6 +164,33 @@ export type SessionPayload = {
 
 export function findUserByCredentials(email: string, password: string): GovernedUserAccount | null {
   const normalizedEmail = email.trim().toLowerCase();
+
+  // In production, hardcoded demo accounts must NOT authenticate unless ALLOW_DEMO_CREDENTIALS is explicitly set
+  if (process.env.NODE_ENV === "production" && !process.env.ALLOW_DEMO_CREDENTIALS) {
+    const prodAdminEmail = process.env.ZOIKO_ADMIN_EMAIL?.trim().toLowerCase();
+    const prodAdminPassword = process.env.ZOIKO_ADMIN_PASSWORD;
+
+    if (
+      prodAdminEmail &&
+      prodAdminPassword &&
+      normalizedEmail === prodAdminEmail &&
+      password === prodAdminPassword
+    ) {
+      return {
+        email: prodAdminEmail,
+        password: "", // do not leak into memory/objects
+        name: process.env.ZOIKO_ADMIN_NAME || "Production Administrator",
+        role: "Platform Administrator",
+        domain: "Global Governance & Core Platform",
+        principalId: process.env.ZOIKO_ADMIN_PRINCIPAL_ID || "33333333-3333-3333-3333-333333333333",
+        tenantId: process.env.ZOIKO_ADMIN_TENANT_ID || "11111111-1111-1111-1111-111111111111",
+        legalEntityId: process.env.ZOIKO_ADMIN_LEGAL_ENTITY_ID || "22222222-2222-2222-2222-222222222222",
+      };
+    }
+    // No hardcoded passwords in production authentication paths
+    return null;
+  }
+
   return GOVERNED_USER_ACCOUNTS.find(
     (u) => u.email.toLowerCase() === normalizedEmail && u.password === password
   ) ?? null;
@@ -173,16 +200,94 @@ export function verifyCredentials(email: string, password: string): boolean {
   return findUserByCredentials(email, password) !== null;
 }
 
+import crypto from "crypto";
+
+export function getSessionSecret(): string {
+  const secret = process.env.ZOIKO_SESSION_SECRET || process.env.SESSION_SECRET;
+  if (secret && secret.length >= 32) {
+    return secret;
+  }
+  if (process.env.NODE_ENV === "production") {
+    if (!secret) {
+      console.error("FATAL: ZOIKO_SESSION_SECRET or SESSION_SECRET must be configured in production.");
+      throw new Error("Missing required session secret in production. Set ZOIKO_SESSION_SECRET with >= 32 characters.");
+    }
+    if (secret.length < 32) {
+      throw new Error("ZOIKO_SESSION_SECRET must be at least 32 characters in production.");
+    }
+  }
+  return secret || "zoiko-suite-default-dev-signing-secret-change-in-prod-2026";
+}
+
+export function signSessionPayload(payloadBase64: string): string {
+  return crypto
+    .createHmac("sha256", getSessionSecret())
+    .update(payloadBase64)
+    .digest("base64url");
+}
+
 export function encodeSession(payload: SessionPayload): string {
-  return Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
+  const safePayload: SessionPayload = {
+    ...payload,
+    iat: payload.iat || Date.now(),
+  };
+  const payloadBase64 = Buffer.from(JSON.stringify(safePayload), "utf-8").toString("base64url");
+  const signature = signSessionPayload(payloadBase64);
+  return `${payloadBase64}.${signature}`;
 }
 
 export function decodeSession(value: string | undefined | null): SessionPayload | null {
-  if (!value) return null;
+  if (!value || typeof value !== "string") return null;
+
+  const parts = value.split(".");
+  // Unsigned, legacy, or malformed cookies lack the HMAC signature part
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [payloadBase64, signature] = parts;
+  if (!payloadBase64 || !signature) {
+    return null;
+  }
+
+  // Cryptographically verify signature using constant-time comparison
+  const expectedSignature = signSessionPayload(payloadBase64);
+  const sigBuffer = Buffer.from(signature);
+  const expBuffer = Buffer.from(expectedSignature);
+
+  if (sigBuffer.length !== expBuffer.length || !crypto.timingSafeEqual(sigBuffer, expBuffer)) {
+    return null; // Tampered, forged, or invalid signature
+  }
+
   try {
-    const json = Buffer.from(value, "base64url").toString("utf-8");
+    const json = Buffer.from(payloadBase64, "base64url").toString("utf-8");
     const parsed = JSON.parse(json) as Partial<SessionPayload>;
-    if (!parsed?.email) return null;
+
+    // Validate required claims
+    if (
+      !parsed?.email ||
+      typeof parsed.email !== "string" ||
+      !parsed.role ||
+      !parsed.tenantId ||
+      !parsed.principalId
+    ) {
+      return null;
+    }
+
+    // Validate expiration
+    if (typeof parsed.iat === "number") {
+      const now = Date.now();
+      const iatMs = parsed.iat < 1e11 ? parsed.iat * 1000 : parsed.iat;
+      if (now - iatMs > SESSION_MAX_AGE_SECONDS * 1000) {
+        return null; // Expired
+      }
+      if (iatMs > now + 60_000) {
+        return null; // Clock skew anomaly (>60s in future)
+      }
+    } else {
+      return null;
+    }
+
     return {
       ...DEMO_IDENTITY,
       ...parsed,
@@ -190,6 +295,26 @@ export function decodeSession(value: string | undefined | null): SessionPayload 
   } catch {
     return null;
   }
+}
+
+export function isPlatformAdmin(session: SessionPayload | null): boolean {
+  return session?.role === "Platform Administrator";
+}
+
+export function assertSessionRole(
+  session: SessionPayload | null,
+  allowedRoles: string[],
+): boolean {
+  if (!session || !session.role) return false;
+  return allowedRoles.includes(session.role);
+}
+
+export function assertTenantContext(
+  session: SessionPayload | null,
+  expectedTenantId: string,
+): boolean {
+  if (!session || !session.tenantId) return false;
+  return session.tenantId === expectedTenantId;
 }
 
 export function createSessionForUser(user: GovernedUserAccount): SessionPayload {

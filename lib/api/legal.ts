@@ -1082,33 +1082,172 @@ export async function listCorporateActions(identity?: Identity): Promise<ApiResu
 
 // ─── 6. Counterparty Management ──────────────────────────────────────────────
 
+export type CounterpartyType =
+  | "VENDOR"
+  | "CUSTOMER"
+  | "PARTNER"
+  | "REGULATOR"
+  | "FINANCIAL_INSTITUTION"
+  | "OTHER";
+
+export type CounterpartyStatus =
+  | "ONBOARDING"
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "TERMINATED";
+
+export type RiskCategory = "LOW" | "MEDIUM" | "HIGH" | "RESTRICTED";
+
+/**
+ * Matches backend domain.Counterparty exactly (counterparty-management-svc, port 8124).
+ * Previously the frontend type had stale field names (legal_name, country,
+ * tax_identifier, risk_rating) that do not exist in the backend response;
+ * those are replaced here with the correct ones from the Go domain model.
+ */
 export type Counterparty = {
   counterparty_id: string;
   tenant_id: string;
+  legal_entity_id: string;
   name: string;
-  legal_name?: string;
-  counterparty_type: string;
+  counterparty_type: CounterpartyType;
   registration_number?: string;
-  tax_identifier?: string;
-  country: string;
-  compliance_status: string;
-  risk_rating: string;
+  tax_id?: string;
+  jurisdiction_id: string;
+  risk_category: RiskCategory;
+  status: CounterpartyStatus;
+  contact_email?: string;
+  phone?: string;
+  address?: string;
+  compliance_status: string; // VERIFIED | PENDING | REJECTED
+  effective_from: string;
+  effective_to?: string;
   created_by: string;
   created_at: string;
+  updated_at: string;
 };
 
 type CounterpartiesResponse = { counterparties: Counterparty[]; total: number };
 
-export async function listCounterparties(identity?: Identity): Promise<ApiResult<Counterparty[]>> {
+export async function listCounterparties(
+  identity?: Identity,
+  options?: {
+    legalEntityId?: string;
+    counterpartyType?: CounterpartyType;
+    status?: CounterpartyStatus;
+  },
+): Promise<ApiResult<Counterparty[]>> {
   const base = counterpartyManagementUrl();
-  const url = `${base}/v1/counterparties`;
+  const url = new URL(`${base}/v1/counterparties`);
+  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
+  if (options?.counterpartyType) url.searchParams.set("counterparty_type", options.counterpartyType);
+  if (options?.status) url.searchParams.set("status", options.status);
 
   return fetchDomainService<CounterpartiesResponse, Counterparty[]>(
-    url,
+    url.toString(),
     base,
     "counterparty-management-svc",
     identity,
     (d) => d.counterparties ?? [],
+  );
+}
+
+export async function getCounterparty(
+  id: string,
+  identity?: Identity,
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties/${encodeURIComponent(id)}`;
+  return fetchDomainService<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    identity,
+    (d) => d,
+  );
+}
+
+export type CreateCounterpartyInput = {
+  legal_entity_id: string;
+  name: string;
+  counterparty_type: CounterpartyType;
+  jurisdiction_id: string;
+  effective_from: string;
+  created_by: string;
+  registration_number?: string;
+  tax_id?: string;
+  risk_category?: RiskCategory;
+  contact_email?: string;
+  phone?: string;
+  address?: string;
+};
+
+export async function createCounterparty(
+  body: CreateCounterpartyInput,
+  identity?: Identity,
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties`;
+  return fetchDomainServicePost<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    body,
+    identity,
+    (d) => d,
+  );
+}
+
+export type UpdateCounterpartyInput = {
+  updated_by: string;
+  name?: string;
+  counterparty_type?: CounterpartyType;
+  registration_number?: string;
+  tax_id?: string;
+  jurisdiction_id?: string;
+  risk_category?: RiskCategory;
+  status?: CounterpartyStatus;
+  contact_email?: string;
+  phone?: string;
+  address?: string;
+  effective_to?: string;
+};
+
+export async function updateCounterparty(
+  id: string,
+  body: UpdateCounterpartyInput,
+  identity?: Identity,
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties/${encodeURIComponent(id)}`;
+  return fetchDomainServicePut<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    body,
+    identity,
+    (d) => d,
+  );
+}
+
+export type UpdateComplianceStatusInput = {
+  compliance_status: string; // VERIFIED | PENDING | REJECTED
+  updated_by: string;
+};
+
+export async function updateCounterpartyComplianceStatus(
+  id: string,
+  body: UpdateComplianceStatusInput,
+  identity?: Identity,
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties/${encodeURIComponent(id)}/compliance`;
+  return fetchDomainServicePost<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    body,
+    identity,
+    (d) => d,
   );
 }
 
@@ -1249,6 +1388,66 @@ async function fetchDomainServicePost<TRaw, TOut>(
         kind: "http",
         status: res.status,
         message: `${serviceName} returned ${res.status} for POST`,
+      },
+    };
+  }
+
+  try {
+    return { ok: true, data: transform((await res.json()) as TRaw) };
+  } catch {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
+    };
+  }
+}
+
+async function fetchDomainServicePut<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  body: unknown,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const correlationId = crypto.randomUUID();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Correlation-ID": correlationId,
+  };
+  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
+  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
+  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+
+  let res: Response;
+  try {
+    res = await fetch(urlStr, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1200)),
+    });
+  } catch (cause) {
+    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    return {
+      ok: false,
+      error: {
+        kind: isTimeout ? "timeout" : "unreachable",
+        message: isTimeout
+          ? `${serviceName} timed out`
+          : `${serviceName} is unreachable at ${base}`,
+      },
+    };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: {
+        kind: "http",
+        status: res.status,
+        message: `${serviceName} returned ${res.status} for PUT`,
       },
     };
   }

@@ -12,9 +12,9 @@ export const SOURCE_CHANNEL = "web";
 
 /**
  * Caller identity, forwarded as the X-*-Id headers every backend trusts.
- *
- * In production these are set by Traefik from gateway-auth-svc's ForwardAuth
+ * * In production these are set by Traefik from gateway-auth-svc's ForwardAuth
  * check of the signed identity envelope, and a service that receives a request
+
  * without them fails closed. The local single-port gateway routes deliberately
  * carry no ForwardAuth middleware, so the console supplies them from the
  * session instead — see lib/auth.ts.
@@ -27,7 +27,7 @@ export type Identity = {
   principalId?: string;
   tenantId?: string;
   legalEntityId?: string;
-
+  
   envelopeJwt?: string;
 };
 
