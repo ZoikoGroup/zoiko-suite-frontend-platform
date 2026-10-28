@@ -38,13 +38,16 @@ export async function startAssistantSession(idempotencyKey: string) {
   return createPublicAISession(idempotencyKey);
 }
 
-export async function askAssistant(grant: string, sessionId: string, clientTurnId: string, message: string) {
+const MARKET = /^[A-Z]{2}$/;
+
+export async function askAssistant(grant: string, sessionId: string, clientTurnId: string, message: string, marketCode?: string) {
   await requireConsoleSession();
   const text = typeof message === "string" ? message.trim() : "";
   if (!UUID.test(clientTurnId) || !grant || !sessionId || text.length === 0 || text.length > MAX_MESSAGE) {
     throw new Error("Invalid request");
   }
-  return sendPublicAITurn(grant, sessionId, clientTurnId, text);
+  if (marketCode !== undefined && !MARKET.test(marketCode)) throw new Error("Invalid request");
+  return sendPublicAITurn(grant, sessionId, clientTurnId, text, marketCode);
 }
 
 export async function endAssistantSession(grant: string, sessionId: string) {

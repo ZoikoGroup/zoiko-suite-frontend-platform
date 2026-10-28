@@ -44,7 +44,19 @@ export type TurnEnvelope = {
   actions: RouteAction[];
   knowledge_release_id: string;
   flags?: { requires_human?: boolean };
+  /** How much of the answer is a governed fact (never set by the model). */
+  answer_class: "VERIFIED_FACT" | "STATUS_QUALIFIED" | "PROCESS_EXPLANATION" | "HANDOFF_UNKNOWN";
+  /** Governed status from the signed claim registry only. */
+  status_label?: string;
+  /** The market a qualified answer is scoped to. */
+  market_code?: string;
+  /** CLARIFY only: one question, options are market codes plus GENERAL_OVERVIEW. */
+  clarification?: { slot: string; question: string; options: string[] };
 };
+
+export const OVERVIEW_OPTION = "GENERAL_OVERVIEW";
+
+export type Chip = { label: string; message: string };
 
 export type PublicAIConfig = {
   assistant_display_name: string;
@@ -52,6 +64,10 @@ export type PublicAIConfig = {
   market_choices: string[];
   public_routes: { route_key: string; url: string }[];
   citation_links: { url_key: string; url: string; title: string }[];
+  /** Pre-approved UI wording keyed ui.* (plain text). */
+  microcopy?: Record<string, string>;
+  /** Starter questions keyed by page_context. */
+  chips?: Record<string, Chip[]>;
 };
 
 /** A refusal or failure, safe to show. Problem codes come from Doc 05 §13. */
@@ -121,9 +137,20 @@ export function createPublicAISession(idempotencyKey: string, locale = "en-US") 
   });
 }
 
-export function sendPublicAITurn(grant: string, sessionId: string, clientTurnId: string, message: string) {
+/**
+ * marketCode is the visitor's own choice from a clarification (never an
+ * entitlement). The console is not a public page, so page_context is "other".
+ */
+export function sendPublicAITurn(grant: string, sessionId: string, clientTurnId: string, message: string, marketCode?: string) {
   return call<TurnEnvelope>("POST", "/turns", {
-    body: { schema_version: "1.0", session_id: sessionId, client_turn_id: clientTurnId, message },
+    body: {
+      schema_version: "1.0",
+      session_id: sessionId,
+      client_turn_id: clientTurnId,
+      message,
+      page_context: "other",
+      ...(marketCode ? { market_code: marketCode } : {}),
+    },
     grant,
     idempotencyKey: clientTurnId,
   });
