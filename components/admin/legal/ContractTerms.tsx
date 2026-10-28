@@ -66,9 +66,33 @@ export function ContractTerms({ contract }: { contract: Contract }) {
         {formatDateTime(contract.created_at)} by <CopyableId value={contract.created_by} />
       </Row>
 
+      {contract.submitted_by ? (
+        <Row label="Submitted for review">
+          {contract.submitted_at ? formatDateTime(contract.submitted_at) : <Absent>date not recorded</Absent>}{" "}
+          by <CopyableId value={contract.submitted_by} />
+        </Row>
+      ) : null}
+
+      {contract.approved_by ? (
+        <Row label="Approved">
+          {contract.approved_at ? formatDateTime(contract.approved_at) : <Absent>date not recorded</Absent>}{" "}
+          by <CopyableId value={contract.approved_by} />
+          {contract.governance_decision_id ? (
+            <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">
+              governance decision <CopyableId value={contract.governance_decision_id} className="text-xs" />
+            </span>
+          ) : null}
+        </Row>
+      ) : null}
+
+      <Row label="Signature">
+        {contract.signature_status ?? <Absent>not reported</Absent>}
+        {contract.signature_sent_at ? ` — sent ${formatDateTime(contract.signature_sent_at)}` : ""}
+      </Row>
+
       {contract.signed_by ? (
-        <Row label="Signed">
-          {contract.signed_at ? formatDateTime(contract.signed_at) : <Absent>date not recorded</Absent>}{" "}
+        <Row label="Executed">
+          {contract.executed_at ? formatDateTime(contract.executed_at) : <Absent>date not recorded</Absent>}{" "}
           by {contract.signed_by}
         </Row>
       ) : null}

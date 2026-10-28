@@ -10,7 +10,18 @@ import type { BoardMeeting, BoardResolution } from "@/lib/api/legal";
  *  report what actually happened — a revision and an activation both return 200
  *  and reading them as the same event would lose the transition. */
 export type ContractActionState = {
-  status: "idle" | "drafted" | "revised" | "submitted" | "activated" | "terminated" | "error";
+  status:
+    | "idle"
+    | "drafted"
+    | "revised"
+    | "submitted"
+    | "approved"
+    | "sent"
+    | "executed"
+    | "amended"
+    | "renewed"
+    | "terminated"
+    | "error";
   message: string;
   /** Echoed back so the UI can name what was acted on. */
   title?: string;
@@ -29,7 +40,7 @@ export const CONTRACT_CURRENCIES = ["GBP", "EUR", "USD", "INR"] as const;
  *  ContractActionState: a vote and a pass both return 200 and reading them as
  *  the same event would lose which transition actually happened. */
 export type BoardActionState = {
-  status: "idle" | "created" | "voted" | "passed" | "error";
+  status: "idle" | "created" | "opened" | "voted" | "passed" | "failed" | "error";
   message: string;
   /** Echoed back so the UI can name what was acted on. */
   title?: string;

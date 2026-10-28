@@ -1,10 +1,18 @@
 // purchase-request-svc (:8100, /purchase-request-svc through the gateway) — the
 // requisition register that sits UPSTREAM of the purchase-order register.
 //
-// Lifecycle is one hop and terminal on both branches: PENDING -> APPROVED or
-// PENDING -> REJECTED. There is no route back. Attempting a second transition
-// answers 422 `invalid_transition` rather than silently re-stamping the record,
-// so who approved a request and when cannot be overwritten.
+// Lifecycle (domain.ValidRequestTransitions):
+//
+//   DRAFT ──submit──▶ PENDING_APPROVAL ──approve──▶ APPROVED ──convert──▶ CONVERTED
+//                                       └─reject──▶ REJECTED
+//   DRAFT | PENDING_APPROVAL | APPROVED ──cancel──▶ CANCELLED
+//   PENDING_APPROVAL | APPROVED ──amend──▶ DRAFT (approval invalidated)
+//
+// A request is created as DRAFT and must be submitted before anyone can decide
+// it. Every transition is version-checked: approve and reject REQUIRE
+// `expected_version` (400 `expected_version_required` without it), and a stale
+// version answers 409 `stale_version`. A transition the state does not allow
+// answers 422 `invalid_transition`.
 //
 // Why the console cares: purchase-order-svc will only issue an order against a
 // purchase request that is APPROVED and owned by the same tenant and legal
@@ -21,7 +29,32 @@
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 import { humanizeKey } from "@/lib/humanize";
 
-export type RequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type RequestStatus =
+  | "DRAFT"
+  | "PENDING_APPROVAL"
+  | "APPROVED"
+  | "REJECTED"
+  | "CONVERTED"
+  | "CANCELLED"
+  | "EXPIRED";
+
+/** The filters the register offers, in lifecycle order. */
+export const REQUEST_STATUSES: readonly RequestStatus[] = [
+  "DRAFT",
+  "PENDING_APPROVAL",
+  "APPROVED",
+  "REJECTED",
+  "CONVERTED",
+  "CANCELLED",
+  "EXPIRED",
+];
+
+/** The service still accepts the legacy "PENDING" alias on filters
+ *  (domain.NormalizeStatus); everything it writes uses PENDING_APPROVAL. */
+export function normaliseRequestStatus(raw: string | undefined | null): string {
+  const s = (raw ?? "").trim();
+  return s === "PENDING" ? "PENDING_APPROVAL" : s;
+}
 
 /** Wire shape. Field names match the Go json tags exactly. */
 export type PurchaseRequest = {
@@ -33,13 +66,55 @@ export type PurchaseRequest = {
   amount: number;
   currency_code: string;
   status: RequestStatus;
+  /** Optimistic-concurrency version; send it back as expected_version. */
+  version: number;
+  business_purpose?: string;
+  budget_decision?: "NOT_CHECKED" | "NOT_REQUIRED" | "ALLOWED" | "BLOCKED" | string;
+  budget_basis?: string;
+  submitted_by_principal_id?: string | null;
   approved_by_principal_id?: string | null;
   rejected_by_principal_id?: string | null;
   rejection_reason?: string | null;
+  cancelled_by_principal_id?: string | null;
+  cancellation_reason?: string | null;
+  converted_purchase_order_id?: string | null;
+  approval_invalidated_count?: number;
   correlation_id: string;
   created_at: string;
+  updated_at?: string;
+  submitted_at?: string | null;
   approved_at?: string | null;
   rejected_at?: string | null;
+  cancelled_at?: string | null;
+  converted_at?: string | null;
+};
+
+/** Actions the service says THIS caller may take now (SoD already applied). */
+export type RequestAction =
+  | "AmendRequisition"
+  | "SubmitRequisition"
+  | "CancelRequisition"
+  | "ApproveRequisition"
+  | "RejectRequisition"
+  | "ConvertToPurchaseOrder";
+
+export type AvailableActions = {
+  request_id: string;
+  status: RequestStatus;
+  version: number;
+  available_actions: RequestAction[];
+};
+
+export type RequestHistoryEntry = {
+  history_id: string;
+  request_id: string;
+  version: number;
+  action: string;
+  from_status?: string | null;
+  to_status: string;
+  actor: string;
+  reason?: string;
+  created_at: string;
 };
 
 /** A response body that is an object, so its envelope keys can be read. */
@@ -153,7 +228,8 @@ export type CreateRequestInput = {
 };
 
 /**
- * Raise a new purchase request. It lands PENDING and grants nothing.
+ * Raise a new purchase request. It lands DRAFT at version 1 and grants nothing
+ * until it is submitted and approved.
  *
  * 201 means a request was created; 200 means this replayed an existing one and
  * nothing new was written — the service holds a partial unique index on
@@ -181,56 +257,116 @@ export async function createPurchaseRequest(
   return { ...res, data: unwrapRequest(res.data) };
 }
 
-/** Approve a PENDING request. Terminal — a second call answers 422. */
-export async function approvePurchaseRequest(
+type RequestWriteIdentity = Identity & { principalId: string; tenantId: string };
+
+const requestPath = (id: string, suffix = "") =>
+  `/v1/purchase-requests/${encodeURIComponent(id)}${suffix}`;
+
+async function transition(
   requestId: string,
-  identity: Identity & { principalId: string; tenantId: string },
+  suffix: string,
+  body: Record<string, unknown>,
+  identity: RequestWriteIdentity,
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  const res = await apiPost<unknown>(
-    "purchaseRequest",
-    `/v1/purchase-requests/${requestId}/approve`,
-    { correlation_id: crypto.randomUUID() },
-    { identity },
-  );
+  const res = await apiPost<unknown>("purchaseRequest", requestPath(requestId, suffix), body, { identity });
   if (!res.ok) return res;
   return { ...res, data: unwrapRequest(res.data) };
 }
 
 /**
- * Reject a PENDING request. Terminal — a second call answers 422.
- *
- * `reason` is required by the service (400 `missing_field` without it): the
- * reason IS the audit record for a refusal, so an unexplained rejection is not
- * accepted.
+ * DRAFT → PENDING_APPROVAL. Runs the budget check for controlled categories;
+ * 422 `budget_blocked` if spend policy refuses it.
+ */
+export async function submitPurchaseRequestForApproval(
+  requestId: string,
+  expectedVersion: number,
+  identity: RequestWriteIdentity,
+): Promise<ApiWriteResult<PurchaseRequest>> {
+  return transition(requestId, "/submit", { expected_version: expectedVersion }, identity);
+}
+
+/**
+ * PENDING_APPROVAL → APPROVED. 403 `self_approval_not_allowed` /
+ * `independent_approver_required` under segregation of duties.
+ */
+export async function approvePurchaseRequest(
+  requestId: string,
+  expectedVersion: number,
+  identity: RequestWriteIdentity,
+): Promise<ApiWriteResult<PurchaseRequest>> {
+  return transition(requestId, "/approve", { expected_version: expectedVersion }, identity);
+}
+
+/**
+ * PENDING_APPROVAL → REJECTED. Terminal. The reason is the audit record for
+ * the refusal and is required.
  */
 export async function rejectPurchaseRequest(
   requestId: string,
   reason: string,
-  identity: Identity & { principalId: string; tenantId: string },
+  expectedVersion: number,
+  identity: RequestWriteIdentity,
 ): Promise<ApiWriteResult<PurchaseRequest>> {
-  const res = await apiPost<unknown>(
-    "purchaseRequest",
-    `/v1/purchase-requests/${requestId}/reject`,
-    { reason, correlation_id: crypto.randomUUID() },
-    { identity },
+  return transition(
+    requestId,
+    "/reject",
+    { reason, correlation_id: crypto.randomUUID(), expected_version: expectedVersion },
+    identity,
   );
+}
+
+/** DRAFT | PENDING_APPROVAL | APPROVED → CANCELLED. Terminal. */
+export async function cancelPurchaseRequest(
+  requestId: string,
+  reason: string,
+  expectedVersion: number,
+  identity: RequestWriteIdentity,
+): Promise<ApiWriteResult<PurchaseRequest>> {
+  return transition(requestId, "/cancel", { reason, expected_version: expectedVersion }, identity);
+}
+
+/** What the signed-in caller may do with this request right now. */
+export async function getAvailableActions(
+  requestId: string,
+  identity: Identity & { tenantId: string },
+): Promise<ApiResult<AvailableActions>> {
+  const res = await apiGet<AvailableActions>("purchaseRequest", requestPath(requestId, "/available-actions"), {
+    identity,
+  });
   if (!res.ok) return res;
-  return { ...res, data: unwrapRequest(res.data) };
+  return {
+    ok: true,
+    data: { ...res.data, available_actions: Array.isArray(res.data?.available_actions) ? res.data.available_actions : [] },
+  };
+}
+
+/** The request's transition history, oldest first. */
+export async function getRequestHistory(
+  requestId: string,
+  identity: Identity & { tenantId: string },
+): Promise<ApiResult<RequestHistoryEntry[]>> {
+  const res = await apiGet<unknown>("purchaseRequest", requestPath(requestId, "/history"), { identity });
+  if (!res.ok) return res;
+  const env = asEnvelope(res.data);
+  const list = Array.isArray(res.data) ? res.data : Array.isArray(env?.history) ? env.history : [];
+  return { ok: true, data: list as RequestHistoryEntry[] };
 }
 
 // ─── Derived views ───────────────────────────────────────────────────────────
 
 export type RequestStats = {
+  draft: number;
   pending: number;
   approved: number;
   rejected: number;
-  /** Value awaiting a decision, by currency. Requests in different currencies
-   *  are never summed together — a single total would be a fiction. */
+  /** Value awaiting a decision (PENDING_APPROVAL), by currency. Requests in
+   *  different currencies are never summed together. */
   pendingValueByCurrency: Record<string, number>;
 };
 
 export function summariseRequests(requests: PurchaseRequest[]): RequestStats {
   const stats: RequestStats = {
+    draft: 0,
     pending: 0,
     approved: 0,
     rejected: 0,
@@ -238,9 +374,11 @@ export function summariseRequests(requests: PurchaseRequest[]): RequestStats {
   };
 
   for (const r of requests) {
-    if (r.status === "APPROVED") stats.approved += 1;
-    else if (r.status === "REJECTED") stats.rejected += 1;
-    else {
+    const status = normaliseRequestStatus(r.status);
+    if (status === "APPROVED") stats.approved += 1;
+    else if (status === "REJECTED") stats.rejected += 1;
+    else if (status === "DRAFT") stats.draft += 1;
+    else if (status === "PENDING_APPROVAL") {
       stats.pending += 1;
       const rawCode = r.currency_code ?? (r as unknown as Record<string, unknown>).currency;
       const currency = typeof rawCode === "string" && rawCode.trim().length > 0
@@ -295,10 +433,19 @@ const REQUEST_STATUS_MEANING: Record<
   RequestStatus,
   { label: string; meaning: string; tone: RequestTone; decided: boolean; issuable: boolean }
 > = {
-  PENDING: {
+  DRAFT: {
+    label: "Draft",
+    meaning:
+      "The request has been written but not submitted. Nobody can approve it yet and it " +
+      "authorises nothing. Submit it to send it for a decision.",
+    tone: "neutral",
+    decided: false,
+    issuable: false,
+  },
+  PENDING_APPROVAL: {
     label: "Awaiting a decision",
     meaning:
-      "The request has been raised and nobody has decided it yet. It commits no money and " +
+      "The request has been submitted and nobody has decided it yet. It commits no money and " +
       "authorises nothing — no purchase order can be placed against it in this state. It " +
       "needs someone other than the person who raised it to approve or reject it.",
     tone: "warning",
@@ -309,9 +456,8 @@ const REQUEST_STATUS_MEANING: Record<
     label: "Approved",
     meaning:
       "Someone with the authority to decide it approved this request, and a purchase order " +
-      "can now be placed against it. The decision is final: it cannot be reversed, and who " +
-      "approved it and when are recorded permanently. To stop the spend now, the order side " +
-      "is where that happens — not here.",
+      "can now be placed against it. Amending it sends it back to DRAFT and voids the " +
+      "approval; cancelling it stops it for good.",
     tone: "success",
     decided: true,
     issuable: true,
@@ -320,9 +466,32 @@ const REQUEST_STATUS_MEANING: Record<
     label: "Rejected",
     meaning:
       "The request was turned down and no purchase order can be placed against it. The " +
-      "decision is final and cannot be reversed — if the spend is still wanted, a new " +
-      "request has to be raised. The reason given is stored on the record.",
+      "decision is final — if the spend is still wanted, a new request has to be raised. " +
+      "The reason given is stored on the record.",
     tone: "danger",
+    decided: true,
+    issuable: false,
+  },
+  CONVERTED: {
+    label: "Converted to an order",
+    meaning:
+      "A purchase order was raised from this request. The request is closed; the spend is " +
+      "now tracked on the order.",
+    tone: "info",
+    decided: true,
+    issuable: false,
+  },
+  CANCELLED: {
+    label: "Cancelled",
+    meaning: "The request was withdrawn and can no longer be decided or ordered against.",
+    tone: "neutral",
+    decided: true,
+    issuable: false,
+  },
+  EXPIRED: {
+    label: "Expired",
+    meaning: "The request's validity window elapsed before it was ordered against. Raise a new one.",
+    tone: "neutral",
     decided: true,
     issuable: false,
   },
@@ -338,7 +507,7 @@ const REQUEST_STATUS_MEANING: Record<
  * APPROVED.
  */
 export function describeRequestStatus(raw: string): RequestStatusDescription {
-  const stored = raw?.trim() || "(empty)";
+  const stored = normaliseRequestStatus(raw) || "(empty)";
   const known = REQUEST_STATUS_MEANING[stored as RequestStatus];
 
   if (!known) {
@@ -408,24 +577,40 @@ export function explainRequest(request: PurchaseRequest): RequestExplanation {
   const status = describeRequestStatus(request.status);
   const money = formatRequestAmount(request.amount, request.currency_code);
 
+  const HEADLINE: Record<RequestStatus, string> = {
+    DRAFT: `${money} drafted — not yet submitted for a decision.`,
+    PENDING_APPROVAL: `${money} requested, and nobody has decided it yet.`,
+    APPROVED: `${money} approved. An order can be placed against this request.`,
+    REJECTED: `${money} requested and turned down. No order can be placed against it.`,
+    CONVERTED: `${money} approved and converted to a purchase order.`,
+    CANCELLED: `${money} requested and then cancelled.`,
+    EXPIRED: `${money} requested; the request expired.`,
+  };
+  const NEXT: Record<RequestStatus, string> = {
+    DRAFT: "Submit it for approval. Until then nobody can decide it.",
+    PENDING_APPROVAL:
+      "It needs a decision. Whoever approves it must be someone other than the person who raised it — the service refuses a request decided by the person who asked for it.",
+    APPROVED:
+      "The next step is on the order side: an order issued against this request is what actually commits the money.",
+    REJECTED:
+      "Nothing further can be done to this request. If the spend is still wanted, raise a new one.",
+    CONVERTED: "Nothing further here — follow the purchase order.",
+    CANCELLED: "Nothing further can be done to this request.",
+    EXPIRED: "Nothing further can be done to this request. Raise a new one if the spend is still wanted.",
+  };
+  const current = status.raw as RequestStatus;
+
   const headline = status.unmapped
     ? `${money} requested — this console cannot say where it stands.`
-    : request.status === "PENDING"
-      ? `${money} requested, and nobody has decided it yet.`
-      : request.status === "APPROVED"
-        ? `${money} approved. An order can be placed against this request.`
-        : `${money} requested and turned down. No order can be placed against it.`;
+    : HEADLINE[current];
 
   const nextStep = status.unmapped
     ? "Nothing should be placed against this request until someone who operates the service confirms what its status means."
-    : request.status === "PENDING"
-      ? "It needs a decision. Whoever approves it must be someone other than the person who raised it — the service refuses a request decided by the person who asked for it, so a requester cannot approve their own spend."
-      : request.status === "APPROVED"
-        ? "Nothing further is needed here. The next step is on the order side: an order issued against this request is what actually commits the money."
-        : "Nothing further can be done to this request. If the spend is still wanted, raise a new one — this record stays as it is, so the refusal and its reason remain on file.";
+    : NEXT[current];
 
-  const decidedBy = request.approved_by_principal_id ?? request.rejected_by_principal_id ?? null;
-  const decidedAt = request.approved_at ?? request.rejected_at ?? null;
+  const decidedBy =
+    request.approved_by_principal_id ?? request.rejected_by_principal_id ?? request.cancelled_by_principal_id ?? null;
+  const decidedAt = request.approved_at ?? request.rejected_at ?? request.cancelled_at ?? null;
 
   const decisionTrail = decidedBy
     ? `Decided by ${decidedBy}${decidedAt ? ` on ${new Date(decidedAt).toLocaleString("en-GB")}` : ""}.`
@@ -526,9 +711,31 @@ export function explainRequestError(
   // send them to fix something that is not broken — no grant lifts this.
   if (
     message.includes("self_approval_not_allowed") ||
+    message.includes("may not approve or reject their own submission") ||
     message.includes("may not approve or decide on their own submission")
   ) {
     return "Refused: you raised this request, so you cannot be the one who decides it. That split is deliberate — one person must not be able to ask for money and then approve it themselves — and no permission grant lifts it. Somebody else with the authority to decide requests has to approve or reject this one.";
+  }
+  if (message.includes("independent_approver_required")) {
+    return "Refused: this request is above the approval threshold, so it needs an approver who did not raise, submit, or last amend it. Somebody else has to decide it.";
+  }
+  if (message.includes("expected_version_required")) {
+    return "Nothing was changed. The decision has to name the version of the request it applies to. This is a console fault, not something you entered — report it.";
+  }
+  if (message.includes("stale_version")) {
+    return "Nothing was changed. The request changed after you loaded it — someone amended, submitted, or decided it. Reload it and decide again on what is there now.";
+  }
+  if (message.includes("requisition_expired")) {
+    return "Nothing was changed. The request's validity window has elapsed, so it can no longer be approved.";
+  }
+  if (message.includes("budget_blocked")) {
+    return "Not submitted: spend policy blocked this request for one of its categories. Check the budget and spend limits for this category.";
+  }
+  if (message.includes("budget_check_unavailable")) {
+    return "Not submitted: the budget check could not be reached, and a request in a controlled category is refused rather than sent unchecked. Try again shortly.";
+  }
+  if (message.includes("budget_check_required")) {
+    return "Not approved: this request has a controlled category without an ALLOWED budget decision. Amend and resubmit it so the budget is checked.";
   }
 
   // ── Refused before the handler ever saw the request ──────────────────────
@@ -557,7 +764,7 @@ export function explainRequestError(
     return "Nothing was changed. Your session did not say which organisation you are acting for — sign in again.";
   }
   if (message.includes("invalid_transition")) {
-    return "This request has already been decided, so nothing was changed. Approval and rejection are both final — a second decision is refused rather than overwriting who decided it first and when. Reload the register to see how it was decided.";
+    return "That step is not available from the request's current status, so nothing was changed. A request must be submitted before it can be decided, and a decided, cancelled, or converted request cannot be decided again. Reload the register to see where it stands.";
   }
   if (message.includes("request_not_found")) {
     return (
@@ -621,7 +828,7 @@ export function explainRequestError(
     case 413:
       return "Nothing was saved. The request was larger than the service accepts. Shorten the description and try again.";
     case 422:
-      return "This request has already been decided, so nothing was changed. Both decisions are final. Reload the register to see how it was decided.";
+      return "That step is not available from the request's current status, so nothing was changed. Reload the register to see where it stands.";
     case 503:
       return "Nothing was changed. Something this action depends on was unavailable, so it was refused rather than allowed through unchecked. Try again shortly.";
     default:

@@ -30,7 +30,15 @@ export const CURRENCIES = ["GBP", "EUR", "USD", "INR"] as const;
  * record rather than a failure of the attempt.
  */
 export type RequestActionState = {
-  status: "idle" | "created" | "replayed" | "approved" | "rejected" | "already-decided" | "error";
+  status:
+    | "idle"
+    | "created"
+    | "replayed"
+    | "submitted"
+    | "approved"
+    | "rejected"
+    | "already-decided"
+    | "error";
   message: string;
   /** Echoed back so the UI can name what was acted on, and so the operator has
    *  the id to paste into the issue-order form. */
@@ -137,3 +145,12 @@ export type VendorCheckActionState = {
 };
 
 export const IDLE_VENDOR_CHECK_STATE: VendorCheckActionState = { status: "idle", message: "" };
+
+/** Outcome of a procurement-case action (procurement-workflow-svc). */
+export type ProcurementCaseActionState = {
+  status: "idle" | "opened" | "replayed" | "approved" | "rejected" | "issued" | "error";
+  message: string;
+  caseId?: string;
+};
+
+export const IDLE_PROCUREMENT_CASE_STATE: ProcurementCaseActionState = { status: "idle", message: "" };
