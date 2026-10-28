@@ -48,7 +48,7 @@ const UPCOMING = [
   {
     icon: Gavel,
     title: "Legal Approvals Service",
-    body: "The approval matrix that PENDING_APPROVAL is meant to wait on. Until it is wired, approval is a status and not a gate.",
+    body: "The approval matrix behind REVIEW → APPROVED. Today approval is gated by a GRANTED governance decision and segregation of duties.",
   },
   {
     icon: Handshake,
@@ -58,7 +58,7 @@ const UPCOMING = [
   {
     icon: FileStack,
     title: "Document Vault",
-    body: "Custody of the executed document referenced when a contract is activated.",
+    body: "Custody of the executed document referenced when a contract's execution is recorded.",
   },
 ];
 
@@ -145,7 +145,7 @@ export default function LegalPage() {
             <CardDescription>
               Live, writable. Backed by contract-lifecycle-svc, reached on the single gateway
               port at /contract-lifecycle-svc. Contracts are created as DRAFT at v1 and are not
-              in force until activated.
+              in force until reviewed, approved, signed, and their execution recorded.
             </CardDescription>
           </div>
         </CardHeader>
@@ -192,38 +192,11 @@ export default function LegalPage() {
               />
               <span>
                 <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Contract writes are not authorized.
+                  Execution is caller-asserted.
                 </strong>{" "}
-                contract-lifecycle-svc builds an authorization-svc client and never calls it, so
-                no contract mutation is checked against a grant and none can fail closed. This is
-                unlike purchase-order-svc, where every write is checked before it is applied.
-              </span>
-            </li>
-            <li className="flex gap-2.5">
-              <span
-                className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
-                aria-hidden="true"
-              />
-              <span>
-                <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Approval is a status, not a gate.
-                </strong>{" "}
-                Activation refuses only ACTIVE and TERMINATED contracts, so a DRAFT can be signed
-                into force without ever passing through PENDING_APPROVAL.
-              </span>
-            </li>
-            <li className="flex gap-2.5">
-              <span
-                className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
-                aria-hidden="true"
-              />
-              <span>
-                <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Submission leaves no trace.
-                </strong>{" "}
-                Every other transition appends a version row. Submitting for approval appends none
-                and records no actor, so the version history cannot show that a contract was ever
-                submitted, or by whom.
+                No e-signature adapter feeds contract-lifecycle-svc yet, so &ldquo;Record
+                execution&rdquo; trusts the signatory named on the form. The signature status moves
+                to COMPLETED because someone said so, not because a signing provider confirmed it.
               </span>
             </li>
           </ul>

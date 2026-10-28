@@ -89,21 +89,32 @@ import {
   listExternalDataFeeds,
 } from "@/lib/api/integration";
 
-async function resolveIdentity(req: NextRequest): Promise<CallerIdentity> {
-  const sessionCookie = req.cookies.get(SESSION_COOKIE)?.value;
-  const session = decodeSession(sessionCookie);
-
+/**
+ * The caller's identity, from the session cookie only.
+ *
+ * This route is outside the proxy's /admin matcher, so it is the only check
+ * between an anonymous request and the backend. It used to substitute a fixed
+ * demo principal/tenant/legal entity when there was no session, which let an
+ * unauthenticated caller read and write as that tenant. No session → null → 401.
+ */
+async function resolveIdentity(req: NextRequest): Promise<Required<CallerIdentity> | null> {
+  const session = decodeSession(req.cookies.get(SESSION_COOKIE)?.value);
+  if (!session?.principalId || !session.tenantId) return null;
   return {
-    principalId: session?.principalId ?? "00000000-0000-0000-0000-000000000001",
-    tenantId: session?.tenantId ?? "11111111-1111-1111-1111-111111111111",
-    legalEntityId: session?.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
-  };
+    principalId: session.principalId,
+    tenantId: session.tenantId,
+    legalEntityId: session.legalEntityId,
+  } as Required<CallerIdentity>;
 }
+
+const UNAUTHENTICATED = () =>
+  NextResponse.json({ error: "unauthenticated", message: "Sign in to use this API." }, { status: 401 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const endpoint = path.join("/");
   const identity = await resolveIdentity(req);
+  if (!identity) return UNAUTHENTICATED();
 
   // ── Tax Domain ─────────────────────────────────────────────────────────────
   if (endpoint === "tax-rules") {
@@ -449,6 +460,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   const { path } = await params;
   const endpoint = path.join("/");
   const identity = await resolveIdentity(req);
+  if (!identity) return UNAUTHENTICATED();
   const body = await req.json().catch(() => ({}));
 
   // ── Tax Domain ─────────────────────────────────────────────────────────────
@@ -568,16 +580,47 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
 
   // ── Compliance Domain ──────────────────────────────────────────────────────
+  // Bodies use the backend's own snake_case field names; identity fields
+  // (tenant, legal entity, created_by) always come from the session.
   if (endpoint === "filing-tracker/requirements") {
-    const res = await createFilingRequirement(body, identity);
+    const res = await createFilingRequirement({
+      identity,
+      jurisdictionId: String(body.jurisdiction_id ?? ""),
+      filingAuthority: String(body.filing_authority ?? ""),
+      filingType: String(body.filing_type ?? ""),
+      periodKey: String(body.period_key ?? ""),
+      dueDate: String(body.due_date ?? ""),
+      ...(body.notes ? { notes: String(body.notes) } : {}),
+    });
     return toJsonResponse(res);
   }
   if (endpoint === "exception-escalation/exceptions") {
-    const res = await createEscalatedException(body, identity);
+    const res = await createEscalatedException({
+      identity,
+      jurisdictionId: String(body.jurisdiction_id ?? ""),
+      exceptionType: String(body.exception_type ?? ""),
+      severityLevel: body.severity_level,
+      linkedObjectType: String(body.linked_object_type ?? ""),
+      linkedObjectId: String(body.linked_object_id ?? ""),
+      description: String(body.description ?? ""),
+      ...(body.assigned_to_role ? { assignedToRole: String(body.assigned_to_role) } : {}),
+    });
     return toJsonResponse(res);
   }
   if (endpoint === "compliance-status/evaluate") {
-    const res = await evaluateCompliance(body, identity);
+    const n = (v: unknown) => Number(v ?? 0);
+    const res = await evaluateCompliance({
+      identity,
+      jurisdictionId: String(body.jurisdiction_id ?? ""),
+      domainName: String(body.domain_name ?? ""),
+      totalObligations: n(body.total_obligations),
+      fulfilledObligations: n(body.fulfilled_obligations),
+      pendingObligations: n(body.pending_obligations),
+      overdueObligations: n(body.overdue_obligations),
+      openExceptions: n(body.open_exceptions),
+      effectiveFrom: String(body.effective_from ?? new Date().toISOString().slice(0, 10)),
+      ...(body.notes ? { notes: String(body.notes) } : {}),
+    });
     return toJsonResponse(res);
   }
 
