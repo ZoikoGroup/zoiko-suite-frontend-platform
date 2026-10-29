@@ -9,6 +9,9 @@ type LogoProps = {
   markOnly?: boolean;
   /** Chip padding — "lg" for hero/login contexts, "sm" everywhere else. */
   chipSize?: "sm" | "lg";
+  /** Drop the light chip (and the white plate baked into logo.png) — only for light surfaces
+   *  where the navy mark already reads. */
+  bare?: boolean;
 };
 
 const FULL_LOGO_ASPECT = 336 / 144;
@@ -19,7 +22,7 @@ const CHIP_PADDING: Record<"sm" | "lg", string> = {
   lg: "px-4 py-3",
 };
 
-export function Logo({ className, height = 32, markOnly = false, chipSize = "sm" }: LogoProps) {
+export function Logo({ className, height = 32, markOnly = false, chipSize = "sm", bare = false }: LogoProps) {
   const width = Math.round(height * (markOnly ? MARK_ASPECT : FULL_LOGO_ASPECT));
 
   return (
@@ -27,13 +30,14 @@ export function Logo({ className, height = 32, markOnly = false, chipSize = "sm"
     // contrast on dark surfaces — a light chip keeps it legible everywhere.
     <span
       className={cn(
-        "inline-flex items-center rounded-lg bg-white shadow-sm ring-1 ring-slate-900/5",
-        CHIP_PADDING[chipSize],
+        "inline-flex items-center",
+        !bare && "rounded-lg bg-white shadow-sm ring-1 ring-slate-900/5",
+        !bare && CHIP_PADDING[chipSize],
         className,
       )}
     >
       <Image
-        src={markOnly ? "/logo-mark.png" : "/logo.png"}
+        src={markOnly ? "/logo-mark.png" : bare ? "/logo-transparent.png" : "/logo.png"}
         alt="ZoikoSuite"
         width={width}
         height={height}
