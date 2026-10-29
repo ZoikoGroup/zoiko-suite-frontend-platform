@@ -9,7 +9,7 @@ const DEFAULT_URL = "http://127.0.0.1:8001";
 const DEFAULT_ORIGIN = "http://localhost:3000";
 
 /** Request headers forwarded to the service (lower-case). */
-export const FORWARD_REQUEST_HEADERS = ["accept", "content-type", "idempotency-key", "x-public-chat-session", "traceparent"];
+export const FORWARD_REQUEST_HEADERS = ["accept", "content-type", "idempotency-key", "if-none-match", "x-public-chat-session", "traceparent"];
 /** Response headers returned to the browser (lower-case). */
 export const FORWARD_RESPONSE_HEADERS = ["content-type", "x-request-id", "retry-after", "cache-control", "etag"];
 
@@ -60,12 +60,30 @@ export function forwardHeaders(incoming: Headers, env: Record<string, string | u
   return out;
 }
 
-export function responseHeaders(upstream: Headers): Headers {
+/** CT-023: only /config may be cached; every other reply is no-store. */
+export function responseHeaders(upstream: Headers, path = ""): Headers {
   const out = new Headers();
+  const cacheable = path === "config";
   for (const name of FORWARD_RESPONSE_HEADERS) {
+    if (!cacheable && (name === "cache-control" || name === "etag")) continue;
     const v = upstream.get(name);
     if (v) out.set(name, v);
   }
-  out.set("cache-control", "no-store");
+  if (!cacheable) out.set("cache-control", "no-store");
   return out;
+}
+
+/**
+ * SEC-T012: refuse cross-site callers. Browsers mark these with
+ * Sec-Fetch-Site; when an Origin is present it must be this app's own.
+ */
+export function crossSite(incoming: Headers, url: string): boolean {
+  if (incoming.get("sec-fetch-site") === "cross-site") return true;
+  const origin = incoming.get("origin");
+  if (!origin) return false;
+  try {
+    return origin !== new URL(url).origin;
+  } catch {
+    return true;
+  }
 }
