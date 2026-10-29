@@ -2,22 +2,24 @@ import { Badge } from "@/components/ui";
 import type { ContractStatus } from "@/lib/api/contracts";
 
 /**
- * Status presentation for a contract.
+ * Status presentation for a contract, one entry per domain.ContractStatus.
  *
- * EXPIRED and SUSPENDED are styled even though no transition in
- * contract-lifecycle-svc produces them, so a row written by some future
- * deadline sweep renders as a state rather than as a raw enum string.
+ * EXECUTED, EXPIRED and ARCHIVED are styled even though no endpoint produces
+ * them today, so a row written by some future job renders as a state rather
+ * than as a raw enum string.
  */
 const PRESENTATION: Record<
   ContractStatus,
   { label: string; tone: "success" | "warning" | "danger" | "neutral" | "info"; dot?: boolean }
 > = {
   DRAFT: { label: "Draft", tone: "neutral" },
-  PENDING_APPROVAL: { label: "Pending approval", tone: "warning", dot: true },
-  ACTIVE: { label: "Active", tone: "success", dot: true },
-  EXPIRED: { label: "Expired", tone: "neutral" },
+  REVIEW: { label: "In review", tone: "warning", dot: true },
+  APPROVED: { label: "Approved", tone: "info", dot: true },
+  EXECUTED: { label: "Executed", tone: "info" },
+  EFFECTIVE: { label: "Effective", tone: "success", dot: true },
   TERMINATED: { label: "Terminated", tone: "danger" },
-  SUSPENDED: { label: "Suspended", tone: "warning" },
+  EXPIRED: { label: "Expired", tone: "neutral" },
+  ARCHIVED: { label: "Archived", tone: "neutral" },
 };
 
 export function ContractStatusBadge({ status }: { status: ContractStatus }) {

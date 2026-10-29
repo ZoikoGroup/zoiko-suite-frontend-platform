@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { defineConfig } from "@playwright/test";
 
 // Browser journeys for the ZoikoSuite Assistant (master prompt STEP 5:
@@ -32,6 +33,13 @@ export default defineConfig({
       ZOIKO_PUBLIC_AI_URL: `http://127.0.0.1:${ASSISTANT_PORT}`,
       ZOIKO_PUBLIC_AI_ORIGIN: "http://localhost:3000",
       LOGO_URL: "/logo.png",
+      // The suite signs in as the demo admin. Production builds refuse demo
+      // accounts unless this is set (lib/auth.ts); it is set only for this
+      // throwaway test server, never for a real environment.
+      ALLOW_DEMO_CREDENTIALS: "true",
+      // Production builds require a session secret; a fresh random one per
+      // run, so no secret is stored in the repo.
+      ZOIKO_SESSION_SECRET: randomBytes(32).toString("hex"),
     },
   },
 });

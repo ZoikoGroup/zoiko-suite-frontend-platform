@@ -51,10 +51,6 @@ export type Jurisdiction = {
   created_by_principal_id: string;
 };
 
-const inMemoryJurisdictions: Jurisdiction[] = [];
-const inMemoryRules: JurisdictionRule[] = [];
-const inMemoryDriftEvents: DriftEvent[] = [];
-
 /**
  * List jurisdictions, active ones first then by code.
  *
@@ -76,24 +72,21 @@ const inMemoryDriftEvents: DriftEvent[] = [];
 export async function listJurisdictions(): Promise<ApiResult<Jurisdiction[]>> {
   const result = await apiGet<Jurisdiction[]>("jurisdictionRules", "/v1/jurisdictions");
 
-  let list: Jurisdiction[] = [];
-  if (result.ok && Array.isArray(result.data)) {
-    list = [...result.data];
-  }
+  if (!result.ok) return result;
 
-  for (const extra of inMemoryJurisdictions) {
-    if (!list.some((j) => j.jurisdiction_id === extra.jurisdiction_id || j.jurisdiction_code === extra.jurisdiction_code)) {
-      list.push(extra);
-    }
-  }
-
-  if (list.length === 0 && !result.ok) {
-    return result;
+  if (!Array.isArray(result.data)) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "jurisdiction-rules-svc returned a non-array jurisdiction list",
+      },
+    };
   }
 
   return {
     ok: true,
-    data: list.sort((a, b) => {
+    data: [...result.data].sort((a, b) => {
       if (a.active_flag !== b.active_flag) return a.active_flag ? -1 : 1;
       return a.jurisdiction_code.localeCompare(b.jurisdiction_code);
     }),
@@ -219,88 +212,27 @@ export function getAncestors(id: string, identity?: Identity): Promise<ApiResult
  * so a jurisdiction with no rules of its own is not a jurisdiction with no
  * rules. Use the rule pack for the question "what applies here".
  */
-export async function getRules(id: string, identity?: Identity): Promise<ApiResult<JurisdictionRule[]>> {
-  const result = await apiGet<JurisdictionRule[]>(
+export function getRules(id: string, identity?: Identity): Promise<ApiResult<JurisdictionRule[]>> {
+  return apiGet<JurisdictionRule[]>(
     "jurisdictionRules", `/v1/jurisdictions/${encodeURIComponent(id)}/rules`, { identity });
-  
-  let list: JurisdictionRule[] = [];
-  if (result.ok && Array.isArray(result.data)) {
-    list = [...result.data];
-  }
-  const local = inMemoryRules.filter((r) => r.jurisdiction_id === id);
-  for (const r of local) {
-    if (!list.some((existing) => existing.jurisdiction_rule_id === r.jurisdiction_rule_id)) {
-      list.push(r);
-    }
-  }
-
-  if (list.length === 0 && !result.ok) {
-    return result;
-  }
-  return { ok: true, data: list };
 }
 
 /** The resolved pack for a jurisdiction, at `effectiveAt` (RFC3339) or now. */
-export async function getRulePack(
+export function getRulePack(
   id: string,
   effectiveAt?: string,
   identity?: Identity,
 ): Promise<ApiResult<RulePack>> {
-  const result = await apiGet<RulePack>("jurisdictionRules", `/v1/jurisdictions/${encodeURIComponent(id)}/rule-pack`, {
+  return apiGet<RulePack>("jurisdictionRules", `/v1/jurisdictions/${encodeURIComponent(id)}/rule-pack`, {
     query: effectiveAt ? { effective_at: effectiveAt } : undefined,
     identity,
   });
-
-  const localActive = inMemoryRules.filter((r) => r.jurisdiction_id === id && r.rule_status === "ACTIVE");
-
-  if (result.ok && result.data) {
-    const rules = [...(result.data.rules ?? [])];
-    for (const lr of localActive) {
-      if (!rules.some((m) => m.rule_code === lr.rule_code && m.rule_domain === lr.rule_domain)) {
-        rules.push(lr);
-      }
-    }
-    return {
-      ok: true,
-      data: {
-        ...result.data,
-        rules,
-      },
-    };
-  }
-
-  if (!result.ok && localActive.length > 0) {
-    return {
-      ok: true,
-      data: {
-        jurisdiction_id: id,
-        effective_at: effectiveAt || new Date().toISOString(),
-        resolved_from: [id],
-        rules: localActive,
-      },
-    };
-  }
-
-  return result;
 }
 
 /** The append-only drift history for one rule, which the rule row cannot show. */
-export async function getDriftEvents(ruleId: string, identity?: Identity): Promise<ApiResult<DriftEvent[]>> {
-  const result = await apiGet<DriftEvent[]>(
+export function getDriftEvents(ruleId: string, identity?: Identity): Promise<ApiResult<DriftEvent[]>> {
+  return apiGet<DriftEvent[]>(
     "jurisdictionRules", `/v1/rules/${encodeURIComponent(ruleId)}/drift-events`, { identity });
-
-  let list: DriftEvent[] = [];
-  if (result.ok && Array.isArray(result.data)) {
-    list = [...result.data];
-  }
-  const local = inMemoryDriftEvents.filter((e) => e.jurisdiction_rule_id === ruleId);
-  for (const e of local) {
-    if (!list.some((existing) => existing.drift_event_id === e.drift_event_id)) {
-      list.push(e);
-    }
-  }
-
-  return { ok: true, data: list };
 }
 
 // ─── Writes ──────────────────────────────────────────────────────────────────
@@ -329,10 +261,10 @@ export type CreateJurisdictionInput = {
  * matches with DIFFERENT attributes is 409, because that is someone redefining
  * an existing jurisdiction rather than re-submitting one.
  */
-export async function createJurisdiction(
+export function createJurisdiction(
   input: CreateJurisdictionInput,
 ): Promise<ApiWriteResult<Jurisdiction>> {
-  const apiRes = await apiPost<Jurisdiction>("jurisdictionRules", "/v1/admin/jurisdictions", {
+  return apiPost<Jurisdiction>("jurisdictionRules", "/v1/admin/jurisdictions", {
     jurisdiction_code: input.jurisdictionCode,
     jurisdiction_name: input.jurisdictionName,
     jurisdiction_type: input.jurisdictionType,
@@ -341,36 +273,6 @@ export async function createJurisdiction(
     ...(input.parentJurisdictionId ? { parent_jurisdiction_id: input.parentJurisdictionId } : {}),
     ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
   }, { identity: input.identity });
-
-  if (apiRes.ok) return apiRes;
-
-  if (
-    apiRes.error.kind === "unreachable" ||
-    apiRes.error.status === 503 ||
-    apiRes.error.message.includes("unavailable")
-  ) {
-    const existing = inMemoryJurisdictions.find((j) => j.jurisdiction_code === input.jurisdictionCode);
-    if (existing) {
-      return { ok: true, status: 200, data: existing };
-    }
-    const fallbackJurisdiction: Jurisdiction = {
-      jurisdiction_id: crypto.randomUUID(),
-      jurisdiction_code: input.jurisdictionCode,
-      jurisdiction_name: input.jurisdictionName,
-      jurisdiction_type: input.jurisdictionType,
-      authority_type: input.authorityType,
-      parent_jurisdiction_id: input.parentJurisdictionId ?? null,
-      effective_from: input.effectiveFrom,
-      effective_to: input.effectiveTo ?? null,
-      active_flag: true,
-      created_at: new Date().toISOString(),
-      created_by_principal_id: input.identity.principalId,
-    };
-    inMemoryJurisdictions.push(fallbackJurisdiction);
-    return { ok: true, status: 201, data: fallbackJurisdiction };
-  }
-
-  return apiRes;
 }
 
 /**
@@ -379,21 +281,12 @@ export async function createJurisdiction(
  * Not a delete — there are none in this platform. It clears active_flag and
  * end-dates the row, so everything already bound to it still resolves.
  */
-export async function deactivateJurisdiction(
+export function deactivateJurisdiction(
   id: string,
   identity: Identity & { principalId: string },
 ): Promise<ApiWriteResult<Jurisdiction>> {
-  const apiRes = await apiPost<Jurisdiction>(
+  return apiPost<Jurisdiction>(
     "jurisdictionRules", `/v1/admin/jurisdictions/${encodeURIComponent(id)}/deactivate`, {}, { identity });
-  if (apiRes.ok) return apiRes;
-
-  const match = inMemoryJurisdictions.find((j) => j.jurisdiction_id === id);
-  if (match) {
-    match.active_flag = false;
-    match.effective_to = new Date().toISOString();
-    return { ok: true, status: 200, data: match };
-  }
-  return apiRes;
 }
 
 export type CreateRuleInput = {
@@ -416,8 +309,8 @@ export type CreateRuleInput = {
  * a rule cannot be created directly into a terminal state, which is why the
  * form offers DRAFT and ACTIVE only.
  */
-export async function createRule(input: CreateRuleInput): Promise<ApiWriteResult<JurisdictionRule>> {
-  const apiRes = await apiPost<JurisdictionRule>(
+export function createRule(input: CreateRuleInput): Promise<ApiWriteResult<JurisdictionRule>> {
+  return apiPost<JurisdictionRule>(
     "jurisdictionRules",
     `/v1/admin/jurisdictions/${encodeURIComponent(input.jurisdictionId)}/rules`,
     {
@@ -432,41 +325,6 @@ export async function createRule(input: CreateRuleInput): Promise<ApiWriteResult
     },
     { identity: input.identity },
   );
-
-  if (apiRes.ok) return apiRes;
-
-  if (
-    apiRes.error.kind === "unreachable" ||
-    apiRes.error.status === 503 ||
-    apiRes.error.message.includes("unavailable")
-  ) {
-    const fallbackRule: JurisdictionRule = {
-      jurisdiction_rule_id: crypto.randomUUID(),
-      jurisdiction_id: input.jurisdictionId,
-      rule_domain: input.ruleDomain,
-      rule_code: input.ruleCode,
-      rule_name: input.ruleName,
-      effective_from: input.effectiveFrom,
-      effective_to: input.effectiveTo ?? null,
-      rule_payload: input.rulePayload,
-      source_reference: input.sourceReference ?? null,
-      external_feed_reference: null,
-      rule_status: input.ruleStatus ?? "DRAFT",
-      legal_drift_state: "CURRENT",
-      data_classification: "PUBLIC",
-      created_at: new Date().toISOString(),
-      created_by_principal_id: input.identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
-      schema_version: "1.0",
-    };
-    inMemoryRules.push(fallbackRule);
-    return {
-      ok: true,
-      status: 201,
-      data: fallbackRule,
-    };
-  }
-
-  return apiRes;
 }
 
 /**
@@ -481,27 +339,17 @@ export async function createRule(input: CreateRuleInput): Promise<ApiWriteResult
  * effective_to stayed NULL keeps matching every point-in-time query beside its
  * own replacement, so the rule pack would resolve two winners for one code.
  */
-export async function transitionRule(
+export function transitionRule(
   ruleId: string,
   newStatus: string,
   identity: Identity & { principalId: string },
   effectiveTo?: string,
 ): Promise<ApiWriteResult<JurisdictionRule>> {
-  const apiRes = await apiPost<JurisdictionRule>(
+  return apiPost<JurisdictionRule>(
     "jurisdictionRules", `/v1/admin/rules/${encodeURIComponent(ruleId)}/transition`,
     { new_status: newStatus, ...(effectiveTo ? { effective_to: effectiveTo } : {}) },
     { identity },
   );
-  if (apiRes.ok) return apiRes;
-
-  const match = inMemoryRules.find((r) => r.jurisdiction_rule_id === ruleId);
-  if (match) {
-    match.rule_status = newStatus;
-    if (effectiveTo) match.effective_to = effectiveTo;
-    return { ok: true, status: 200, data: match };
-  }
-
-  return apiRes;
 }
 
 /**
@@ -512,37 +360,17 @@ export async function transitionRule(
  * append-only, so this never overwrites — it adds the next entry and moves the
  * rule's current state.
  */
-export async function recordDrift(
+export function recordDrift(
   ruleId: string,
   driftState: string,
   reason: string,
   identity: Identity & { principalId: string },
 ): Promise<ApiWriteResult<JurisdictionRule>> {
-  const apiRes = await apiPost<JurisdictionRule>(
+  return apiPost<JurisdictionRule>(
     "jurisdictionRules", `/v1/admin/rules/${encodeURIComponent(ruleId)}/drift`,
     { drift_state: driftState, reason },
     { identity },
   );
-  if (apiRes.ok) return apiRes;
-
-  const match = inMemoryRules.find((r) => r.jurisdiction_rule_id === ruleId);
-  if (match) {
-    match.legal_drift_state = driftState;
-    inMemoryDriftEvents.push({
-      drift_event_id: crypto.randomUUID(),
-      jurisdiction_rule_id: ruleId,
-      from_state: match.legal_drift_state,
-      to_state: driftState,
-      reason,
-      effective_at: new Date().toISOString(),
-      recorded_by_principal_id: identity.principalId,
-      correlation_id: null,
-      schema_version: "1.0",
-    });
-    return { ok: true, status: 200, data: match };
-  }
-
-  return apiRes;
 }
 
 /** Human-readable reason for a refused jurisdiction-registry call. */

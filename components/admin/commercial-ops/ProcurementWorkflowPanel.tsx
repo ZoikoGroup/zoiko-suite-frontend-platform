@@ -1,23 +1,29 @@
 import { cookies } from "next/headers";
-import { CloudOff, GitBranch, ShieldAlert, CheckCircle, Clock, XCircle, Ban } from "lucide-react";
+import { CloudOff, GitBranch, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listProcurementWorkflows, type ProcurementWorkflow } from "@/lib/api/commercial-ops";
+import {
+  listProcurementCases,
+  explainProcurementCaseError,
+  type ProcurementCaseStatus,
+} from "@/lib/api/commercial-ops";
+import { formatMoney } from "@/lib/format";
+import { OpenProcurementCaseForm, ProcurementCaseActions } from "./ProcurementCaseForms";
 
-const STATUS_ICONS: Record<string, React.ElementType> = {
-  IN_PROGRESS: Clock,
-  APPROVED: CheckCircle,
-  REJECTED: XCircle,
-  CANCELLED: Ban,
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  IN_PROGRESS: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
-  APPROVED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+const STATUS_COLORS: Record<ProcurementCaseStatus, string> = {
+  REQUESTED: "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300",
+  SPEND_BLOCKED: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300",
+  APPROVAL_PENDING: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
+  APPROVED: "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
   REJECTED: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300",
-  CANCELLED: "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300",
+  COMPLETED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
 };
 
+/**
+ * Procurement cases from procurement-workflow-svc (/v1/procurement-cases):
+ * open a case (spend-checked on create), approve or reject it, then issue the
+ * purchase order, which completes the case.
+ */
 export async function ProcurementWorkflowPanel() {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
@@ -28,7 +34,7 @@ export async function ProcurementWorkflowPanel() {
         icon={ShieldAlert}
         tone="warning"
         label="No active session"
-        hint="Sign in to view procurement workflows."
+        hint="Sign in to view procurement cases."
       />
     );
   }
@@ -39,82 +45,65 @@ export async function ProcurementWorkflowPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const res = await listProcurementWorkflows(identity);
-
-  if (!res.ok) {
-    return (
-      <PanelEmptyState
-        icon={CloudOff}
-        tone="warning"
-        label="Procurement workflows unavailable"
-        hint={res.error.message}
-      />
-    );
-  }
-
-  const workflows = res.data;
-
-  if (workflows.length === 0) {
-    return (
-      <PanelEmptyState
-        icon={GitBranch}
-        tone="neutral"
-        label="No active workflows"
-        hint="All procurement workflows have been finalized or none have been initiated."
-      />
-    );
-  }
+  const res = await listProcurementCases(identity);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-        <span>Showing {workflows.length} procurement lifecycle workflows</span>
-        <span className="font-mono text-[11px]">procurement-workflow-svc :8134</span>
-      </div>
+    <div className="space-y-6">
+      <OpenProcurementCaseForm />
 
-      <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
-        {workflows.map((wf) => {
-          const StatusIcon = STATUS_ICONS[wf.status] || Clock;
-          const statusClass = STATUS_COLORS[wf.status] || STATUS_COLORS.IN_PROGRESS;
-          const progressPercent = wf.total_steps > 0 ? Math.round((wf.steps_completed / wf.total_steps) * 100) : 0;
-
-          return (
-            <div key={wf.workflow_id} className="p-4 transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
-                      {wf.workflow_id}
+      {!res.ok ? (
+        <PanelEmptyState
+          icon={CloudOff}
+          tone="warning"
+          label="Procurement cases unavailable"
+          hint={explainProcurementCaseError(res.error.message)}
+        />
+      ) : res.data.length === 0 ? (
+        <PanelEmptyState
+          icon={GitBranch}
+          tone="neutral"
+          label="No procurement cases yet"
+          hint="Open one above. It is spend-checked as soon as it is created."
+        />
+      ) : (
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+          {res.data.map((c) => (
+            <div key={c.case_id} className="p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      {c.description}
                     </span>
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${statusClass}`}>
-                      <StatusIcon className="h-3 w-3" />
-                      {wf.status}
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[c.status] ?? STATUS_COLORS.REQUESTED}`}
+                    >
+                      {c.status.replace(/_/g, " ")}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                    Type: <span className="font-medium text-slate-800 dark:text-slate-200">{wf.workflow_type}</span> • Initiated by: <span className="font-mono">{wf.initiated_by}</span>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {c.category} · spend check {c.spend_check_decision || "—"}
+                    {c.spend_check_basis ? ` (${c.spend_check_basis})` : ""}
+                    {c.rejection_reason ? ` · rejected: ${c.rejection_reason}` : ""}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[11px] text-slate-400 dark:text-slate-500">
+                    {c.case_id}
+                    {c.purchase_order_id ? ` → PO ${c.purchase_order_id}` : ""}
                   </p>
                 </div>
-
-                <div className="sm:text-right">
-                  <div className="flex items-center gap-2 sm:justify-end">
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      Step {wf.steps_completed} of {wf.total_steps}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{progressPercent}%</span>
-                  </div>
-                  <div className="mt-1 h-1.5 w-full sm:w-28 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 rounded-full transition-all"
-                      style={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                </div>
+                <span className="text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-200">
+                  {formatMoney(c.amount, c.currency_code)}
+                </span>
               </div>
+              <ProcurementCaseActions
+                caseId={c.case_id}
+                status={c.status}
+                isRequester={c.requested_by_principal_id === session.principalId}
+              />
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/purchase-orders";
 import {
   createPurchaseRequest,
+  submitPurchaseRequestForApproval,
   approvePurchaseRequest,
   rejectPurchaseRequest,
   getPurchaseRequest,
@@ -53,8 +54,16 @@ import {
   submitWorkflowStageAction,
 } from "@/lib/api/workflow-history";
 import type { LookupState } from "@/components/admin/shared/lookup";
+import {
+  createProcurementCase,
+  approveProcurementCase,
+  rejectProcurementCase,
+  issueProcurementCaseOrder,
+  explainProcurementCaseError,
+} from "@/lib/api/commercial-ops";
 import type {
   OrderActionState,
+  ProcurementCaseActionState,
   RequestActionState,
   SpendCheckActionState,
   SpendPolicyActionState,
@@ -339,7 +348,7 @@ const EXPIRED_REQUEST: RequestActionState = {
   message: "Your session has expired — sign in again.",
 };
 
-/** Raise a purchase request. Lands PENDING; grants nothing on its own. */
+/** Raise a purchase request. Lands DRAFT; grants nothing until submitted and approved. */
 export async function submitPurchaseRequest(
   _previous: RequestActionState,
   formData: FormData,
@@ -396,7 +405,50 @@ export async function submitPurchaseRequest(
       };
 }
 
-/** Approve a PENDING request. Terminal. */
+/** DRAFT → PENDING_APPROVAL, at the request's current version. */
+export async function submitRequestForApproval(
+  _previous: RequestActionState,
+  formData: FormData,
+): Promise<RequestActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED_REQUEST;
+  }
+
+  const requestId = String(formData.get("request_id") ?? "").trim();
+  if (!requestId) return { status: "error", message: "A purchase request ID is required." };
+  if (!isUuid(requestId)) return { status: "error", message: "A purchase request ID must be a UUID." };
+
+  const current = await getPurchaseRequest(requestId, identity);
+  if (!current.ok) {
+    return {
+      status: "error",
+      message: explainRequestError(current.error.message, {
+        status: current.error.status,
+        notFound: "No purchase request with that ID exists for your organisation.",
+      }),
+    };
+  }
+
+  const result = await submitPurchaseRequestForApproval(requestId, current.data.version, identity);
+  if (!result.ok) {
+    const message = explainRequestError(result.error.message, { status: result.error.status });
+    return result.error.status === 422
+      ? { status: "already-decided", message }
+      : { status: "error", message };
+  }
+
+  refresh();
+  return {
+    status: "submitted",
+    requestId,
+    message: `Request submitted — now ${result.data.status}. Someone other than the requester has to approve or reject it.`,
+  };
+}
+
+/** Approve a PENDING_APPROVAL request. */
 export async function submitRequestApproval(
   _previous: RequestActionState,
   formData: FormData,
@@ -404,7 +456,7 @@ export async function submitRequestApproval(
   return decideRequest(formData, "approve");
 }
 
-/** Reject a PENDING request, with a reason. Terminal. */
+/** Reject a PENDING_APPROVAL request, with a reason. Terminal. */
 export async function submitRequestRejection(
   _previous: RequestActionState,
   formData: FormData,
@@ -448,10 +500,24 @@ async function decideRequest(
     }
   }
 
+  // Both decisions require expected_version. The form takes the request by ID,
+  // so read its current version first; a change in between still answers 409.
+  const current = await getPurchaseRequest(requestId, identity);
+  if (!current.ok) {
+    return {
+      status: "error",
+      message: explainRequestError(current.error.message, {
+        status: current.error.status,
+        notFound: "No purchase request with that ID exists for your organisation.",
+      }),
+    };
+  }
+  const version = current.data.version;
+
   const result =
     decision === "approve"
-      ? await approvePurchaseRequest(requestId, identity)
-      : await rejectPurchaseRequest(requestId, reason, identity);
+      ? await approvePurchaseRequest(requestId, version, identity)
+      : await rejectPurchaseRequest(requestId, reason, version, identity);
 
   if (!result.ok) {
     if (result.error.status === 422) {
@@ -1060,3 +1126,114 @@ export async function submitWorkflowDecisionAction(
 }
 
 
+
+// ─── Procurement cases (procurement-workflow-svc) ────────────────────────────
+
+const CASE_EXPIRED: ProcurementCaseActionState = {
+  status: "error",
+  message: "Your session has expired — sign in again.",
+};
+
+/** Open a procurement case. The service runs the spend check on create. */
+export async function openProcurementCase(
+  _previous: ProcurementCaseActionState,
+  formData: FormData,
+): Promise<ProcurementCaseActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return CASE_EXPIRED;
+  }
+
+  const description = String(formData.get("description") ?? "").trim();
+  const category = String(formData.get("category") ?? "").trim().toUpperCase();
+  const currencyCode = String(formData.get("currency_code") ?? "").trim();
+  const vendorProfileId = String(formData.get("vendor_profile_id") ?? "").trim();
+  const amountRaw = String(formData.get("amount") ?? "").trim();
+  const amount = Number(amountRaw);
+
+  if (!description) return { status: "error", message: "Describe what is being procured." };
+  if (!category) return { status: "error", message: "A spend category is required — it decides which spend limit applies." };
+  if (amountRaw === "" || !Number.isFinite(amount) || amount <= 0) {
+    return { status: "error", message: "Amount must be a number greater than zero." };
+  }
+  if (!currencyCode) return { status: "error", message: "Currency is required." };
+  if (vendorProfileId && !isUuid(vendorProfileId)) {
+    return { status: "error", message: "A vendor profile ID must be a UUID." };
+  }
+
+  const result = await createProcurementCase({
+    identity,
+    description,
+    category,
+    amount,
+    currencyCode,
+    ...(vendorProfileId ? { vendorProfileId } : {}),
+  });
+  if (!result.ok) return { status: "error", message: explainProcurementCaseError(result.error.message) };
+
+  refresh();
+  const c = result.data;
+  const outcome =
+    c.status === "SPEND_BLOCKED"
+      ? `Spend check BLOCKED it (${c.spend_check_basis || "over the limit"}), so it cannot be approved.`
+      : `Spend check ${c.spend_check_decision ?? "passed"} — it now needs someone other than you to approve it.`;
+  return {
+    status: result.status === 201 ? "opened" : "replayed",
+    caseId: c.case_id,
+    message: `Case opened — ${c.status}. ${outcome}`,
+  };
+}
+
+async function caseTransition(
+  formData: FormData,
+  kind: "approve" | "reject" | "issue",
+): Promise<ProcurementCaseActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return CASE_EXPIRED;
+  }
+
+  const caseId = String(formData.get("case_id") ?? "").trim();
+  if (!isUuid(caseId)) return { status: "error", message: "Missing or malformed case ID. Reload and try again." };
+
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (kind === "reject" && !reason) {
+    return { status: "error", caseId, message: "A reason is required to reject a case." };
+  }
+
+  const result =
+    kind === "approve"
+      ? await approveProcurementCase(caseId, identity)
+      : kind === "reject"
+        ? await rejectProcurementCase(caseId, reason, identity)
+        : await issueProcurementCaseOrder(caseId, identity);
+  if (!result.ok) {
+    return { status: "error", caseId, message: explainProcurementCaseError(result.error.message) };
+  }
+
+  refresh();
+  const c = result.data;
+  if (kind === "approve") return { status: "approved", caseId, message: "Case APPROVED. Issue the purchase order next." };
+  if (kind === "reject") return { status: "rejected", caseId, message: "Case REJECTED, with your reason recorded." };
+  return {
+    status: "issued",
+    caseId,
+    message: `Purchase order issued${c.purchase_order_id ? ` — ${c.purchase_order_id}` : ""}. The case is COMPLETED.`,
+  };
+}
+
+export async function approveCase(_p: ProcurementCaseActionState, formData: FormData) {
+  return caseTransition(formData, "approve");
+}
+
+export async function rejectCase(_p: ProcurementCaseActionState, formData: FormData) {
+  return caseTransition(formData, "reject");
+}
+
+export async function issueCaseOrder(_p: ProcurementCaseActionState, formData: FormData) {
+  return caseTransition(formData, "issue");
+}

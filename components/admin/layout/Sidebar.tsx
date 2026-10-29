@@ -1,29 +1,50 @@
 "use client";
 
+import { useId, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronLeft, X } from "lucide-react";
-import { NAV_SECTIONS, SECONDARY_NAV, PRIMARY_NAV } from "@/lib/constants";
-import { Logo } from "@/components/ui";
+import { ArrowRight, ChevronRight, ChevronsLeft, ChevronsRight, Sparkles, X } from "lucide-react";
+import {
+  NAV_SECTIONS,
+  SECONDARY_NAV,
+  findNavLocation,
+  isNavActive,
+  type NavEntry,
+  type NavSection,
+} from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
-function isActive(pathname: string, href: string) {
-  if (href === "/admin") return pathname === "/admin";
-  return pathname === href || pathname.startsWith(`${href}/`);
+const ROW =
+  "group relative flex w-full items-center rounded-lg text-[13px] font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400/70";
+const ROW_IDLE = "text-navy-100 hover:bg-white/[0.06] hover:text-white";
+const ICON_IDLE = "text-navy-300 group-hover:text-white";
+const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400/70";
+const TOGGLE = "rounded-lg p-1.5 text-navy-300 transition-colors hover:bg-white/10 hover:text-white";
+
+/** The logo recoloured for the navy rail (public/logo-on-dark.png): the navy
+ *  strokes of the source asset are white here, so it needs no light chip. */
+function Brand({ collapsed = false }: { collapsed?: boolean }) {
+  return collapsed ? (
+    <Image src="/logo-mark-on-dark.png" alt="ZoikoSuite" width={37} height={56} priority style={{ width: 37, height: 56 }} />
+  ) : (
+    <Image src="/logo-on-dark.png" alt="ZoikoSuite" width={163} height={70} priority style={{ width: 163, height: 70 }} />
+  );
 }
 
-type NavItem = { label: string; href: string; icon: (typeof PRIMARY_NAV)[number]["icon"] };
+/** The gold edge marking the group that holds the current page. */
+function ActiveBar({ className }: { className?: string }) {
+  return <span className={cn("absolute inset-y-0 w-1 bg-rail-bar", className)} />;
+}
 
-// Overview is not part of any domain section - it is the way back out.
-const OVERVIEW_NAV: NavItem = PRIMARY_NAV[0];
-
-function NavLink({
+/** A top-level row that is a page: the footer links. */
+function NavRow({
   item,
   active,
   collapsed,
   onNavigate,
 }: {
-  item: NavItem;
+  item: NavEntry;
   active: boolean;
   collapsed: boolean;
   onNavigate?: () => void;
@@ -33,67 +54,173 @@ function NavLink({
       href={item.href}
       onClick={onNavigate}
       title={collapsed ? item.label : undefined}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex items-center rounded-lg py-2.5 text-sm font-medium transition-all duration-200",
-        collapsed ? "justify-center px-0" : "gap-3 px-3",
-        active
-          ? "bg-navy-900 text-white shadow-sm dark:bg-navy-700"
-          : "text-slate-600 hover:bg-slate-100 hover:text-navy-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
+        ROW,
+        collapsed ? "justify-center py-2.5" : "gap-3 px-3.5 py-2.5",
+        active ? "bg-nav-active font-semibold text-white shadow-sm" : ROW_IDLE,
       )}
     >
-      {active && (
-        <span className="absolute -left-3 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gold-400" />
-      )}
-      <item.icon
-        className={cn(
-          "h-4.5 w-4.5 shrink-0 transition-transform duration-200 group-hover:scale-110",
-          active
-            ? "text-gold-300"
-            : "text-slate-400 group-hover:text-navy-700 dark:text-slate-500 dark:group-hover:text-slate-200",
-        )}
-      />
-      <span
-        className={cn(
-          "overflow-hidden whitespace-nowrap transition-all duration-200 ease-in-out",
-          collapsed ? "max-w-0 opacity-0" : "max-w-[10rem] opacity-100",
-        )}
-      >
-        {item.label}
-      </span>
-
-      {collapsed && (
-        <span className="pointer-events-none absolute left-full z-50 ml-3 origin-left scale-95 whitespace-nowrap rounded-md bg-navy-900 px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg transition-all duration-150 group-hover:scale-100 group-hover:opacity-100 dark:bg-slate-800 dark:ring-1 dark:ring-slate-700">
-          {item.label}
-        </span>
+      <item.icon className={cn("h-4 w-4 shrink-0", active ? "text-white" : ICON_IDLE)} />
+      {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+      {!collapsed && (
+        <ChevronRight className={cn("h-4 w-4 shrink-0", active ? "text-white" : "text-navy-300/70 group-hover:text-white")} />
       )}
     </Link>
   );
 }
 
-/** Group heading. Collapses to nothing when the sidebar is collapsed — a
- *  truncated label is worse than none, since the icons carry tooltips. */
-function SectionLabel({
+/** One domain group: a heading that opens and closes, with its pages under it. */
+function SectionGroup({
+  section,
+  open,
+  activeHref,
   collapsed,
-  children,
+  onToggle,
+  onNavigate,
 }: {
+  section: NavSection;
+  open: boolean;
+  activeHref: string | undefined;
   collapsed: boolean;
-  children: React.ReactNode;
+  onToggle: () => void;
+  onNavigate?: () => void;
 }) {
+  const panelId = useId();
+  const holdsActive = section.items.some((item) => item.href === activeHref);
+  const Icon = section.icon;
+
+  if (collapsed) {
+    // The rail has no room for the pages, so the group icon opens the sidebar
+    // on that group rather than navigating somewhere the operator did not pick.
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        title={section.title}
+        aria-label={`${section.title} — open the menu`}
+        className={cn(ROW, "justify-center py-2.5", holdsActive ? "bg-rail-raised text-white" : ROW_IDLE)}
+      >
+        {holdsActive && <ActiveBar className="-left-3" />}
+        <Icon className={cn("h-4 w-4 shrink-0", holdsActive ? "text-gold-300" : ICON_IDLE)} />
+      </button>
+    );
+  }
+
   return (
-    <p
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className={cn(
+          ROW,
+          "gap-3 py-2.5 text-left",
+          // The group holding the current page is raised edge to edge, with the
+          // gold bar on the rail's own edge (the nav's px-4 is cancelled out).
+          holdsActive
+            ? "-mx-4 w-[calc(100%+2rem)] rounded-none bg-rail-raised px-[1.875rem] text-white"
+            : cn("px-3.5", ROW_IDLE),
+        )}
+      >
+        {holdsActive && <ActiveBar className="left-0" />}
+        <Icon className={cn("h-4 w-4 shrink-0", holdsActive ? "text-gold-300" : ICON_IDLE)} />
+        <span className="flex-1 leading-snug">{section.title}</span>
+        <ChevronRight
+          className={cn(
+            "h-4 w-4 shrink-0 transition-transform duration-200",
+            holdsActive ? "text-white" : "text-navy-300/70 group-hover:text-white",
+            open && "-rotate-90",
+          )}
+        />
+      </button>
+
+      {/* grid-rows 0fr -> 1fr animates to the content's own height. `inert`
+          keeps the links of a closed group out of the tab order. */}
+      <div
+        id={panelId}
+        inert={!open}
+        className={cn(
+          "grid transition-[grid-template-rows,opacity] duration-300 ease-in-out",
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="overflow-hidden">
+          {/* ml-4 starts the pill under the group icon rather than at the rail's padding. */}
+          <ul className="ml-4 space-y-0.5 py-1.5">
+            {section.items.map((item) => {
+              const active = item.href === activeHref;
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    onClick={onNavigate}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "group flex items-center gap-2 rounded-lg py-2 pl-2.5 pr-3 text-[12px] leading-5 transition-colors duration-150",
+                      FOCUS,
+                      active
+                        ? "bg-nav-active font-semibold text-white shadow-sm"
+                        : "text-navy-200 hover:bg-white/[0.06] hover:text-white",
+                    )}
+                  >
+                    <ChevronRight
+                      className={cn("h-3 w-3 shrink-0", active ? "text-white" : "text-navy-300/60 group-hover:text-navy-100")}
+                    />
+                    <span className="truncate">{item.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The assistant's entry point. No assistant service exists yet, so the card
+ *  says so instead of opening a chat that cannot answer. */
+function AskSuivoCard({ collapsed }: { collapsed: boolean }) {
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        aria-disabled="true"
+        title="Ask Suivo — coming soon"
+        aria-label="Ask Suivo, ZoikoSuite AI assistant — coming soon"
+        className={cn(ROW, "cursor-default justify-center py-2.5", ROW_IDLE)}
+      >
+        <Sparkles className="h-5 w-5 text-rail-spark" />
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      aria-disabled="true"
+      title="Coming soon"
       className={cn(
-        // Wraps rather than nowrap: the headings are domain names now, not
-        // single words, and "Governance, Compliance & Audit" is wider than the
-        // 16rem rail. With nowrap the tail was simply clipped off.
-        //
-        // max-h is generous enough for two lines for the same reason — the
-        // previous max-h-5 was sized for one.
-        "mb-2 overflow-hidden px-3 text-[11px] font-semibold uppercase leading-tight tracking-wider text-slate-400 transition-all duration-200 dark:text-slate-500",
-        collapsed ? "max-h-0 opacity-0" : "max-h-10 opacity-100",
+        "flex w-full cursor-default items-start gap-3 rounded-xl border border-rail-card-line bg-rail-card p-4 text-left",
+        FOCUS,
       )}
     >
-      {children}
-    </p>
+      <Sparkles className="mt-0.5 h-7 w-7 shrink-0 fill-rail-spark/25 text-rail-spark" />
+      <span className="min-w-0">
+        <span className="flex items-center gap-2">
+          <span className="text-base font-semibold text-white">Ask Suivo</span>
+          <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-navy-200">
+            Soon
+          </span>
+        </span>
+        <span className="mt-1 block text-[13px] text-navy-200">ZoikoSuite AI assistant</span>
+        <span className="mt-1.5 flex items-center gap-1 text-[13px] text-navy-200">
+          Help &amp; guidance <ArrowRight className="h-3.5 w-3.5" />
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -101,57 +228,75 @@ function NavList({
   pathname,
   collapsed = false,
   onNavigate,
+  onExpand,
 }: {
   pathname: string;
   collapsed?: boolean;
   onNavigate?: () => void;
+  onExpand?: () => void;
 }) {
-  return (
-    <nav className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden scrollbar-thin px-3 py-6">
-      {/* Overview sits above the sections, unlabelled: it is the way back out
-          of a domain rather than a page inside one. */}
-      <div className="space-y-0.5">
-        <NavLink
-          item={OVERVIEW_NAV}
-          active={isActive(pathname, OVERVIEW_NAV.href)}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
-      </div>
+  // Explicit open/closed choices by group title. A group nobody has toggled is
+  // open exactly when it holds the current page, so navigating into a group
+  // opens it without an effect.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
-      {/* One group per domain, so a page is found where its subject is. The
-          previous two-way split (business domain / governance plane) described
-          the architecture rather than answering the question an operator asks:
-          it required knowing that the governance decision log is a
-          cross-cutting control and that board resolutions live under Legal
-          before either could be found. */}
-      {NAV_SECTIONS.map((section) => (
-        <div key={section.title} className="space-y-0.5">
-          <SectionLabel collapsed={collapsed}>{section.title}</SectionLabel>
-          {section.items.map((item) => (
-            <NavLink
+  const activeHref = findNavLocation(pathname)?.item.href;
+
+  function isOpen(section: NavSection) {
+    // /admin is the Overview dashboard but no menu entry, so open its group there.
+    const holdsPage =
+      section.items.some((item) => item.href === activeHref) ||
+      (pathname === "/admin" && section === NAV_SECTIONS[0]);
+    return toggled[section.title] ?? holdsPage;
+  }
+
+  function toggle(section: NavSection) {
+    if (collapsed) {
+      setToggled((prev) => ({ ...prev, [section.title]: true }));
+      onExpand?.();
+      return;
+    }
+    setToggled((prev) => ({ ...prev, [section.title]: !isOpen(section) }));
+  }
+
+  return (
+    <>
+      <nav
+        aria-label="Main"
+        className={cn(
+          "scrollbar-dark flex flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden py-3",
+          collapsed ? "px-3" : "px-4",
+        )}
+      >
+        {/* One group per domain, so a page is found where its subject is. */}
+        {NAV_SECTIONS.map((section) => (
+          <SectionGroup
+            key={section.title}
+            section={section}
+            open={isOpen(section)}
+            activeHref={activeHref}
+            collapsed={collapsed}
+            onToggle={() => toggle(section)}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </nav>
+
+      <div className={cn("shrink-0 space-y-3 border-t border-rail-line py-3", collapsed ? "px-3" : "px-4")}>
+        <div className="space-y-0.5">
+          {SECONDARY_NAV.map((item) => (
+            <NavRow
               key={item.href}
               item={item}
-              active={isActive(pathname, item.href)}
+              active={isNavActive(pathname, item.href)}
               collapsed={collapsed}
               onNavigate={onNavigate}
             />
           ))}
         </div>
-      ))}
-
-      <div className="mt-auto space-y-0.5 border-t border-slate-200 pt-4 dark:border-slate-800">
-        {SECONDARY_NAV.map((item) => (
-          <NavLink
-            key={item.href}
-            item={item}
-            active={isActive(pathname, item.href)}
-            collapsed={collapsed}
-            onNavigate={onNavigate}
-          />
-        ))}
+        <AskSuivoCard collapsed={collapsed} />
       </div>
-    </nav>
+    </>
   );
 }
 
@@ -173,30 +318,48 @@ export function Sidebar({
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "relative hidden shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 lg:flex",
-          collapsed ? "w-[4.5rem]" : "w-64",
+          "bg-sidebar relative hidden shrink-0 flex-col text-navy-100 transition-[width] duration-300 ease-in-out lg:flex",
+          collapsed ? "w-20" : "w-[17.5rem]",
         )}
       >
         <div
           className={cn(
-            "flex h-16 items-center border-b border-slate-200 transition-all duration-200 dark:border-slate-800",
-            collapsed ? "justify-center px-0" : "px-5",
+            "flex h-[76px] shrink-0 items-center border-b border-rail-line",
+            collapsed ? "justify-center" : "justify-between pl-3 pr-4",
           )}
         >
-          <Logo height={28} markOnly={collapsed} />
+          <Link href="/admin" aria-label="ZoikoSuite — Overview" className={cn("rounded-xl", FOCUS)}>
+            <Brand collapsed={collapsed} />
+          </Link>
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+              className={cn(TOGGLE, FOCUS)}
+            >
+              <ChevronsLeft className="h-5 w-5" />
+            </button>
+          )}
         </div>
 
-        <NavList pathname={pathname} collapsed={collapsed} />
+        {/* The 80px rail has no room beside the logo mark, so expand sits just under it. */}
+        {collapsed && (
+          <div className="flex shrink-0 justify-center border-b border-rail-line py-2">
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+              className={cn(TOGGLE, FOCUS)}
+            >
+              <ChevronsRight className="h-5 w-5" />
+            </button>
+          </div>
+        )}
 
-        <button
-          onClick={onToggleCollapse}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="absolute -right-3 top-7 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-navy-300 hover:text-navy-700 hover:shadow-md dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:border-navy-400 dark:hover:text-slate-100"
-        >
-          <ChevronLeft
-            className={cn("h-3.5 w-3.5 transition-transform duration-300 ease-in-out", collapsed && "rotate-180")}
-          />
-        </button>
+        <NavList pathname={pathname} collapsed={collapsed} onExpand={onToggleCollapse} />
       </aside>
 
       {/* Mobile drawer */}
@@ -210,21 +373,25 @@ export function Sidebar({
         <div
           onClick={onClose}
           className={cn(
-            "absolute inset-0 bg-slate-900/40 transition-opacity duration-200",
+            "absolute inset-0 bg-slate-950/50 transition-opacity duration-200",
             mobileOpen ? "opacity-100" : "opacity-0",
           )}
         />
         <aside
           className={cn(
-            "absolute inset-y-0 left-0 flex w-72 flex-col bg-white shadow-xl transition-transform duration-300 ease-out dark:bg-slate-900",
+            "bg-sidebar absolute inset-y-0 left-0 flex w-[18rem] flex-col text-navy-100 shadow-2xl transition-transform duration-300 ease-out",
             mobileOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
-          <div className="flex h-16 items-center justify-between border-b border-slate-200 px-5 dark:border-slate-800">
-            <Logo height={28} />
+          <div className="flex h-[76px] shrink-0 items-center justify-between border-b border-rail-line pl-3 pr-4">
+            <Link href="/admin" onClick={onClose} aria-label="ZoikoSuite — Overview" className={cn("rounded-xl", FOCUS)}>
+              <Brand />
+            </Link>
             <button
+              type="button"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              aria-label="Close navigation"
+              className="rounded-lg p-1.5 text-navy-300 transition-colors hover:bg-white/10 hover:text-white"
             >
               <X className="h-5 w-5" />
             </button>

@@ -46,21 +46,21 @@ export async function ExceptionAndAnomalyPanels() {
             ) : (
               <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-64 overflow-y-auto">
                 {exceptions.map((e) => (
-                  <div key={e.exception_id} className="flex items-center justify-between py-2.5 text-xs">
+                  <div key={e.exception_case_id} className="flex items-center justify-between py-2.5 text-xs">
                     <div>
-                      <div className="font-semibold text-slate-900 dark:text-slate-100">{e.title}</div>
+                      <div className="font-semibold text-slate-900 dark:text-slate-100">{e.exception_type}</div>
                       <div className="text-slate-500 text-[11px]">
-                        Source: {e.source_service} • Level {e.escalation_level}
+                        {e.linked_object_type} {e.linked_object_id} • {e.case_status}
                       </div>
                     </div>
                     <span
                       className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-                        e.severity === "CRITICAL"
+                        e.severity_level === "CRITICAL"
                           ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
                           : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
                       }`}
                     >
-                      {e.severity}
+                      {e.severity_level}
                     </span>
                   </div>
                 ))}
