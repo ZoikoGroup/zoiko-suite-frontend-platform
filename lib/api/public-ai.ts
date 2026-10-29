@@ -1,26 +1,14 @@
-// Server-only client for public-ai-svc (Suivo, Release R0) — the public,
-// anonymous ZoikoSuite assistant.
+// Browser client for the ZoikoSuite Assistant (public-ai-svc).
 //
-// Deliberately NOT built on ./client.ts: that client attaches the console's
-// identity envelope (X-Principal-Id / X-Tenant-Id / X-Legal-Entity-Id). The
-// public assistant must never receive a staff or tenant identity — it is
-// PUBLIC_ANONYMOUS by design (backend INV-01, Doc 06 TB-X). Never import this
-// from a "use client" component.
+// The assistant is PUBLIC_ANONYMOUS by design (backend INV-01, Doc 06 TB-X).
+// Every call goes to the same-origin /public-ai/v1/* route (see
+// app/public-ai/v1/[...path]/route.ts) with credentials: "omit", so the
+// browser attaches no site cookie, and the only headers are the assistant's
+// own: Content-Type, Idempotency-Key and the X-Public-Chat-Session grant. This
+// module never reads cookies, tokens, storage, dashboard state or the DOM.
 
-const DEFAULT_URL = "http://127.0.0.1:18080";
-const DEFAULT_ORIGIN = "http://localhost:3000";
 const TIMEOUT_MS = 20_000;
-
-function baseUrl(): string {
-  return (process.env.ZOIKO_PUBLIC_AI_URL ?? DEFAULT_URL).replace(/\/+$/, "");
-}
-
-// The service enforces a first-party Origin allowlist. Calls are made from
-// the Next.js server, so the console states its own origin explicitly; it
-// must be listed in the backend's PUBLIC_AI_ALLOWED_ORIGINS.
-function origin(): string {
-  return process.env.ZOIKO_PUBLIC_AI_ORIGIN ?? DEFAULT_ORIGIN;
-}
+const BASE = "/public-ai/v1";
 
 export type TurnStatus = "ANSWERED" | "CLARIFY" | "REFUSED_ACTION" | "ABSTAIN" | "HANDOFF" | "UNAVAILABLE";
 
@@ -32,6 +20,7 @@ export type PublicAISession = {
 
 export type Citation = { source_version_id: string; claim_ids: string[]; url_key: string };
 export type RouteAction = { type: "OPEN_OFFICIAL_ROUTE"; route_key: string };
+export type Chip = { label: string; message: string };
 
 export type TurnEnvelope = {
   turn_id: string;
@@ -46,23 +35,32 @@ export type TurnEnvelope = {
   flags?: { requires_human?: boolean };
   /** How much of the answer is a governed fact (never set by the model). */
   answer_class: "VERIFIED_FACT" | "STATUS_QUALIFIED" | "PROCESS_EXPLANATION" | "HANDOFF_UNKNOWN";
-  /** Governed status from the signed claim registry only. */
+  /** Governed status from the signed claim registry only (VERIFIED, Available, Unverified, ...). */
   status_label?: string;
   /** The market a qualified answer is scoped to. */
   market_code?: string;
-  /** CLARIFY only: one question, options are market codes plus GENERAL_OVERVIEW. */
+  /** CLARIFY only: one question, options are market codes, OTHER and GENERAL_OVERVIEW. */
   clarification?: { slot: string; question: string; options: string[] };
+  /** Second intent of a two-part question (e.g. plans and trial). */
+  secondary_intent_id?: string;
+  /** Why the turn ended this way (ANSWERED, MARKET_REQUIRED, LIVE_PLATFORM_DATA, KILL_SWITCH, ...). */
+  reason?: string;
+  /** Pre-approved follow-up questions, shown as chips. */
+  suggestions?: Chip[];
+  /** Answered from articles owners have not approved yet (local/dev only). */
+  draft?: boolean;
 };
 
 export const OVERVIEW_OPTION = "GENERAL_OVERVIEW";
-
-export type Chip = { label: string; message: string };
+export const OTHER_OPTION = "OTHER";
 
 export type PublicAIConfig = {
   assistant_display_name: string;
   supported_locales: string[];
   market_choices: string[];
+  /** Official destinations with real URLs only; placeholder routes are never sent. */
   public_routes: { route_key: string; url: string }[];
+  /** Approved source titles; url is "" when no real public page exists. */
   citation_links: { url_key: string; url: string; title: string }[];
   /** Pre-approved UI wording keyed ui.* (plain text). */
   microcopy?: Record<string, string>;
@@ -81,24 +79,29 @@ export type PublicAIError = {
 
 export type PublicAIResult<T> = { ok: true; data: T } | { ok: false; error: PublicAIError };
 
+export type FeedbackRating = "useful" | "not_useful";
+export type FeedbackReason = "" | "incorrect" | "incomplete" | "not_relevant" | "unclear" | "other";
+
 async function call<T>(
   method: "GET" | "POST" | "DELETE",
   path: string,
   init: { body?: unknown; grant?: string; idempotencyKey?: string } = {},
 ): Promise<PublicAIResult<T>> {
-  const headers: Record<string, string> = { Origin: origin(), Accept: "application/json" };
+  const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
   if (init.grant) headers["X-Public-Chat-Session"] = init.grant;
   if (init.idempotencyKey) headers["Idempotency-Key"] = init.idempotencyKey;
 
   let response: Response;
   try {
-    response = await fetch(`${baseUrl()}/public-ai/v1${path}`, {
+    response = await fetch(`${BASE}${path}`, {
       method,
       headers,
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      credentials: "omit", // never the site's cookies
       cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
     const timeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
@@ -111,7 +114,7 @@ async function call<T>(
   try {
     body = await response.json();
   } catch {
-    return { ok: false, error: { kind: "malformed", status: response.status, requestId } };
+    return { ok: false, error: { kind: response.status >= 500 ? "unreachable" : "malformed", status: response.status, requestId } };
   }
   if (!response.ok) {
     const problem = body as { code?: string; request_id?: string };
@@ -130,25 +133,22 @@ async function call<T>(
   return { ok: true, data: body as T };
 }
 
-export function createPublicAISession(idempotencyKey: string, locale = "en-US") {
-  return call<PublicAISession>("POST", "/sessions", {
-    body: { schema_version: "1.0", locale },
-    idempotencyKey,
-  });
+export function startAssistantSession(idempotencyKey: string, locale = "en-US") {
+  return call<PublicAISession>("POST", "/sessions", { body: { schema_version: "1.0", locale }, idempotencyKey });
 }
 
 /**
  * marketCode is the visitor's own choice from a clarification (never an
- * entitlement). The console is not a public page, so page_context is "other".
+ * entitlement); pageContext is the public page the widget is on.
  */
-export function sendPublicAITurn(grant: string, sessionId: string, clientTurnId: string, message: string, marketCode?: string) {
+export function askAssistant(grant: string, sessionId: string, clientTurnId: string, message: string, marketCode?: string, pageContext = "other") {
   return call<TurnEnvelope>("POST", "/turns", {
     body: {
       schema_version: "1.0",
       session_id: sessionId,
       client_turn_id: clientTurnId,
       message,
-      page_context: "other",
+      page_context: pageContext,
       ...(marketCode ? { market_code: marketCode } : {}),
     },
     grant,
@@ -156,19 +156,16 @@ export function sendPublicAITurn(grant: string, sessionId: string, clientTurnId:
   });
 }
 
-export function endPublicAISession(grant: string, sessionId: string) {
+export function endAssistantSession(grant: string, sessionId: string) {
   return call<void>("DELETE", `/sessions/${encodeURIComponent(sessionId)}`, { grant });
 }
 
-export function getPublicAIConfig() {
+export function loadAssistantConfig() {
   return call<PublicAIConfig>("GET", "/config");
 }
 
-export type FeedbackRating = "useful" | "not_useful";
-export type FeedbackReason = "" | "incorrect" | "incomplete" | "not_relevant" | "unclear" | "other";
-
-/** Doc 01 FR-09: rate an answer. Enums only; no free text leaves the console. */
-export function sendPublicAIFeedback(grant: string, sessionId: string, turnId: string, rating: FeedbackRating, reason: FeedbackReason) {
+/** Doc 01 FR-09: rate an answer. Enums only; no free text. */
+export function rateAssistantAnswer(grant: string, sessionId: string, turnId: string, rating: FeedbackRating, reason: FeedbackReason) {
   return call<void>("POST", `/turns/${encodeURIComponent(turnId)}/feedback`, {
     body: { schema_version: "1.0", session_id: sessionId, rating, ...(reason ? { reason } : {}) },
     grant,
@@ -176,7 +173,7 @@ export function sendPublicAIFeedback(grant: string, sessionId: string, turnId: s
 }
 
 /** Doc 05 §21: record that an official route was opened (route-only; creates nothing). */
-export function recordPublicAIHandoff(grant: string, sessionId: string, routeKey: string) {
+export function recordAssistantHandoff(grant: string, sessionId: string, routeKey: string) {
   return call<{ route_key: string; url: string }>("POST", "/handoffs", {
     body: { schema_version: "1.0", session_id: sessionId, route_key: routeKey },
     grant,

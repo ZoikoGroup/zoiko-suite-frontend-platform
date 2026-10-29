@@ -26,7 +26,8 @@ export type UIEvent =
   | { type: "RESPONSE"; status: TurnStatus }
   | { type: "FAIL" }
   | { type: "CANCEL" }
-  | { type: "END" };
+  | { type: "END" }
+  | { type: "RESET" };
 
 /** Every API status maps to exactly one UI state. */
 export const STATUS_STATE: Record<TurnStatus, UIState> = {
@@ -60,7 +61,11 @@ export function reduce(state: UIState, event: UIEvent): UIState {
     case "CANCEL":
       return state === "S03_WAITING" ? "S02_COMPOSING" : state;
     case "END":
+      // S09: the end card (rating, reason, retention notice) before reset.
       return state === "S00_CLOSED" ? state : "S09_END";
+    case "RESET":
+      // Clear chat confirmed: back to the welcome card.
+      return state === "S09_END" ? "S01_WELCOME" : state;
   }
 }
 

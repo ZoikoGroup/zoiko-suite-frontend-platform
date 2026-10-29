@@ -12,7 +12,7 @@ const EVENTS = [
   { type: "OPEN", hasMessages: false, waiting: false },
   { type: "OPEN", hasMessages: true, waiting: false },
   { type: "OPEN", hasMessages: true, waiting: true },
-  { type: "CLOSE" }, { type: "TYPE" }, { type: "SEND" }, { type: "FAIL" }, { type: "CANCEL" }, { type: "END" },
+  { type: "CLOSE" }, { type: "TYPE" }, { type: "SEND" }, { type: "FAIL" }, { type: "CANCEL" }, { type: "END" }, { type: "RESET" },
   ...STATUSES.map((status) => ({ type: "RESPONSE", status })),
 ];
 
@@ -39,6 +39,8 @@ test("happy path: open, ask, answer, end", () => {
   assert.equal(reduce(s, { type: "RESPONSE", status: "UNAVAILABLE" }), "S08_ERROR");
   assert.equal(reduce(s, { type: "FAIL" }), "S08_ERROR");
   assert.equal(reduce("S04_ANSWERED", { type: "END" }), "S09_END");
+  assert.equal(reduce("S09_END", { type: "RESET" }), "S01_WELCOME");
+  assert.equal(reduce("S04_ANSWERED", { type: "RESET" }), "S04_ANSWERED");
 });
 
 test("no second send while waiting, and no late output after cancel or close", () => {

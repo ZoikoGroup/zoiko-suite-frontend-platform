@@ -1,0 +1,685 @@
+/*
+ * ZoikoSuite Assistant: design tokens and layout.
+ *
+ * Every size the widget uses is a token here (--za-*). Comments mark each
+ * one as (Doc01), a rule from Document 01 (Product Requirements and
+ * Wireframe), or (proposed), an engineering choice for Design to approve.
+ * Colours reuse the site's brand palette (navy, slate, amber, red, green);
+ * see docs/ui-spec.md in the backend repo for the full list.
+ */
+
+:root {
+  /* Launcher (S00) */
+  --za-launcher-size: 56px;            /* proposed: mobile and < 1024 px */
+  --za-launcher-size-lg: 64px;         /* proposed: >= 1024 px */
+  --za-launcher-min-target: 44px;      /* Doc01: touch target never below 44 x 44 */
+  --za-launcher-radius: 16px;          /* proposed: matches the tile's own corners */
+  --za-launcher-margin: 16px;          /* proposed: mobile */
+  --za-launcher-margin-desktop: 20px;  /* proposed: >= 768 px */
+  --za-launcher-offset: 0px;           /* Doc01 W01-A: LAUNCHER_BOTTOM_OFFSET + detected cookie banner / sticky footer */
+  --za-close-badge: 18px;              /* proposed */
+  --za-unread-dot: 10px;               /* proposed: deliberate replies only (Doc01) */
+
+  /* Desktop panel (>= 768 px, W01) */
+  --za-panel-width: 400px;             /* proposed default */
+  --za-panel-width-min: 360px;         /* proposed */
+  --za-panel-width-max: 440px;         /* proposed */
+  --za-panel-width-expanded: 560px;    /* proposed: expand/minimize (Doc01 header) */
+  --za-panel-right: 24px;              /* proposed */
+  --za-panel-gap-above-launcher: 32px; /* proposed: panel bottom = launcher + 32 px */
+  --za-panel-height: min(680px, calc(100dvh - 96px)); /* proposed */
+  --za-panel-min-height: 480px;        /* proposed */
+  --za-panel-radius: 16px;             /* proposed */
+  --za-panel-padding: 16px;            /* proposed */
+
+  /* Mobile sheet (< 768 px, W02) */
+  --za-sheet-height: 88dvh;            /* proposed; full viewport at <= 360 px */
+  --za-sheet-radius: 12px;             /* proposed */
+  --za-handle-width: 36px;             /* proposed */
+  --za-handle-height: 4px;             /* proposed */
+  --za-kb-inset: 0px;                  /* set from VisualViewport: keeps the composer above the keyboard (Doc01) */
+
+  /* Header (Doc01: one-line title, logo, AI disclosure, expand/minimize/close) */
+  --za-header-height: 64px;            /* proposed */
+  --za-header-tile: 32px;              /* proposed */
+  --za-header-tile-radius: 8px;        /* proposed */
+  --za-control-touch: 44px;            /* Doc01: 44 x 44 touch targets */
+  --za-control-fine: 32px;             /* proposed: pointer-fine desktop (>= 24 px WCAG 2.5.8) */
+  --za-control-icon: 20px;             /* proposed */
+  --za-control-gap: 8px;               /* proposed */
+
+  /* Typography (proposed; rem so text zoom scales it) */
+  --za-font-title: 1rem;               /* 16 px */
+  --za-font-body: 0.9375rem;           /* 15 px */
+  --za-line-body: 1.375rem;            /* 22 px */
+  --za-font-small: 0.8125rem;          /* 13 px: sources, chips meta */
+  --za-font-meta: 0.75rem;             /* 12 px: never smaller */
+  --za-font-chip: 0.875rem;            /* 14 px */
+  --za-font-composer: 0.9375rem;       /* 15 px; 16 px on touch to stop iOS zoom */
+
+  /* Spacing scale (proposed) */
+  --za-space-1: 4px;
+  --za-space-2: 8px;
+  --za-space-3: 12px;
+  --za-space-4: 16px;
+  --za-space-5: 24px;
+
+  /* Conversation (proposed) */
+  --za-bubble-pad-y: 10px;
+  --za-bubble-pad-x: 14px;
+  --za-bubble-radius: 16px;
+  --za-bubble-tail: 4px;
+  --za-bubble-max: 88%;                /* desktop; Doc01 mobile: full-width bubbles */
+  --za-bubble-max-mobile: 92%;
+  --za-bubble-gap: 12px;
+  --za-turn-gap: 16px;
+  --za-welcome-tile: 48px;
+  --za-avatar: 24px;
+  --za-avatar-radius: 6px;
+  --za-chip-height: 40px;              /* proposed: pointer-fine */
+  --za-chip-height-touch: 44px;        /* Doc01: touch */
+  --za-chip-gap: 8px;
+  --za-source-row: 44px;
+  --za-cta-height: 44px;               /* Doc01: touch */
+  --za-feedback-visible: 32px;
+  --za-feedback-hit: 44px;
+  --za-jump-pill: 44px;
+  --za-scrollbar: 6px;
+
+  /* Composer (Doc01: single line expanding to 4 lines) */
+  --za-composer-min: 44px;
+  --za-composer-max: 112px;            /* about 4 lines */
+  --za-send: 44px;
+
+  /* Motion (proposed; none under prefers-reduced-motion) */
+  --za-motion: 180ms;
+  --za-motion-resize: 150ms;
+
+  /* Colour roles: brand palette, light theme */
+  --za-surface: #ffffff;
+  --za-surface-muted: #f1f5f9;         /* slate-100: assistant bubble */
+  --za-border: #e2e8f0;                /* slate-200 */
+  --za-text: #0f172a;                  /* slate-900 */
+  --za-text-muted: #475569;            /* slate-600 */
+  --za-user-bg: #0a1a30;               /* navy-900 */
+  --za-user-text: #ffffff;
+  --za-focus: #26629c;                 /* navy-500: 6.3:1 on white */
+  --za-warn-bg: #fffbeb;               /* amber-50 */
+  --za-warn-border: #d97706;           /* amber-600 */
+  --za-warn-text: #78350f;             /* amber-900 */
+  --za-error-bg: #fef2f2;              /* red-50 */
+  --za-error-border: #dc2626;          /* red-600 */
+  --za-error-text: #7f1d1d;            /* red-900 */
+  --za-success-text: #166534;          /* green-800 */
+  --za-scrollbar-thumb: #cbd5e1;       /* slate-300 (scrollbar only, not a control boundary) */
+  --za-control-border: #64748b;        /* slate-500: control boundaries >= 3:1 (4.8:1 on white) */
+  --za-launcher-edge: rgba(0, 0, 0, 0.12);
+}
+
+.dark {
+  --za-surface: #0f172a;               /* slate-900 */
+  --za-surface-muted: #1e293b;         /* slate-800 */
+  --za-border: #334155;                /* slate-700 */
+  --za-text: #f8fafc;                  /* slate-50 */
+  --za-text-muted: #cbd5e1;            /* slate-300 */
+  --za-user-bg: #1c4f80;               /* navy-600 */
+  --za-user-text: #ffffff;
+  --za-focus: #8fb2d1;                 /* navy-300: navy-500 is only ~2.8:1 on slate-900 */
+  --za-warn-bg: #451a03;               /* amber-950 */
+  --za-warn-border: #f59e0b;           /* amber-500 */
+  --za-warn-text: #fef3c7;             /* amber-100 */
+  --za-error-bg: #450a0a;              /* red-950 */
+  --za-error-border: #f87171;          /* red-400 */
+  --za-error-text: #fee2e2;            /* red-100 */
+  --za-success-text: #86efac;          /* green-300 */
+  --za-scrollbar-thumb: #475569;       /* slate-600 */
+  --za-control-border: #94a3b8;        /* slate-400: >= 3:1 on slate-900 and slate-800 */
+  --za-launcher-edge: rgba(255, 255, 255, 0.18);
+}
+
+/* ---------- Launcher ---------- */
+.za-launcher {
+  position: fixed;
+  z-index: 60;
+  right: calc(var(--za-launcher-margin) + env(safe-area-inset-right));
+  bottom: calc(var(--za-launcher-margin) + var(--za-launcher-offset) + env(safe-area-inset-bottom));
+  width: var(--za-launcher-size);
+  height: var(--za-launcher-size);
+  min-width: var(--za-launcher-min-target);
+  min-height: var(--za-launcher-min-target);
+  padding: 0;
+  border: 1px solid var(--za-launcher-edge);
+  border-radius: var(--za-launcher-radius);
+  background: transparent;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.18);
+  cursor: pointer;
+}
+.dark .za-launcher { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55); }
+.za-launcher > img,
+.za-launcher > [data-testid="ztile-fallback"] {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: calc(var(--za-launcher-radius) - 1px) !important;
+}
+.za-launcher:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 3px; }
+.za-close-badge,
+.za-unread {
+  position: absolute;
+  top: calc(var(--za-close-badge) / -3);
+  right: calc(var(--za-close-badge) / -3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+}
+.za-close-badge {
+  width: var(--za-close-badge);
+  height: var(--za-close-badge);
+  background: #0a1a30;
+  color: #ffffff;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+.za-unread {
+  width: var(--za-unread-dot);
+  height: var(--za-unread-dot);
+  background: #dc2626;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+
+@media (min-width: 768px) {
+  .za-launcher {
+    right: calc(var(--za-launcher-margin-desktop) + env(safe-area-inset-right));
+    bottom: calc(var(--za-launcher-margin-desktop) + var(--za-launcher-offset) + env(safe-area-inset-bottom));
+  }
+}
+@media (min-width: 1024px) {
+  .za-launcher { width: var(--za-launcher-size-lg); height: var(--za-launcher-size-lg); }
+}
+
+/* ---------- Panel ---------- */
+.za-panel {
+  container-type: inline-size;
+  container-name: za-panel;
+  position: fixed;
+  z-index: 61;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--za-surface);
+  color: var(--za-text);
+  font-size: var(--za-font-body);
+  line-height: var(--za-line-body);
+}
+
+/* Desktop / tablet: right-side panel; page behind stays visible (W01). */
+@media (min-width: 768px) {
+  .za-panel {
+    /* Sits above the (possibly lifted) launcher and never runs off the top. */
+    --za-panel-bottom: calc(var(--za-launcher-margin-desktop) + var(--za-launcher-offset) + var(--za-launcher-size) + var(--za-panel-gap-above-launcher) + env(safe-area-inset-bottom));
+    --za-panel-room: calc(100dvh - var(--za-panel-bottom) - var(--za-space-4));
+    right: calc(var(--za-panel-right) + env(safe-area-inset-right));
+    bottom: var(--za-panel-bottom);
+    width: clamp(var(--za-panel-width-min), var(--za-panel-width), var(--za-panel-width-max));
+    max-width: calc(100vw - 2 * var(--za-panel-right));
+    height: min(var(--za-panel-height), var(--za-panel-room));
+    min-height: min(var(--za-panel-min-height), var(--za-panel-room));
+    border: 1px solid var(--za-border);
+    border-radius: var(--za-panel-radius);
+    box-shadow: 0 18px 48px rgba(2, 6, 23, 0.22);
+    transition: width var(--za-motion-resize) ease;
+  }
+  .za-panel[data-expanded="true"] {
+    width: var(--za-panel-width-expanded);
+  }
+}
+@media (min-width: 1024px) {
+  .za-panel {
+    --za-panel-bottom: calc(var(--za-launcher-margin-desktop) + var(--za-launcher-offset) + var(--za-launcher-size-lg) + var(--za-panel-gap-above-launcher) + env(safe-area-inset-bottom));
+  }
+}
+
+/* Mobile: bottom sheet (W02); full viewport at <= 360 px. */
+@media (max-width: 767.98px) {
+  .za-panel {
+    left: 0;
+    right: 0;
+    bottom: var(--za-kb-inset);
+    height: min(var(--za-sheet-height), calc(100dvh - var(--za-kb-inset)));
+    border-top-left-radius: var(--za-sheet-radius);
+    border-top-right-radius: var(--za-sheet-radius);
+    box-shadow: 0 -12px 40px rgba(2, 6, 23, 0.3);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .za-launcher[aria-expanded="true"] { display: none; }
+}
+@media (max-width: 360px) {
+  .za-panel {
+    top: 0;
+    height: auto;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top);
+  }
+  .za-handle { display: none; }
+}
+.za-handle {
+  align-self: center;
+  width: var(--za-handle-width);
+  height: var(--za-handle-height);
+  margin-top: var(--za-space-2);
+  border-radius: 999px;
+  background: var(--za-scrollbar-thumb);
+}
+@media (min-width: 768px) {
+  .za-handle { display: none; }
+}
+
+/* Open / close motion: opacity and transform only, none when reduced. */
+@keyframes za-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+.za-panel { animation: za-in var(--za-motion) ease-out; }
+.za-panel[data-closing="true"] {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity var(--za-motion) ease-in, transform var(--za-motion) ease-in;
+}
+@media (prefers-reduced-motion: reduce) {
+  .za-panel, .za-panel[data-closing="true"] { animation: none; transition: none; }
+  .za-launcher { transition: none !important; transform: none !important; }
+  .za-dots span { animation: none !important; opacity: 1 !important; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .za-launcher { transition: transform 150ms ease; }
+  .za-launcher:hover, .za-launcher:focus-visible { transform: scale(1.04); }
+}
+
+/* ---------- Header ---------- */
+.za-header {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: var(--za-space-3);
+  align-items: center;
+  min-height: var(--za-header-height);
+  padding: var(--za-space-2) var(--za-space-3) var(--za-space-2) var(--za-panel-padding);
+  border-bottom: 1px solid var(--za-border);
+}
+.za-header-tile { grid-column: 1; grid-row: 1 / span 2; }
+.za-title {
+  grid-column: 2;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--za-font-title);
+  font-weight: 500;
+  line-height: 1.375rem;
+}
+.za-title:focus { outline: none; }
+.za-title:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
+.za-subtitle {
+  grid-column: 2 / span 2;
+  margin: 0;
+  white-space: nowrap;
+  font-size: var(--za-font-meta);
+  line-height: 1rem;
+  color: var(--za-text-muted);
+}
+.za-subtitle-short { display: none; }
+/* The disclosure never clips: shorter approved copy when the panel is narrow. */
+@container za-panel (max-width: 380px) {
+  .za-subtitle-full { display: none; }
+  .za-subtitle-short { display: inline; }
+}
+/* Title stays on one line: at very narrow widths drop the decorative tile. */
+@container za-panel (max-width: 340px) {
+  .za-header-tile { display: none; }
+}
+.za-controls { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: var(--za-control-gap); }
+.za-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--za-control-touch);
+  height: var(--za-control-touch);
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--za-text-muted);
+  cursor: pointer;
+}
+.za-control svg { width: var(--za-control-icon); height: var(--za-control-icon); }
+.za-control:hover { background: var(--za-surface-muted); color: var(--za-text); }
+.za-control:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 1px; }
+.za-control:disabled { opacity: 0.45; cursor: default; }
+@media (pointer: fine) {
+  .za-control { width: var(--za-control-fine); height: var(--za-control-fine); }
+}
+.za-wide-only { display: none !important; }
+@media (min-width: 768px) {
+  .za-wide-only { display: inline-flex !important; }
+}
+.za-more { position: relative; display: none; }
+/* Info and Clear chat fold into "More" at <= 360 px and on touch devices,
+   so 44 px targets never push the title onto two lines. */
+@container za-panel (max-width: 360px) {
+  .za-more { display: inline-flex; }
+  .za-collapsible { display: none !important; }
+}
+@media (pointer: coarse) {
+  .za-more { display: inline-flex; }
+  .za-collapsible { display: none !important; }
+}
+.za-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 2;
+  min-width: 200px;
+  padding: var(--za-space-1);
+  border: 1px solid var(--za-border);
+  border-radius: 10px;
+  background: var(--za-surface);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.2);
+}
+.za-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--za-space-2);
+  min-height: var(--za-control-touch);
+  padding: 0 var(--za-space-3);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--za-text);
+  font-size: var(--za-font-small);
+  text-align: left;
+  cursor: pointer;
+}
+.za-menu button:hover, .za-menu button:focus-visible { background: var(--za-surface-muted); outline: none; }
+
+/* ---------- Conversation (the only scroll area) ---------- */
+.za-conversation {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--za-panel-padding);
+  scrollbar-width: thin;
+  scrollbar-color: var(--za-scrollbar-thumb) transparent;
+}
+.za-conversation::-webkit-scrollbar { width: var(--za-scrollbar); }
+.za-conversation::-webkit-scrollbar-thumb { background: var(--za-scrollbar-thumb); border-radius: 999px; }
+.za-conversation::-webkit-scrollbar-track { background: transparent; }
+.za-list { display: flex; flex-direction: column; gap: var(--za-bubble-gap); margin: 0; padding: 0; list-style: none; }
+.za-list > li[data-role="assistant"],
+.za-list > li[data-role="visitor"] + li[data-role="assistant"] { margin-top: calc(var(--za-turn-gap) - var(--za-bubble-gap)); }
+.za-row-visitor { display: flex; flex-direction: column; align-items: flex-end; }
+.za-row-assistant { display: flex; align-items: flex-start; gap: var(--za-space-2); max-width: var(--za-bubble-max); }
+.za-bubble {
+  max-width: var(--za-bubble-max);
+  padding: var(--za-bubble-pad-y) var(--za-bubble-pad-x);
+  border-radius: var(--za-bubble-radius);
+  overflow-wrap: anywhere;
+}
+.za-bubble-visitor {
+  background: var(--za-user-bg);
+  color: var(--za-user-text);
+  border-bottom-right-radius: var(--za-bubble-tail);
+  white-space: pre-wrap;
+}
+.za-bubble-assistant {
+  min-width: 0;
+  max-width: 100%;
+  background: var(--za-surface-muted);
+  color: var(--za-text);
+  border-top-left-radius: var(--za-bubble-tail);
+}
+.za-bubble-assistant[data-tone="warn"] {
+  background: var(--za-warn-bg);
+  color: var(--za-warn-text);
+  box-shadow: inset 0 0 0 1px var(--za-warn-border);
+}
+.za-bubble-assistant[data-tone="error"] {
+  background: var(--za-error-bg);
+  color: var(--za-error-text);
+  box-shadow: inset 0 0 0 1px var(--za-error-border);
+}
+@media (max-width: 767.98px) {
+  .za-bubble { max-width: var(--za-bubble-max-mobile); }
+  .za-row-assistant { max-width: 100%; }
+}
+.za-avatar { flex: none; margin-top: 2px; }
+.za-md p { margin: 0; }
+.za-md p + p, .za-md ul + p, .za-md p + ul { margin-top: var(--za-space-2); }
+.za-md ul { margin: 0; padding-left: 1.1rem; list-style: disc; }
+.za-md code { padding: 0 4px; border-radius: 4px; background: var(--za-border); font-size: 0.85em; }
+.za-meta { font-size: var(--za-font-meta); line-height: 1rem; color: var(--za-text-muted); }
+[data-tone="warn"] .za-meta, [data-tone="error"] .za-meta { color: inherit; }
+.za-section { margin-top: var(--za-space-3); padding-top: var(--za-space-2); border-top: 1px solid var(--za-border); }
+[data-tone] .za-section { border-top-color: currentColor; border-top-style: dotted; }
+
+/* Source cards: 44 px rows, title only (no raw domain). */
+.za-sources { display: flex; flex-direction: column; gap: var(--za-space-1); margin: var(--za-space-1) 0 0; padding: 0; list-style: none; }
+.za-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--za-space-2);
+  min-height: var(--za-source-row);
+  padding: 0 var(--za-space-3);
+  border: 1px solid var(--za-control-border);
+  border-radius: 10px;
+  background: var(--za-surface);
+  color: var(--za-text);
+  font-size: var(--za-font-small);
+  text-decoration: none;
+}
+a.za-source:hover { border-color: var(--za-focus); }
+a.za-source:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 1px; }
+
+/* One primary CTA, full width on mobile (Doc01: stacked CTAs). */
+.za-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--za-space-2);
+  min-height: var(--za-cta-height);
+  margin-top: var(--za-space-3);
+  padding: 0 var(--za-space-4);
+  border-radius: 10px;
+  background: var(--za-user-bg);
+  color: #ffffff;
+  font-size: var(--za-font-chip);
+  font-weight: 500;
+  text-decoration: none;
+}
+.za-cta:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
+@media (max-width: 767.98px) {
+  .za-cta { display: flex; width: 100%; }
+}
+.za-channel { margin-top: var(--za-space-2); }
+
+/* Chips */
+.za-chips { display: flex; flex-wrap: wrap; gap: var(--za-chip-gap); margin: var(--za-space-3) 0 0; padding: 0; list-style: none; }
+.za-chip {
+  min-height: var(--za-chip-height);
+  padding: 6px var(--za-space-4);
+  border: 1px solid var(--za-control-border);
+  border-radius: 999px;
+  background: var(--za-surface);
+  color: var(--za-text);
+  font-size: var(--za-font-chip);
+  line-height: 1.25rem;
+  text-align: center;
+  white-space: normal;
+  cursor: pointer;
+}
+.za-chip:hover { border-color: var(--za-focus); }
+.za-chip:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
+.za-chip:disabled { opacity: 0.55; cursor: default; }
+@media (pointer: coarse) {
+  .za-chip { min-height: var(--za-chip-height-touch); }
+}
+.za-linkbutton {
+  min-height: var(--za-control-touch);
+  padding: 0 var(--za-space-2);
+  border: 0;
+  background: transparent;
+  color: var(--za-text);
+  font-size: var(--za-font-small);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.za-linkbutton:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 1px; }
+
+/* Feedback: 32 px visible, 44 px hit area. */
+.za-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: var(--za-space-1); }
+.za-thumb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--za-feedback-visible);
+  height: var(--za-feedback-visible);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--za-text-muted);
+  cursor: pointer;
+}
+.za-thumb::after { content: ""; position: absolute; inset: calc((var(--za-feedback-visible) - var(--za-feedback-hit)) / 2); }
+.za-thumb[aria-pressed="true"] { color: var(--za-focus); }
+.za-thumb:focus-visible { outline: 2px solid var(--za-focus); }
+
+/* Badges: icon + text, never colour alone. */
+.za-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--za-control-border);
+  border-radius: 999px;
+  background: var(--za-surface);
+  color: var(--za-text);
+  font-size: var(--za-font-meta);
+  font-weight: 500;
+  line-height: 1.125rem;
+}
+.za-badge[data-tone="warn"] { border-color: var(--za-warn-border); background: var(--za-warn-bg); color: var(--za-warn-text); }
+
+/* S02 thinking: three dots, static under reduced motion. */
+.za-dots { display: inline-flex; gap: 3px; }
+.za-dots span { width: 6px; height: 6px; border-radius: 999px; background: currentColor; opacity: 0.35; animation: za-dot 1.2s ease-in-out infinite; }
+.za-dots span:nth-child(2) { animation-delay: 0.2s; }
+.za-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes za-dot { 0%, 80%, 100% { opacity: 0.35; } 40% { opacity: 1; } }
+
+/* Jump to latest */
+.za-jump {
+  position: sticky;
+  bottom: 0;
+  left: 50%;
+  display: flex;
+  margin: var(--za-space-2) auto 0;
+  min-height: var(--za-jump-pill);
+  align-items: center;
+  gap: var(--za-space-1);
+  padding: 0 var(--za-space-4);
+  border: 1px solid var(--za-control-border);
+  border-radius: 999px;
+  background: var(--za-surface);
+  color: var(--za-text);
+  font-size: var(--za-font-small);
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.18);
+  cursor: pointer;
+}
+.za-jump:focus-visible { outline: 2px solid var(--za-focus); }
+
+/* Banners */
+.za-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--za-space-2);
+  padding: var(--za-space-2) var(--za-panel-padding);
+  font-size: var(--za-font-small);
+}
+.za-banner[data-tone="error"] { background: var(--za-error-bg); color: var(--za-error-text); border-bottom: 1px solid var(--za-error-border); }
+
+/* ---------- Composer (fixed) ---------- */
+.za-composer {
+  flex: none;
+  padding: var(--za-space-2) var(--za-space-3) var(--za-space-3);
+  border-top: 1px solid var(--za-border);
+  background: var(--za-surface);
+}
+.za-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--za-space-2);
+  margin-bottom: var(--za-space-2);
+  padding: var(--za-space-2) var(--za-space-3);
+  border: 1px solid var(--za-warn-border);
+  border-radius: 8px;
+  background: var(--za-warn-bg);
+  color: var(--za-warn-text);
+  font-size: var(--za-font-small);
+}
+.za-input-row { display: flex; align-items: flex-end; gap: var(--za-space-2); }
+.za-textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--za-composer-min);
+  max-height: var(--za-composer-max);
+  padding: 10px var(--za-space-3);
+  border: 1px solid var(--za-control-border);
+  border-radius: 10px;
+  background: var(--za-surface);
+  color: var(--za-text);
+  font: inherit;
+  font-size: var(--za-font-composer);
+  line-height: 1.375rem;
+  resize: none;
+  overflow-y: auto;
+}
+.za-textarea::placeholder { color: var(--za-text-muted); opacity: 1; }
+.za-textarea:focus { outline: 2px solid var(--za-focus); outline-offset: 0; border-color: var(--za-focus); }
+.za-textarea[aria-invalid="true"] { border-color: var(--za-warn-border); }
+@media (pointer: coarse) {
+  .za-textarea { font-size: max(16px, var(--za-font-composer)); } /* no iOS auto-zoom */
+}
+.za-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--za-send);
+  height: var(--za-send);
+  border: 0;
+  border-radius: 10px;
+  background: var(--za-user-bg);
+  color: #ffffff;
+  cursor: pointer;
+}
+.za-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.za-send:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
+.za-send[data-mode="stop"] { background: var(--za-surface-muted); color: var(--za-text); box-shadow: inset 0 0 0 1px var(--za-control-border); }
+.za-footer { margin: var(--za-space-2) 0 0; font-size: var(--za-font-meta); line-height: 1rem; color: var(--za-text-muted); }
+.za-footer-compact { display: none; }
+@media (max-height: 519.98px) {
+  .za-footer-full { display: none; }
+  .za-footer-compact { display: inline-flex; }
+}
+.za-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* Background scroll lock while the mobile sheet is open. */
+html[data-za-lock="true"], html[data-za-lock="true"] body { overflow: hidden; }
