@@ -33,7 +33,7 @@ async function openAssistant(page: Page) {
   await page.getByRole("button", { name: "Chat with ZoikoSuite" }).click();
   const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
   await expect(dialog.getByTestId("assistant-welcome")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Compare plans" })).toBeVisible(); // config loaded
+  await expect(dialog.getByRole("button", { name: /Compare plans|Pricing and trial/ })).toBeVisible(); // config loaded
   return dialog;
 }
 

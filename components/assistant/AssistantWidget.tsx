@@ -290,7 +290,7 @@ function isUnverified(turn: TurnEnvelope): boolean {
 // Unverified replies a retry can change: the answer failed validation (a new
 // attempt is generated). Expired, revoked, conflicting or missing evidence is
 // release state, so a retry would repeat the same reply.
-const RETRYABLE_REASONS = new Set(["VALIDATION_FAILED"]);
+const RETRYABLE_REASONS = new Set(["VALIDATION_FAILED", "NO_EVIDENCE"]);
 
 /** Doc01 §10 S05 Uncertain offers "Retry, open source, handoff": retry only
  * where it can give a different answer; otherwise the service's next steps. */
@@ -424,6 +424,7 @@ function TopicMenu(props: {
                 type="button"
                 className="za-chip za-option"
                 disabled={props.disabled}
+                aria-label={tp.label}
                 onClick={() => (tp.send ? props.onPick(tp.send) : props.onView({ kind: "topic", key: tp.key }))}
               >
                 <span aria-hidden="true" className="za-option-icon">
@@ -450,7 +451,7 @@ function TopicMenu(props: {
       <ul className="za-grid" aria-label={`${topic.label} questions`}>
         {topic.questions.map((q) => (
           <li key={q.message}>
-            <button type="button" className="za-chip za-option" disabled={props.disabled} onClick={() => props.onPick(q.message)}>
+            <button type="button" className="za-chip za-option" aria-label={q.label} disabled={props.disabled} onClick={() => props.onPick(q.message)}>
               <span className="za-option-label">{q.label}</span>
             </button>
           </li>
@@ -1490,14 +1491,10 @@ export function AssistantWidget({
                       {expanded ? <Minimize2 size={18} aria-hidden /> : <Maximize2 size={18} aria-hidden />}
                       {expanded ? "Minimize chat" : "Expand chat"}
                     </button>
-                    <button type="button" role="menuitem" className="za-wide-only" onClick={close}>
-                      <X size={18} aria-hidden />
-                      {t("ui.launcher.close")}
-                    </button>
-                  </div>
+                    </div>
                 )}
               </span>
-              <button type="button" onClick={close} className="za-control za-narrow-only" aria-label={t("ui.launcher.close")} title={t("ui.launcher.close")}>
+              <button type="button" onClick={close} className="za-control" aria-label={t("ui.launcher.close")} title={t("ui.launcher.close")}>
                 <X aria-hidden />
               </button>
             </div>

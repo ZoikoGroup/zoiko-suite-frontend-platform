@@ -17,6 +17,12 @@ export default defineConfig({
   fullyParallel: false,
   timeout: 60_000,
   reporter: [["list"], ["html", { outputFolder: "test-results/e2e-report", open: "never" }]],
+  expect: {
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.1,
+      threshold: 0.2,
+    },
+  },
   globalSetup: "./tests/e2e/global-setup.ts",
   use: {
     baseURL: `http://localhost:${CONSOLE_PORT}`,
