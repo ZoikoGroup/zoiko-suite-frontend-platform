@@ -372,8 +372,8 @@ const DATA = {
 
   "purchase-requests": {
     purchase_requests: [
-      { request_id:"preq-001", description:"MacBook Pro 14\" for new hire", amount:2499, currency:"GBP", status:"APPROVED", requested_by:"emp-004", requested_at:NOW },
-      { request_id:"preq-002", description:"Figma Enterprise Licence", amount:1200, currency:"GBP", status:"PENDING", requested_by:"emp-001", requested_at:NOW },
+      { request_id:"preq-001", description:"MacBook Pro 14\" for new hire", amount:2499, currency:"GBP", currency_code:"GBP", status:"APPROVED", requested_by:"emp-004", requested_at:NOW },
+      { request_id:"preq-002", description:"Figma Enterprise Licence", amount:1200, currency:"GBP", currency_code:"GBP", status:"PENDING", requested_by:"emp-001", requested_at:NOW },
     ]
   },
 
@@ -427,24 +427,29 @@ function handler(req, res) {
 // ── Unique ports to start ─────────────────────────────────────────────────
 
 const PORTS = [
-  // Tax
-  8125, 8126, 8127, 8128, 8129, 8130, 8147,
-  // AI Governance
-  8146,
-  // Legal
-  8119, 8120, 8088, 8122, 8123, 8124,
+  // Core & Governance (Block 1-5)
+  8080, 8081, 8082, 8083, 8084, 8085, 8086, 8087, 8088, 8089, 8093, 8094, 8095,
+
   // Finance
   8098, 8099, 8101, 8102, 8103, 8104, 8105, 8106, 8107,
-  // Commercial Ops
-  8100, 8131, 8135, 8140,
-  // HR
-  8108, 8109, 8110, 8111, 8112, 8113, 8114, 8115, 8116, 8117, 8118, 8139,
-  // Compliance
-  8132, 8133, 8134, 8136, 8137, 8138, 8141,
-  // Audit
-  8081, 8082, 8083, 8084, 8085,
-  // Misc
-  8086, 8087, 8089, 8093, 8094,
+
+  // HR & Payroll
+  8108, 8109, 8110, 8111, 8112, 8113, 8114, 8115, 8116, 8117, 8118,
+
+  // Block 6 · Legal, Corporate & Commercial
+  8100, 8119, 8120, 8121, 8122, 8123, 8124, 8131, 8132, 8134, 8150,
+
+  // Block 7 · Tax & Compliance
+  8125, 8126, 8127, 8128, 8129, 8130, 8133, 8147, 8151, 8152,
+
+  // Block 8 · Intelligence & Reporting
+  8135, 8136, 8137, 8138, 8139, 8153, 8154,
+
+  // Block 9 · Security & Trust
+  8140, 8141, 8142, 8143, 8183,
+
+  // Block 10 · Integration & Extensibility
+  8144, 8145, 8146, 8148, 8149
 ];
 
 const UNIQUE_PORTS = [...new Set(PORTS)].sort((a, b) => a - b);

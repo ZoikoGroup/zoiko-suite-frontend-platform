@@ -3,7 +3,17 @@
  * Tests all admin domain routes and API endpoints for gaps or HTTP errors
  */
 async function checkAllDomains() {
-  const BASE = "http://localhost:3000";
+  const BASE = "http://127.0.0.1:3000";
+  const SESSION = {
+    email: "admin@zoikosuite.com",
+    name: "Lingaraj (Super Admin)",
+    role: "Platform Administrator",
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    legalEntityId: "22222222-2222-2222-2222-222222222222",
+    iat: Math.floor(Date.now() / 1000)
+  };
+  const SESSION_COOKIE = 'zoiko_session=' + Buffer.from(JSON.stringify(SESSION)).toString('base64url');
+
   const routes = [
     "/admin",
     "/admin/tax",
@@ -29,12 +39,15 @@ async function checkAllDomains() {
     "/admin/obligations",
   ];
 
-  console.log("═══ SCANNING ALL 22 ADMIN DOMAIN ROUTES ═══\n");
+  console.log("═══ SCANNING ALL 22 ADMIN DOMAIN ROUTES (AUTHENTICATED) ═══\n");
   const failed = [];
 
   for (const r of routes) {
     try {
-      const res = await fetch(`${BASE}${r}`, { redirect: "manual" });
+      const res = await fetch(`${BASE}${r}`, {
+        redirect: "manual",
+        headers: { Cookie: SESSION_COOKIE }
+      });
       if (res.status === 200) {
         console.log(`✅ ${r.padEnd(30)} [HTTP 200 OK]`);
       } else if (res.status === 307 || res.status === 302) {
