@@ -17,6 +17,7 @@ const PAGE_CONTEXT: Record<string, string> = {
   "/": "home",
   "/pricing": "pricing",
   "/platform": "core_modules",
+  "/trust": "trust",
   "/demo": "demo",
   "/book-demo": "demo",
   "/support": "support",

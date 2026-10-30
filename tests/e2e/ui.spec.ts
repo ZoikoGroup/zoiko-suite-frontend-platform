@@ -308,7 +308,7 @@ test.describe("composer", () => {
     const dialog = await open(page);
     await ask(page, "What does Legal and Contracts do?");
     await expect(dialog.getByTestId("assistant-thinking")).toBeVisible();
-    await expect(page.getByTestId("assistant-announcer")).toContainText("Checking approved sources");
+    await expect(page.getByTestId("assistant-announcer")).toContainText("Looking for verified information");
     await expect(dialog.getByRole("button", { name: "Stop" })).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: "Message" })).toBeEditable();
     await dialog.getByRole("textbox", { name: "Message" }).fill("next question");
@@ -669,7 +669,7 @@ for (const width of [1280, 768, 375]) {
         await page.screenshot({ path: `${dir}/S02-thinking.png` });
         await expect(dialog.getByTestId("assistant-thinking")).toHaveCount(0, { timeout: 10_000 });
         const touch = width <= 768;
-        if (touch) await dialog.getByRole("button", { name: "More", exact: true }).click();
+        if (touch) await dialog.getByRole("button", { name: "Menu", exact: true }).click();
         await dialog.getByRole(touch ? "menuitem" : "button", { name: "Clear chat" }).click();
         await expect(dialog.getByTestId("assistant-end")).toBeVisible();
         await dialog.getByTestId("assistant-end").scrollIntoViewIfNeeded();

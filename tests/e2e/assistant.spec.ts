@@ -33,7 +33,7 @@ async function openAssistant(page: Page) {
   await page.getByRole("button", { name: "Chat with ZoikoSuite" }).click();
   const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
   await expect(dialog.getByTestId("assistant-welcome")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Pricing and trial" })).toBeVisible(); // config loaded
+  await expect(dialog.getByRole("button", { name: "Compare plans" })).toBeVisible(); // config loaded
   return dialog;
 }
 
@@ -130,8 +130,9 @@ for (const scheme of ["light", "dark"] as const) {
       const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
       const welcomeTile = (await dialog.getByTestId("assistant-welcome").getByTestId("ztile").boundingBox())!;
       expect(Math.round(welcomeTile.width)).toBe(48);
-      const headerTile = (await dialog.locator("header").getByTestId("ztile").boundingBox())!;
-      expect(Math.round(headerTile.width)).toBe(32);
+      // Header: the full wordmark (public/logo.png) on its white container, 36 px tall.
+      const headerLogo = (await dialog.locator("header").getByTestId("full-logo").boundingBox())!;
+      expect(Math.round(headerLogo.height)).toBe(36);
       // Subtitle on one line at the panel's width.
       const sub = dialog.getByTestId("assistant-subtitle");
       const lines = await sub.evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
@@ -235,9 +236,8 @@ test("K10 tile load failure shows the white Z with no layout shift", async ({ pa
   const after = (await launcher.boundingBox())!;
   expect([after.x, after.y, after.width, after.height]).toEqual([before.x, before.y, before.width, before.height]);
   await launcher.click();
-  const header = page.getByRole("dialog", { name: "ZoikoSuite Assistant" }).locator("header");
-  const fb = (await header.getByTestId("ztile-fallback").boundingBox())!;
-  expect([Math.round(fb.width), Math.round(fb.height)]).toEqual([32, 32]);
+  // The header shows the wordmark, not the Z tile, so the Z fallback is launcher-only.
+  await expect(page.getByRole("dialog", { name: "ZoikoSuite Assistant" }).locator("header").getByTestId("ztile-fallback")).toHaveCount(0);
 });
 
 test("K10 header fits at 320 px and 200% zoom equivalent", async ({ page }) => {
@@ -249,8 +249,8 @@ test("K10 header fits at 320 px and 200% zoom equivalent", async ({ page }) => {
   expect(await heading.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const sub = dialog.getByTestId("assistant-subtitle");
   expect(await sub.evaluate((el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight + 1)).toBe(true);
-  // At <= 360 px, Info and Clear chat fold into "More" (Doc01 one-line title).
-  for (const name of ["More", "Close chat"]) {
+  // At <= 360 px, History and Theme fold into "Menu" (Doc01 one-line title).
+  for (const name of ["Menu", "Close chat"]) {
     await expect(header.getByRole("button", { name, exact: true })).toBeVisible();
   }
   await page.screenshot({ path: `${shotDir}/K10-320px.png` });
@@ -305,4 +305,17 @@ test("Test 7: the exact question reaches the backend and its answer is what is s
   const answer = page.getByTestId("assistant-answer").last();
   await expect(answer).toContainText(body.text.split("\n")[0]);
   expect(body.status).toBe("ANSWERED");
+});
+
+// Doc 01 §06 "streaming" state without streaming tokens (Doc 05 §14): the
+// validated answer is revealed word by word, then sources and feedback.
+test("typing reveal of the validated answer", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const dialog = await openAssistant(page);
+  await ask(page, "What is Delegated Authority?");
+  const answer = dialog.getByTestId("assistant-answer").last();
+  await expect(answer).toHaveAttribute("data-typing", "true");
+  await expect(answer).not.toHaveAttribute("data-typing", "true", { timeout: 5000 });
+  await expect(answer).toContainText("time-bound");
+  await expect(answer.getByText("Was this helpful?")).toBeVisible();
 });

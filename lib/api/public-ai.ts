@@ -18,9 +18,16 @@ export type PublicAISession = {
   expires_at: string;
 };
 
-export type Citation = { source_version_id: string; claim_ids: string[]; url_key: string };
+/** title, route_key and url are resolved by the service when structured responses are on (ADR-008). */
+export type Citation = { source_version_id: string; claim_ids: string[]; url_key: string; title?: string; route_key?: string; url?: string };
 export type RouteAction = { type: "OPEN_OFFICIAL_ROUTE"; route_key: string };
 export type Chip = { label: string; message: string };
+/** An approved question from the service's Doc 02 menu and follow-up map; message is what it sends. */
+export type FollowUp = { id: string; label: string; intent_id: string; message: string };
+/** One official route offered as a call to action; url only when a real page exists. */
+export type CTALink = { route_key: string; label: string; url?: string };
+export type MenuCategory = { id: string; label: string; items: FollowUp[] };
+export type AssistantMenu = { schema_version: string; categories: MenuCategory[] };
 
 export type TurnEnvelope = {
   turn_id: string;
@@ -49,6 +56,10 @@ export type TurnEnvelope = {
   suggestions?: Chip[];
   /** Answered from articles owners have not approved yet (local/dev only). */
   draft?: boolean;
+  /** Structured responses (ADR-008), present only while the service has them on. */
+  outcome?: "GROUNDED" | "CLARIFY" | "ABSTAIN" | "SAFE_FALLBACK" | "REFUSED" | "HANDOFF_OFFER";
+  followups?: FollowUp[];
+  cta?: { primary?: CTALink; secondary?: CTALink };
 };
 
 export const OVERVIEW_OPTION = "GENERAL_OVERVIEW";
@@ -82,10 +93,37 @@ export type PublicAIResult<T> = { ok: true; data: T } | { ok: false; error: Publ
 export type FeedbackRating = "useful" | "not_useful";
 export type FeedbackReason = "" | "incorrect" | "incomplete" | "not_relevant" | "unclear" | "other";
 
+const TURN_STATUSES: ReadonlySet<string> = new Set<TurnStatus>([
+  "ANSWERED",
+  "CLARIFY",
+  "REFUSED_ACTION",
+  "ABSTAIN",
+  "HANDOFF",
+  "UNAVAILABLE",
+]);
+
+/**
+ * Doc 05 §10: the widget only renders a response that is a v1 envelope with a
+ * known status and the fields it reads. Anything else takes the malformed
+ * path, so an unexpected shape is never shown to the visitor.
+ */
+export function validEnvelope(value: unknown): value is TurnEnvelope {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const envelope = value as Record<string, unknown>;
+  const version = envelope.schema_version;
+  if (version !== undefined && (typeof version !== "string" || version.split(".")[0] !== "1")) return false;
+  if (typeof envelope.turn_id !== "string" || envelope.turn_id.length === 0) return false;
+  if (typeof envelope.text !== "string") return false;
+  if (typeof envelope.turn_sequence !== "number" || !Number.isFinite(envelope.turn_sequence)) return false;
+  if (typeof envelope.status !== "string" || !TURN_STATUSES.has(envelope.status)) return false;
+  if (!Array.isArray(envelope.citations) || !Array.isArray(envelope.actions)) return false;
+  return true;
+}
+
 async function call<T>(
   method: "GET" | "POST" | "DELETE",
   path: string,
-  init: { body?: unknown; grant?: string; idempotencyKey?: string } = {},
+  init: { body?: unknown; grant?: string; idempotencyKey?: string; signal?: AbortSignal } = {},
 ): Promise<PublicAIResult<T>> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
@@ -101,7 +139,8 @@ async function call<T>(
       credentials: "omit", // never the site's cookies
       cache: "no-store",
       referrerPolicy: "no-referrer",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      // Stop aborts the caller's signal; the timeout still bounds every call.
+      signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
     const timeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
@@ -141,7 +180,7 @@ export function startAssistantSession(idempotencyKey: string, locale = "en-US") 
  * marketCode is the visitor's own choice from a clarification (never an
  * entitlement); pageContext is the public page the widget is on.
  */
-export function askAssistant(grant: string, sessionId: string, clientTurnId: string, message: string, marketCode?: string, pageContext = "other") {
+export function askAssistant(grant: string, sessionId: string, clientTurnId: string, message: string, marketCode?: string, pageContext = "other", signal?: AbortSignal) {
   return call<TurnEnvelope>("POST", "/turns", {
     body: {
       schema_version: "1.0",
@@ -153,6 +192,7 @@ export function askAssistant(grant: string, sessionId: string, clientTurnId: str
     },
     grant,
     idempotencyKey: clientTurnId,
+    signal,
   });
 }
 
@@ -162,6 +202,29 @@ export function endAssistantSession(grant: string, sessionId: string) {
 
 export function loadAssistantConfig() {
   return call<PublicAIConfig>("GET", "/config");
+}
+
+/** The guided topic menu (ADR-008). 404 while the service has structured responses off. */
+export function loadAssistantMenu() {
+  return call<AssistantMenu>("GET", "/menu");
+}
+
+/** A menu the widget can render: categories with at least one well-formed item. */
+export function validMenu(value: unknown): value is AssistantMenu {
+  if (typeof value !== "object" || value === null) return false;
+  const cats = (value as { categories?: unknown }).categories;
+  return (
+    Array.isArray(cats) &&
+    cats.length > 0 &&
+    cats.every(
+      (c) =>
+        typeof c?.id === "string" &&
+        typeof c?.label === "string" &&
+        Array.isArray(c?.items) &&
+        c.items.length > 0 &&
+        c.items.every((i: Partial<FollowUp>) => typeof i?.id === "string" && typeof i?.label === "string" && typeof i?.message === "string"),
+    )
+  );
 }
 
 /** Doc 01 FR-09: rate an answer. Enums only; no free text. */

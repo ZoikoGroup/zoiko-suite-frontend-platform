@@ -23,6 +23,9 @@ export default defineConfig({
     channel: "msedge",
     trace: "retain-on-failure",
     viewport: { width: 1280, height: 800 },
+    // Answers appear complete, so layout checks never measure a half-typed
+    // reply; the typing reveal has its own test with motion turned on.
+    reducedMotion: "reduce",
   },
   webServer: {
     command: `npx next start -p ${CONSOLE_PORT}`,

@@ -4,8 +4,9 @@
  * Every size the widget uses is a token here (--za-*). Comments mark each
  * one as (Doc01), a rule from Document 01 (Product Requirements and
  * Wireframe), or (proposed), an engineering choice for Design to approve.
- * Colours reuse the site's brand palette (navy, slate, amber, red, green);
- * see docs/ui-spec.md in the backend repo for the full list.
+ * Colours follow the Kairos (ZoikoTime) assistant: dark navy panel, teal-green
+ * accent. The widget keeps its own light/dark theme on [data-za-root]
+ * (data-za-theme), chosen by the visitor and defaulting to the page's.
  */
 
 :root {
@@ -21,15 +22,15 @@
   --za-unread-dot: 10px;               /* proposed: deliberate replies only (Doc01) */
 
   /* Desktop panel (>= 768 px, W01) */
-  --za-panel-width: 400px;             /* proposed default */
+  --za-panel-width: 480px;             /* proposed default (fits the wordmark, title and MENU label) */
   --za-panel-width-min: 360px;         /* proposed */
-  --za-panel-width-max: 440px;         /* proposed */
+  --za-panel-width-max: 500px;         /* proposed */
   --za-panel-width-expanded: 560px;    /* proposed: expand/minimize (Doc01 header) */
   --za-panel-right: 24px;              /* proposed */
   --za-panel-gap-above-launcher: 32px; /* proposed: panel bottom = launcher + 32 px */
   --za-panel-height: min(680px, calc(100dvh - 96px)); /* proposed */
   --za-panel-min-height: 480px;        /* proposed */
-  --za-panel-radius: 16px;             /* proposed */
+  --za-panel-radius: 20px;             /* proposed: Kairos panel corners */
   --za-panel-padding: 16px;            /* proposed */
 
   /* Mobile sheet (< 768 px, W02) */
@@ -95,15 +96,24 @@
   --za-motion: 180ms;
   --za-motion-resize: 150ms;
 
-  /* Colour roles: brand palette, light theme */
+}
+
+/* Colour roles, light theme (the widget's own; see data-za-theme). */
+[data-za-root] {
   --za-surface: #ffffff;
-  --za-surface-muted: #f1f5f9;         /* slate-100: assistant bubble */
-  --za-border: #e2e8f0;                /* slate-200 */
+  --za-surface-muted: #f1f6f9;         /* menus, history, stop button */
+  --za-header-bg: #f6f9fb;             /* header and composer bands */
+  --za-card-bg: #ffffff;               /* answer cards and menu options */
+  --za-border: #dbe4ec;
   --za-text: #0f172a;                  /* slate-900 */
   --za-text-muted: #475569;            /* slate-600 */
-  --za-user-bg: #0a1a30;               /* navy-900 */
+  --za-accent: #13865f;                /* dot, send, hover edges */
+  --za-accent-text: #0e7a55;           /* title, labels: 5.3:1 on white */
+  --za-accent-soft: #e6f5ef;           /* pill and option hover */
+  --za-option-border: #8cbfac;
+  --za-user-bg: linear-gradient(135deg, #13865f 0%, #0e6e4e 100%); /* white text >= 4.5:1 */
   --za-user-text: #ffffff;
-  --za-focus: #26629c;                 /* navy-500: 6.3:1 on white */
+  --za-focus: #0e7a55;
   --za-warn-bg: #fffbeb;               /* amber-50 */
   --za-warn-border: #d97706;           /* amber-600 */
   --za-warn-text: #78350f;             /* amber-900 */
@@ -116,15 +126,22 @@
   --za-launcher-edge: rgba(0, 0, 0, 0.12);
 }
 
-.dark {
-  --za-surface: #0f172a;               /* slate-900 */
-  --za-surface-muted: #1e293b;         /* slate-800 */
-  --za-border: #334155;                /* slate-700 */
-  --za-text: #f8fafc;                  /* slate-50 */
-  --za-text-muted: #cbd5e1;            /* slate-300 */
-  --za-user-bg: #1c4f80;               /* navy-600 */
+/* Colour roles, dark theme: Kairos navy and teal. */
+[data-za-root][data-za-theme="dark"] {
+  --za-surface: #0b1a2b;
+  --za-surface-muted: #11263b;
+  --za-header-bg: #08141f;
+  --za-card-bg: #0f2236;
+  --za-border: #1f3a52;
+  --za-text: #e8f0f7;
+  --za-text-muted: #a7b8c9;            /* 8:1 on the panel */
+  --za-accent: #1fb57a;
+  --za-accent-text: #34d399;
+  --za-accent-soft: rgba(31, 181, 122, 0.14);
+  --za-option-border: #2a6b5a;
+  --za-user-bg: linear-gradient(135deg, #13865f 0%, #0e6e4e 100%);
   --za-user-text: #ffffff;
-  --za-focus: #8fb2d1;                 /* navy-300: navy-500 is only ~2.8:1 on slate-900 */
+  --za-focus: #6ee7b7;
   --za-warn-bg: #451a03;               /* amber-950 */
   --za-warn-border: #f59e0b;           /* amber-500 */
   --za-warn-text: #fef3c7;             /* amber-100 */
@@ -132,8 +149,8 @@
   --za-error-border: #f87171;          /* red-400 */
   --za-error-text: #fee2e2;            /* red-100 */
   --za-success-text: #86efac;          /* green-300 */
-  --za-scrollbar-thumb: #475569;       /* slate-600 */
-  --za-control-border: #94a3b8;        /* slate-400: >= 3:1 on slate-900 and slate-800 */
+  --za-scrollbar-thumb: #2a4560;
+  --za-control-border: #5d7f9c;        /* >= 3:1 on the panel and cards */
   --za-launcher-edge: rgba(255, 255, 255, 0.18);
 }
 
@@ -154,7 +171,7 @@
   box-shadow: 0 6px 18px rgba(2, 6, 23, 0.18);
   cursor: pointer;
 }
-.dark .za-launcher { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55); }
+[data-za-theme="dark"] .za-launcher { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55); }
 .za-launcher > img,
 .za-launcher > [data-testid="ztile-fallback"] {
   width: 100% !important;
@@ -303,8 +320,9 @@
   column-gap: var(--za-space-3);
   align-items: center;
   min-height: var(--za-header-height);
-  padding: var(--za-space-2) var(--za-space-3) var(--za-space-2) var(--za-panel-padding);
+  padding: var(--za-space-3) var(--za-space-3) var(--za-space-3) var(--za-panel-padding);
   border-bottom: 1px solid var(--za-border);
+  background: var(--za-header-bg);
 }
 .za-header-tile { grid-column: 1; grid-row: 1 / span 2; }
 .za-title {
@@ -312,29 +330,47 @@
   margin: 0;
   overflow: hidden;
   white-space: nowrap;
-  font-size: var(--za-font-title);
-  font-weight: 500;
+  color: var(--za-accent-text);
+  font-size: 1.0625rem;
+  font-weight: 700;
   line-height: 1.375rem;
 }
 .za-title:focus { outline: none; }
 .za-title:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
+/* AI disclosure as the Kairos-style pill under the title. */
 .za-subtitle {
   grid-column: 2 / span 2;
-  margin: 0;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin: 4px 0 0;
+  padding: 1px 10px;
+  border: 1px solid var(--za-option-border);
+  border-radius: 999px;
+  background: var(--za-accent-soft);
+  color: var(--za-accent-text);
   white-space: nowrap;
   font-size: var(--za-font-meta);
+  font-weight: 600;
   line-height: 1rem;
-  color: var(--za-text-muted);
 }
+.za-subtitle-icon { flex: none; }
 .za-subtitle-short { display: none; }
 /* The disclosure never clips: shorter approved copy when the panel is narrow. */
-@container za-panel (max-width: 380px) {
+@container za-panel (max-width: 420px) {
   .za-subtitle-full { display: none; }
   .za-subtitle-short { display: inline; }
 }
-/* Title stays on one line: at very narrow widths drop the decorative tile. */
-@container za-panel (max-width: 340px) {
-  .za-header-tile { display: none; }
+/* Title stays on one line: on narrow panels the wordmark shrinks, and on
+   the narrowest it is dropped (it is decorative; the title names the panel). */
+@container za-panel (max-width: 410px) {
+  .za-header-tile { height: 28px !important; padding: 0 6px !important; }
+  .za-header-tile img { height: 20px !important; width: auto !important; }
+}
+@container za-panel (max-width: 380px) {
+  .za-header-tile { display: none !important; }
 }
 .za-controls { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: var(--za-control-gap); }
 .za-control {
@@ -344,8 +380,8 @@
   width: var(--za-control-touch);
   height: var(--za-control-touch);
   padding: 0;
-  border: 0;
-  border-radius: 8px;
+  border: 1px solid var(--za-border);
+  border-radius: 10px;
   background: transparent;
   color: var(--za-text-muted);
   cursor: pointer;
@@ -355,22 +391,38 @@
 .za-control:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 1px; }
 .za-control:disabled { opacity: 0.45; cursor: default; }
 @media (pointer: fine) {
-  .za-control { width: var(--za-control-fine); height: var(--za-control-fine); }
+  .za-control { width: 34px; height: 34px; }
+}
+.za-control.za-menu-button { width: auto; min-width: var(--za-control-fine); gap: 6px; padding: 0 10px; color: var(--za-text); }
+.za-menu-label { font-size: var(--za-font-meta); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+@container za-panel (max-width: 450px) {
+  .za-menu-label { display: none; }
+  .za-control.za-menu-button { padding: 0; width: var(--za-control-touch); }
+}
+@media (pointer: fine) {
+  @container za-panel (max-width: 450px) {
+    .za-control.za-menu-button { width: 34px; }
+  }
+}
+.za-narrow-only { display: inline-flex; }
+@media (min-width: 768px) {
+  .za-narrow-only { display: none !important; }
 }
 .za-wide-only { display: none !important; }
 @media (min-width: 768px) {
   .za-wide-only { display: inline-flex !important; }
 }
-.za-more { position: relative; display: none; }
-/* Info and Clear chat fold into "More" at <= 360 px and on touch devices,
+.za-more { position: relative; display: inline-flex; }
+/* History and Theme fold into "Menu" at <= 360 px and on touch devices,
    so 44 px targets never push the title onto two lines. */
+.za-menu .za-menu-folded { display: none; }
 @container za-panel (max-width: 360px) {
-  .za-more { display: inline-flex; }
   .za-collapsible { display: none !important; }
+  .za-menu .za-menu-folded { display: flex; }
 }
 @media (pointer: coarse) {
-  .za-more { display: inline-flex; }
   .za-collapsible { display: none !important; }
+  .za-menu .za-menu-folded { display: flex; }
 }
 .za-menu {
   position: absolute;
@@ -380,9 +432,9 @@
   min-width: 200px;
   padding: var(--za-space-1);
   border: 1px solid var(--za-border);
-  border-radius: 10px;
-  background: var(--za-surface);
-  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.2);
+  border-radius: 12px;
+  background: var(--za-card-bg);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.35);
 }
 .za-menu button {
   display: flex;
@@ -683,3 +735,221 @@ a.za-source:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 
 
 /* Background scroll lock while the mobile sheet is open. */
 html[data-za-lock="true"], html[data-za-lock="true"] body { overflow: hidden; }
+
+/* ---------- Kairos-style pieces ---------- */
+
+/* Header with the full wordmark: a slightly tighter gap leaves the
+   one-line title a few pixels of slack at the default width. */
+.za-header { column-gap: 10px; }
+
+/* Visitor: right-aligned green pill. Assistant: speaker label + bordered card. */
+.za-bubble-visitor {
+  border-radius: 18px;
+  border-bottom-right-radius: var(--za-bubble-tail);
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(19, 134, 95, 0.25);
+}
+.za-row-assistant { max-width: 96%; gap: var(--za-space-3); }
+.za-answer-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.za-speaker {
+  margin: 2px 0 0;
+  color: var(--za-accent-text);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+.za-bubble-assistant {
+  padding: 12px 16px;
+  border: 1px solid var(--za-border);
+  border-radius: 14px;
+  border-top-left-radius: var(--za-bubble-tail);
+  background: var(--za-card-bg);
+}
+.za-card-title { margin: 0 0 6px; font-weight: 600; }
+
+/* Welcome */
+.za-welcome { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.za-welcome-title { margin: 8px 0 0; color: var(--za-accent-text); font-size: 1.125rem; font-weight: 700; }
+
+/* Guided menu: two-column grid of outlined options, one column when narrow. */
+.za-menublock { align-self: stretch; width: 100%; margin-top: var(--za-space-4); text-align: left; }
+.za-menu-heading {
+  margin: 0;
+  color: var(--za-text-muted);
+  font-size: var(--za-font-meta);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.za-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--za-chip-gap);
+  margin: var(--za-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+@container za-panel (max-width: 360px) {
+  .za-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.za-grid > li { display: flex; }
+.za-option {
+  display: flex;
+  align-items: center;
+  gap: var(--za-space-2);
+  width: 100%;
+  min-height: var(--za-chip-height);
+  padding: 8px 12px;
+  border: 1px solid var(--za-option-border);
+  border-radius: 12px;
+  background: var(--za-card-bg);
+  color: var(--za-text);
+  font-size: var(--za-font-small);
+  font-weight: 600;
+  line-height: 1.125rem;
+  text-align: left;
+  cursor: pointer;
+}
+.za-option:hover:not(:disabled) { border-color: var(--za-accent); background: var(--za-accent-soft); }
+.za-option:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
+.za-option:disabled { opacity: 0.55; cursor: default; }
+@media (pointer: coarse) {
+  .za-option { min-height: var(--za-chip-height-touch); }
+}
+.za-option-icon { flex: none; font-size: 1rem; }
+.za-option-label { min-width: 0; }
+.za-option-back { color: var(--za-accent-text); }
+.za-followups { margin: var(--za-space-2) 0 0 calc(var(--za-avatar) + var(--za-space-3)); }
+@media (max-width: 767.98px) {
+  .za-followups { margin-left: 0; }
+}
+
+/* History (this session only) */
+.za-history { display: block; border-bottom: 1px solid var(--za-border); background: var(--za-surface-muted); }
+.za-history-list { display: flex; flex-direction: column; gap: 2px; max-height: 180px; margin: 8px 0 0; padding: 0; overflow-y: auto; list-style: none; }
+.za-history-list button {
+  width: 100%;
+  min-height: var(--za-control-fine);
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--za-text);
+  font-size: var(--za-font-small);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.za-history-list button:hover, .za-history-list button:focus-visible { background: var(--za-card-bg); outline: none; }
+
+/* Composer: rounded input holding the clear icon, round send button. */
+.za-composer { background: var(--za-header-bg); }
+.za-input-row { align-items: center; }
+.za-input {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  border: 1px solid var(--za-control-border);
+  border-radius: 16px;
+  background: var(--za-card-bg);
+}
+.za-input:focus-within { outline: 2px solid var(--za-focus); outline-offset: 0; border-color: var(--za-focus); }
+.za-input:has(.za-textarea[aria-invalid="true"]) { border-color: var(--za-warn-border); }
+.za-input .za-textarea { border: 0; background: transparent; }
+.za-input .za-textarea:focus { outline: none; }
+.za-input-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--za-control-touch);
+  height: var(--za-composer-min);
+  border: 0;
+  background: transparent;
+  color: var(--za-text-muted);
+  cursor: pointer;
+}
+.za-input-icon:hover:not(:disabled) { color: var(--za-text); }
+.za-input-icon:focus-visible { outline: 2px solid var(--za-focus); outline-offset: -4px; border-radius: 10px; }
+.za-input-icon:disabled { opacity: 0.4; cursor: default; }
+.za-send { width: 48px; height: 48px; border-radius: 999px; box-shadow: 0 4px 14px rgba(19, 134, 95, 0.3); }
+
+/* Footer strip */
+.za-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  color: var(--za-text-muted);
+  font-size: 0.65625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+}
+@container za-panel (max-width: 380px) {
+  .za-strip { letter-spacing: 0.04em; white-space: normal; text-align: center; }
+}
+.za-strip-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--za-accent); }
+
+/* Optional expand for answers over 120 words (Doc 01 §12). */
+.za-expand { display: block; min-height: var(--za-control-fine); margin-top: 4px; padding: 0; color: var(--za-accent-text); font-weight: 600; }
+@media (pointer: coarse) {
+  .za-expand { min-height: var(--za-control-touch); }
+}
+
+/* Typing reveal of the validated answer: a blinking caret after the last
+   word. Never runs under reduced motion (the reveal itself is skipped). */
+.za-bubble[data-typing] { cursor: pointer; }
+.za-bubble[data-typing] .za-md > p:last-child::after,
+.za-bubble[data-typing] .za-md > ul:last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: var(--za-accent);
+  animation: za-caret 1s steps(1) infinite;
+}
+@keyframes za-caret { 50% { opacity: 0; } }
+
+/* History: this conversation, then earlier conversations of this tab, each
+   expandable to its questions and answers. */
+.za-history { max-height: 55%; overflow-y: auto; }
+.za-history-heading {
+  margin: 12px 0 4px;
+  color: var(--za-text-muted);
+  font-size: var(--za-font-meta);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.za-archive { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.za-archive details { border: 1px solid var(--za-border); border-radius: 10px; background: var(--za-card-bg); }
+.za-archive summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: var(--za-control-fine);
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.za-archive summary::-webkit-details-marker { display: none; }
+.za-archive summary:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 1px; border-radius: 10px; }
+.za-archive-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--za-font-small); font-weight: 600; }
+.za-archive-turns { margin: 0; padding: 0 10px 10px; }
+.za-archive-turns > div { padding-top: 8px; border-top: 1px solid var(--za-border); }
+.za-archive-turns > div + div { margin-top: 8px; }
+.za-archive-turns dt { color: var(--za-accent-text); font-size: var(--za-font-small); font-weight: 600; }
+.za-archive-turns dd { margin: 4px 0 0; font-size: var(--za-font-small); line-height: 1.25rem; }

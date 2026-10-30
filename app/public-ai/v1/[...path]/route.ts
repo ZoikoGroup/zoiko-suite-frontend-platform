@@ -2,7 +2,7 @@
 // Public and unauthenticated (proxy.ts guards only /admin); it reads no
 // cookie or session and forwards none (see lib/api/public-ai-proxy.ts).
 
-import { allowedPath, forwardHeaders, responseHeaders, upstreamURL } from "@/lib/api/public-ai-proxy";
+import { allowedPath, crossSite, forwardHeaders, responseHeaders, upstreamURL } from "@/lib/api/public-ai-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +11,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 async function pass(request: Request, ctx: { params: Promise<{ path: string[] }> }): Promise<Response> {
   const path = allowedPath((await ctx.params).path ?? []);
   if (!path) return problem(404, "Not found");
+  if (crossSite(request.headers, request.url)) return problem(403, "Cross-site requests are not allowed");
   let body: string | undefined;
   if (request.method !== "GET") {
     body = await request.text();
@@ -23,14 +24,16 @@ async function pass(request: Request, ctx: { params: Promise<{ path: string[] }>
       headers: forwardHeaders(request.headers),
       body: body || undefined,
       cache: "no-store",
-      signal: AbortSignal.timeout(20_000),
+      // The visitor's Stop aborts this request; the abort reaches the
+      // service, which cancels the model call (Doc 05 §12).
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
     });
   } catch {
     return problem(503, "The assistant is unavailable");
   }
-  return new Response(upstream.status === 204 ? null : await upstream.text(), {
+  return new Response(upstream.status === 204 || upstream.status === 304 ? null : await upstream.text(), {
     status: upstream.status,
-    headers: responseHeaders(upstream.headers),
+    headers: responseHeaders(upstream.headers, path),
   });
 }
 

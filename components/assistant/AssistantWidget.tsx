@@ -28,36 +28,47 @@ import {
   CircleHelp,
   CircleSlash,
   Clock,
+  ChevronLeft,
   Copy,
-  Eraser,
   ExternalLink,
   FilePen,
   Globe,
   Handshake,
+  History,
   Info,
+  LayoutGrid,
+  MessageSquarePlus,
   Maximize2,
+  Menu,
   Minimize2,
-  MoreVertical,
+  Moon,
   RotateCcw,
   Send,
   ShieldAlert,
   ShieldCheck,
   Square,
+  Sun,
   ThumbsDown,
   ThumbsUp,
+  Trash2,
   TriangleAlert,
   WifiOff,
   X,
+  Zap,
 } from "lucide-react";
 import {
   OTHER_OPTION,
   OVERVIEW_OPTION,
   askAssistant,
+  validEnvelope,
+  validMenu,
   endAssistantSession,
   loadAssistantConfig,
+  loadAssistantMenu,
   rateAssistantAnswer,
   recordAssistantHandoff,
   startAssistantSession,
+  type AssistantMenu,
   type Chip,
   type FeedbackReason,
   type PublicAIConfig,
@@ -65,8 +76,9 @@ import {
   type PublicAIResult,
   type TurnEnvelope,
 } from "@/lib/api/public-ai";
-import { ASSISTANT_SUBTITLE, ASSISTANT_TITLE, LOGO_FULL_URL, LOGO_MARK_URL, type AssistantLogos } from "./branding";
-import { Markdown } from "./markdown";
+import { ASSISTANT_LABEL, ASSISTANT_SUBTITLE, ASSISTANT_TITLE, LOGO_FULL_URL, LOGO_MARK_URL, type AssistantLogos } from "./branding";
+import { Markdown, clampWords, countWords, revealWords } from "./markdown";
+import { answerTitle, menuFromChips, menuFromServer, type MenuTopic } from "./menu";
 import { looksSensitive, reduce } from "./state";
 import { useLauncherOffset } from "./useLauncherOffset";
 import { FullLogo, ZTile } from "./ZTile";
@@ -95,6 +107,51 @@ const COUNTER_FROM = 1800;
 const MAX_STARTERS = 4; // Doc01 §06: max four quick-action prompts
 const MOBILE_STARTERS = 3; // Doc01 §06: 2-3 visible chips at a time on mobile
 const MOTION_MS = 180;
+// Doc 01 §12: a default answer is at most 120 words before an optional expand.
+const ANSWER_WORDS = 120;
+// Typing reveal of the final, validated answer (Doc 01 §06 "streaming"
+// state). Doc 05 §14 forbids streaming raw model tokens, so nothing is shown
+// before the service has validated the whole answer; this only paces it.
+// Never longer than TYPE_MAX_MS, and off under prefers-reduced-motion.
+// Earlier conversations of this visit, kept in sessionStorage: this browser
+// tab only, gone when it closes. Doc 02 §10 allows no persistent visitor
+// profile by default and §27 puts stored transcripts behind a Doc 07 DPIA,
+// so nothing is kept across browser sessions or sent to the service.
+const ARCHIVE_KEY = "zoiko-assistant-conversations";
+const ARCHIVE_MAX = 10;
+type SavedConversation = { id: string; startedAt: number; turns: { q: string; a: string }[] };
+
+function readArchive(): SavedConversation[] {
+  try {
+    const raw = window.sessionStorage.getItem(ARCHIVE_KEY);
+    const list: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? (list as SavedConversation[]).filter((c) => c && Array.isArray(c.turns)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeArchive(list: SavedConversation[]) {
+  try {
+    if (list.length) window.sessionStorage.setItem(ARCHIVE_KEY, JSON.stringify(list));
+    else window.sessionStorage.removeItem(ARCHIVE_KEY);
+  } catch {
+    // storage blocked: history lasts for this page view only
+  }
+}
+
+/** A finished conversation for the archive, stamped now. */
+function archiveEntry(turns: SavedConversation["turns"]): SavedConversation {
+  return { id: crypto.randomUUID(), startedAt: Date.now(), turns };
+}
+
+const TYPE_TICK_MS = 40;
+const TYPE_MAX_MS = 2400;
+// Per-visitor theme choice (a convenience only: the widget works without it).
+const THEME_KEY = "zoiko-assistant-theme";
+type Theme = "light" | "dark";
+// The topic menu shown in the conversation: the main menu or one topic's questions.
+type MenuView = { kind: "main" } | { kind: "topic"; key: string };
 
 // Fallback copy for when /config has not loaded; the service's copy wins.
 const STARTERS: Chip[] = [
@@ -118,7 +175,8 @@ const COPY: Record<string, string> = {
   "ui.privacy": "Don't share passwords, payment, tax or account details.",
   "ui.privacy.link": "Privacy and AI notice",
   "ui.placeholder": "Ask about ZoikoSuite",
-  "ui.thinking": "Checking approved sources…",
+  "ui.loading": "Looking for verified information…", // Doc 02 §21
+  "ui.thinking": "Looking for verified information…",
   "ui.clear": "Clear chat",
   "ui.clear.notice": "Clearing the chat ends this session in your browser. It doesn't erase records the service must keep under its retention policy.",
   "ui.sensitive.warning": "Looks like sensitive info. Remove it before sending.",
@@ -133,6 +191,7 @@ const COPY: Record<string, string> = {
   "ui.error.rate_limited": "You're sending messages quickly. Wait a moment and try again.",
   "ui.unavailable": "The assistant is unavailable right now. These official pages can help in the meantime.",
   "ui.offline": "You're offline. Check your connection, then try again.",
+  "ui.timeout": "Your public chat session has ended. Start a new conversation to continue.",
   "ui.retry": "Try again",
   "ui.jump": "Jump to latest",
   "ui.feedback.prompt": "Was this helpful?",
@@ -140,6 +199,25 @@ const COPY: Record<string, string> = {
   "ui.end.title": "Before you clear the chat",
   "ui.end.prompt": "Was this chat helpful?",
   "ui.end.keep": "Keep chatting",
+  "ui.menu": "Menu",
+  "ui.menu.topics": "Browse topics",
+  "ui.menu.main": "Choose a topic",
+  "ui.menu.back": "Back to Main Menu",
+  "ui.menu.related": "Related questions",
+  "ui.answer.more": "Show more",
+  "ui.answer.less": "Show less",
+  "ui.history": "Chat history",
+  "ui.history.current": "This conversation",
+  "ui.history.earlier": "Earlier conversations",
+  "ui.history.none": "No earlier conversations in this tab yet.",
+  "ui.history.note": "Kept in this browser tab only and removed when you close it. Nothing is saved to your account.",
+  "ui.history.clear": "Clear history",
+  "ui.new_conversation": "New conversation",
+  "ui.new_conversation.started": "New conversation started.",
+  "ui.history.empty": "Questions you ask in this chat appear here. They're cleared when you clear the chat.",
+  "ui.theme.light": "Switch to light theme",
+  "ui.theme.dark": "Switch to dark theme",
+  "ui.strip": "AI · Source-grounded · Governed",
   "ui.retention.link": "Retention notice",
   "ui.privacy.title": "Privacy and AI notice",
   "ui.privacy.body":
@@ -161,9 +239,13 @@ const ROUTE_LABELS: Record<string, string> = {
   signup_or_trial: "Start a trial",
 };
 
+/** Shown in place of a message the service classed as sensitive (X03). */
+export const SENSITIVE_REMOVED = "Sensitive details removed from this message.";
+
 // S07: the expected channel, never a wait time (Doc01 §10).
 const CHANNELS: Record<string, string> = {
-  demo: "This opens the official demo page; the team follows up from there.",
+  // Doc 10 §08 "Enquiry route only" copy: no follow-up is implied.
+  demo: "Open our secure demo form to send your request.",
   support: "This opens the official support page.",
   trust: "This opens the official trust and security page.",
   pricing: "This opens the official pricing page.",
@@ -193,6 +275,28 @@ const STATUS_ICONS: Record<string, typeof Info> = {
   MARKET_DEPENDENT: Globe,
 };
 const WARN_LABELS = new Set(["Unverified", "Limited", "Not Available"]);
+
+// S05 (Doc01 §10) is for a claim the service could not verify. Scope,
+// boundary and route replies (off-topic, other products, residency,
+// roadmap, AI, competitors) also come back as ABSTAIN but are not S05.
+// Neither is MARKET_NOT_COVERED ("Other" country, Doc 02 T08): it is a
+// coverage route with its own next steps, and retrying repeats it.
+const UNVERIFIED_REASONS = new Set(["NO_EVIDENCE", "CLAIM_CONFLICT", "EXPIRED_SOURCE", "SOURCE_REVOKED", "UNSUPPORTED_GUARANTEE", "VALIDATION_FAILED"]);
+
+function isUnverified(turn: TurnEnvelope): boolean {
+  return turn.status === "ABSTAIN" && (!turn.reason || UNVERIFIED_REASONS.has(turn.reason));
+}
+
+// Unverified replies a retry can change: the answer failed validation (a new
+// attempt is generated). Expired, revoked, conflicting or missing evidence is
+// release state, so a retry would repeat the same reply.
+const RETRYABLE_REASONS = new Set(["VALIDATION_FAILED"]);
+
+/** Doc01 §10 S05 Uncertain offers "Retry, open source, handoff": retry only
+ * where it can give a different answer; otherwise the service's next steps. */
+function canRetry(turn: TurnEnvelope): boolean {
+  return isUnverified(turn) && (!turn.reason || RETRYABLE_REASONS.has(turn.reason));
+}
 
 const REASONS: { value: FeedbackReason; label: string }[] = [
   { value: "incorrect", label: "Incorrect" },
@@ -293,6 +397,75 @@ function ErrorPanel(props: {
   );
 }
 
+// Kairos-style guided menu: the service's topic grid, then one topic's
+// questions and "Back to Main Menu". Picking a question sends its fixed
+// message like a typed one. Fallback chips (no /menu) send directly.
+function TopicMenu(props: {
+  topics: MenuTopic[];
+  all: MenuTopic[];
+  view: MenuView;
+  disabled: boolean;
+  showMore: boolean;
+  copy: { main: string; back: string; more: string };
+  onView: (v: MenuView) => void;
+  onMore: () => void;
+  onPick: (message: string) => void;
+}) {
+  const { view } = props;
+  const topic = view.kind === "topic" ? props.all.find((x) => x.key === view.key) : undefined;
+  if (!topic) {
+    return (
+      <div className="za-menublock" data-testid="assistant-menu">
+        <p className="za-menu-heading">{props.copy.main}</p>
+        <ul className="za-grid" aria-label="Suggested questions">
+          {props.topics.map((tp) => (
+            <li key={tp.key}>
+              <button
+                type="button"
+                className="za-chip za-option"
+                disabled={props.disabled}
+                onClick={() => (tp.send ? props.onPick(tp.send) : props.onView({ kind: "topic", key: tp.key }))}
+              >
+                <span aria-hidden="true" className="za-option-icon">
+                  {tp.icon}
+                </span>
+                <span className="za-option-label">{tp.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {props.showMore && (
+          <button type="button" className="za-linkbutton" style={{ marginTop: 4 }} onClick={props.onMore}>
+            {props.copy.more}
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="za-menublock" data-testid="assistant-menu">
+      <p className="za-menu-heading">
+        <span aria-hidden="true">{topic.icon}</span> {topic.label}
+      </p>
+      <ul className="za-grid" aria-label={`${topic.label} questions`}>
+        {topic.questions.map((q) => (
+          <li key={q.message}>
+            <button type="button" className="za-chip za-option" disabled={props.disabled} onClick={() => props.onPick(q.message)}>
+              <span className="za-option-label">{q.label}</span>
+            </button>
+          </li>
+        ))}
+        <li>
+          <button type="button" className="za-option za-option-back" onClick={() => props.onView({ kind: "main" })}>
+            <ChevronLeft size={16} aria-hidden />
+            {props.copy.back}
+          </button>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 export function AssistantWidget({
   logos = { mark: LOGO_MARK_URL, full: LOGO_FULL_URL },
   pageContext = "other",
@@ -305,6 +478,8 @@ export function AssistantWidget({
 }) {
   const [ui, dispatch] = useReducer(reduce, "S00_CLOSED");
   const [config, setConfig] = useState<PublicAIConfig | null>(null);
+  // The service's guided menu (ADR-008); null until loaded or when it is off.
+  const [serverMenu, setServerMenu] = useState<AssistantMenu | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [emptyHint, setEmptyHint] = useState(false);
@@ -316,11 +491,25 @@ export function AssistantWidget({
   const [unread, setUnread] = useState(false);
   const [jump, setJump] = useState(false);
   const [online, setOnline] = useState(true);
+  // Doc 02 §21 ui.timeout: the server session expired and a new one began,
+  // so earlier context is gone ("no surprise persistence").
+  const [sessionEnded, setSessionEnded] = useState(false);
   const [announce, setAnnounce] = useState("");
   const [endRating, setEndRating] = useState<Feedback>({});
+  const [theme, setTheme] = useState<Theme>("dark");
+  // History lists this session's questions only; nothing outlives Clear chat.
+  const [showHistory, setShowHistory] = useState(false);
+  const [menuView, setMenuView] = useState<MenuView | null>(null);
+  // Answers the visitor expanded past ANSWER_WORDS.
+  const [expandedAnswers, setExpandedAnswers] = useState<ReadonlySet<string>>(new Set());
+  // The answer being revealed: words shown so far of its total.
+  const [typing, setTyping] = useState<{ id: string; shown: number; total: number; step: number } | null>(null);
+  const [archive, setArchive] = useState<SavedConversation[]>([]);
   const session = useRef<Session | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const inFlight = useRef<string | null>(null); // turnId of the attempt awaiting a reply
+  // Aborts the in-flight request on Stop, so the service cancels the model call (Doc 05 §12).
+  const abortTurn = useRef<AbortController | null>(null);
   const shownSeq = useRef({ session: "", seq: 0 }); // highest turn_sequence shown (CT-014)
   const pushedHistory = useRef(false);
   const returnFocus = useRef(false);
@@ -343,12 +532,61 @@ export function AssistantWidget({
   const title = t("ui.header.title") || ASSISTANT_TITLE;
   const allStarters = (config?.chips?.[pageContext] ?? config?.chips?.other ?? STARTERS).slice(0, 6);
   const visibleCount = isMobile ? MOBILE_STARTERS : MAX_STARTERS;
-  const starters = moreTopics ? allStarters : allStarters.slice(0, visibleCount);
+  const menu = serverMenu ? menuFromServer(serverMenu) : menuFromChips(allStarters);
+  const visibleTopics = moreTopics ? menu : menu.slice(0, visibleCount);
   const sensitive = looksSensitive(draft);
 
   useEffect(() => {
     openRef.current = open;
   }, [open]);
+
+  // Theme: the visitor's saved choice, else the site's dark class or the OS
+  // preference, read again on each open so it follows the page.
+  useEffect(() => {
+    if (!open) return;
+    const init = () => {
+      let saved: string | null = null;
+      try {
+        saved = window.localStorage.getItem(THEME_KEY);
+      } catch {
+        // storage blocked: fall through to the page's own theme
+      }
+      const pageDark = document.documentElement.classList.contains("dark") || window.matchMedia("(prefers-color-scheme: dark)").matches;
+      setTheme(saved === "light" || saved === "dark" ? saved : pageDark ? "dark" : "light");
+    };
+    init();
+  }, [open]);
+
+  useEffect(() => {
+    const load = () => setArchive(readArchive());
+    load();
+  }, []);
+
+  function toggleTheme() {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    setMoreOpen(false);
+    try {
+      window.localStorage.setItem(THEME_KEY, next);
+    } catch {
+      // not saved; the choice still applies for this page view
+    }
+  }
+
+  useEffect(() => {
+    if (!typing || typing.shown >= typing.total) return;
+    const timer = window.setTimeout(
+      () => setTyping((cur) => (cur && cur.id === typing.id ? { ...cur, shown: Math.min(cur.total, cur.shown + cur.step) } : cur)),
+      TYPE_TICK_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [typing]);
+
+  // A menu opened mid-conversation: bring it into view.
+  useEffect(() => {
+    const el = convo.current;
+    if (menuView && el && messagesRef.current.length > 0) el.scrollTop = el.scrollHeight;
+  }, [menuView]);
 
   // All message changes go through update, which applies them to the ref
   // synchronously so async handlers always read the latest list.
@@ -362,6 +600,10 @@ export function AssistantWidget({
     if (!open || config) return;
     loadAssistantConfig()
       .then((r) => r.ok && setConfig(r.data))
+      .catch(() => undefined);
+    // 404 while structured responses are off: the starter chips stay.
+    loadAssistantMenu()
+      .then((r) => r.ok && validMenu(r.data) && setServerMenu(r.data))
       .catch(() => undefined);
   }, [open, config]);
 
@@ -517,8 +759,10 @@ export function AssistantWidget({
   }
 
   function stop() {
-    // S02 cancel: the reply is discarded when it arrives. The service still
-    // finishes the turn, so nothing is half-written on its side.
+    // S02 cancel: the request is aborted; the service cancels the model call,
+    // frees the turn slot and stores nothing for it (Doc 05 §12).
+    abortTurn.current?.abort();
+    abortTurn.current = null;
     const stopped = messagesRef.current.find((m) => m.role === "visitor" && m.turnId === inFlight.current);
     inFlight.current = null;
     dispatch({ type: "CANCEL" });
@@ -538,7 +782,7 @@ export function AssistantWidget({
     inFlight.current = turnId;
     setVisitor(visitorId, { turnId, state: "sending", fail: undefined });
     dispatch({ type: "SEND" });
-    setAnnounce(t("ui.thinking"));
+    setAnnounce(t("ui.loading") || t("ui.thinking"));
     const stillWanted = () => inFlight.current === turnId;
     const failed = (e: PublicAIError) => {
       if (!stillWanted()) return;
@@ -551,33 +795,46 @@ export function AssistantWidget({
     try {
       let s = await ensureSession();
       if (!s) return failed({ kind: "unreachable" });
-      let r: PublicAIResult<TurnEnvelope> = await askAssistant(s.grant, s.id, turnId, msg.text, msg.market, pageContext);
+      abortTurn.current = new AbortController();
+      let r: PublicAIResult<TurnEnvelope> = await askAssistant(s.grant, s.id, turnId, msg.text, msg.market, pageContext, abortTurn.current.signal);
       if (!r.ok && r.error.kind === "http" && r.error.status === 401) {
         // Session expired: a new session needs a new turn id; same bubble.
         s = await ensureSession(true);
+        setSessionEnded(true);
+        setAnnounce(t("ui.timeout"));
         if (s) {
           const renewed = crypto.randomUUID();
           inFlight.current = renewed;
           setVisitor(visitorId, { turnId: renewed });
-          r = await askAssistant(s.grant, s.id, renewed, msg.text, msg.market, pageContext);
+          r = await askAssistant(s.grant, s.id, renewed, msg.text, msg.market, pageContext, abortTurn.current?.signal);
           if (inFlight.current !== renewed) return;
           inFlight.current = turnId; // keep stillWanted() true for the shared exit below
         }
       }
       if (!stillWanted()) return;
       if (!r.ok) return failed(r.error);
+      // Doc 05 §10: an unsupported schema version or unknown status is never shown.
+      if (!validEnvelope(r.data)) return failed({ kind: "malformed" });
       const turn = r.data;
       // CT-014: a reply older than one already shown is out of order; never
       // render it over newer state (the server keeps the canonical order).
       if (shownSeq.current.session === s?.id && turn.turn_sequence < shownSeq.current.seq) return failed({ kind: "malformed" });
       shownSeq.current = { session: s?.id ?? "", seq: turn.turn_sequence };
-      setVisitor(visitorId, { state: "sent" });
+      // Doc 01 §16 / Doc 06 §20: input the service classed as sensitive is
+      // never re-displayed; the bubble keeps a neutral notice instead.
+      setVisitor(visitorId, turn.reason === "SENSITIVE_INPUT" ? { state: "sent", text: SENSITIVE_REMOVED } : { state: "sent" });
       update((all) => {
         const reply: Message = { id: turn.turn_id, role: "assistant", turn, feedback: {}, replyTo: visitorId };
         const i = all.findIndex((m) => m.role === "assistant" && m.replyTo === visitorId);
         return i >= 0 ? all.map((m, j) => (j === i ? reply : m)) : [...all, reply];
       });
       dispatch({ type: "RESPONSE", status: turn.status });
+      // Screen readers get the whole answer once (announcer below); the
+      // visual reveal is skipped when closed or under reduced motion.
+      if (openRef.current && turn.status !== "UNAVAILABLE" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        const total = countWords(clampWords(turn.text, ANSWER_WORDS).text);
+        setTyping({ id: turn.turn_id, shown: 0, total, step: Math.max(1, Math.ceil(total / (TYPE_MAX_MS / TYPE_TICK_MS))) });
+      }
       setAnnounce(`Assistant said: ${turn.status === "UNAVAILABLE" ? t("ui.unavailable") : turn.text}`);
       if (!openRef.current) setUnread(true); // a deliberate reply while closed
     } catch {
@@ -602,6 +859,8 @@ export function AssistantWidget({
     update((m) => [...m, { id, role: "visitor", text: message, market: opts.market, turnId: id, state: "sending" }]);
     if (opts.typed) setDraft("");
     setEmptyHint(false);
+    setMenuView(null);
+    setTyping(null);
     void attempt(id);
   }
 
@@ -612,6 +871,35 @@ export function AssistantWidget({
     dispatch({ type: "END" });
   }
 
+  // Question-and-answer pairs of the current conversation, as shown.
+  function currentTurns(): { q: string; a: string }[] {
+    const all = messagesRef.current;
+    return all.flatMap((m) => {
+      if (m.role !== "visitor") return [];
+      const reply = all.find((x): x is Extract<Message, { role: "assistant" }> => x.role === "assistant" && x.replyTo === m.id);
+      if (!reply) return [];
+      return [{ q: m.text, a: reply.turn.status === "UNAVAILABLE" ? t("ui.unavailable") : reply.turn.text }];
+    });
+  }
+
+  async function newConversation() {
+    setMoreOpen(false);
+    const turns = currentTurns();
+    if (turns.length) {
+      const next = [archiveEntry(turns), ...archive].slice(0, ARCHIVE_MAX);
+      setArchive(next);
+      writeArchive(next);
+    }
+    await confirmClear();
+    setAnnounce(t("ui.new_conversation.started"));
+    composer.current?.focus();
+  }
+
+  function clearArchive() {
+    setArchive([]);
+    writeArchive([]);
+  }
+
   async function confirmClear() {
     const s = session.current;
     session.current = null;
@@ -619,6 +907,11 @@ export function AssistantWidget({
     update(() => []);
     setDraft("");
     setMoreTopics(false);
+    setMenuView(null);
+    setShowHistory(false);
+    setExpandedAnswers(new Set());
+    setTyping(null);
+    setSessionEnded(false);
     dispatch({ type: "RESET" });
     if (s) await endAssistantSession(s.grant, s.id).catch(() => undefined);
     heading.current?.focus();
@@ -668,6 +961,7 @@ export function AssistantWidget({
     if (e.key === "Escape") {
       e.stopPropagation();
       if (moreOpen) setMoreOpen(false);
+      else if (showHistory) setShowHistory(false);
       else close();
       return;
     }
@@ -695,8 +989,8 @@ export function AssistantWidget({
   const citationOf = (urlKey: string) => config?.citation_links.find((c) => c.url_key === urlKey);
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.id;
 
-  function routeLink(key: string, label: string, primary: boolean) {
-    const url = routeUrl(key);
+  function routeLink(key: string, label: string, primary: boolean, given?: string) {
+    const url = given && !isPlaceholderUrl(given) ? given : routeUrl(key);
     if (!url) return null; // no real URL → no link and no CTA
     return (
       <a
@@ -732,7 +1026,7 @@ export function AssistantWidget({
 
   function qualifier(turn: TurnEnvelope) {
     // S05: an abstention without a governed label reads "Unverified".
-    const label = turn.status_label ?? (turn.status === "ABSTAIN" ? "Unverified" : undefined);
+    const label = turn.status_label ?? (isUnverified(turn) ? "Unverified" : undefined);
     const market = turn.market_code;
     if (!label && !market && !turn.draft) return null;
     const labelText = label ? t(`ui.status.${label}`) || label : "";
@@ -812,25 +1106,71 @@ export function AssistantWidget({
     const turn = m.turn;
     const tone = turn.status === "REFUSED_ACTION" ? "warn" : undefined;
     const sources = Array.from(new Map(turn.citations.map((c) => [c.url_key, c])).values()).slice(0, 3);
-    const cta = turn.actions[0] && routeLink(turn.actions[0].route_key, ROUTE_LABELS[turn.actions[0].route_key] ?? "Open official page", true);
+    // The service's CTA when it sends one (ADR-008), else the first action.
+    const primary = turn.cta?.primary;
+    const cta = primary
+      ? routeLink(primary.route_key, primary.label, true, primary.url)
+      : turn.actions[0] && routeLink(turn.actions[0].route_key, ROUTE_LABELS[turn.actions[0].route_key] ?? "Open official page", true);
+    const secondary = turn.cta?.secondary && routeLink(turn.cta.secondary.route_key, turn.cta.secondary.label, false, turn.cta.secondary.url);
+    const asked = messages.find((x) => x.role === "visitor" && x.id === m.replyTo);
+    const clamp = clampWords(turn.text, ANSWER_WORDS);
+    const full = expandedAnswers.has(m.id);
+    const shown = full || !clamp.clamped ? turn.text : clamp.text;
+    // While revealing, only the text shows; qualifier, sources, CTA and
+    // feedback appear when it is complete. A click shows it all at once.
+    const typingNow = typing !== null && typing.id === m.id && typing.shown < typing.total;
+    const topic = turn.status === "ANSWERED" && asked?.role === "visitor" ? answerTitle(menu, turn.intent_id, asked.text) : undefined;
     return (
       <div className="za-row-assistant">
         <ZTile src={logos.mark} size={24} radius={6} className="za-avatar" />
-        <div data-testid="assistant-answer" data-status={turn.status} className="za-bubble za-bubble-assistant" data-tone={tone}>
+        <div className="za-answer-col">
+        <p className="za-speaker" aria-hidden="true">{ASSISTANT_LABEL}</p>
+        <div
+          data-testid="assistant-answer"
+          data-status={turn.status}
+          data-typing={typingNow || undefined}
+          className="za-bubble za-bubble-assistant"
+          data-tone={tone}
+          onClick={typingNow ? () => setTyping(null) : undefined}
+        >
           <span className="za-sr-only">Assistant said: </span>
+          {topic && (
+            <p className="za-card-title">
+              <span aria-hidden="true">{topic.icon}</span> {topic.label}
+            </p>
+          )}
           {turn.status === "REFUSED_ACTION" && (
             <p className="za-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 4px", fontWeight: 600 }}>
               <ShieldAlert size={14} aria-hidden />
               Not something I can do here
             </p>
           )}
-          {turn.status === "ABSTAIN" && (
+          {isUnverified(turn) && (
             <p className="za-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 4px", fontWeight: 600 }}>
               <CircleHelp size={14} aria-hidden />
               {t("ui.uncertain")}
             </p>
           )}
-          <Markdown text={turn.text} />
+          <Markdown text={typingNow ? revealWords(shown, typing.shown) : shown} />
+          {!typingNow && (
+            <>
+          {clamp.clamped && (
+            <button
+              type="button"
+              className="za-linkbutton za-expand"
+              aria-expanded={full}
+              onClick={() =>
+                setExpandedAnswers((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(m.id)) next.delete(m.id);
+                  else next.add(m.id);
+                  return next;
+                })
+              }
+            >
+              {full ? t("ui.answer.less") : t("ui.answer.more")}
+            </button>
+          )}
 
           {qualifier(turn)}
 
@@ -861,9 +1201,11 @@ export function AssistantWidget({
               </p>
               <ul className="za-sources" data-testid="assistant-sources">
                 {sources.map((c) => {
+                  // The service resolves title and url (ADR-008); /config links cover older replies.
                   const link = citationOf(c.url_key);
-                  const name = link?.title ?? "Approved ZoikoSuite source";
-                  const url = link?.url && !isPlaceholderUrl(link.url) ? link.url : "";
+                  const name = c.title || link?.title || "Approved ZoikoSuite source";
+                  const raw = c.url || link?.url || "";
+                  const url = raw && !isPlaceholderUrl(raw) ? raw : "";
                   return (
                     <li key={c.url_key}>
                       {url ? (
@@ -884,12 +1226,13 @@ export function AssistantWidget({
 
           {/* One primary CTA, only with a real URL from the signed route registry. */}
           {cta}
+          {secondary && <div style={{ marginTop: 8 }}>{secondary}</div>}
 
           {turn.status === "HANDOFF" && turn.actions[0] && CHANNELS[turn.actions[0].route_key] && (
             <p className="za-meta za-channel">{CHANNELS[turn.actions[0].route_key]}</p>
           )}
 
-          {turn.status === "ABSTAIN" && m.id === lastAssistant && (
+          {canRetry(turn) && m.id === lastAssistant && (
             <div style={{ marginTop: 8 }}>
               <button type="button" className="za-chip" disabled={sending} onClick={() => void attempt(m.replyTo, true)}>
                 <RotateCcw size={16} aria-hidden style={{ display: "inline", marginRight: 6, verticalAlign: "-3px" }} />
@@ -899,7 +1242,55 @@ export function AssistantWidget({
           )}
 
           {(turn.status === "ANSWERED" || turn.status === "ABSTAIN") && <div className="za-section">{feedbackRow(m)}</div>}
+            </>
+          )}
         </div>
+        </div>
+      </div>
+    );
+  }
+
+  function menuBlock(view: MenuView) {
+    return (
+      <TopicMenu
+        topics={messages.length === 0 ? visibleTopics : menu}
+        all={menu}
+        view={view}
+        disabled={sending}
+        showMore={messages.length === 0 && !moreTopics && menu.length > visibleCount}
+        copy={{ main: t("ui.menu.main"), back: t("ui.menu.back"), more: t("ui.more_topics") }}
+        onView={setMenuView}
+        onMore={() => setMoreTopics(true)}
+        onPick={send}
+      />
+    );
+  }
+
+  // After the latest answer: the service's approved follow-ups (never
+  // chosen here), minus questions already asked, and the way back to the menu.
+  function followUpBlock(m: Extract<Message, { role: "assistant" }>) {
+    if (m.id !== lastAssistant || sending || menuView || ui === "S09_END") return null;
+    if (typing?.id === m.id && typing.shown < typing.total) return null; // after the text is complete
+    if (m.turn.status === "CLARIFY" || m.turn.status === "UNAVAILABLE") return null;
+    const asked = new Set(messages.flatMap((x) => (x.role === "visitor" ? [x.text.trim().toLowerCase()] : [])));
+    const related = (m.turn.followups ?? []).filter((q) => !asked.has(q.message.trim().toLowerCase()));
+    return (
+      <div className="za-followups" data-testid="assistant-followups">
+        <ul className="za-grid" aria-label={t("ui.menu.related")}>
+          {related.map((q) => (
+            <li key={q.message}>
+              <button type="button" className="za-chip za-option" onClick={() => send(q.message)}>
+                <span className="za-option-label">{q.label}</span>
+              </button>
+            </li>
+          ))}
+          <li>
+            <button type="button" className="za-option za-option-back" onClick={() => setMenuView({ kind: "main" })}>
+              <LayoutGrid size={16} aria-hidden />
+              {t("ui.menu.back")}
+            </button>
+          </li>
+        </ul>
       </div>
     );
   }
@@ -956,7 +1347,7 @@ export function AssistantWidget({
   const showEnd = ui === "S09_END" && messages.length > 0;
 
   return (
-    <div data-za-root="">
+    <div data-za-root="" data-za-theme={theme}>
       {/* Launcher: the Z tile itself. Open, it keeps the tile and shows a close badge. */}
       <button
         ref={launcher}
@@ -996,46 +1387,82 @@ export function AssistantWidget({
         >
           <div className="za-handle" aria-hidden="true" />
           <header className="za-header">
-            <ZTile src={logos.mark} size={32} radius={8} className="za-header-tile" />
+            <FullLogo src={logos.full} className="za-header-tile" />
             <h2 ref={heading} tabIndex={-1} className="za-title">
               {title}
             </h2>
             <div className="za-controls">
               <button
                 type="button"
-                onClick={() => setShowPrivacy((v) => !v)}
-                aria-expanded={showPrivacy}
-                aria-controls={`${panelId}-about`}
+                onClick={() => {
+                  setMoreOpen(false);
+                  setShowHistory((v) => !v);
+                }}
+                aria-expanded={showHistory}
+                aria-controls={`${panelId}-history`}
                 className="za-control za-collapsible"
-                aria-label={t("ui.privacy.title")}
-                title={t("ui.privacy.title")}
+                aria-label={t("ui.history")}
+                title={t("ui.history")}
               >
-                <Info aria-hidden />
+                <History aria-hidden />
               </button>
               <button
                 type="button"
-                onClick={startEnd}
-                disabled={messages.length === 0}
+                onClick={toggleTheme}
                 className="za-control za-collapsible"
-                aria-label={t("ui.clear")}
-                title={t("ui.clear")}
+                aria-label={theme === "dark" ? t("ui.theme.light") : t("ui.theme.dark")}
+                title={theme === "dark" ? t("ui.theme.light") : t("ui.theme.dark")}
               >
-                <Eraser aria-hidden />
+                {theme === "dark" ? <Sun aria-hidden /> : <Moon aria-hidden />}
               </button>
               <span className="za-more">
                 <button
                   type="button"
-                  className="za-control"
-                  aria-label="More"
-                  title="More"
+                  className="za-control za-menu-button"
+                  aria-label={t("ui.menu")}
+                  title={t("ui.menu")}
                   aria-haspopup="menu"
                   aria-expanded={moreOpen}
                   onClick={() => setMoreOpen((v) => !v)}
                 >
-                  <MoreVertical aria-hidden />
+                  <Menu aria-hidden />
+                  <span className="za-menu-label" aria-hidden="true">
+                    {t("ui.menu")}
+                  </span>
                 </button>
                 {moreOpen && (
-                  <div className="za-menu" role="menu" aria-label="More">
+                  <div className="za-menu" role="menu" aria-label={t("ui.menu")}>
+                    <button type="button" role="menuitem" disabled={messages.length === 0 || sending} onClick={() => void newConversation()}>
+                      <MessageSquarePlus size={18} aria-hidden />
+                      {t("ui.new_conversation")}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setMenuView({ kind: "main" });
+                      }}
+                    >
+                      <LayoutGrid size={18} aria-hidden />
+                      {t("ui.menu.topics")}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="za-menu-folded"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setShowHistory(true);
+                      }}
+                    >
+                      <History size={18} aria-hidden />
+                      {t("ui.history")}
+                    </button>
+                    <button type="button" role="menuitem" className="za-menu-folded" onClick={toggleTheme}>
+                      {theme === "dark" ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+                      {theme === "dark" ? t("ui.theme.light") : t("ui.theme.dark")}
+                    </button>
                     <button
                       type="button"
                       role="menuitem"
@@ -1048,27 +1475,34 @@ export function AssistantWidget({
                       {t("ui.privacy.title")}
                     </button>
                     <button type="button" role="menuitem" disabled={messages.length === 0} onClick={startEnd}>
-                      <Eraser size={18} aria-hidden />
+                      <Trash2 size={18} aria-hidden />
                       {t("ui.clear")}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="za-wide-only"
+                      onClick={() => {
+                        setMoreOpen(false);
+                        setExpanded((v) => !v);
+                      }}
+                    >
+                      {expanded ? <Minimize2 size={18} aria-hidden /> : <Maximize2 size={18} aria-hidden />}
+                      {expanded ? "Minimize chat" : "Expand chat"}
+                    </button>
+                    <button type="button" role="menuitem" className="za-wide-only" onClick={close}>
+                      <X size={18} aria-hidden />
+                      {t("ui.launcher.close")}
                     </button>
                   </div>
                 )}
               </span>
-              <button
-                type="button"
-                className="za-control za-wide-only"
-                aria-label={expanded ? "Minimize chat" : "Expand chat"}
-                title={expanded ? "Minimize chat" : "Expand chat"}
-                aria-pressed={expanded}
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
-              </button>
-              <button type="button" onClick={close} className="za-control" aria-label={t("ui.launcher.close")} title={t("ui.launcher.close")}>
+              <button type="button" onClick={close} className="za-control za-narrow-only" aria-label={t("ui.launcher.close")} title={t("ui.launcher.close")}>
                 <X aria-hidden />
               </button>
             </div>
             <p data-testid="assistant-subtitle" className="za-subtitle">
+              <Zap size={12} aria-hidden className="za-subtitle-icon" />
               <span className="za-subtitle-full">{t("ui.header.subtitle")}</span>
               <span className="za-subtitle-short">{t("ui.header.subtitle_short")}</span>
             </p>
@@ -1078,6 +1512,12 @@ export function AssistantWidget({
             <div className="za-banner" data-tone="error" role="status" data-testid="assistant-offline">
               <WifiOff size={16} aria-hidden />
               {t("ui.offline")}
+            </div>
+          )}
+
+          {sessionEnded && (
+            <div className="za-banner" role="status" data-testid="assistant-session-ended">
+              {t("ui.timeout")}
             </div>
           )}
 
@@ -1104,6 +1544,84 @@ export function AssistantWidget({
             </div>
           )}
 
+          {showHistory && (
+            <div id={`${panelId}-history`} role="region" aria-label={t("ui.history")} className="za-banner za-history" data-testid="assistant-history">
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <History size={18} aria-hidden />
+                <h3 style={{ flex: 1, margin: 0, fontSize: "var(--za-font-title)", fontWeight: 600 }}>{t("ui.history")}</h3>
+                <button type="button" onClick={() => setShowHistory(false)} className="za-control" aria-label="Hide chat history">
+                  <X aria-hidden />
+                </button>
+              </div>
+              <h4 className="za-history-heading">{t("ui.history.current")}</h4>
+              {messages.some((m) => m.role === "visitor") ? (
+                <ol className="za-history-list">
+                  {messages.map((m) =>
+                    m.role === "visitor" ? (
+                      <li key={m.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowHistory(false);
+                            const el = convo.current;
+                            const li = el?.querySelector<HTMLElement>(`[data-msg="${CSS.escape(m.id)}"]`);
+                            if (el && li) el.scrollTop = Math.max(0, li.offsetTop - 8);
+                          }}
+                        >
+                          {m.text}
+                        </button>
+                      </li>
+                    ) : null,
+                  )}
+                </ol>
+              ) : (
+                <p className="za-meta" style={{ margin: "4px 0 0" }}>
+                  {t("ui.history.empty")}
+                </p>
+              )}
+              <h4 className="za-history-heading">{t("ui.history.earlier")}</h4>
+              {archive.length === 0 ? (
+                <p className="za-meta" style={{ margin: "4px 0 0" }}>
+                  {t("ui.history.none")}
+                </p>
+              ) : (
+                <ol className="za-archive" data-testid="assistant-archive">
+                  {archive.map((c) => (
+                    <li key={c.id}>
+                      <details>
+                        <summary>
+                          <span className="za-archive-title">{c.turns[0]?.q}</span>
+                          <span className="za-meta">
+                            {new Date(c.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {c.turns.length}{" "}
+                            {c.turns.length === 1 ? "question" : "questions"}
+                          </span>
+                        </summary>
+                        <dl className="za-archive-turns">
+                          {c.turns.map((turn, n) => (
+                            <div key={n}>
+                              <dt>{turn.q}</dt>
+                              <dd>
+                                <Markdown text={turn.a} />
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </details>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <p className="za-meta" style={{ margin: "8px 0 0" }}>
+                {t("ui.history.note")}{" "}
+                {archive.length > 0 && (
+                  <button type="button" className="za-linkbutton" style={{ minHeight: 24, padding: 0, fontSize: "inherit" }} onClick={clearArchive}>
+                    {t("ui.history.clear")}
+                  </button>
+                )}
+              </p>
+            </div>
+          )}
+
           <div
             ref={convo}
             className="za-conversation"
@@ -1114,32 +1632,19 @@ export function AssistantWidget({
             aria-label="Conversation"
           >
             {showWelcome && (
-              <div data-testid="assistant-welcome" style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+              <div data-testid="assistant-welcome" className="za-welcome">
                 {ui === "S09_END" && (
                   <p className="za-meta" role="status" style={{ marginBottom: 12 }}>
                     Chat cleared.
                   </p>
                 )}
                 <ZTile src={logos.mark} size={48} radius={12} />
-                <p style={{ margin: "8px 0 0", fontSize: "var(--za-font-title)", fontWeight: 500 }}>{title}</p>
+                <p className="za-welcome-title">{title}</p>
                 <p style={{ margin: "4px 0 0" }}>{t("ui.welcome.greeting")}</p>
                 <p className="za-meta" style={{ margin: "4px 0 0" }}>
                   {t("ui.welcome.disclosure")}
                 </p>
-                <ul className="za-chips" aria-label="Suggested questions" style={{ justifyContent: "center" }}>
-                  {starters.map((s) => (
-                    <li key={s.label}>
-                      <button type="button" className="za-chip" onClick={() => send(s.message)}>
-                        {s.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                {!moreTopics && allStarters.length > visibleCount && (
-                  <button type="button" className="za-linkbutton" style={{ marginTop: 4 }} onClick={() => setMoreTopics(true)}>
-                    {t("ui.more_topics")}
-                  </button>
-                )}
+                {menuBlock(menuView ?? { kind: "main" })}
               </div>
             )}
 
@@ -1179,9 +1684,12 @@ export function AssistantWidget({
                     />
                   )}
                   {m.role === "assistant" && m.turn.status !== "UNAVAILABLE" && answer(m)}
+                  {m.role === "assistant" && followUpBlock(m)}
                 </li>
               ))}
             </ol>
+
+            {!showWelcome && menuView && !sending && menuBlock(menuView)}
 
             {sending && (
               <div data-testid="assistant-thinking" className="za-meta" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
@@ -1190,7 +1698,7 @@ export function AssistantWidget({
                   <span />
                   <span />
                 </span>
-                <span>{t("ui.thinking")}</span>
+                <span>{t("ui.loading") || t("ui.thinking")}</span>
               </div>
             )}
 
@@ -1235,6 +1743,7 @@ export function AssistantWidget({
               Message
             </label>
             <div className="za-input-row">
+              <div className="za-input">
               <textarea
                 id={`${panelId}-composer`}
                 ref={composer}
@@ -1252,6 +1761,10 @@ export function AssistantWidget({
                 aria-invalid={sensitive || emptyHint}
                 aria-describedby={[`${panelId}-privacy`, sensitive && `${panelId}-sensitive`, emptyHint && `${panelId}-empty`].filter(Boolean).join(" ")}
               />
+              <button type="button" className="za-input-icon" disabled={messages.length === 0} onClick={startEnd} aria-label={t("ui.clear")} title={t("ui.clear")}>
+                <Trash2 size={18} aria-hidden />
+              </button>
+              </div>
               {sending ? (
                 <button type="submit" className="za-send" data-mode="stop" aria-label="Stop" title="Stop">
                   <Square size={16} aria-hidden />
@@ -1275,6 +1788,10 @@ export function AssistantWidget({
                 </button>
               </span>
               {draft.length >= COUNTER_FROM && <span aria-live="polite"> {MAX_MESSAGE - draft.length} characters left.</span>}
+            </p>
+            <p className="za-strip" data-testid="assistant-strip">
+              <span className="za-strip-dot" aria-hidden="true" />
+              {ASSISTANT_LABEL} {t("ui.strip")}
             </p>
           </form>
         </section>

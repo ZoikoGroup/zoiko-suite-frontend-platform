@@ -40,6 +40,7 @@ export async function startAssistant(): Promise<void> {
       MODEL_PROVIDER: "mock",
       PUBLIC_AI_RATE_LIMIT_IP_PER_MIN: "6000",
       PUBLIC_AI_RATE_LIMIT_SESSION_PER_MIN: "6000",
+      PUBLIC_AI_RATE_LIMIT_SESSION_CREATE_PER_MIN: "6000",
     },
     stdio: "ignore",
   });
