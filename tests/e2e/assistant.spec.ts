@@ -33,7 +33,7 @@ async function openAssistant(page: Page) {
   await page.getByRole("button", { name: "Chat with ZoikoSuite" }).click();
   const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
   await expect(dialog.getByTestId("assistant-welcome")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Pricing and trial" })).toBeVisible(); // config loaded
+  await expect(dialog.getByRole("button", { name: "Compare plans" })).toBeVisible(); // config loaded
   return dialog;
 }
 
@@ -249,8 +249,8 @@ test("K10 header fits at 320 px and 200% zoom equivalent", async ({ page }) => {
   expect(await heading.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   const sub = dialog.getByTestId("assistant-subtitle");
   expect(await sub.evaluate((el) => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight + 1)).toBe(true);
-  // At <= 360 px, Info and Clear chat fold into "More" (Doc01 one-line title).
-  for (const name of ["More", "Close chat"]) {
+  // At <= 360 px, History and Theme fold into "Menu" (Doc01 one-line title).
+  for (const name of ["Menu", "Close chat"]) {
     await expect(header.getByRole("button", { name, exact: true })).toBeVisible();
   }
   await page.screenshot({ path: `${shotDir}/K10-320px.png` });

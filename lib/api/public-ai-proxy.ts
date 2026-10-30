@@ -17,6 +17,7 @@ export const FORWARD_RESPONSE_HEADERS = ["content-type", "x-request-id", "retry-
 const ALLOWED = [
   /^health\/public$/,
   /^config$/,
+  /^menu$/,
   /^sessions$/,
   /^sessions\/[A-Za-z0-9_-]{1,128}$/,
   /^turns$/,
@@ -60,10 +61,10 @@ export function forwardHeaders(incoming: Headers, env: Record<string, string | u
   return out;
 }
 
-/** CT-023: only /config may be cached; every other reply is no-store. */
+/** CT-023: only /config and /menu (public, policy-versioned copy) may be cached; every other reply is no-store. */
 export function responseHeaders(upstream: Headers, path = ""): Headers {
   const out = new Headers();
-  const cacheable = path === "config";
+  const cacheable = path === "config" || path === "menu";
   for (const name of FORWARD_RESPONSE_HEADERS) {
     if (!cacheable && (name === "cache-control" || name === "etag")) continue;
     const v = upstream.get(name);

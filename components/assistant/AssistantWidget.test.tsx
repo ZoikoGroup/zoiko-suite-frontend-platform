@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   askAssistant: vi.fn(),
   endAssistantSession: vi.fn(),
   loadAssistantConfig: vi.fn(),
+  loadAssistantMenu: vi.fn(),
   rateAssistantAnswer: vi.fn(),
   recordAssistantHandoff: vi.fn(),
   startAssistantSession: vi.fn(),
@@ -58,6 +59,8 @@ beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
   Element.prototype.scrollIntoView = vi.fn();
   api.loadAssistantConfig.mockResolvedValue(ok(config));
+  // Structured responses off by default: /menu is 404 and the starter chips stay.
+  api.loadAssistantMenu.mockResolvedValue({ ok: false, error: { kind: "http", status: 404 } });
   api.startAssistantSession.mockResolvedValue(ok({ session_id: "pub_s_1", session_grant: "grant", expires_at: "" }));
   api.endAssistantSession.mockResolvedValue(ok(undefined));
 });
@@ -109,24 +112,24 @@ describe("K10 Z-tile branding", () => {
     expect(within(launcher).getByTestId("launcher-close-badge").className).toContain("za-close-badge"); // 18 px token
   });
 
-  it("welcome card has the 48 px tile, title, greeting and chips; header tile is 32 px", async () => {
+  it("welcome card has the 48 px tile, title, greeting and topic menu; header tile is 32 px", async () => {
     const dialog = await openWidget();
     const welcome = within(dialog).getByTestId("assistant-welcome");
     expect(tileSize(within(welcome).getByTestId("ztile"))).toEqual({ w: "48px", h: "48px", r: "12px" });
     expect(welcome.textContent).toContain("ZoikoSuite Assistant");
     expect(welcome.textContent).toContain("Hi, I can explain ZoikoSuite plans, modules, trust and integrations. I can't see or change any account.");
     // Doc01: at most four quick-action prompts; the rest behind "More topics".
-    expect(within(within(welcome).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.textContent)).toEqual([
+    expect(within(within(welcome).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.querySelector(".za-option-label")!.textContent)).toEqual([
       "Pricing and trial", "Explore modules", "Book a demo", "Security and trust",
     ]);
     expect(welcome.textContent).toContain("AI assistant. Answers use public ZoikoSuite information only.");
     await act(async () => {
       fireEvent.click(within(welcome).getByRole("button", { name: "More topics" }));
     });
-    expect(within(welcome).getByRole("button", { name: "Get support" })).toBeTruthy();
+    expect(within(welcome).getByRole("button", { name: /Get support/ })).toBeTruthy();
     const header = dialog.querySelector("header")!;
     expect(tileSize(within(header).getByTestId("ztile"))).toEqual({ w: "32px", h: "32px", r: "8px" });
-    expect(within(header).getByRole("heading", { name: "ZoikoSuite Assistant" }).className).toContain("za-title"); // 16 px / 500 tokens
+    expect(within(header).getByRole("heading", { name: "ZoikoSuite Assistant" }).className).toContain("za-title");
     expect(within(header).getByTestId("assistant-subtitle").querySelector(".za-subtitle-full")!.textContent).toBe("AI assistant. Public ZoikoSuite information only.");
     expect(within(header).queryByRole("img")).toBeNull(); // no wordmark in the header
   });
@@ -157,12 +160,13 @@ describe("K10 Z-tile branding", () => {
     expect(notice.textContent).toContain("[period from signed policy]");
   });
 
-  it("shows a 24 px avatar beside each assistant answer", async () => {
+  it("shows a 24 px avatar and the speaker label beside each assistant answer", async () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
     await openWidget();
     await ask("What plans are available?");
-    const answer = screen.getByTestId("assistant-answer");
-    expect(tileSize(within(answer.parentElement!).getByTestId("ztile"))).toEqual({ w: "24px", h: "24px", r: "6px" });
+    const row = screen.getByTestId("assistant-answer").closest(".za-row-assistant") as HTMLElement;
+    expect(tileSize(within(row).getByTestId("ztile"))).toEqual({ w: "24px", h: "24px", r: "6px" });
+    expect(row.querySelector(".za-speaker")!.textContent).toBe("ZoikoSuite");
   });
 
   it("never shows the uncleared working name or a placeholder host", async () => {
@@ -314,5 +318,199 @@ describe("answers", () => {
     expect(screen.getByRole("button", { name: "Remove it" })).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement).disabled).toBe(false); // still editable
     expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("sensitive input flagged by the service (Doc 01 §16, Doc 06 §20)", () => {
+  it("replaces the visitor bubble so the value is never re-displayed", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ status: "REFUSED_ACTION", intent_id: "X03", reason: "SENSITIVE_INPUT", text: "Please do not share passwords, codes, bank details or personal financial or employee records here.", citations: [], actions: [] })),
+    );
+    await openWidget();
+    await ask("my EIN is 12-3456789, which plan fits?");
+    const bubble = screen.getAllByTestId("visitor-bubble")[0];
+    expect(bubble.textContent).not.toContain("12-3456789");
+    expect(bubble.textContent).toContain("Sensitive details removed");
+  });
+});
+
+describe("S05 Unverified only for verification failures", () => {
+  it("an off-topic reply shows no Unverified badge and no Try again", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ status: "ABSTAIN", reason: "OUT_OF_SCOPE", intent_id: "I29", status_label: undefined, market_code: undefined, citations: [], actions: [],
+        text: "I'm here to help with ZoikoSuite capabilities, plans, security, integrations, demos and support." })),
+    );
+    const dialog = await openWidget();
+    await ask("what is the weather");
+    const answer = within(dialog).getAllByTestId("assistant-answer").at(-1)!;
+    expect(answer.textContent).not.toContain("Unverified");
+    expect(answer.textContent).not.toContain("I couldn't verify that.");
+    expect(within(answer).queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("a validation failure keeps the Unverified badge and offers Try again", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ status: "ABSTAIN", reason: "VALIDATION_FAILED", status_label: undefined, market_code: undefined, citations: [], actions: [],
+        text: "I couldn't verify that from approved ZoikoSuite sources, so I won't guess." })),
+    );
+    const dialog = await openWidget();
+    await ask("What does Legal do?");
+    const answer = within(dialog).getAllByTestId("assistant-answer").at(-1)!;
+    expect(answer.textContent).toContain("Unverified");
+    expect(within(answer).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("a clarifying question for an ambiguous term shows its chips", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ status: "CLARIFY", reason: "AMBIGUOUS_QUESTION", intent_id: "I29", status_label: undefined, market_code: undefined, citations: [], actions: [],
+        text: "Do you mean ZoikoSuite plan prices, payroll, or payment workflows in Finance and Payments?",
+        suggestions: [{ label: "Plan prices", message: "How much does ZoikoSuite cost?" }, { label: "Payroll", message: "Does ZoikoSuite handle payroll?" }, { label: "Payment workflows", message: "What does Finance and Payments do?" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("what is the pay");
+    const answer = within(dialog).getAllByTestId("assistant-answer").at(-1)!;
+    for (const name of ["Plan prices", "Payroll", "Payment workflows"]) expect(within(answer).getByRole("button", { name })).toBeTruthy();
+    expect(answer.textContent).not.toContain("Unverified");
+  });
+});
+
+// The service's /menu as public-ai-svc serves it (ADR-008), trimmed.
+const serverMenu = {
+  schema_version: "1.0",
+  categories: [
+    {
+      id: "pricing",
+      label: "Compare plans",
+      items: [
+        { id: "pricing.plans", label: "Plan differences", intent_id: "I05", message: "What plans are available?" },
+        { id: "pricing.trial", label: "Trial terms", intent_id: "I06", message: "Is there a free trial?" },
+      ],
+    },
+    {
+      id: "trust",
+      label: "Security & trust",
+      items: [{ id: "trust.residency", label: "Data residency", intent_id: "I14", message: "Where is ZoikoSuite data stored?" }],
+    },
+  ],
+};
+
+describe("Kairos-style menu, history and theme", () => {
+  it("with /menu off, a starter chip sends its own message directly", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(within(dialog).getByTestId("assistant-welcome")).getByRole("button", { name: /Book a demo/ }));
+    });
+    expect(api.askAssistant.mock.calls[0][3]).toBe("I'd like to book a demo");
+  });
+
+  it("the service's menu: a category opens its questions; a question sends; Back to Main Menu returns", async () => {
+    api.loadAssistantMenu.mockResolvedValue(ok(serverMenu));
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    const dialog = await openWidget();
+    const welcome = within(dialog).getByTestId("assistant-welcome");
+    expect(within(within(welcome).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.querySelector(".za-option-label")!.textContent)).toEqual([
+      "Compare plans",
+      "Security & trust",
+    ]);
+    await act(async () => {
+      fireEvent.click(within(welcome).getByRole("button", { name: /Compare plans/ }));
+    });
+    const questions = within(welcome).getByRole("list", { name: "Compare plans questions" });
+    expect(api.askAssistant).not.toHaveBeenCalled(); // opening a category sends nothing
+    await act(async () => {
+      fireEvent.click(within(questions).getByRole("button", { name: "Back to Main Menu" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(welcome).getByRole("button", { name: /Compare plans/ }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Trial terms" }));
+    });
+    expect(api.askAssistant.mock.calls[0][3]).toBe("Is there a free trial?"); // the item's fixed message, not its label
+  });
+
+  it("shows the service's follow-ups, titles, sources and CTA; never invents its own", async () => {
+    api.loadAssistantMenu.mockResolvedValue(ok(serverMenu));
+    api.askAssistant.mockResolvedValueOnce(
+      ok(
+        envelope({
+          intent_id: "I05",
+          citations: [{ source_version_id: "claims-1", claim_ids: ["c1"], url_key: "pricing", title: "Pricing and plans", route_key: "pricing" }],
+          actions: [{ type: "OPEN_OFFICIAL_ROUTE", route_key: "pricing" }],
+          outcome: "GROUNDED",
+          followups: [
+            { id: "pricing.trial", label: "Trial terms", intent_id: "I06", message: "Is there a free trial?" },
+            { id: "pricing.plans", label: "Plan differences", intent_id: "I05", message: "What plans are available?" },
+          ],
+          cta: { primary: { route_key: "pricing", label: "Compare plans", url: "https://www.zoikosuite.com/pricing" } },
+        }),
+      ),
+    );
+    await openWidget();
+    await ask("What plans are available?");
+    const answer = screen.getByTestId("assistant-answer");
+    expect(answer.querySelector(".za-card-title")!.textContent).toContain("Plan differences"); // the menu question asked, not its category
+    expect(within(screen.getByTestId("assistant-sources")).getByText("Pricing and plans")).toBeTruthy();
+    expect(within(answer).getByRole("link", { name: /Compare plans/ }).getAttribute("href")).toBe("https://www.zoikosuite.com/pricing");
+    const followups = screen.getByTestId("assistant-followups");
+    // The question just asked is not offered again.
+    expect(within(within(followups).getByRole("list", { name: "Related questions" })).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Trial terms",
+      "Back to Main Menu",
+    ]);
+    await act(async () => {
+      fireEvent.click(within(followups).getByRole("button", { name: "Back to Main Menu" }));
+    });
+    expect(screen.getByTestId("assistant-menu")).toBeTruthy();
+    expect(screen.queryByTestId("assistant-followups")).toBeNull();
+  });
+
+  it("without service follow-ups shows only Back to Main Menu", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    await openWidget();
+    await ask("What plans are available?");
+    const related = within(screen.getByTestId("assistant-followups")).getAllByRole("button").map((b) => b.textContent);
+    expect(related).toEqual(["Back to Main Menu"]);
+  });
+
+  it("history lists this session's questions and empties on Clear chat", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    const history = within(dialog).getByRole("region", { name: "Chat history" });
+    expect(within(history).getByRole("button", { name: "What plans are available?" })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
+    });
+    expect(within(dialog).queryByRole("region", { name: "Chat history" })).toBeNull();
+    expect(screen.queryByTestId("visitor-bubble")).toBeNull();
+  });
+
+  it("the theme button switches light and dark and remembers the choice", async () => {
+    window.localStorage.removeItem("zoiko-assistant-theme");
+    const dialog = await openWidget();
+    const root = dialog.closest("[data-za-root]")!;
+    const before = root.getAttribute("data-za-theme");
+    const toggle = within(dialog).getByRole("button", { name: before === "dark" ? "Switch to light theme" : "Switch to dark theme" });
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    const after = before === "dark" ? "light" : "dark";
+    expect(root.getAttribute("data-za-theme")).toBe(after);
+    expect(window.localStorage.getItem("zoiko-assistant-theme")).toBe(after);
+  });
+
+  it("the composer has a clear-chat icon and the footer strip", async () => {
+    const dialog = await openWidget();
+    const clear = within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }) as HTMLButtonElement;
+    expect(clear.disabled).toBe(true); // nothing to clear yet
+    expect(within(dialog).getByTestId("assistant-strip").textContent).toBe("ZoikoSuite AI · Source-grounded · Governed");
   });
 });

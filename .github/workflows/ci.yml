@@ -30,8 +30,70 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Assistant widget unit tests (Vitest incl. the import boundary) and
+      # node tests (Doc 07 §04 L1: deterministic CI, blocking on failure).
+      - name: Unit tests
+        run: npm test
+
       - name: Build Next.js Application
         run: npm run build
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           NEXT_TELEMETRY_DISABLED: 1
+
+  # Doc 07 §04 L4 / §10: the assistant's browser tests (axe, keyboard, the
+  # public-only boundary, 52 cases) against a real public-ai-svc built from
+  # the backend repository. Needs the BACKEND_REPO_TOKEN secret (read-only
+  # access to ZoikoGroup/zoiko-suite-backend).
+  assistant-e2e:
+    name: Assistant browser tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout the assistant service
+        uses: actions/checkout@v4
+        with:
+          repository: ZoikoGroup/zoiko-suite-backend
+          ref: main
+          token: ${{ secrets.BACKEND_REPO_TOKEN }}
+          path: backend
+          sparse-checkout: services/public-ai-svc
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache-dependency-path: backend/services/public-ai-svc/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies and the browser
+        run: |
+          npm ci
+          npx playwright install --with-deps msedge
+
+      - name: Build Next.js Application
+        run: npm run build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Playwright
+        run: npx playwright test --reporter=line,html
+        env:
+          PUBLIC_AI_SVC_DIR: ${{ github.workspace }}/backend/services/public-ai-svc
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assistant-playwright-report
+          path: playwright-report
+          if-no-files-found: ignore

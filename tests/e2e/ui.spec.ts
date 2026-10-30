@@ -669,7 +669,7 @@ for (const width of [1280, 768, 375]) {
         await page.screenshot({ path: `${dir}/S02-thinking.png` });
         await expect(dialog.getByTestId("assistant-thinking")).toHaveCount(0, { timeout: 10_000 });
         const touch = width <= 768;
-        if (touch) await dialog.getByRole("button", { name: "More", exact: true }).click();
+        if (touch) await dialog.getByRole("button", { name: "Menu", exact: true }).click();
         await dialog.getByRole(touch ? "menuitem" : "button", { name: "Clear chat" }).click();
         await expect(dialog.getByTestId("assistant-end")).toBeVisible();
         await dialog.getByTestId("assistant-end").scrollIntoViewIfNeeded();

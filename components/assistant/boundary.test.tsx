@@ -5,7 +5,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { askAssistant, loadAssistantConfig, startAssistantSession } from "@/lib/api/public-ai";
-import { allowedPath, forwardHeaders, responseHeaders, upstreamURL } from "@/lib/api/public-ai-proxy";
+import { allowedPath, crossSite, forwardHeaders, responseHeaders, upstreamURL } from "@/lib/api/public-ai-proxy";
+import { validEnvelope } from "@/lib/api/public-ai";
 import { ACTIVE_PUBLIC_PATHS, PREPARED_PUBLIC_PATHS, isAssistantPath } from "./mount";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -79,8 +80,36 @@ describe("same-origin route", () => {
     expect(back.get("set-cookie")).toBeNull();
     expect(back.get("x-request-id")).toBe("r");
     expect(allowedPath(["turns"])).toBe("turns");
+    expect(allowedPath(["menu"])).toBe("menu");
     expect(allowedPath(["sessions", "pub_s_1"])).toBe("sessions/pub_s_1");
     for (const p of [["admin"], ["..", "admin"], ["sessions", "a", "b"], ["internal", "flags"]]) expect(allowedPath(p)).toBeNull();
     expect(upstreamURL("turns", { ZOIKO_PUBLIC_AI_URL: "http://127.0.0.1:8001/" })).toBe("http://127.0.0.1:8001/public-ai/v1/turns");
+  });
+});
+
+describe("Doc 05 / Doc 06 proxy and envelope rules", () => {
+  it("refuses cross-site callers and accepts same-origin ones (SEC-T012)", () => {
+    const url = "http://localhost:3000/public-ai/v1/turns";
+    expect(crossSite(new Headers({ "sec-fetch-site": "cross-site" }), url)).toBe(true);
+    expect(crossSite(new Headers({ origin: "https://evil.example" }), url)).toBe(true);
+    expect(crossSite(new Headers({ origin: "http://localhost:3000", "sec-fetch-site": "same-origin" }), url)).toBe(false);
+    expect(crossSite(new Headers(), url)).toBe(false);
+  });
+
+  it("lets only /config be cached and forwards If-None-Match (CT-023)", () => {
+    const up = new Headers({ "cache-control": "public, max-age=60", etag: '"v1"' });
+    expect(responseHeaders(up, "config").get("cache-control")).toBe("public, max-age=60");
+    expect(responseHeaders(up, "config").get("etag")).toBe('"v1"');
+    expect(responseHeaders(up, "menu").get("cache-control")).toBe("public, max-age=60");
+    expect(responseHeaders(up, "turns").get("cache-control")).toBe("no-store");
+    expect(forwardHeaders(new Headers({ "if-none-match": '"v1"' }), {}).get("if-none-match")).toBe('"v1"');
+  });
+
+  it("rejects envelopes of another major version or unknown status (Doc 05 §10)", () => {
+    const ok = { schema_version: "1.0", turn_id: "t", text: "x", turn_sequence: 1, status: "ANSWERED", citations: [], actions: [] };
+    expect(validEnvelope(ok)).toBe(true);
+    expect(validEnvelope({ ...ok, schema_version: "2.0" })).toBe(false);
+    expect(validEnvelope({ ...ok, status: "DONE" })).toBe(false);
+    expect(validEnvelope({ ...ok, citations: undefined })).toBe(false);
   });
 });

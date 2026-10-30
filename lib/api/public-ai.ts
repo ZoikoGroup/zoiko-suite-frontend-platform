@@ -18,9 +18,16 @@ export type PublicAISession = {
   expires_at: string;
 };
 
-export type Citation = { source_version_id: string; claim_ids: string[]; url_key: string };
+/** title, route_key and url are resolved by the service when structured responses are on (ADR-008). */
+export type Citation = { source_version_id: string; claim_ids: string[]; url_key: string; title?: string; route_key?: string; url?: string };
 export type RouteAction = { type: "OPEN_OFFICIAL_ROUTE"; route_key: string };
 export type Chip = { label: string; message: string };
+/** An approved question from the service's Doc 02 menu and follow-up map; message is what it sends. */
+export type FollowUp = { id: string; label: string; intent_id: string; message: string };
+/** One official route offered as a call to action; url only when a real page exists. */
+export type CTALink = { route_key: string; label: string; url?: string };
+export type MenuCategory = { id: string; label: string; items: FollowUp[] };
+export type AssistantMenu = { schema_version: string; categories: MenuCategory[] };
 
 export type TurnEnvelope = {
   turn_id: string;
@@ -49,6 +56,10 @@ export type TurnEnvelope = {
   suggestions?: Chip[];
   /** Answered from articles owners have not approved yet (local/dev only). */
   draft?: boolean;
+  /** Structured responses (ADR-008), present only while the service has them on. */
+  outcome?: "GROUNDED" | "CLARIFY" | "ABSTAIN" | "SAFE_FALLBACK" | "REFUSED" | "HANDOFF_OFFER";
+  followups?: FollowUp[];
+  cta?: { primary?: CTALink; secondary?: CTALink };
 };
 
 export const OVERVIEW_OPTION = "GENERAL_OVERVIEW";
@@ -191,6 +202,29 @@ export function endAssistantSession(grant: string, sessionId: string) {
 
 export function loadAssistantConfig() {
   return call<PublicAIConfig>("GET", "/config");
+}
+
+/** The guided topic menu (ADR-008). 404 while the service has structured responses off. */
+export function loadAssistantMenu() {
+  return call<AssistantMenu>("GET", "/menu");
+}
+
+/** A menu the widget can render: categories with at least one well-formed item. */
+export function validMenu(value: unknown): value is AssistantMenu {
+  if (typeof value !== "object" || value === null) return false;
+  const cats = (value as { categories?: unknown }).categories;
+  return (
+    Array.isArray(cats) &&
+    cats.length > 0 &&
+    cats.every(
+      (c) =>
+        typeof c?.id === "string" &&
+        typeof c?.label === "string" &&
+        Array.isArray(c?.items) &&
+        c.items.length > 0 &&
+        c.items.every((i: Partial<FollowUp>) => typeof i?.id === "string" && typeof i?.label === "string" && typeof i?.message === "string"),
+    )
+  );
 }
 
 /** Doc 01 FR-09: rate an answer. Enums only; no free text. */
