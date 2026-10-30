@@ -22,9 +22,9 @@
   --za-unread-dot: 10px;               /* proposed: deliberate replies only (Doc01) */
 
   /* Desktop panel (>= 768 px, W01) */
-  --za-panel-width: 440px;             /* proposed default (fits the MENU label) */
+  --za-panel-width: 480px;             /* proposed default (fits the wordmark, title and MENU label) */
   --za-panel-width-min: 360px;         /* proposed */
-  --za-panel-width-max: 460px;         /* proposed */
+  --za-panel-width-max: 500px;         /* proposed */
   --za-panel-width-expanded: 560px;    /* proposed: expand/minimize (Doc01 header) */
   --za-panel-right: 24px;              /* proposed */
   --za-panel-gap-above-launcher: 32px; /* proposed: panel bottom = launcher + 32 px */
@@ -363,9 +363,14 @@
   .za-subtitle-full { display: none; }
   .za-subtitle-short { display: inline; }
 }
-/* Title stays on one line: at very narrow widths drop the decorative tile. */
-@container za-panel (max-width: 340px) {
-  .za-header-tile { display: none; }
+/* Title stays on one line: on narrow panels the wordmark shrinks, and on
+   the narrowest it is dropped (it is decorative; the title names the panel). */
+@container za-panel (max-width: 410px) {
+  .za-header-tile { height: 28px !important; padding: 0 6px !important; }
+  .za-header-tile img { height: 20px !important; width: auto !important; }
+}
+@container za-panel (max-width: 380px) {
+  .za-header-tile { display: none !important; }
 }
 .za-controls { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: var(--za-control-gap); }
 .za-control {
@@ -390,12 +395,12 @@
 }
 .za-control.za-menu-button { width: auto; min-width: var(--za-control-fine); gap: 6px; padding: 0 10px; color: var(--za-text); }
 .za-menu-label { font-size: var(--za-font-meta); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
-@container za-panel (max-width: 430px) {
+@container za-panel (max-width: 450px) {
   .za-menu-label { display: none; }
   .za-control.za-menu-button { padding: 0; width: var(--za-control-touch); }
 }
 @media (pointer: fine) {
-  @container za-panel (max-width: 430px) {
+  @container za-panel (max-width: 450px) {
     .za-control.za-menu-button { width: 34px; }
   }
 }
@@ -732,6 +737,10 @@ a.za-source:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 
 html[data-za-lock="true"], html[data-za-lock="true"] body { overflow: hidden; }
 
 /* ---------- Kairos-style pieces ---------- */
+
+/* Header with the full wordmark: a slightly tighter gap leaves the
+   one-line title a few pixels of slack at the default width. */
+.za-header { column-gap: 10px; }
 
 /* Visitor: right-aligned green pill. Assistant: speaker label + bordered card. */
 .za-bubble-visitor {

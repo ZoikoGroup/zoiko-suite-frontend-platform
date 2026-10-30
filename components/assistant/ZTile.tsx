@@ -49,16 +49,25 @@ export function ZTile({ src, size, radius, className }: { src: string; size: num
   );
 }
 
-/** The full wordmark on a white container (privacy and AI notice only). */
-export function FullLogo({ src }: { src: string }) {
+/**
+ * The full wordmark (public/logo.png, 336×144) on a white container, so its
+ * navy lettering stays visible on the dark theme. Used in the panel header
+ * and the privacy notice. Width is fixed from the aspect ratio so nothing
+ * moves while it loads; a failed image becomes the "ZoikoSuite" word.
+ */
+export function FullLogo({ src, className }: { src: string; className?: string }) {
   const [failed, setFailed] = useState(false);
   return (
-    <span className="inline-flex h-9 shrink-0 items-center rounded-lg bg-white px-2 ring-1 ring-slate-200 dark:ring-slate-600" aria-hidden="true">
+    <span
+      className={cn("inline-flex h-9 shrink-0 items-center rounded-lg bg-white px-2 ring-1 ring-slate-200 dark:ring-slate-600", className)}
+      aria-hidden="true"
+      data-testid="full-logo"
+    >
       {failed ? (
         <span className="text-sm font-semibold text-navy-900">ZoikoSuite</span>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" height={28} onError={() => setFailed(true)} className="h-7 w-auto object-contain" />
+        <img src={src} alt="" width={65} height={28} onError={() => setFailed(true)} className="h-7 w-auto object-contain" />
       )}
     </span>
   );

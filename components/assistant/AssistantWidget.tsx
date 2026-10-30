@@ -1237,7 +1237,7 @@ export function AssistantWidget({
         >
           <div className="za-handle" aria-hidden="true" />
           <header className="za-header">
-            <ZTile src={logos.mark} size={32} radius={8} className="za-header-tile" />
+            <FullLogo src={logos.full} className="za-header-tile" />
             <h2 ref={heading} tabIndex={-1} className="za-title">
               {title}
             </h2>

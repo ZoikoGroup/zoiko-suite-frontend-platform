@@ -130,8 +130,9 @@ for (const scheme of ["light", "dark"] as const) {
       const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
       const welcomeTile = (await dialog.getByTestId("assistant-welcome").getByTestId("ztile").boundingBox())!;
       expect(Math.round(welcomeTile.width)).toBe(48);
-      const headerTile = (await dialog.locator("header").getByTestId("ztile").boundingBox())!;
-      expect(Math.round(headerTile.width)).toBe(32);
+      // Header: the full wordmark (public/logo.png) on its white container, 36 px tall.
+      const headerLogo = (await dialog.locator("header").getByTestId("full-logo").boundingBox())!;
+      expect(Math.round(headerLogo.height)).toBe(36);
       // Subtitle on one line at the panel's width.
       const sub = dialog.getByTestId("assistant-subtitle");
       const lines = await sub.evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
@@ -235,9 +236,8 @@ test("K10 tile load failure shows the white Z with no layout shift", async ({ pa
   const after = (await launcher.boundingBox())!;
   expect([after.x, after.y, after.width, after.height]).toEqual([before.x, before.y, before.width, before.height]);
   await launcher.click();
-  const header = page.getByRole("dialog", { name: "ZoikoSuite Assistant" }).locator("header");
-  const fb = (await header.getByTestId("ztile-fallback").boundingBox())!;
-  expect([Math.round(fb.width), Math.round(fb.height)]).toEqual([32, 32]);
+  // The header shows the wordmark, not the Z tile, so the Z fallback is launcher-only.
+  await expect(page.getByRole("dialog", { name: "ZoikoSuite Assistant" }).locator("header").getByTestId("ztile-fallback")).toHaveCount(0);
 });
 
 test("K10 header fits at 320 px and 200% zoom equivalent", async ({ page }) => {

@@ -112,7 +112,7 @@ describe("K10 Z-tile branding", () => {
     expect(within(launcher).getByTestId("launcher-close-badge").className).toContain("za-close-badge"); // 18 px token
   });
 
-  it("welcome card has the 48 px tile, title, greeting and topic menu; header tile is 32 px", async () => {
+  it("welcome card has the 48 px tile, title, greeting and topic menu; header shows the full wordmark", async () => {
     const dialog = await openWidget();
     const welcome = within(dialog).getByTestId("assistant-welcome");
     expect(tileSize(within(welcome).getByTestId("ztile"))).toEqual({ w: "48px", h: "48px", r: "12px" });
@@ -128,10 +128,11 @@ describe("K10 Z-tile branding", () => {
     });
     expect(within(welcome).getByRole("button", { name: /Get support/ })).toBeTruthy();
     const header = dialog.querySelector("header")!;
-    expect(tileSize(within(header).getByTestId("ztile"))).toEqual({ w: "32px", h: "32px", r: "8px" });
+    expect(within(header).queryByTestId("ztile")).toBeNull(); // the Z tile stays on the launcher only
+    expect(within(header).getByTestId("full-logo").querySelector("img")!.getAttribute("src")).toBe("/logo.png");
     expect(within(header).getByRole("heading", { name: "ZoikoSuite Assistant" }).className).toContain("za-title");
     expect(within(header).getByTestId("assistant-subtitle").querySelector(".za-subtitle-full")!.textContent).toBe("AI assistant. Public ZoikoSuite information only.");
-    expect(within(header).queryByRole("img")).toBeNull(); // no wordmark in the header
+    expect(within(header).queryByRole("img")).toBeNull(); // the wordmark is decorative (the title names the dialog)
   });
 
   it("a failed tile becomes a white Z square of exactly the same size", async () => {
@@ -148,9 +149,9 @@ describe("K10 Z-tile branding", () => {
     expect(tileSize(fallback)).toEqual(before);
   });
 
-  it("the full wordmark appears only in the privacy notice, on a white container", async () => {
+  it("the full wordmark sits on a white container in the header and the privacy notice", async () => {
     const dialog = await openWidget();
-    expect(dialog.querySelector('img[src="/logo.png"]')).toBeNull();
+    expect(dialog.querySelector("header")!.querySelector('img[src="/logo.png"]')!.parentElement!.className).toContain("bg-white");
     await act(async () => {
       fireEvent.click(within(dialog).getAllByRole("button", { name: "Privacy and AI notice" })[0]);
     });
