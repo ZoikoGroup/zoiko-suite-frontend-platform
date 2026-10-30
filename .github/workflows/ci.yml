@@ -43,10 +43,9 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
           NEXT_TELEMETRY_DISABLED: 1
 
-  # The browser tests need the BACKEND_REPO_TOKEN secret to check out the
-  # private backend. Secrets cannot be read in a job-level `if`, so this job
-  # reports whether it is set; without it (not configured yet, or a fork PR)
-  # the browser tests are skipped with a warning instead of failing.
+  # The browser tests need access to the backend repository.
+  # If BACKEND_REPO_TOKEN is set it will be used; otherwise, the repository
+  # is checked for public/authenticated access.
   backend-access:
     name: Backend repo access
     runs-on: ubuntu-latest
@@ -59,15 +58,16 @@ jobs:
         run: |
           if [ -n "$TOKEN" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote https://github.com/ZoikoGroup/zoiko-suite-backend.git HEAD >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning title=Assistant browser tests skipped::BACKEND_REPO_TOKEN is not set, so the backend cannot be checked out. Add a read-only token for ZoikoGroup/zoiko-suite-backend as a repository secret to run them."
+            echo "::warning title=Assistant browser tests skipped::ZoikoGroup/zoiko-suite-backend is not accessible and BACKEND_REPO_TOKEN is not set."
             echo "available=false" >> "$GITHUB_OUTPUT"
           fi
 
   # Doc 07 §04 L4 / §10: the assistant's browser tests (axe, keyboard, the
   # public-only boundary, 52 cases) against a real public-ai-svc built from
-  # the backend repository. Needs the BACKEND_REPO_TOKEN secret (read-only
-  # access to ZoikoGroup/zoiko-suite-backend).
+  # the backend repository.
   assistant-e2e:
     name: Assistant browser tests (Playwright)
     runs-on: ubuntu-latest
@@ -82,7 +82,7 @@ jobs:
         with:
           repository: ZoikoGroup/zoiko-suite-backend
           ref: main
-          token: ${{ secrets.BACKEND_REPO_TOKEN }}
+          token: ${{ secrets.BACKEND_REPO_TOKEN || github.token }}
           path: backend
           sparse-checkout: services/public-ai-svc
 
@@ -119,5 +119,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: assistant-playwright-report
-          path: playwright-report
+          path: |
+            playwright-report
+            test-results
           if-no-files-found: ignore
