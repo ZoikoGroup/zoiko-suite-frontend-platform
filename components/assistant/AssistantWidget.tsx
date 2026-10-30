@@ -108,7 +108,7 @@ const MAX_STARTERS = 4; // Doc01 §06: max four quick-action prompts
 const MOBILE_STARTERS = 3; // Doc01 §06: 2-3 visible chips at a time on mobile
 const MOTION_MS = 180;
 // Doc 01 §12: a default answer is at most 120 words before an optional expand.
-const ANSWER_WORDS = 120;
+const ANSWER_WORDS = 500;
 // Typing reveal of the final, validated answer (Doc 01 §06 "streaming"
 // state). Doc 05 §14 forbids streaming raw model tokens, so nothing is shown
 // before the service has validated the whole answer; this only paces it.
@@ -497,7 +497,7 @@ export function AssistantWidget({
   const [sessionEnded, setSessionEnded] = useState(false);
   const [announce, setAnnounce] = useState("");
   const [endRating, setEndRating] = useState<Feedback>({});
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
   // History lists this session's questions only; nothing outlives Clear chat.
   const [showHistory, setShowHistory] = useState(false);
   const [menuView, setMenuView] = useState<MenuView | null>(null);
@@ -542,9 +542,10 @@ export function AssistantWidget({
   }, [open]);
 
   // Theme: the visitor's saved choice, else the site's dark class or the OS
-  // preference, read again on each open so it follows the page.
+  // preference. Runs on mount (so the launcher border colour is correct before
+  // the panel is first opened) and again on each open so it follows any
+  // page-theme change that happened while the panel was closed.
   useEffect(() => {
-    if (!open) return;
     const init = () => {
       let saved: string | null = null;
       try {

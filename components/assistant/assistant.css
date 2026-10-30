@@ -22,7 +22,7 @@
   --za-unread-dot: 10px;               /* proposed: deliberate replies only (Doc01) */
 
   /* Desktop panel (>= 768 px, W01) */
-  --za-panel-width: 480px;             /* proposed default (fits the wordmark, title and MENU label) */
+  --za-panel-width: 400px;             /* panel width matching test spec (Doc01 W01) */
   --za-panel-width-min: 360px;         /* proposed */
   --za-panel-width-max: 500px;         /* proposed */
   --za-panel-width-expanded: 560px;    /* proposed: expand/minimize (Doc01 header) */
