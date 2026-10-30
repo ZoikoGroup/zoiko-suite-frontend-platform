@@ -306,3 +306,16 @@ test("Test 7: the exact question reaches the backend and its answer is what is s
   await expect(answer).toContainText(body.text.split("\n")[0]);
   expect(body.status).toBe("ANSWERED");
 });
+
+// Doc 01 §06 "streaming" state without streaming tokens (Doc 05 §14): the
+// validated answer is revealed word by word, then sources and feedback.
+test("typing reveal of the validated answer", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const dialog = await openAssistant(page);
+  await ask(page, "What is Delegated Authority?");
+  const answer = dialog.getByTestId("assistant-answer").last();
+  await expect(answer).toHaveAttribute("data-typing", "true");
+  await expect(answer).not.toHaveAttribute("data-typing", "true", { timeout: 5000 });
+  await expect(answer).toContainText("time-bound");
+  await expect(answer.getByText("Was this helpful?")).toBeVisible();
+});

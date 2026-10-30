@@ -515,3 +515,218 @@ describe("Kairos-style menu, history and theme", () => {
     expect(within(dialog).getByTestId("assistant-strip").textContent).toBe("ZoikoSuite AI · Source-grounded · Governed");
   });
 });
+
+describe("answer format (Doc 01 §12, Doc 02 §16)", () => {
+  it("clampWords keeps whole lines and never splits a list item", async () => {
+    const { clampWords } = await import("./markdown");
+    const item = (n: number) => `- ${Array.from({ length: 50 }, (_, i) => `w${n}x${i}`).join(" ")}`;
+    const text = [item(1), item(2), item(3)].join("\n");
+    const out = clampWords(text, 120);
+    expect(out.clamped).toBe(true);
+    expect(out.text).toBe([item(1), item(2)].join("\n"));
+    expect(clampWords("short answer", 120)).toEqual({ text: "short answer", clamped: false });
+    const long = Array.from({ length: 130 }, (_, i) => `w${i}`).join(" ");
+    expect(clampWords(long, 120).text.split(" ")).toHaveLength(120);
+  });
+
+  it("shows a long answer's first 120 words with Show more / Show less", async () => {
+    const words = Array.from({ length: 150 }, (_, i) => `word${i}`).join(" ");
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: words })));
+    await openWidget();
+    await ask("Tell me everything");
+    const answer = screen.getByTestId("assistant-answer");
+    expect(answer.textContent).not.toContain("word149");
+    const more = within(answer).getByRole("button", { name: "Show more" });
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => {
+      fireEvent.click(more);
+    });
+    expect(answer.textContent).toContain("word149");
+    expect(within(answer).getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("a short answer has no expand control", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    await openWidget();
+    await ask("What plans are available?");
+    expect(within(screen.getByTestId("assistant-answer")).queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+});
+
+describe('"Other" country (Doc 02 T08)', () => {
+  it("is a coverage route: no Unverified badge or retry, and its next steps are offered", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(
+        envelope({
+          status: "ABSTAIN",
+          reason: "MARKET_NOT_COVERED",
+          answer_class: "HANDOFF_UNKNOWN",
+          text: "I can't confirm what's available in that country from approved ZoikoSuite sources. The team can confirm coverage for your country.",
+          citations: [],
+          actions: [],
+          status_label: undefined,
+          market_code: undefined,
+          suggestions: [
+            { label: "Show general overview", message: "Show general overview" },
+            { label: "Book a demo", message: "I'd like to book a demo" },
+          ],
+        }),
+      ),
+    );
+    await openWidget();
+    await ask("Other");
+    const answer = screen.getByTestId("assistant-answer");
+    expect(answer.textContent).not.toContain("I couldn't verify that.");
+    expect(answer.textContent).not.toContain("Unverified");
+    expect(within(answer).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(within(within(answer).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Show general overview",
+      "Book a demo",
+    ]);
+  });
+});
+
+describe("typing reveal of the validated answer (Doc 05 §14, Doc 01 §06)", () => {
+  const media = (globalThis as unknown as { __media: { reducedMotion: boolean } }).__media;
+  afterEach(() => {
+    media.reducedMotion = true;
+  });
+
+  it("revealWords keeps line breaks and never shows a half bold marker", async () => {
+    const { revealWords } = await import("./markdown");
+    expect(revealWords("- one two\n- three", 3)).toBe("- one two");
+    expect(revealWords("a **bold words** end", 2)).toBe("a **bold**");
+    expect(revealWords("a b", 9)).toBe("a b");
+  });
+
+  it("reveals the answer word by word, then shows sources and feedback", async () => {
+    media.reducedMotion = false;
+    const text = Array.from({ length: 40 }, (_, i) => `w${i}`).join(" ");
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text })));
+    await openWidget();
+    await ask("What plans are available?");
+    const answer = screen.getByTestId("assistant-answer");
+    expect(answer.getAttribute("data-typing")).toBe("true");
+    expect(answer.textContent).not.toContain("w39");
+    expect(screen.queryByTestId("assistant-sources")).toBeNull(); // extras wait for the text
+    // The screen reader gets the whole answer at once.
+    expect(screen.getByTestId("assistant-announcer").textContent).toContain("w39");
+    await screen.findByTestId("assistant-sources", {}, { timeout: 4000 });
+    expect(answer.textContent).toContain("w39");
+    expect(answer.hasAttribute("data-typing")).toBe(false);
+  });
+
+  it("a click shows the whole answer at once", async () => {
+    media.reducedMotion = false;
+    const text = Array.from({ length: 40 }, (_, i) => `w${i}`).join(" ");
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text })));
+    await openWidget();
+    await ask("What plans are available?");
+    const answer = screen.getByTestId("assistant-answer");
+    await act(async () => {
+      fireEvent.click(answer);
+    });
+    expect(answer.textContent).toContain("w39");
+    expect(screen.getByTestId("assistant-sources")).toBeTruthy();
+  });
+
+  it("under reduced motion the answer appears complete", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    await openWidget();
+    await ask("What plans are available?");
+    expect(screen.getByTestId("assistant-answer").hasAttribute("data-typing")).toBe(false);
+    expect(screen.getByTestId("assistant-sources")).toBeTruthy();
+  });
+});
+
+describe("expired market claims (Doc 02 T06)", () => {
+  it("keeps the Unverified notice but offers the service's next steps instead of a retry", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(
+        envelope({
+          status: "ABSTAIN",
+          intent_id: "I06",
+          reason: "EXPIRED_SOURCE",
+          answer_class: "HANDOFF_UNKNOWN",
+          text: "I can't verify the current trial terms for the United Kingdom right now. The official pricing page has the current information.",
+          citations: [],
+          actions: [],
+          status_label: undefined,
+          market_code: undefined,
+          suggestions: [
+            { label: "United States", message: "United States" },
+            { label: "Show general overview", message: "Show general overview" },
+          ],
+        }),
+      ),
+    );
+    await openWidget();
+    await ask("United Kingdom");
+    const answer = screen.getByTestId("assistant-answer");
+    expect(answer.textContent).toContain("I couldn't verify that.");
+    expect(within(answer).queryByRole("button", { name: "Try again" })).toBeNull(); // expired stays expired
+    expect(within(within(answer).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "United States",
+      "Show general overview",
+    ]);
+  });
+});
+
+describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
+  beforeEach(() => window.sessionStorage.clear());
+
+  async function openMenu(dialog: HTMLElement) {
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Menu" }));
+    });
+  }
+
+  it("New conversation is disabled until there is a conversation", async () => {
+    const dialog = await openWidget();
+    await openMenu(dialog);
+    expect((within(dialog).getByRole("menuitem", { name: "New conversation" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("starts fresh, ends the old session and keeps its questions and answers in this tab's history", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    await openMenu(dialog);
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("menuitem", { name: "New conversation" }));
+    });
+    expect(screen.queryByTestId("visitor-bubble")).toBeNull(); // fresh conversation
+    expect(within(dialog).getByTestId("assistant-welcome")).toBeTruthy();
+    expect(api.endAssistantSession).toHaveBeenCalled();
+    const stored = JSON.parse(window.sessionStorage.getItem("zoiko-assistant-conversations")!);
+    expect(stored[0].turns).toEqual([{ q: "What plans are available?", a: "Starter, Growth and Enterprise plans are available." }]);
+    expect(window.localStorage.getItem("zoiko-assistant-conversations")).toBeNull(); // never beyond the tab
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    const archive = within(dialog).getByTestId("assistant-archive");
+    expect(archive.textContent).toContain("What plans are available?");
+    expect(archive.textContent).toContain("Starter, Growth and Enterprise plans are available.");
+    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Kept in this browser tab only");
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Clear history" }));
+    });
+    expect(within(dialog).queryByTestId("assistant-archive")).toBeNull();
+    expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).toBeNull();
+  });
+
+  it("Clear chat erases the conversation without keeping it in history", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    await act(async () => {
+      fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
+    });
+    expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).toBeNull();
+  });
+});

@@ -899,3 +899,57 @@ html[data-za-lock="true"], html[data-za-lock="true"] body { overflow: hidden; }
   .za-strip { letter-spacing: 0.04em; white-space: normal; text-align: center; }
 }
 .za-strip-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--za-accent); }
+
+/* Optional expand for answers over 120 words (Doc 01 §12). */
+.za-expand { display: block; min-height: var(--za-control-fine); margin-top: 4px; padding: 0; color: var(--za-accent-text); font-weight: 600; }
+@media (pointer: coarse) {
+  .za-expand { min-height: var(--za-control-touch); }
+}
+
+/* Typing reveal of the validated answer: a blinking caret after the last
+   word. Never runs under reduced motion (the reveal itself is skipped). */
+.za-bubble[data-typing] { cursor: pointer; }
+.za-bubble[data-typing] .za-md > p:last-child::after,
+.za-bubble[data-typing] .za-md > ul:last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: var(--za-accent);
+  animation: za-caret 1s steps(1) infinite;
+}
+@keyframes za-caret { 50% { opacity: 0; } }
+
+/* History: this conversation, then earlier conversations of this tab, each
+   expandable to its questions and answers. */
+.za-history { max-height: 55%; overflow-y: auto; }
+.za-history-heading {
+  margin: 12px 0 4px;
+  color: var(--za-text-muted);
+  font-size: var(--za-font-meta);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.za-archive { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.za-archive details { border: 1px solid var(--za-border); border-radius: 10px; background: var(--za-card-bg); }
+.za-archive summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: var(--za-control-fine);
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.za-archive summary::-webkit-details-marker { display: none; }
+.za-archive summary:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 1px; border-radius: 10px; }
+.za-archive-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--za-font-small); font-weight: 600; }
+.za-archive-turns { margin: 0; padding: 0 10px 10px; }
+.za-archive-turns > div { padding-top: 8px; border-top: 1px solid var(--za-border); }
+.za-archive-turns > div + div { margin-top: 8px; }
+.za-archive-turns dt { color: var(--za-accent-text); font-size: var(--za-font-small); font-weight: 600; }
+.za-archive-turns dd { margin: 4px 0 0; font-size: var(--za-font-small); line-height: 1.25rem; }

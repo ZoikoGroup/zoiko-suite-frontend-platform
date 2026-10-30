@@ -308,7 +308,7 @@ test.describe("composer", () => {
     const dialog = await open(page);
     await ask(page, "What does Legal and Contracts do?");
     await expect(dialog.getByTestId("assistant-thinking")).toBeVisible();
-    await expect(page.getByTestId("assistant-announcer")).toContainText("Checking approved sources");
+    await expect(page.getByTestId("assistant-announcer")).toContainText("Looking for verified information");
     await expect(dialog.getByRole("button", { name: "Stop" })).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: "Message" })).toBeEditable();
     await dialog.getByRole("textbox", { name: "Message" }).fill("next question");
