@@ -20,11 +20,13 @@ import { REASONS, type AuthzResult, type ReasonSet } from "@/app/admin/authoriza
 import { FIELD, LABEL } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 
-type Tone = "primary" | "secondary" | "danger" | "ghost" | "approve";
+type Tone = "primary" | "secondary" | "danger" | "ghost" | "approve" | "accent";
 
 const TRIGGER: Record<Tone, string> = {
   primary: "bg-navy-900 text-white hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500",
   approve: "bg-emerald-600 text-white hover:bg-emerald-700",
+  // The one gold command in a page header or a drawer footer, as on the brand mark.
+  accent: "bg-gold-500 text-white shadow-sm shadow-gold-600/20 hover:bg-gold-600",
   secondary:
     "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
   danger:
@@ -214,7 +216,13 @@ export function ActionDialog({
                       disabled={busy}
                       className={cn(
                         "inline-flex h-10 items-center gap-2 rounded-lg px-5 text-sm font-medium text-white disabled:opacity-60",
-                        tone === "danger" ? "bg-rose-600 hover:bg-rose-700" : tone === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-navy-900 hover:bg-navy-800 dark:bg-navy-600",
+                        tone === "danger"
+                          ? "bg-rose-600 hover:bg-rose-700"
+                          : tone === "approve"
+                            ? "bg-emerald-600 hover:bg-emerald-700"
+                            : tone === "accent"
+                              ? "bg-gold-500 hover:bg-gold-600"
+                              : "bg-navy-900 hover:bg-navy-800 dark:bg-navy-600",
                       )}
                     >
                       {busy ? "Working…" : submitLabel}
@@ -357,6 +365,32 @@ function ResultView({ result, returnTo, onDone }: { result: AuthzResult; returnT
             </div>
           ))}
         </dl>
+      )}
+      {result.table && (
+        <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+          <table className="min-w-full text-left text-[12.5px]">
+            <thead className="bg-slate-50 dark:bg-slate-800/60">
+              <tr>
+                {result.table.headers.map((h) => (
+                  <th key={h} scope="col" className="whitespace-nowrap px-3 py-2 font-medium text-slate-500">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {result.table.rows.map((row, r) => (
+                <tr key={r}>
+                  {row.map((cell, c) => (
+                    <td key={c} className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <div className="flex justify-end">
         <button type="button" onClick={onDone} className="h-10 rounded-lg bg-navy-900 px-5 text-sm font-medium text-white hover:bg-navy-800 dark:bg-navy-600">
