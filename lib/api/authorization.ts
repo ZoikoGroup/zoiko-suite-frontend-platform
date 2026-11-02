@@ -142,10 +142,11 @@ export async function listSoDRules(identity: Identity): Promise<ApiResult<SoDRul
  * with the change (authz_config_history) and travels on the IAM event as
  * `command_reason`, so it is what an auditor reads later.
  *
- * `expectedVersion` is the row's `version` as the operator saw it. Sent where
- * the service honours it (retire / reactivate of roles, bundles, SoD and ABAC
- * rules); a stale one is `409 version_conflict` rather than a silent overwrite
- * of somebody else's change.
+ * `expectedVersion` is the row's `version` as the operator saw it. Required
+ * where the service versions the record (retire / reactivate of roles,
+ * bundles, SoD and ABAC rules; change / retire of authority limits): missing
+ * is `428 precondition_required`, stale is `412 stale_version` rather than a
+ * silent overwrite of somebody else's change.
  */
 export type CommandReason = {
   reasonCode: string;
@@ -2163,6 +2164,8 @@ const ADMIN_ERRORS: [string, string][] = [
   ["approval_not_pending", "This is no longer waiting for a decision."],
   ["invalid_state", "This is not in a state that allows that change. Reload to see where it stands."],
   ["invalid_transition", "This has already ended, so it cannot be changed."],
+  ["stale_version", "Somebody changed this since you loaded the page. Reload and try again."],
+  ["precondition_required", "The page did not say which version of this you were looking at. Reload and try again."],
   ["version_conflict", "Somebody changed this since you loaded the page. Reload and try again."],
   ["sod_conflict", "Refused: this would give somebody two duties that must not be held together."],
   ["protected_privilege_not_delegable", "Access-administration and platform powers cannot be lent."],
