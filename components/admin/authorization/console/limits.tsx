@@ -105,7 +105,7 @@ export function limitsRegister(data: AuthzData, ctx: Ctx): RegisterSpec {
       } else if (l.status === "ACTIVE") {
         actions = (
           <>
-            <Command command="limit.retire" id={id} label="Retire" title="Retire this limit" description="Requested now; the limit keeps applying until someone else approves it." reasons="end" tone="danger" />
+            <Command command="limit.retire" id={id} label="Retire" title="Retire this limit" description="Requested now; the limit keeps applying until someone else approves it." reasons="end" version={l.version} tone="danger" />
             <ChangeLimitDialog limit={l} />
           </>
         );

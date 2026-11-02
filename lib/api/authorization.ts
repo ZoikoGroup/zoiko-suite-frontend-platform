@@ -1830,6 +1830,8 @@ export type PrivilegedSession = {
   review_notes?: string | null;
   requester_step_up?: StepUpEvidence | null;
   approver_step_up?: StepUpEvidence | null;
+  /** Optimistic-concurrency token (000037); revoking sends it as If-Match. */
+  record_version?: number;
 };
 
 export type BreakGlassSession = {
@@ -1860,6 +1862,8 @@ export type BreakGlassSession = {
   rejected_by?: string | null;
   rejected_at?: string | null;
   request_expires_at?: string | null;
+  /** Optimistic-concurrency token (000037); revoking sends it as If-Match. */
+  record_version?: number;
 };
 
 export type SupportSession = {
@@ -1879,6 +1883,8 @@ export type SupportSession = {
   revoked_at?: string | null;
   revoked_by?: string | null;
   requested_by?: string | null;
+  /** Optimistic-concurrency token (000037); revoking sends it as If-Match. */
+  record_version?: number;
 };
 
 /** The service's maximums (B-01): longer is refused, never shortened. */
@@ -1953,11 +1959,15 @@ export async function revokeSession(input: {
   sessionId: string;
   reason: CommandReason;
 }): Promise<ApiWriteResult<{ session_id: string; status: string }>> {
+  // A revoke is a mutation of an existing session (API-3): the service takes
+  // the version from If-Match only — a body expected_version is not read —
+  // and answers 428 without it. The version comes from the row the person saw.
+  const version = input.reason.expectedVersion;
   return apiPost(
     SERVICE,
     `${SESSION_BASE[input.kind]}/${encodeURIComponent(input.sessionId)}/revoke`,
     commandBody(input.reason),
-    { identity: input.identity },
+    { identity: input.identity, ifMatch: version && version > 0 ? `"v${version}"` : undefined },
   );
 }
 

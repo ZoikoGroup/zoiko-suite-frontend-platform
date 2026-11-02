@@ -242,6 +242,7 @@ function sessionCommands(x: Session, me: string): { actions: ReactNode; note: Re
             title="Revoke this session"
             description="Access ends on the next permission check."
             reasons="end"
+            version={x.s.record_version}
             tone="danger"
           />
         )}

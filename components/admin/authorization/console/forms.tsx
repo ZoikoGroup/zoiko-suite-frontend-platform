@@ -252,7 +252,7 @@ export function ChangeLimitDialog({ limit }: { limit: AuthorityLimit }) {
       title="Change this limit"
       description="The current limit keeps applying until someone else approves the new one. Leave a field blank to keep it."
       action={changeLimitAction}
-      hidden={{ id: limit.authority_limit_id }}
+      hidden={{ id: limit.authority_limit_id, expected_version: limit.version }}
       reasons="change"
       submitLabel="Request change"
     >
