@@ -14,8 +14,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import { CheckCircle2, Clock, Fingerprint, LogIn, ShieldAlert, X, XCircle } from "lucide-react";
-import { stepUpAction } from "@/app/admin/account/actions";
+import { CheckCircle2, Clock, Fingerprint, KeyRound, LogIn, ShieldAlert, X, XCircle } from "lucide-react";
+import { beginPasskeyStepUpAction, finishPasskeyStepUpAction, stepUpAction } from "@/app/admin/account/actions";
+import { getPasskeyAssertion, passkeysSupported } from "@/lib/webauthn-browser";
 import { REASONS, type AuthzResult, type ReasonSet } from "@/app/admin/authorization/state";
 import { FIELD, LABEL } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
@@ -123,6 +124,32 @@ export function ActionDialog({
         return;
       }
       // Proven. Send the request the person already filled in, unchanged.
+      if (saved) settle(await action({ status: "idle", message: "" }, saved));
+    });
+  }
+
+  // The same proof with a passkey instead of a code (phishing-resistant).
+  function verifyWithPasskey() {
+    startTransition(async () => {
+      const begun = await beginPasskeyStepUpAction();
+      if (!begun.ok) {
+        setVerifyMessage({ text: begun.notEnrolled ? "You have no passkey yet. Use your authenticator app, or add a passkey first." : begun.message });
+        if (begun.signin) settle({ status: "signin", message: begun.message });
+        return;
+      }
+      let assertion: unknown;
+      try {
+        assertion = await getPasskeyAssertion(begun.ceremony.options);
+      } catch {
+        setVerifyMessage({ text: "The passkey prompt was cancelled or timed out. Try again, or enter a code." });
+        return;
+      }
+      const v = await finishPasskeyStepUpAction(begun.ceremony.ceremony, assertion);
+      if (!v.ok) {
+        setVerifyMessage({ text: v.message });
+        if (v.signin) settle({ status: "signin", message: v.message });
+        return;
+      }
       if (saved) settle(await action({ status: "idle", message: "" }, saved));
     });
   }
@@ -275,6 +302,17 @@ export function ActionDialog({
                   </p>
                 )}
                 <div className="flex items-center justify-end gap-2">
+                  {passkeysSupported() && (
+                    <button
+                      type="button"
+                      onClick={verifyWithPasskey}
+                      disabled={busy}
+                      className="mr-auto inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                      Use a passkey instead
+                    </button>
+                  )}
                   <button type="button" onClick={close} className="h-10 rounded-lg px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
                     Cancel
                   </button>
