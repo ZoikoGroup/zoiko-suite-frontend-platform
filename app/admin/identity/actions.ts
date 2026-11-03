@@ -16,6 +16,7 @@ import type { ApiError } from "@/lib/api/client";
 import {
   approveSupportContext,
   createSubject,
+  decidePasswordReset,
   explainIdentityError,
   identityProblemCode,
   invalidateSession,
@@ -120,6 +121,17 @@ export async function identityCommand(_prev: AuthzResult, fd: FormData): Promise
         message: "Reset requested. A second administrator must approve it before the link is sent.",
         details: [{ label: "Request", value: r.data.request_id }],
       };
+    }
+    case "reset_decide": {
+      const decision = text(fd, "decision") === "REJECT" ? "REJECT" : "APPROVE";
+      if (!reason) return { status: "error", message: "Choose a reason." };
+      const r = await decidePasswordReset(me, id, decision, reason);
+      if (!r.ok) return fail(r.error);
+      refresh();
+      if (decision === "REJECT") return { status: "done", message: "Reset rejected. No link was sent." };
+      return r.data.status === "ISSUED"
+        ? { status: "done", message: "Reset approved. The link has been sent to them." }
+        : { status: "pending", message: "Approval recorded. The request needs another approver before the link is sent." };
     }
     case "mfa_reset": {
       const code = text(fd, "reason_code");

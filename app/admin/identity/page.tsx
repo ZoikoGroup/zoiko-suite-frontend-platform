@@ -9,17 +9,27 @@ import { RegisterView, type Query, type RegisterSpec } from "@/components/admin/
 import { SessionChip } from "@/components/admin/authorization/console/SessionChip";
 import { loadIdentity, type IdentityData } from "@/components/admin/identity/console/data";
 import { IdentityKpis, IdentityPanels } from "@/components/admin/identity/console/overview";
+import { DiagnosticsView, type Diagnostics } from "@/components/admin/identity/console/diagnostics";
 import {
   eventsRegister,
+  federationRegister,
   idHref,
   peopleRegister,
+  resetsRegister,
   sessionsRegister,
   supportRegister,
   type Ctx,
   type PersonDetail,
 } from "@/components/admin/identity/console/registers";
 import { identityCommand } from "./actions";
-import { getAssuranceHistory, getSubjectIdentity } from "@/lib/api/identity";
+import {
+  explainContextResolution,
+  getAssuranceHistory,
+  getIdentityHealth,
+  getJWKS,
+  getOidcDiscovery,
+  getSubjectIdentity,
+} from "@/lib/api/identity";
 import { currentSession } from "@/lib/authz-inbox";
 import type { SessionIdentity } from "@/lib/auth";
 
@@ -30,6 +40,9 @@ const TABS = [
   { key: "sessions", label: "Live sessions" },
   { key: "events", label: "Sign-in events" },
   { key: "support", label: "Support access" },
+  { key: "resets", label: "Password resets" },
+  { key: "federation", label: "Federation" },
+  { key: "diagnostics", label: "Diagnostics" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -40,9 +53,39 @@ function requestTime(): number {
 }
 
 function count(data: IdentityData, tab: TabKey): number | null {
-  const read = { people: data.principals, sessions: data.sessions, events: data.events, support: data.support }[tab];
+  if (tab === "diagnostics") return null;
+  if (tab === "federation" && !data.federation.enabled) return null;
+  const read = {
+    people: data.principals,
+    sessions: data.sessions,
+    events: data.events,
+    support: data.support,
+    resets: data.resets,
+    federation: data.federation,
+  }[tab];
   if (read.error) return null;
-  return tab === "sessions" ? read.rows.filter((s) => (s as { state?: string }).state === "ACTIVE").length : read.rows.length;
+  if (tab === "sessions") return read.rows.filter((s) => (s as { state?: string }).state === "ACTIVE").length;
+  if (tab === "resets") return read.rows.filter((r) => (r as { status?: string }).status === "PENDING_APPROVAL").length;
+  return read.rows.length;
+}
+
+/** The Diagnostics tab's reads: only when that tab is open. */
+async function diagnostics(identity: SessionIdentity, sid: string | undefined): Promise<Diagnostics> {
+  const caller = identity as SessionIdentity & { principalId: string; tenantId: string };
+  const [health, jwks, discovery, explain] = await Promise.all([
+    getIdentityHealth(),
+    getJWKS(),
+    getOidcDiscovery(),
+    sid
+      ? explainContextResolution({
+          sessionContextId: sid,
+          callerTenantId: caller.tenantId,
+          callerPrincipalId: caller.principalId,
+          callerLegalEntityId: caller.legalEntityId,
+        })
+      : Promise.resolve(undefined),
+  ]);
+  return { health, jwks, discovery, sid, explain };
 }
 
 /** The People drawer's extra reads, for the one principal that is open. */
@@ -115,8 +158,18 @@ export default async function IdentityContextPage({
   const data = await loadIdentity(current.identity);
   const signedOut = [data.summary.error, data.principals.error].some((e) => e?.status === 401);
 
-  let spec: RegisterSpec;
+  let spec: RegisterSpec | null = null;
+  let diag: Diagnostics | null = null;
   switch (tab) {
+    case "diagnostics":
+      diag = await diagnostics(current.identity, query.sid?.trim() || undefined);
+      break;
+    case "resets":
+      spec = resetsRegister(data, ctx);
+      break;
+    case "federation":
+      spec = federationRegister(data, ctx);
+      break;
     case "sessions":
       spec = sessionsRegister(data, ctx);
       break;
@@ -163,7 +216,7 @@ export default async function IdentityContextPage({
             active={tab}
             tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: count(data, t.key), href: idHref({ tab: t.key }) }))}
           >
-            <RegisterView spec={spec} query={query} />
+            {diag ? <DiagnosticsView d={diag} /> : spec ? <RegisterView spec={spec} query={query} /> : null}
           </RegisterCard>
         </>
       )}

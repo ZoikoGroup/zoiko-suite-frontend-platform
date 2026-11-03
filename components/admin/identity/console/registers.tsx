@@ -1,12 +1,12 @@
-// The Identity Context registers: people, live sessions, sign-in events and
-// support access. Each is a RegisterSpec for the shared RegisterView (search,
+// The Identity Context registers: people, live sessions, sign-in events,
+// support access, password resets and federation connections. Each is a RegisterSpec for the shared RegisterView (search,
 // filters, pager, drawer); the drawers carry the governed commands. A maker
 // never sees the checker's button: support access is approved only by the
 // approver it names, and a reset is approved by someone other than whoever
 // requested it (the service enforces both; the console does not offer them).
 
 import type { ReactNode } from "react";
-import { ArrowDown, Fingerprint, KeyRound, LogIn, ShieldQuestion, UserRound } from "lucide-react";
+import { ArrowDown, Building2, Fingerprint, KeyRound, LockKeyhole, LogIn, ShieldQuestion, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui";
 import { DetailDrawer, DrawerFacts, DrawerNote, TwoLine } from "@/components/admin/console";
 import { ActionDialog } from "@/components/admin/authorization/kit/ActionDialog";
@@ -15,7 +15,16 @@ import { hrefAt, short, type FilterDef, type Query, type RegisterSpec, type Row 
 import { identityCommand } from "@/app/admin/identity/actions";
 import { formatDateTime } from "@/lib/format";
 import type { ApiError } from "@/lib/api/client";
-import type { AssuranceChange, AuthenticationEvent, PrincipalDetail, SessionSummary, SubjectIdentity, SupportRow } from "@/lib/api/identity";
+import type {
+  AssuranceChange,
+  AuthenticationEvent,
+  FederationConnection,
+  PasswordResetRequest,
+  PrincipalDetail,
+  SessionSummary,
+  SubjectIdentity,
+  SupportRow,
+} from "@/lib/api/identity";
 import { ago, elevated, latestEventBy, latestSessionBy, supportState, type IdentityData } from "./data";
 
 export const BASE = "/admin/identity";
@@ -609,6 +618,217 @@ function SupportDrawer({ s, ctx, close, names }: { s: SupportRow; ctx: Ctx; clos
           { label: "Expires", value: when(s.expires_at) },
           ...(s.revoked_at ? [{ label: "Revoked", value: `${when(s.revoked_at)} · ${s.revocation_reason ?? ""}` }] : []),
           ...(s.reviewed_at ? [{ label: "Reviewed", value: when(s.reviewed_at) }] : []),
+        ]}
+      />
+    </DetailDrawer>
+  );
+}
+
+// ── Password resets ──────────────────────────────────────────────────────────
+
+const RESET_STATE: Record<string, { label: string; tone: Tone }> = {
+  PENDING_APPROVAL: { label: "Awaiting approval", tone: "warning" },
+  ISSUED: { label: "Link sent", tone: "info" },
+  COMPLETED: { label: "Completed", tone: "success" },
+  REJECTED: { label: "Rejected", tone: "neutral" },
+  EXPIRED: { label: "Expired", tone: "neutral" },
+};
+
+function approvalsOf(r: PasswordResetRequest): number {
+  return (r.approvals ?? []).filter((a) => a.decision === "APPROVE").length;
+}
+
+export function resetsRegister(data: IdentityData, ctx: Ctx): RegisterSpec {
+  const names = new Map(data.principals.rows.map((p) => [p.principal_id, p.display_name]));
+  const who = (id: string) => (id === ctx.me ? "You" : names.get(id) || short(id));
+  const rows: Row[] = data.resets.rows.map((r) => {
+    const st = RESET_STATE[r.status] ?? { label: r.status, tone: "neutral" as Tone };
+    return {
+      id: r.request_id,
+      idLabel: short(r.request_id),
+      search: `${names.get(r.principal_id) ?? ""} ${r.principal_id} ${names.get(r.requested_by) ?? ""} ${r.requested_by} ${r.reason ?? ""}`,
+      facets: { status: r.status, mine: r.requested_by === ctx.me ? "mine" : "others" },
+      cells: [
+        <TwoLine key="p" primary={names.get(r.principal_id) || short(r.principal_id)} secondary={short(r.principal_id)} />,
+        <span key="b" className="text-[12px]">{who(r.requested_by)}</span>,
+        <span key="r" className="text-[12px] text-slate-600 dark:text-slate-300">{(r.reason ?? "—").replaceAll("_", " ")}</span>,
+        <Chip key="s" label={st.label} tone={st.tone} />,
+        <span key="a" className="text-[12px] tabular-nums">{`${approvalsOf(r)} of ${r.approvals_required}`}</span>,
+        <span key="w" className="text-[12px] text-slate-500">{ago(r.created_at, ctx.now)}</span>,
+      ],
+    };
+  });
+  return {
+    base: BASE,
+    noun: "resets",
+    idColumn: "Request",
+    columns: [{ label: "Subject" }, { label: "Requested by" }, { label: "Reason" }, { label: "Status" }, { label: "Approvals" }, { label: "Requested" }],
+    rows,
+    filters: [
+      { name: "status", allLabel: "All statuses", options: Object.entries(RESET_STATE).map(([k, v]) => [k, v.label] as const) },
+      { name: "mine", allLabel: "Anyone's requests", options: [["mine", "Requested by me"], ["others", "Requested by others"]] },
+    ],
+    searchPlaceholder: "Search subject, requester or reason",
+    empty: "No password reset has been requested in this tenant. Request one from a person's drawer.",
+    error: data.resets.error,
+    what: "password resets",
+    problem: identityProblem("password resets"),
+    note: data.resets.more ? "Newest 200 shown" : undefined,
+    drawer: (id, links) => {
+      const r = data.resets.rows.find((x) => x.request_id === id);
+      if (!r) return null;
+      return <ResetDrawer r={r} ctx={ctx} close={links.close} who={who} />;
+    },
+  };
+}
+
+function ResetDrawer({ r, ctx, close, who }: { r: PasswordResetRequest; ctx: Ctx; close: string; who: (id: string) => string }) {
+  const st = RESET_STATE[r.status] ?? { label: r.status, tone: "neutral" as Tone };
+  const mine = r.requested_by === ctx.me;
+  const subject = r.principal_id === ctx.me;
+  const decided = (r.approvals ?? []).some((a) => a.approver_id === ctx.me);
+  let actions: ReactNode = null;
+  if (r.status === "PENDING_APPROVAL") {
+    // The maker never sees the checker's buttons; nor does the person whose
+    // password it is, nor someone who has already decided.
+    actions = mine ? (
+      <DrawerNote>You requested this reset. A second administrator approves or rejects it.</DrawerNote>
+    ) : subject ? (
+      <DrawerNote>This reset is for your own account. Someone else decides it.</DrawerNote>
+    ) : decided ? (
+      <DrawerNote>You have already decided this request. It needs another approver.</DrawerNote>
+    ) : (
+      <>
+        <ActionDialog
+          label="Approve reset"
+          tone="accent"
+          title={`Approve the password reset for ${who(r.principal_id)}`}
+          description="Once approved, the reset link is sent to them. Needs your own fresh second factor."
+          action={identityCommand}
+          hidden={{ command: "reset_decide", id: r.request_id, decision: "APPROVE" }}
+          submitLabel="Approve"
+          reasons="approve"
+        />
+        <ActionDialog
+          label="Reject"
+          tone="danger"
+          title={`Reject the password reset for ${who(r.principal_id)}`}
+          description="No link is sent. The requester can raise a new request."
+          action={identityCommand}
+          hidden={{ command: "reset_decide", id: r.request_id, decision: "REJECT" }}
+          submitLabel="Reject"
+          reasons="reject"
+        />
+      </>
+    );
+  }
+  return (
+    <DetailDrawer
+      heading="Password reset"
+      closeHref={close}
+      icon={LockKeyhole}
+      title={who(r.principal_id)}
+      subtitle={r.request_id}
+      status={st}
+      actions={actions}
+    >
+      <DrawerFacts
+        items={[
+          { label: "Subject", value: <span className="font-mono text-[11px]">{r.principal_id}</span> },
+          { label: "Requested by", value: who(r.requested_by) },
+          { label: "Reason", value: (r.reason ?? "—").replaceAll("_", " ") },
+          { label: "Approvals", value: `${approvalsOf(r)} of ${r.approvals_required}` },
+          ...(r.approvals ?? []).map((a) => ({ label: a.decision === "APPROVE" ? "Approved by" : "Rejected by", value: `${who(a.approver_id)} · ${when(a.at)}` })),
+          { label: "Requested", value: when(r.created_at) },
+          { label: "Expires", value: when(r.expires_at) },
+          ...(r.decided_at ? [{ label: "Decided", value: when(r.decided_at) }] : []),
+        ]}
+      />
+      <DrawerNote>The service refuses a decision by the requester or the subject whatever the console shows.</DrawerNote>
+    </DetailDrawer>
+  );
+}
+
+// ── Federation ───────────────────────────────────────────────────────────────
+
+const CONNECTION_STATE: Record<string, { label: string; tone: Tone }> = {
+  ACTIVE: { label: "Active", tone: "success" },
+  PENDING_APPROVAL: { label: "Awaiting approval", tone: "warning" },
+  DEGRADED: { label: "Keys stale", tone: "danger" },
+  SUSPENDED: { label: "Suspended", tone: "warning" },
+  REVOKED: { label: "Revoked", tone: "neutral" },
+};
+
+export function federationRegister(data: IdentityData, ctx: Ctx): RegisterSpec {
+  const f = data.federation;
+  const rows: Row[] = f.rows.map((c) => {
+    const st = CONNECTION_STATE[c.status] ?? { label: c.status.replaceAll("_", " ").toLowerCase(), tone: "neutral" as Tone };
+    return {
+      id: c.connection_id,
+      idLabel: short(c.connection_id),
+      search: `${c.name} ${c.connection_id} ${c.protocol}`,
+      facets: { status: c.status },
+      cells: [
+        <TwoLine key="n" primary={c.name} secondary={c.protocol.toUpperCase()} />,
+        <Chip key="s" label={st.label} tone={st.tone} />,
+        <span key="v" className="text-[12px] tabular-nums">{c.active_version ? `v${c.active_version}` : "None approved"}</span>,
+        <span key="l" className="text-[12px] tabular-nums">{`v${c.latest_version}`}</span>,
+        <span key="u" className="text-[12px] text-slate-500">{ago(c.updated_at, ctx.now)}</span>,
+      ],
+    };
+  });
+  return {
+    base: BASE,
+    noun: "connections",
+    idColumn: "Connection",
+    columns: [{ label: "Identity provider" }, { label: "Status" }, { label: "Approved version" }, { label: "Latest version" }, { label: "Updated" }],
+    rows,
+    filters: [{ name: "status", allLabel: "All statuses", options: Object.entries(CONNECTION_STATE).map(([k, v]) => [k, v.label] as const) }],
+    searchPlaceholder: "Search connection name or ID",
+    empty: f.enabled ? (
+      "No enterprise identity provider is connected to this tenant."
+    ) : (
+      <span>
+        Federation is not enabled on this deployment (FEDERATION_ENABLED is off), so no enterprise identity provider can sign anyone in. People sign in
+        with a local password and second factor. The operator turns it on; see the service runbook, section 12.
+      </span>
+    ),
+    error: f.error,
+    what: "federation connections",
+    problem: identityProblem("federation connections"),
+    drawer: (id, links) => {
+      const c = f.rows.find((x) => x.connection_id === id);
+      if (!c) return null;
+      return <ConnectionDrawer c={c} close={links.close} />;
+    },
+  };
+}
+
+function ConnectionDrawer({ c, close }: { c: FederationConnection; close: string }) {
+  const st = CONNECTION_STATE[c.status] ?? { label: c.status, tone: "neutral" as Tone };
+  return (
+    <DetailDrawer
+      heading="Federation connection"
+      closeHref={close}
+      icon={Building2}
+      title={c.name}
+      subtitle={c.connection_id}
+      status={st}
+      actions={
+        <DrawerNote>
+          Configuration and approval are governed at the federation API: a second person approves each version against the fingerprint they saw.
+        </DrawerNote>
+      }
+    >
+      <DrawerFacts
+        items={[
+          { label: "Protocol", value: c.protocol.toUpperCase() },
+          { label: "Approved version", value: c.active_version ? `v${c.active_version}` : "None approved — no logins admitted" },
+          { label: "Latest version", value: `v${c.latest_version}` },
+          ...(c.status_reason ? [{ label: "Status reason", value: c.status_reason }] : []),
+          { label: "Created by", value: <span className="font-mono text-[11px]">{c.created_by}</span> },
+          { label: "Created", value: when(c.created_at) },
+          { label: "Updated", value: when(c.updated_at) },
         ]}
       />
     </DetailDrawer>

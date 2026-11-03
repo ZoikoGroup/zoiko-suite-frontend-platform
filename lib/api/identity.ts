@@ -889,6 +889,66 @@ export async function listMfaFactors(identity: CallerIdentity): Promise<ApiResul
   return apiGet("identityContext", "/v1/mfa/factors", { identity });
 }
 
+// ─── Passkeys (WebAuthn, AU-11) ─────────────────────────────────────────────
+//
+// begin returns the options for navigator.credentials.create / .get and a
+// single-use ceremony handle; finish takes the handle and the browser's
+// PublicKeyCredential with its binary fields base64url-encoded. A passkey
+// step-up answers a login token with amr [pwd, hwk]: resolving it gives an
+// envelope at assurance PHISHING_RESISTANT.
+
+export type PasskeyCeremony = { options: { publicKey: Record<string, unknown> }; ceremony: string };
+
+export type Passkey = {
+  credential_id: string;
+  nickname?: string;
+  transports: string[];
+  backup_eligible: boolean;
+  backup_state: boolean;
+  user_verified: boolean;
+  status: string;
+  created_at: string;
+  last_used_at?: string | null;
+};
+
+export async function beginPasskeyRegistration(identity: CallerIdentity): Promise<ApiWriteResult<PasskeyCeremony>> {
+  return apiPost<PasskeyCeremony>("identityContext", "/v1/mfa/passkeys/register/begin", {}, { identity });
+}
+
+export async function finishPasskeyRegistration(
+  identity: CallerIdentity,
+  ceremony: string,
+  credential: unknown,
+  nickname: string,
+): Promise<ApiWriteResult<Passkey>> {
+  return apiPost<Passkey>("identityContext", "/v1/mfa/passkeys/register/finish", { ceremony, credential, nickname }, { identity });
+}
+
+export async function listPasskeys(identity: CallerIdentity): Promise<ApiResult<{ passkeys: Passkey[]; count: number }>> {
+  return apiGet("identityContext", "/v1/mfa/passkeys", { identity });
+}
+
+/** Remove a passkey (needs a recent step-up). */
+export async function revokePasskey(
+  identity: CallerIdentity,
+  credentialId: string,
+  reasonCode: string,
+): Promise<ApiWriteResult<{ credential_id: string; status: string }>> {
+  return apiPost("identityContext", "/v1/mfa/passkeys/revoke", { credential_id: credentialId, reason_code: reasonCode }, { identity });
+}
+
+export async function beginPasskeyStepUp(identity: CallerIdentity): Promise<ApiWriteResult<PasskeyCeremony>> {
+  return apiPost<PasskeyCeremony>("identityContext", "/v1/authenticate/step-up/passkey/begin", {}, { identity });
+}
+
+export async function finishPasskeyStepUp(
+  identity: CallerIdentity,
+  ceremony: string,
+  credential: unknown,
+): Promise<ApiWriteResult<AuthenticateResponse>> {
+  return apiPost<AuthenticateResponse>("identityContext", "/v1/authenticate/step-up/passkey/finish", { ceremony, credential }, { identity });
+}
+
 /** Prove the second factor now: a new login token to resolve into an envelope. */
 export async function stepUp(
   identity: CallerIdentity,
@@ -910,7 +970,9 @@ export async function stepUp(
 //   POST /v1/principals                         (create a person or workload)
 //   POST /v1/principals/{id}/invite
 //   POST /v1/principals/{id}/password-resets    (maker)
+//   GET  /v1/password-resets                    (filter[status], filter[principal_id])
 //   POST /v1/password-resets/{id}/decide        (checker, step-up)
+//   GET  /v1/federation/connections             (404 when federation is off)
 //   POST /v1/context/support/{id}/approve       (named approver, If-Match)
 //   POST /v1/principals/{id}/mfa/reset          (step-up)
 
@@ -1015,15 +1077,49 @@ export type SubjectIdentity = {
   links: IdentityLink[];
 };
 
+export type ResetApproval = { approver_id: string; at: string; decision: "APPROVE" | "REJECT"; reason?: string };
+
 export type PasswordResetRequest = {
   request_id: string;
   tenant_id: string;
   principal_id: string;
   requested_by: string;
   reason?: string;
+  /** As the register shows it: a pending or unused request past its expiry reads EXPIRED. */
   status: "PENDING_APPROVAL" | "ISSUED" | "REJECTED" | "COMPLETED" | "EXPIRED";
   approvals_required: number;
+  approvals?: ResetApproval[];
   created_at?: string;
+  decided_at?: string | null;
+  expires_at?: string;
+};
+
+/** A tenant's enterprise identity provider connection (INT-10). */
+export type FederationConnection = {
+  connection_id: string;
+  tenant_id: string;
+  name: string;
+  protocol: string;
+  status: string;
+  status_reason?: string;
+  active_version: number | null;
+  latest_version: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** OIDC discovery (RFC 8414 / OIDC Discovery), as the hosted login publishes it. */
+export type OidcDiscovery = {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  jwks_uri: string;
+  userinfo_endpoint?: string;
+  code_challenge_methods_supported?: string[];
+  grant_types_supported?: string[];
+  token_endpoint_auth_methods_supported?: string[];
+  dpop_signing_alg_values_supported?: string[];
 };
 
 /** A support access request or grant as the Support access register lists it. */
@@ -1088,6 +1184,28 @@ export function listAuthenticationEvents(
   });
 }
 
+export function listPasswordResets(
+  identity: CallerIdentity,
+  q: { status?: string; principalId?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<PasswordResetRequest>>> {
+  return listOf(identity, "/v1/password-resets", {
+    "filter[status]": q.status,
+    "filter[principal_id]": q.principalId,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+/** The tenant's federation connections. 404 means federation is not enabled on this deployment. */
+export function listFederationConnections(identity: CallerIdentity): Promise<ApiResult<FederationConnection[]>> {
+  return apiGet<FederationConnection[]>("identityContext", "/v1/federation/connections", { identity });
+}
+
+/** The hosted login's published metadata. Public. */
+export function getOidcDiscovery(): Promise<ApiResult<OidcDiscovery>> {
+  return apiGet<OidcDiscovery>("identityContext", "/.well-known/openid-configuration");
+}
+
 export function getAssuranceHistory(identity: CallerIdentity, principalId: string): Promise<ApiResult<Page<AssuranceChange>>> {
   return listOf(identity, `/v1/principals/${encodeURIComponent(principalId)}/assurance-history`, { page_size: 20 });
 }
@@ -1143,8 +1261,14 @@ export function decidePasswordReset(
   identity: CallerIdentity,
   requestId: string,
   decision: "APPROVE" | "REJECT",
+  reason?: string,
 ): Promise<ApiWriteResult<PasswordResetRequest>> {
-  return apiPost<PasswordResetRequest>("identityContext", `/v1/password-resets/${encodeURIComponent(requestId)}/decide`, { decision }, { identity });
+  return apiPost<PasswordResetRequest>(
+    "identityContext",
+    `/v1/password-resets/${encodeURIComponent(requestId)}/decide`,
+    { decision, reason },
+    { identity },
+  );
 }
 
 export function getPasswordReset(identity: CallerIdentity, requestId: string): Promise<ApiResult<PasswordResetRequest>> {

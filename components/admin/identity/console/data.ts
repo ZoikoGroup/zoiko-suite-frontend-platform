@@ -9,12 +9,16 @@ import type { ApiError, ApiResult } from "@/lib/api/client";
 import {
   getIdentitySummary,
   listAuthenticationEvents,
+  listFederationConnections,
+  listPasswordResets,
   listPrincipals,
   listSessions,
   listSupportContexts,
   type AuthenticationEvent,
+  type FederationConnection,
   type IdentitySummary,
   type Page,
+  type PasswordResetRequest,
   type PrincipalDetail,
   type SessionSummary,
   type SupportRow,
@@ -31,6 +35,9 @@ export type IdentityData = {
   sessions: Read<SessionSummary>;
   support: Read<SupportRow>;
   events: Read<AuthenticationEvent>;
+  resets: Read<PasswordResetRequest>;
+  /** enabled=false: the deployment has federation off (the routes answer 404), which is a state, not an error. */
+  federation: Read<FederationConnection> & { enabled: boolean };
 };
 
 type Caller = SessionIdentity & { principalId: string; tenantId: string };
@@ -42,19 +49,26 @@ function read<T>(result: ApiResult<Page<T>>): Read<T> {
 
 export async function loadIdentity(identity: SessionIdentity): Promise<IdentityData> {
   const caller = identity as Caller;
-  const [summary, principals, sessions, support, events] = await Promise.all([
+  const [summary, principals, sessions, support, events, resets, federation] = await Promise.all([
     getIdentitySummary(caller),
     listPrincipals(caller, { pageSize: PAGE_MAX }),
     listSessions(caller, { pageSize: PAGE_MAX }),
     listSupportContexts(caller, { pageSize: PAGE_MAX }),
     listAuthenticationEvents(caller, { pageSize: PAGE_MAX }),
+    listPasswordResets(caller, { pageSize: PAGE_MAX }),
+    listFederationConnections(caller),
   ]);
+  const federationOff = !federation.ok && federation.error.status === 404;
   return {
     summary: summary.ok ? { data: summary.data, error: null } : { data: null, error: summary.error },
     principals: read(principals),
     sessions: read(sessions),
     support: read(support),
     events: read(events),
+    resets: read(resets),
+    federation: federation.ok
+      ? { rows: federation.data ?? [], error: null, more: false, enabled: true }
+      : { rows: [], error: federationOff ? null : federation.error, more: false, enabled: !federationOff },
   };
 }
 
