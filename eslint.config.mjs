@@ -42,6 +42,21 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "warn",
     },
   },
+  {
+    // Public chatbot boundary (Docs 01 FR-16, 03 §27, 04 INV-01): the
+    // chatbot never reads dashboard, health, auth or session code. The
+    // authenticated admin copilot is deferred to R2 (docs/open-decisions.md).
+    // components/assistant/import-boundary.test.tsx enforces the same rule.
+    files: ["components/assistant/**", "app/public-ai/**", "app/assistant/**", "lib/api/public-ai.ts", "lib/api/public-ai-proxy.ts"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["@/lib/api/*", "!@/lib/api/public-ai", "!@/lib/api/public-ai-proxy", "@/lib/auth", "@/lib/servicectl", "@/components/admin", "@/components/admin/*", "next/headers"],
+          message: "The public chatbot must not import dashboard, health, auth or session code (FR-16 deferred).",
+        }],
+      }],
+    },
+  },
 ]);
 
 export default eslintConfig;

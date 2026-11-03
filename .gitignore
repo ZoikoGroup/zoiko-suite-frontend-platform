@@ -53,3 +53,7 @@ zoiko-suite-frontend-platform/
 scratch/*.log
 *.log
 mock-svc/
+
+# Playwright / Vitest output
+/test-results
+/tests/e2e/.bin

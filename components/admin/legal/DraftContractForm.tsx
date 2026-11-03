@@ -158,7 +158,7 @@ export function DraftContractForm() {
           {pending ? "Drafting…" : "Draft contract"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Created as DRAFT at v1 — not in force until it is activated
+          Created as DRAFT at v1 — not in force until review, approval, and signature
         </p>
       </div>
 
@@ -169,7 +169,7 @@ export function DraftContractForm() {
           href={`/admin/legal/${state.contractId}`}
           className="inline-flex items-center gap-1.5 text-sm font-medium text-navy-700 hover:underline dark:text-navy-300"
         >
-          Open the contract to submit or activate it
+          Open the contract to submit it for review
           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       )}

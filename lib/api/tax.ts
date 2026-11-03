@@ -8,33 +8,38 @@
 // - tax-authority-interface-svc (8147)
 
 import { type ApiResult, type Identity } from "./client";
+import { serviceUrl } from "./config";
+
+// Base URLs come from the shared registry so ZOIKO_USE_GATEWAY applies to Tax
+// like every other domain. The per-service env overrides are unchanged:
+// serviceUrl("taxRules") still reads ZOIKO_TAX_RULES_URL, and so on.
 
 function taxRulesUrl(): string {
-  return (process.env.ZOIKO_TAX_RULES_URL ?? "http://localhost:8125").replace(/\/$/, "");
+  return serviceUrl("taxRules");
 }
 
 function taxDeterminationUrl(): string {
-  return (process.env.ZOIKO_TAX_DETERMINATION_URL ?? "http://localhost:8126").replace(/\/$/, "");
+  return serviceUrl("taxDetermination");
 }
 
 function vatGstUrl(): string {
-  return (process.env.ZOIKO_VAT_GST_URL ?? "http://localhost:8127").replace(/\/$/, "");
+  return serviceUrl("vatGst");
 }
 
 function corporateTaxUrl(): string {
-  return (process.env.ZOIKO_CORPORATE_TAX_URL ?? "http://localhost:8128").replace(/\/$/, "");
+  return serviceUrl("corporateTax");
 }
 
 function withholdingTaxUrl(): string {
-  return (process.env.ZOIKO_WITHHOLDING_TAX_URL ?? "http://localhost:8129").replace(/\/$/, "");
+  return serviceUrl("withholdingTax");
 }
 
 function filingPrepUrl(): string {
-  return (process.env.ZOIKO_FILING_PREPARATION_URL ?? "http://localhost:8130").replace(/\/$/, "");
+  return serviceUrl("filingPreparation");
 }
 
 function taxAuthorityUrl(): string {
-  return (process.env.ZOIKO_TAX_AUTHORITY_INTERFACE_URL ?? "http://localhost:8147").replace(/\/$/, "");
+  return serviceUrl("taxAuthorityInterface");
 }
 
 // ─── 1. Tax Rules ────────────────────────────────────────────────────────────

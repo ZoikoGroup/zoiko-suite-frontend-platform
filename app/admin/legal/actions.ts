@@ -6,11 +6,10 @@
 // session is verified inside every action rather than relying on the proxy's
 // /admin matcher.
 //
-// Unlike the purchase-order actions, these actions enforce authorization
-// checks directly before dispatching to contract-lifecycle-svc (:8119).
-// While contract-lifecycle-svc builds an authorization client, gating mutations
-// in these server actions against authorization-svc (:8089) guarantees fail-closed
-// enforcement so that unprivileged callers are rejected before mutations occur.
+// contract-lifecycle-svc authorizes every write itself. These actions also ask
+// authorization-svc (:8089) first, using the service's own action names
+// (CONTRACT_SUBMIT_REVIEW, CONTRACT_APPROVE, …), so an unprivileged caller gets
+// a readable refusal before the request is sent.
 //
 // Validation that duplicates the service is deliberate where the service's
 // answer would be unhelpful: it rejects a missing title with prose, accepts a
@@ -23,10 +22,13 @@ import { authorize, PLATFORM_SCOPE_SENTINEL } from "@/lib/api/authorization";
 import {
   draftContract as draftContractCall,
   reviseContract as reviseContractCall,
-  submitContractForApproval,
-  activateContract as activateContractCall,
+  submitContractForReview,
+  approveContract as approveContractCall,
+  sendContractForSignature,
+  recordContractExecution,
+  amendContract as amendContractCall,
+  renewContract as renewContractCall,
   terminateContract as terminateContractCall,
-  getContract,
   explainContractError,
   CONTRACT_TYPES,
   type ContractType,
@@ -34,12 +36,14 @@ import {
 import {
   createBoardMeeting as createBoardMeetingCall,
   createBoardResolution as createBoardResolutionCall,
-  recordResolutionVotes as recordResolutionVotesCall,
-  passBoardResolution as passBoardResolutionCall,
+  openResolutionVoting,
+  castResolutionVote,
+  closeResolutionVoting,
   explainBoardError,
   summariseVotes,
   RESOLUTION_CATEGORIES,
   type ResolutionCategory,
+  type VoteChoice,
 } from "@/lib/api/legal";
 import type { BoardActionState, ContractActionState } from "./state";
 
@@ -170,12 +174,12 @@ export async function draftContract(
     status: "drafted",
     title: result.data.title,
     contractId: result.data.contract_id,
-    message: `“${result.data.title}” drafted at v${result.data.version}. It is not in force until it is activated.`,
+    message: `“${result.data.title}” drafted at v${result.data.version}. Submit it for review when the terms are settled.`,
   };
 }
 
 /**
- * Revise a DRAFT or PENDING_APPROVAL contract's terms.
+ * Revise a DRAFT or REVIEW contract's terms.
  *
  * Only fields the user actually filled in are sent. The service merges
  * field-by-field and reads an empty string or a zero as "leave unchanged", so
@@ -221,7 +225,7 @@ export async function reviseContract(
     }
   }
 
-  const authzError = await assertAuthorized(identity, "CONTRACT_REVISE", {
+  const authzError = await assertAuthorized(identity, "CONTRACT_UPDATE", {
     contract_id: contractId,
     ...(totalValue ? { total_value: String(totalValue) } : {}),
   });
@@ -250,13 +254,7 @@ export async function reviseContract(
   };
 }
 
-/**
- * Submit a DRAFT for approval.
- *
- * Records no actor and appends no version row — the service ignores the request
- * body and does not snapshot on this transition. The success message says so,
- * because a reader who expects the submission in the history will not find it.
- */
+/** DRAFT → REVIEW. The submitter is recorded and cannot approve it later. */
 export async function submitContract(
   _previous: ContractActionState,
   formData: FormData,
@@ -271,12 +269,12 @@ export async function submitContract(
   const contractId = String(formData.get("contract_id") ?? "").trim();
   if (!contractId) return fail("Missing contract ID.");
 
-  const authzError = await assertAuthorized(identity, "CONTRACT_SUBMIT", {
+  const authzError = await assertAuthorized(identity, "CONTRACT_SUBMIT_REVIEW", {
     contract_id: contractId,
   });
   if (authzError) return authzError;
 
-  const result = await submitContractForApproval(contractId, identity);
+  const result = await submitContractForReview(contractId, identity);
   if (!result.ok) return fail(explainContractError(result.error.message));
 
   revalidateContract();
@@ -285,18 +283,90 @@ export async function submitContract(
     status: "submitted",
     title: result.data.title,
     contractId,
-    message: `“${result.data.title}” is now PENDING_APPROVAL. This step is not versioned — it leaves no row in the contract's history.`,
+    message: `“${result.data.title}” is now in REVIEW. Someone other than you has to approve it.`,
   };
 }
 
 /**
- * Activate a contract, recording who signed it and when.
- *
- * `signed_at` is stamped here rather than left to the service: it parses the
- * field into a time.Time and stores whatever it parses, so an omitted value
- * would be written as the zero time — 0001-01-01 — instead of now.
+ * REVIEW → APPROVED. Needs a GRANTED governance decision, and the approver may
+ * not be the principal who submitted the contract — the service enforces both.
  */
-export async function activateContract(
+export async function approveContract(
+  _previous: ContractActionState,
+  formData: FormData,
+): Promise<ContractActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const contractId = String(formData.get("contract_id") ?? "").trim();
+  const governanceDecisionId = String(formData.get("governance_decision_id") ?? "").trim();
+  const submittedBy = String(formData.get("submitted_by") ?? "").trim();
+
+  if (!contractId) return fail("Missing contract ID.");
+  if (!governanceDecisionId) {
+    return fail("Enter the governance decision ID that authorizes this approval.");
+  }
+  if (submittedBy && submittedBy === identity.principalId) {
+    return fail("You submitted this contract for review, so you cannot approve it. Another approver has to.");
+  }
+
+  const authzError = await assertAuthorized(identity, "CONTRACT_APPROVE", {
+    contract_id: contractId,
+  });
+  if (authzError) return authzError;
+
+  const result = await approveContractCall({ contractId, identity, governanceDecisionId });
+  if (!result.ok) return fail(explainContractError(result.error.message));
+
+  revalidateContract();
+
+  return {
+    status: "approved",
+    title: result.data.title,
+    contractId,
+    message: `“${result.data.title}” is APPROVED. Its terms are now fixed — send it for signature next.`,
+  };
+}
+
+/** APPROVED → signature SENT. */
+export async function sendForSignature(
+  _previous: ContractActionState,
+  formData: FormData,
+): Promise<ContractActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const contractId = String(formData.get("contract_id") ?? "").trim();
+  if (!contractId) return fail("Missing contract ID.");
+
+  const authzError = await assertAuthorized(identity, "CONTRACT_SEND_FOR_SIGNATURE", {
+    contract_id: contractId,
+  });
+  if (authzError) return authzError;
+
+  const result = await sendContractForSignature(contractId, identity);
+  if (!result.ok) return fail(explainContractError(result.error.message));
+
+  revalidateContract();
+
+  return {
+    status: "sent",
+    title: result.data.title,
+    contractId,
+    message: `“${result.data.title}” was sent for signature. Record execution once every signature is in.`,
+  };
+}
+
+/** APPROVED + signature SENT → EFFECTIVE. */
+export async function recordExecution(
   _previous: ContractActionState,
   formData: FormData,
 ): Promise<ContractActionState> {
@@ -312,46 +382,124 @@ export async function activateContract(
   const documentVaultId = String(formData.get("document_vault_id") ?? "").trim();
 
   if (!contractId) return fail("Missing contract ID.");
-  if (!signedBy) return fail("Name the signatory — activation is attributed to them.");
+  if (!signedBy) return fail("Name the signatory — execution is attributed to them.");
 
-  const authzError = await assertAuthorized(identity, "CONTRACT_ACTIVATE", {
+  const authzError = await assertAuthorized(identity, "CONTRACT_RECORD_EXECUTION", {
     contract_id: contractId,
   });
   if (authzError) return authzError;
 
-  // Enforce strict lifecycle transition: contract must be in PENDING_APPROVAL to activate
-  const currentContract = await getContract(contractId, identity);
-  if (!currentContract.ok) {
-    return fail(`Contract could not be retrieved (${currentContract.error.message}). Activation was refused.`);
-  }
-  if (currentContract.data.status !== "PENDING_APPROVAL") {
-    return fail(
-      `Contract cannot be activated while in ${currentContract.data.status} status. It must be submitted for approval first.`,
-    );
-  }
-
-  const result = await activateContractCall({
+  const result = await recordContractExecution({
     contractId,
     identity,
     signedBy,
-    signedAt: new Date().toISOString(),
     documentVaultId: documentVaultId || undefined,
   });
-
   if (!result.ok) return fail(explainContractError(result.error.message));
 
   revalidateContract();
 
   return {
-    status: "activated",
+    status: "executed",
     title: result.data.title,
     contractId,
-    message: `“${result.data.title}” is ACTIVE at v${result.data.version}, signed by ${signedBy}.`,
+    message: `“${result.data.title}” is EFFECTIVE at v${result.data.version}, signed by ${signedBy}.`,
+  };
+}
+
+/** Amend an EFFECTIVE contract's terms. */
+export async function amendContract(
+  _previous: ContractActionState,
+  formData: FormData,
+): Promise<ContractActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const contractId = String(formData.get("contract_id") ?? "").trim();
+  const changeSummary = String(formData.get("change_summary") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  const counterpartyName = String(formData.get("counterparty_name") ?? "").trim();
+  const valueRaw = String(formData.get("total_value") ?? "").trim();
+
+  if (!contractId) return fail("Missing contract ID.");
+  if (!changeSummary) return fail("A change summary is required — it is the audit record.");
+
+  let totalValue: number | undefined;
+  if (valueRaw !== "") {
+    totalValue = Number(valueRaw);
+    if (!Number.isFinite(totalValue) || totalValue <= 0) {
+      return fail("Amended value must be a number greater than zero.");
+    }
+  }
+  if (!title && !counterpartyName && totalValue === undefined) {
+    return fail("Change at least one term — title, counterparty name, or value.");
+  }
+
+  const authzError = await assertAuthorized(identity, "CONTRACT_AMEND", { contract_id: contractId });
+  if (authzError) return authzError;
+
+  const result = await amendContractCall({
+    contractId,
+    identity,
+    changeSummary,
+    title: title || undefined,
+    counterpartyName: counterpartyName || undefined,
+    totalValue,
+  });
+  if (!result.ok) return fail(explainContractError(result.error.message));
+
+  revalidateContract();
+
+  return {
+    status: "amended",
+    title: result.data.title,
+    contractId,
+    message: `“${result.data.title}” amended — now at v${result.data.version}.`,
+  };
+}
+
+/** Extend an EFFECTIVE contract's term. */
+export async function renewContract(
+  _previous: ContractActionState,
+  formData: FormData,
+): Promise<ContractActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+
+  const contractId = String(formData.get("contract_id") ?? "").trim();
+  const newEffectiveTo = String(formData.get("new_effective_to") ?? "").trim();
+  const changeSummary = String(formData.get("change_summary") ?? "").trim();
+
+  if (!contractId) return fail("Missing contract ID.");
+  if (!isDate(newEffectiveTo)) return fail("Pick the new end date for the renewed term.");
+  if (!changeSummary) return fail("A change summary is required — it is the audit record.");
+
+  const authzError = await assertAuthorized(identity, "CONTRACT_RENEW", { contract_id: contractId });
+  if (authzError) return authzError;
+
+  const result = await renewContractCall({ contractId, identity, newEffectiveTo, changeSummary });
+  if (!result.ok) return fail(explainContractError(result.error.message));
+
+  revalidateContract();
+
+  return {
+    status: "renewed",
+    title: result.data.title,
+    contractId,
+    message: `“${result.data.title}” renewed to ${newEffectiveTo} — now at v${result.data.version}.`,
   };
 }
 
 /**
- * Terminate a contract.
+ * Terminate an APPROVED or EFFECTIVE contract.
  *
  * The service also sets `effective_to` to today, so the agreement's term is
  * closed off at the moment of termination rather than left running.
@@ -534,9 +682,15 @@ export async function proposeBoardResolution(
   };
 }
 
-/** Tally a resolution's votes. Voting only tallies — it does not finalize the
- *  status; only a pass does. */
-export async function tallyResolutionVotes(
+const NOT_FOUND_RESOLUTION =
+  "That resolution is no longer on record for your organisation. Reload the page to see what " +
+  "the register holds now.";
+
+const VOTE_CHOICES = new Set<VoteChoice>(["FOR", "AGAINST", "ABSTAIN"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** PROPOSED → OPEN: freeze the voter roster and the quorum threshold. */
+export async function openVoting(
   _previous: BoardActionState,
   formData: FormData,
 ): Promise<BoardActionState> {
@@ -549,37 +703,32 @@ export async function tallyResolutionVotes(
 
   const resolutionId = String(formData.get("resolution_id") ?? "").trim();
   const title = String(formData.get("resolution_title") ?? "").trim();
-  const votesFor = Number(formData.get("votes_for") ?? "0");
-  const votesAgainst = Number(formData.get("votes_against") ?? "0");
-  const abstentions = Number(formData.get("abstentions") ?? "0");
+  const rosterRaw = String(formData.get("voter_principal_ids") ?? "");
+  const quorumRaw = String(formData.get("quorum_threshold") ?? "").trim();
 
   if (!resolutionId) return boardFail("It is not clear which resolution this applies to. Reload the page and try again.");
-  if (
-    !Number.isInteger(votesFor) || votesFor < 0 ||
-    !Number.isInteger(votesAgainst) || votesAgainst < 0 ||
-    !Number.isInteger(abstentions) || abstentions < 0
-  ) {
-    return boardFail("Enter each vote count as a whole number of people, using 0 for none. A count cannot be negative or a fraction.");
+
+  // One principal ID per line or comma; duplicates collapse so the roster size
+  // the quorum is checked against is the number of distinct voters.
+  const roster = [...new Set(rosterRaw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean))];
+  if (roster.length === 0) return boardFail("Name at least one person entitled to vote — one principal ID per line.");
+  const invalid = roster.filter((p) => !UUID_RE.test(p));
+  if (invalid.length > 0) {
+    return boardFail(`These are not principal IDs: ${invalid.slice(0, 3).join(", ")}. Each voter is identified by their principal ID.`);
   }
 
-  const result = await recordResolutionVotesCall({
-    identity,
-    resolutionId,
-    votesFor,
-    votesAgainst,
-    abstentions,
-  });
+  const quorumThreshold = Number(quorumRaw);
+  if (!Number.isInteger(quorumThreshold) || quorumThreshold < 1 || quorumThreshold > roster.length) {
+    return boardFail(`The quorum must be a whole number from 1 to ${roster.length} — the number of people on the roster.`);
+  }
 
+  const result = await openResolutionVoting({ identity, resolutionId, voterPrincipalIds: roster, quorumThreshold });
   if (!result.ok) {
     return boardFail(
       explainBoardError(result.error.message, {
         status: result.error.status,
-        notFound:
-          "That resolution is no longer on record for your organisation, so no count was " +
-          "saved. Reload the page to see what the register holds now.",
-        conflict:
-          "Nothing was saved. This resolution has already been closed, and the tally of a " +
-          "closed resolution cannot be changed. Reload the page to see how it was decided.",
+        notFound: NOT_FOUND_RESOLUTION,
+        conflict: "Voting could not be opened — it is already open, or the resolution has been decided. Reload to see where it stands.",
       }),
     );
   }
@@ -587,24 +736,56 @@ export async function tallyResolutionVotes(
   refresh();
 
   const r = result.data;
-  const votes = summariseVotes(r);
   return {
-    status: "voted",
+    status: "opened",
     title: title || r.title,
     recordId: r.resolution_id,
     resolution: r,
-    // Says what was recorded and, in the same breath, that recording it settled
-    // nothing. The service does not compare the counts or act on them, so a
-    // message that stopped at the figures would read as a decision.
-    message: `Recorded: ${votes.line}. ${votes.headline} Nothing is decided by this — the resolution still has to be passed.`,
+    message: `Voting is open for ${roster.length} voter${roster.length === 1 ? "" : "s"}, with a quorum of ${quorumThreshold}. The roster and quorum are now fixed.`,
   };
 }
 
-/** Pass a resolution into force. The service enforces segregation of duties —
- *  the resolution's creator may not be the principal who passes it — so the
- *  console hands the pass to the acting principal only when they are not the
- *  creator, and surfaces the SoD refusal otherwise. */
-export async function passResolutionIntoForce(
+/** Cast the signed-in principal's own vote on an OPEN resolution. */
+export async function castVote(
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return BOARD_EXPIRED;
+  }
+
+  const resolutionId = String(formData.get("resolution_id") ?? "").trim();
+  const title = String(formData.get("resolution_title") ?? "").trim();
+  const vote = String(formData.get("vote") ?? "").trim() as VoteChoice;
+
+  if (!resolutionId) return boardFail("It is not clear which resolution this applies to. Reload the page and try again.");
+  if (!VOTE_CHOICES.has(vote)) return boardFail("Choose For, Against, or Abstain.");
+
+  const result = await castResolutionVote({ identity, resolutionId, vote });
+  if (!result.ok) {
+    return boardFail(
+      explainBoardError(result.error.message, { status: result.error.status, notFound: NOT_FOUND_RESOLUTION }),
+    );
+  }
+
+  refresh();
+
+  return {
+    status: "voted",
+    title,
+    recordId: resolutionId,
+    message: `Your vote (${vote}) is recorded. It cannot be changed. The resolution is decided when someone other than its proposer closes the vote.`,
+  };
+}
+
+/**
+ * OPEN → PASSED or FAILED. The service decides which, from the frozen quorum
+ * and the vote ledger; the proposer may not close their own resolution.
+ */
+export async function closeVoting(
   _previous: BoardActionState,
   formData: FormData,
 ): Promise<BoardActionState> {
@@ -618,34 +799,27 @@ export async function passResolutionIntoForce(
   const resolutionId = String(formData.get("resolution_id") ?? "").trim();
   const title = String(formData.get("resolution_title") ?? "").trim();
   const createdBy = String(formData.get("resolution_created_by") ?? "").trim();
+  const documentVaultId = String(formData.get("document_vault_id") ?? "").trim();
 
   if (!resolutionId) return boardFail("It is not clear which resolution this applies to. Reload the page and try again.");
-
-  if (createdBy === identity.principalId) {
+  if (createdBy && createdBy === identity.principalId) {
     return boardFail(
-      "You proposed this resolution, so you cannot be the one to pass it. That split is " +
-        "deliberate: one person must not be able to put their own proposal into force on " +
-        "their own. Someone else with the authority to close resolutions has to pass it.",
+      "You proposed this resolution, so you cannot be the one to close its vote. Someone else " +
+        "with the authority to close resolutions has to do it.",
     );
   }
 
-  const result = await passBoardResolutionCall({
+  const result = await closeResolutionVoting({
     identity,
     resolutionId,
-    passedBy: identity.principalId,
+    ...(documentVaultId ? { documentVaultId } : {}),
   });
-
   if (!result.ok) {
     return boardFail(
       explainBoardError(result.error.message, {
         status: result.error.status,
-        notFound:
-          "That resolution is no longer on record for your organisation, so nothing was " +
-          "passed. Reload the page to see what the register holds now.",
-        conflict:
-          "Nothing was changed. This resolution has already been closed — passed, turned " +
-          "down, or withdrawn — so its outcome is fixed. Reload the page to see how it was " +
-          "decided.",
+        notFound: NOT_FOUND_RESOLUTION,
+        conflict: "Nothing was changed. This resolution is not open for voting. Reload to see how it was decided.",
       }),
     );
   }
@@ -653,16 +827,25 @@ export async function passResolutionIntoForce(
   refresh();
 
   const r = result.data;
+  const votes = summariseVotes(r);
+  if (r.status === "PASSED") {
+    return {
+      status: "passed",
+      title: title || r.title,
+      recordId: r.resolution_id,
+      passedBy: r.passed_by,
+      resolution: r,
+      message:
+        `Passed and in force${r.passed_at ? ` as of ${formatWhen(r.passed_at)}` : ""} — ${votes.line}. ` +
+        "Quorum was reached and the required supporting evidence was on file.",
+    };
+  }
   return {
-    status: "passed",
+    status: "failed",
     title: title || r.title,
     recordId: r.resolution_id,
-    passedBy: r.passed_by,
     resolution: r,
-    message:
-      `The resolution is passed and in force${r.passed_at ? ` as of ${formatWhen(r.passed_at)}` : ""}. ` +
-      "The supporting evidence the board requires for this kind of decision was checked and " +
-      "found to be on file. It is now closed and cannot be changed.",
+    message: `Voting closed and the resolution was not carried — ${votes.line}. Quorum was not reached, or the votes in favour did not outnumber those against.`,
   };
 }
 

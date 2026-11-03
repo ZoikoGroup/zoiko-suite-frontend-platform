@@ -7,11 +7,13 @@ import { listContracts, type Contract } from "@/lib/api/legal";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400",
-  PENDING_APPROVAL: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
-  ACTIVE: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+  REVIEW: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
+  APPROVED: "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
+  EXECUTED: "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
+  EFFECTIVE: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
   EXPIRED: "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300",
   TERMINATED: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300",
-  SUSPENDED: "bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300",
+  ARCHIVED: "bg-slate-100 text-slate-500 dark:bg-slate-500/20 dark:text-slate-400",
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -88,14 +90,12 @@ export async function ContractLifecyclePanel() {
 
   const contracts: ContractVariant[] = result.ok ? (result.data as ContractVariant[]) : [];
 
-  const active = contracts.filter((c) => c.status === "ACTIVE" || c.stage === "EXECUTED");
-  const draft = contracts.filter((c) => c.status === "DRAFT" || c.stage === "DRAFT");
-  const pending = contracts.filter((c) => c.status === "PENDING_APPROVAL" || c.stage === "REVIEW");
+  const active = contracts.filter((c) => c.status === "EFFECTIVE");
+  const draft = contracts.filter((c) => c.status === "DRAFT");
+  const pending = contracts.filter((c) => c.status === "REVIEW" || c.status === "APPROVED");
   const expiringSoon = active.filter(isExpiringSoon);
 
-  const totalValue = contracts
-    .filter((c) => c.status === "ACTIVE" || c.stage === "EXECUTED")
-    .reduce((sum, c) => sum + (c.total_value ?? c.value ?? 0), 0);
+  const totalValue = active.reduce((sum, c) => sum + (c.total_value ?? c.value ?? 0), 0);
 
   return (
     <div className="space-y-5">

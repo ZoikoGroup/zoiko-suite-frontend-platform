@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme";
+import { AssistantMount } from "@/components/assistant/AssistantMount";
+import { launcherOffset, resolveLogos } from "@/components/assistant/logos.server";
 import "./globals.css";
 
 const inter = Inter({
@@ -36,7 +38,11 @@ export default function RootLayout({
       className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          {/* ZoikoSuite Assistant: public pages only (components/assistant/mount.ts). */}
+          <AssistantMount logos={resolveLogos()} launcherOffset={launcherOffset()} />
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -27,6 +27,9 @@ export type ComplianceActionState = {
   id?: string;
 };
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Register a statutory filing requirement in filing-tracker-svc (lands SCHEDULED). */
 export async function createFilingRequirementAction(
   formData: FormData
 ): Promise<ComplianceActionState> {
@@ -37,41 +40,38 @@ export async function createFilingRequirementAction(
     return { ok: false, message: "Your session has expired — sign in again." };
   }
 
-  const filingName = String(formData.get("filing_name") ?? "").trim();
-  const authorityName = String(formData.get("authority_name") ?? "").trim();
+  const filingType = String(formData.get("filing_type") ?? "").trim();
+  const filingAuthority = String(formData.get("filing_authority") ?? "").trim();
+  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "").trim();
+  const periodKey = String(formData.get("period_key") ?? "").trim();
   const dueDate = String(formData.get("due_date") ?? "").trim();
-  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "jur-uk-gb").trim();
-  const frequency = String(formData.get("frequency") ?? "ANNUAL").trim();
+  const notes = String(formData.get("notes") ?? "").trim();
 
-  if (!filingName || !authorityName || !dueDate) {
-    return { ok: false, message: "Filing name, authority name, and statutory due date are required." };
+  if (!filingType || !filingAuthority || !jurisdictionId || !periodKey) {
+    return { ok: false, message: "Filing type, authority, jurisdiction, and period are required." };
   }
+  if (!DATE_RE.test(dueDate)) return { ok: false, message: "The statutory due date must be a date." };
 
-  const res = await createFilingRequirement(
-    {
-      filing_name: filingName,
-      authority_name: authorityName,
-      due_date: dueDate,
-      jurisdiction_id: jurisdictionId,
-      frequency,
-      legal_entity_id: identity.legalEntityId,
-      status: "OPEN",
-    },
-    identity
-  );
-
-  if (!res.ok) {
-    return { ok: false, message: res.error.message };
-  }
+  const res = await createFilingRequirement({
+    identity,
+    jurisdictionId,
+    filingAuthority,
+    filingType,
+    periodKey,
+    dueDate,
+    ...(notes ? { notes } : {}),
+  });
+  if (!res.ok) return { ok: false, message: res.error.message };
 
   refresh();
   return {
     ok: true,
-    message: `Filing requirement "${filingName}" registered in filing-tracker-svc.`,
-    id: res.data.requirement_id,
+    message: `Filing requirement ${filingType} (${periodKey}) registered — ${res.data.status}, due ${dueDate}.`,
+    id: res.data.filing_id,
   };
 }
 
+/** Record a compliance evaluation; the service derives status and score. */
 export async function evaluateComplianceAction(
   formData: FormData
 ): Promise<ComplianceActionState> {
@@ -82,31 +82,45 @@ export async function evaluateComplianceAction(
     return { ok: false, message: "Your session has expired — sign in again." };
   }
 
-  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "jur-uk-gb").trim();
+  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "").trim();
+  const domainName = String(formData.get("domain_name") ?? "").trim();
+  const count = (key: string) => Number(String(formData.get(key) ?? "0").trim() || "0");
+  const counts = {
+    totalObligations: count("total_obligations"),
+    fulfilledObligations: count("fulfilled_obligations"),
+    pendingObligations: count("pending_obligations"),
+    overdueObligations: count("overdue_obligations"),
+    openExceptions: count("open_exceptions"),
+  };
 
-  const res = await evaluateCompliance(
-    {
-      legal_entity_id: identity.legalEntityId,
-      jurisdiction_id: jurisdictionId,
-    },
-    identity
-  );
-
-  if (!res.ok) {
-    return { ok: false, message: res.error.message };
+  if (!jurisdictionId || !domainName) {
+    return { ok: false, message: "Jurisdiction and compliance domain are required." };
   }
+  if (Object.values(counts).some((n) => !Number.isInteger(n) || n < 0)) {
+    return { ok: false, message: "Each count must be a whole number, 0 or more." };
+  }
+
+  const res = await evaluateCompliance({
+    identity,
+    jurisdictionId,
+    domainName,
+    ...counts,
+    effectiveFrom: new Date().toISOString().slice(0, 10),
+  });
+  if (!res.ok) return { ok: false, message: res.error.message };
 
   refresh();
   return {
     ok: true,
-    message: `Compliance evaluated for entity: Status ${res.data.overall_status} (Score: ${res.data.score_percentage}%).`,
-    id: res.data.evaluation_id,
+    message: `Compliance evaluated for ${domainName}: ${res.data.overall_status} (health ${Math.round(res.data.health_score)}%).`,
+    id: res.data.status_id,
   };
 }
 
+/** Close an exception case with a reason. */
 export async function resolveExceptionAction(
-  exceptionId: string,
-  resolutionNote: string
+  exceptionCaseId: string,
+  closureReason: string
 ): Promise<ComplianceActionState> {
   let identity: SessionIdentity;
   try {
@@ -115,20 +129,17 @@ export async function resolveExceptionAction(
     return { ok: false, message: "Your session has expired — sign in again." };
   }
 
-  if (!exceptionId || !resolutionNote) {
-    return { ok: false, message: "Exception ID and resolution note are required." };
+  if (!exceptionCaseId || !closureReason) {
+    return { ok: false, message: "Exception case ID and closure reason are required." };
   }
 
-  const res = await resolveException(exceptionId, resolutionNote, identity);
-
-  if (!res.ok) {
-    return { ok: false, message: res.error.message };
-  }
+  const res = await resolveException(exceptionCaseId, closureReason, identity);
+  if (!res.ok) return { ok: false, message: res.error.message };
 
   refresh();
   return {
     ok: true,
-    message: `Exception ${exceptionId} resolved in exception-escalation-svc.`,
+    message: `Exception case ${exceptionCaseId} is now ${res.data.case_status}.`,
   };
 }
 
