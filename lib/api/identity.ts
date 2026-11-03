@@ -888,3 +888,292 @@ export async function stepUp(
 ): Promise<ApiWriteResult<AuthenticateResponse>> {
   return apiPost<AuthenticateResponse>("identityContext", "/v1/authenticate/step-up", { code }, { identity });
 }
+
+// ─── Console read models and governed commands (IC-2, IC-3, AU-09) ──────────
+//
+//   GET  /v1/identity/summary
+//   GET  /v1/principals                         (cursor-paged; filter[status], filter[principal_type], q)
+//   GET  /v1/principals/{id}/assurance-history
+//   GET  /v1/context/sessions                   (filter[principal_id], filter[status])
+//   GET  /v1/context/support                    (filter[status])
+//   GET  /v1/authentication-events              (filter[principal_id], filter[outcome], filter[since])
+//   GET  /v1/subjects/{id}                      (ETag; a merged id resolves to its survivor)
+//   POST /v1/subjects/{survivor}/merge          (If-Match, step-up)
+//   POST /v1/principals                         (create a person or workload)
+//   POST /v1/principals/{id}/invite
+//   POST /v1/principals/{id}/password-resets    (maker)
+//   POST /v1/password-resets/{id}/decide        (checker, step-up)
+//   POST /v1/context/support/{id}/approve       (named approver, If-Match)
+//   POST /v1/principals/{id}/mfa/reset          (step-up)
+
+/** One page of a console list. next_cursor is absent on the last page. */
+export type Page<T> = { items: T[]; next_cursor?: string; page_size: number };
+
+export type PrincipalDetail = {
+  principal_id: string;
+  tenant_id: string;
+  principal_type: "HUMAN" | "SERVICE_ACCOUNT" | "API_CLIENT";
+  identity_provider_subject: string;
+  email: string;
+  display_name: string;
+  status: "PENDING_ACTIVATION" | PrincipalStatus;
+  created_at: string;
+  data_classification: string;
+  record_version: number;
+  external_id?: string;
+  source: string;
+  invited_at?: string;
+  activated_at?: string;
+  disabled_at?: string;
+  updated_at: string;
+};
+
+export type SessionSummary = {
+  session_context_id: string;
+  principal_id: string;
+  display_name: string;
+  principal_type: string;
+  legal_entity_id?: string;
+  trust_posture: string;
+  mfa_verified: boolean;
+  adaptive_risk_score: number;
+  source_channel?: string;
+  support_context_id?: string;
+  issued_at: string;
+  expires_at: string;
+  invalidated_at?: string;
+  invalidation_reason?: string;
+  state: "ACTIVE" | "EXPIRED" | "INVALIDATED";
+};
+
+export type AuthenticationEvent = {
+  event_id: string;
+  tenant_id: string;
+  principal_id: string;
+  event_type: "LOGIN" | "LOGOUT" | "FAILED_LOGIN" | "MFA_CHALLENGE" | "STEP_UP" | "SESSION_INVALIDATED" | "PASSWORD_RESET";
+  outcome: "SUCCESS" | "FAILURE";
+  assurance_level?: string;
+  occurred_at: string;
+  correlation_id?: string;
+  details?: { basis?: string; decision?: string };
+};
+
+export type AssuranceChange = {
+  history_id: string;
+  principal_id: string;
+  assurance_level: "PASSWORD" | "TOTP" | "PASSKEY";
+  changed_at: string;
+  changed_by?: string;
+  reason?: string;
+};
+
+export type IdentitySummary = {
+  generated_at: string;
+  principals_by_status: Record<string, number>;
+  active_principals_by_type: Record<string, number>;
+  active_sessions: number;
+  active_sessions_mfa_verified: number;
+  active_humans: number;
+  active_humans_with_mfa: number;
+  admins_without_mfa: number;
+  support_pending_approval: number;
+  support_active: number;
+  password_resets_pending: number;
+  failed_sign_ins_24h: number;
+  successful_sign_ins_24h: number;
+  factor_holders: Record<string, number>;
+  pipeline_24h: Record<string, number>;
+  mfa_by_role: { role_id: string; holders: number; with_mfa: number }[];
+  merged_identities: number;
+  session_invalidations_24h: Record<string, number>;
+};
+
+export type IdentityLink = {
+  link_id: string;
+  principal_id: string;
+  source: "federation_link" | "federated_identity";
+  identity_provider: string;
+  issuer?: string;
+  provider_subject: string;
+  status: string;
+  created_at: string;
+  last_login_at?: string;
+};
+
+export type SubjectIdentity = {
+  requested_id: string;
+  merged_into?: string;
+  principal: Principal & { record_version: number };
+  links: IdentityLink[];
+};
+
+export type PasswordResetRequest = {
+  request_id: string;
+  tenant_id: string;
+  principal_id: string;
+  requested_by: string;
+  reason?: string;
+  status: "PENDING_APPROVAL" | "ISSUED" | "REJECTED" | "COMPLETED" | "EXPIRED";
+  approvals_required: number;
+  created_at?: string;
+};
+
+/** A support access request or grant as the Support access register lists it. */
+export type SupportRow = SupportContext & {
+  record_version?: number;
+  approval_status?: string;
+  requested_by_principal_id?: string;
+};
+
+type ListQuery = Record<string, string | number | undefined>;
+
+function listOf<T>(identity: CallerIdentity, path: string, query: ListQuery): Promise<ApiResult<Page<T>>> {
+  return apiGet<Page<T>>("identityContext", path, { identity, query });
+}
+
+export function getIdentitySummary(identity: CallerIdentity): Promise<ApiResult<IdentitySummary>> {
+  return apiGet<IdentitySummary>("identityContext", "/v1/identity/summary", { identity });
+}
+
+export function listPrincipals(
+  identity: CallerIdentity,
+  q: { status?: string; principalType?: string; search?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<PrincipalDetail>>> {
+  return listOf(identity, "/v1/principals", {
+    "filter[status]": q.status,
+    "filter[principal_type]": q.principalType,
+    q: q.search,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+export function listSessions(
+  identity: CallerIdentity,
+  q: { principalId?: string; state?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<SessionSummary>>> {
+  return listOf(identity, "/v1/context/sessions", {
+    "filter[principal_id]": q.principalId,
+    "filter[status]": q.state,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+export function listSupportContexts(
+  identity: CallerIdentity,
+  q: { state?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<SupportRow>>> {
+  return listOf(identity, "/v1/context/support", { "filter[status]": q.state, page_size: q.pageSize, cursor: q.cursor });
+}
+
+export function listAuthenticationEvents(
+  identity: CallerIdentity,
+  q: { principalId?: string; outcome?: string; since?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<AuthenticationEvent>>> {
+  return listOf(identity, "/v1/authentication-events", {
+    "filter[principal_id]": q.principalId,
+    "filter[outcome]": q.outcome,
+    "filter[since]": q.since,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+export function getAssuranceHistory(identity: CallerIdentity, principalId: string): Promise<ApiResult<Page<AssuranceChange>>> {
+  return listOf(identity, `/v1/principals/${encodeURIComponent(principalId)}/assurance-history`, { page_size: 20 });
+}
+
+export function getSubjectIdentity(identity: CallerIdentity, id: string): Promise<ApiResult<SubjectIdentity>> {
+  return apiGet<SubjectIdentity>("identityContext", `/v1/subjects/${encodeURIComponent(id)}`, { identity });
+}
+
+/** The ETag form identity-context-svc issues: "v<record_version>". */
+export function versionTag(version: number): string {
+  return `"v${version}"`;
+}
+
+export function createSubject(
+  identity: CallerIdentity,
+  body: { email?: string; display_name: string; principal_type: string; external_id?: string; invite?: boolean },
+  idempotencyKey?: string,
+): Promise<ApiWriteResult<PrincipalDetail>> {
+  return apiPost<PrincipalDetail>("identityContext", "/v1/principals", body, { identity, idempotencyKey });
+}
+
+export function inviteSubject(identity: CallerIdentity, principalId: string): Promise<ApiWriteResult<unknown>> {
+  return apiPost("identityContext", `/v1/principals/${encodeURIComponent(principalId)}/invite`, {}, { identity });
+}
+
+export function setPrincipalStatus(
+  identity: CallerIdentity,
+  principalId: string,
+  status: PrincipalStatus,
+  reason: string,
+  version: number,
+): Promise<ApiWriteResult<null>> {
+  return apiPut<null>("identityContext", `/v1/principals/${encodeURIComponent(principalId)}/status`, { status, reason }, {
+    identity,
+    ifMatch: versionTag(version),
+  });
+}
+
+export function requestPasswordReset(
+  identity: CallerIdentity,
+  principalId: string,
+  reason: string,
+): Promise<ApiWriteResult<PasswordResetRequest>> {
+  return apiPost<PasswordResetRequest>(
+    "identityContext",
+    `/v1/principals/${encodeURIComponent(principalId)}/password-resets`,
+    { reason },
+    { identity },
+  );
+}
+
+export function decidePasswordReset(
+  identity: CallerIdentity,
+  requestId: string,
+  decision: "APPROVE" | "REJECT",
+): Promise<ApiWriteResult<PasswordResetRequest>> {
+  return apiPost<PasswordResetRequest>("identityContext", `/v1/password-resets/${encodeURIComponent(requestId)}/decide`, { decision }, { identity });
+}
+
+export function getPasswordReset(identity: CallerIdentity, requestId: string): Promise<ApiResult<PasswordResetRequest>> {
+  return apiGet<PasswordResetRequest>("identityContext", `/v1/password-resets/${encodeURIComponent(requestId)}`, { identity });
+}
+
+export function approveSupportContext(identity: CallerIdentity, supportContextId: string, version: number): Promise<ApiWriteResult<SupportContext>> {
+  return apiPost<SupportContext>("identityContext", `/v1/context/support/${encodeURIComponent(supportContextId)}/approve`, {}, {
+    identity,
+    ifMatch: versionTag(version),
+  });
+}
+
+export function resetPrincipalMfa(
+  identity: CallerIdentity,
+  principalId: string,
+  reasonCode: string,
+  purpose: string,
+): Promise<ApiWriteResult<{ retired: number }>> {
+  return apiPost("identityContext", `/v1/principals/${encodeURIComponent(principalId)}/mfa/reset`, { reason_code: reasonCode, purpose }, { identity });
+}
+
+export function mergeSubjects(
+  identity: CallerIdentity,
+  survivorId: string,
+  duplicateId: string,
+  reason: string,
+  duplicateVersion: number,
+): Promise<ApiWriteResult<{ merge_id: string; survivor_id: string; duplicate_id: string; links_moved: number }>> {
+  return apiPost("identityContext", `/v1/subjects/${encodeURIComponent(survivorId)}/merge`, { duplicate_id: duplicateId, reason }, {
+    identity,
+    ifMatch: versionTag(duplicateVersion),
+  });
+}
+
+/** The problem code identity-context-svc put on a refusal, when it sent one. */
+export function identityProblemCode(error: { body?: unknown }): string {
+  const b = error.body as { code?: unknown } | undefined;
+  return typeof b?.code === "string" ? b.code : "";
+}

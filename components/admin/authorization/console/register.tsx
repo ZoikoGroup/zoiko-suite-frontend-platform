@@ -34,10 +34,15 @@ export const PAGE_SIZE = 8;
 export type Query = Record<string, string | undefined>;
 
 export function href(q: Query): string {
+  return hrefAt(BASE, q);
+}
+
+/** A link to `base` carrying the query. RegisterView serves any console page through this. */
+export function hrefAt(base: string, q: Query): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) if (v !== undefined) sp.set(k, v);
   const s = sp.toString();
-  return s ? `${BASE}?${s}` : BASE;
+  return s ? `${base}?${s}` : base;
 }
 
 export type Ctx = {
@@ -77,9 +82,13 @@ export type RegisterSpec = {
   what: string;
   note?: string;
   drawer: (id: string, links: DrawerLinks) => ReactNode | null;
+  /** The page this register lives on; the Authorization console when unset. */
+  base?: string;
 };
 
 export function RegisterView({ spec, query }: { spec: RegisterSpec; query: Query }) {
+  const base = spec.base ?? BASE;
+  const href = (q: Query) => hrefAt(base, q);
   const q = (query.q ?? "").trim();
   const needle = q.toLowerCase();
   const values = Object.fromEntries(spec.filters.map((f) => [f.name, query[f.name] ?? ""]));
@@ -114,7 +123,7 @@ export function RegisterView({ spec, query }: { spec: RegisterSpec; query: Query
   return (
     <RegisterBody drawer={drawer}>
       <RegisterToolbar
-        action={BASE}
+        action={base}
         keep={query.tab ? { tab: query.tab } : {}}
         search={{ name: "q", value: q, placeholder: spec.searchPlaceholder }}
         filters={spec.filters.map((f) => ({ ...f, value: values[f.name] }))}
