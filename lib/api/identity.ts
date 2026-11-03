@@ -248,6 +248,14 @@ export type AuthenticateRequest = {
   email: string;
   password: string;
   correlation_id?: string;
+  /**
+   * The console's confidential OAuth client (Group 1 register R-1), so the
+   * session carries a VERIFIED source channel. Server-only: read from
+   * IDENTITY_CONSOLE_CLIENT_ID / IDENTITY_CONSOLE_CLIENT_SECRET, never a
+   * NEXT_PUBLIC_* variable.
+   */
+  client_id?: string;
+  client_secret?: string;
 };
 
 /**
