@@ -61,10 +61,6 @@ function risk(score: number): { label: string; tone: Tone } {
   return { label: "Low", tone: "success" };
 }
 
-function Unreadable({ what }: { what: string }): ReactNode {
-  return <span className="text-slate-500">{`The ${what} could not be read.`}</span>;
-}
-
 // ── People ───────────────────────────────────────────────────────────────────
 
 export function peopleRegister(data: IdentityData, ctx: Ctx, detail: PersonDetail | null, query: Query): RegisterSpec {
@@ -125,6 +121,7 @@ export function peopleRegister(data: IdentityData, ctx: Ctx, detail: PersonDetai
     empty: "No principals in this tenant yet. Add a person to start.",
     error: data.principals.error,
     what: "identity register",
+    problem: identityProblem("identity register"),
     note: data.principals.more ? "First 200 shown — narrow with search" : undefined,
     drawer: (id, links) => {
       const p = data.principals.rows.find((x) => x.principal_id === id);
@@ -375,6 +372,7 @@ export function sessionsRegister(data: IdentityData, ctx: Ctx): RegisterSpec {
     empty: "No sessions have been resolved in this tenant.",
     error: data.sessions.error,
     what: "sessions",
+    problem: identityProblem("sessions"),
     note: data.sessions.more ? "Newest 200 shown" : undefined,
     drawer: (id, links) => {
       const s = data.sessions.rows.find((x) => x.session_context_id === id);
@@ -471,6 +469,7 @@ export function eventsRegister(data: IdentityData, ctx: Ctx): RegisterSpec {
     empty: "No sign-in has been recorded in this tenant yet.",
     error: data.events.error,
     what: "sign-in events",
+    problem: identityProblem("sign-in events"),
     note: data.events.more ? "Newest 200 shown" : undefined,
     drawer: (id, links) => {
       const e = data.events.rows.find((x) => x.event_id === id);
@@ -544,6 +543,7 @@ export function supportRegister(data: IdentityData, ctx: Ctx): RegisterSpec {
     empty: "No support access has been requested in this tenant.",
     error: data.support.error,
     what: "support access requests",
+    problem: identityProblem("support access requests"),
     drawer: (id, links) => {
       const s = data.support.rows.find((x) => x.support_context_id === id);
       if (!s) return null;
@@ -615,6 +615,20 @@ function SupportDrawer({ s, ctx, close, names }: { s: SupportRow; ctx: Ctx; clos
   );
 }
 
-export function unreadableNode(what: string): ReactNode {
-  return <Unreadable what={what} />;
+/** Why a register is empty when identity-context-svc could not be read. */
+export function identityProblem(what: string) {
+  return function IdentityProblem(error: ApiError): ReactNode {
+    const why =
+      error.kind === "unreachable" || error.kind === "timeout"
+        ? "The identity service is not reachable, so nothing was read."
+        : error.status === 403
+          ? `You don't have access to the ${what}.`
+          : `The ${what} could not be read (${error.status ?? error.kind}).`;
+    return (
+      <div className="flex items-center gap-2 px-5 py-6 text-[13px] text-amber-700 dark:text-amber-300">
+        <ShieldQuestion className="h-4 w-4 shrink-0" />
+        {why} Nothing is shown rather than an empty list.
+      </div>
+    );
+  };
 }

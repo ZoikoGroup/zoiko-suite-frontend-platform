@@ -84,6 +84,8 @@ export type RegisterSpec = {
   drawer: (id: string, links: DrawerLinks) => ReactNode | null;
   /** The page this register lives on; the Authorization console when unset. */
   base?: string;
+  /** Shown instead of the Authorization console's read problem when the register is unreadable. */
+  problem?: (error: ApiError) => ReactNode;
 };
 
 export function RegisterView({ spec, query }: { spec: RegisterSpec; query: Query }) {
@@ -130,7 +132,11 @@ export function RegisterView({ spec, query }: { spec: RegisterSpec; query: Query
         clearHref={filtered ? href({ tab: query.tab }) : undefined}
       />
       {unreadable ? (
-        <ReadProblem error={spec.error!} what={spec.what} returnTo={href({ tab: query.tab })} />
+        spec.problem ? (
+          spec.problem(spec.error!)
+        ) : (
+          <ReadProblem error={spec.error!} what={spec.what} returnTo={href({ tab: query.tab })} />
+        )
       ) : (
         <>
           <RegisterTable
