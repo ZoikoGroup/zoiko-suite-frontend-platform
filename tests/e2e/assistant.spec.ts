@@ -175,7 +175,8 @@ for (const scheme of ["light", "dark"] as const) {
       const dialog = await openAssistant(page);
       await dialog.getByRole("button", { name: "Privacy and AI notice" }).first().click();
       const notice = dialog.getByRole("region", { name: "Privacy and AI notice" });
-      await expect(notice).toContainText("[period from signed policy]");
+      // Doc 02 §17: never an unresolved "[…]" placeholder in the notice.
+      await expect(notice).not.toContainText(/\[[^\]]+\]/);
       await expect(notice.locator('img[src="/logo.png"]')).toBeVisible();
       await dialog.screenshot({ path: `${shotDir}/privacy-${scheme}.png` });
     });

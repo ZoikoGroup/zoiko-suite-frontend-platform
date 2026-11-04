@@ -120,13 +120,11 @@ describe("K10 Z-tile branding", () => {
     expect(welcome.textContent).toContain("Hi, I can explain ZoikoSuite plans, modules, trust and integrations. I can't see or change any account.");
     // Doc01: at most four quick-action prompts; the rest behind "More topics".
     expect(within(within(welcome).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.querySelector(".za-option-label")!.textContent)).toEqual([
-      "Pricing and trial", "Explore modules", "Book a demo", "Security and trust",
+      "Explore platform", "Compare plans", "Book demo", "Security & trust",
     ]);
     expect(welcome.textContent).toContain("AI assistant. Answers use public ZoikoSuite information only.");
-    await act(async () => {
-      fireEvent.click(within(welcome).getByRole("button", { name: "More topics" }));
-    });
-    expect(within(welcome).getByRole("button", { name: /Get support/ })).toBeTruthy();
+    // Doc 02 T01: exactly the four quick actions; nothing hidden behind them.
+    expect(within(welcome).queryByRole("button", { name: /Get support/ })).toBeNull();
     const header = dialog.querySelector("header")!;
     expect(within(header).queryByTestId("ztile")).toBeNull(); // the Z tile stays on the launcher only
     expect(within(header).getByTestId("full-logo").querySelector("img")!.getAttribute("src")).toBe("/logo.png");
@@ -158,7 +156,8 @@ describe("K10 Z-tile branding", () => {
     const notice = within(dialog).getByRole("region", { name: "Privacy and AI notice" });
     const wordmark = notice.querySelector('img[src="/logo.png"]')!;
     expect(wordmark.parentElement!.className).toContain("bg-white");
-    expect(notice.textContent).toContain("[period from signed policy]");
+    // Doc 02 §17: no unresolved placeholder in the notice.
+    expect(notice.textContent).not.toMatch(/\[[^\]]+\]/);
   });
 
   it("shows a 24 px avatar and the speaker label beside each assistant answer", async () => {
@@ -400,7 +399,7 @@ describe("Kairos-style menu, history and theme", () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
     const dialog = await openWidget();
     await act(async () => {
-      fireEvent.click(within(within(dialog).getByTestId("assistant-welcome")).getByRole("button", { name: /Book a demo/ }));
+      fireEvent.click(within(within(dialog).getByTestId("assistant-welcome")).getByRole("button", { name: /Book demo/ }));
     });
     expect(api.askAssistant.mock.calls[0][3]).toBe("I'd like to book a demo");
   });
@@ -728,5 +727,16 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
       fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
     });
     expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).toBeNull();
+  });
+});
+
+describe("kill switch (Doc 08 §10)", () => {
+  it("with chat_enabled false, the official routes show first and the composer is disabled", async () => {
+    api.loadAssistantConfig.mockResolvedValue(ok({ ...config, capabilities: { chat_enabled: false } }));
+    const dialog = await openWidget();
+    const welcome = within(dialog).getByTestId("assistant-welcome");
+    expect(within(welcome).getByTestId("assistant-unavailable")).toBeTruthy();
+    expect((within(dialog).getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(api.askAssistant).not.toHaveBeenCalled();
   });
 });

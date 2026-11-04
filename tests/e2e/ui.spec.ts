@@ -262,9 +262,11 @@ test.describe("target sizes on a pointer desktop (1280x800)", () => {
     const launcher = (await page.getByTestId("assistant-launcher").boundingBox())!;
     for (const c of await size(page, ".za-header .za-control")) expect(Math.min(c.w, c.h), c.name ?? "").toBeGreaterThanOrEqual(32);
     const chips = await size(page, "[data-testid=assistant-welcome] .za-chip");
-    expect(chips.map((c) => c.name)).toEqual(["Pricing and trial", "Explore modules", "Book a demo", "Security and trust"]);
+    // The leading icon is decorative (aria-hidden); compare the label text.
+    expect(chips.map((c) => (c.name ?? "").replace(/^[^\p{L}]+/u, ""))).toEqual(["Explore platform", "Compare plans", "Book demo", "Security & trust"]);
     for (const c of chips) expect(c.h).toBeGreaterThanOrEqual(40);
-    await expect(dialog.getByRole("button", { name: "More topics" })).toBeVisible();
+    // Doc 02 T01: exactly four quick actions, so nothing is hidden behind "More topics".
+    await expect(dialog.getByRole("button", { name: "More topics" })).toHaveCount(0);
     await ask(page, "What does Legal and Contracts do?");
     expect((await dialog.locator(".za-cta").boundingBox())!.height).toBeGreaterThanOrEqual(44);
     const send = (await dialog.getByRole("button", { name: "Send message" }).boundingBox())!;

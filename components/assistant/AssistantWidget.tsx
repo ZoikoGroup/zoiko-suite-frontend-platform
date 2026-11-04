@@ -79,7 +79,7 @@ import {
 import { ASSISTANT_LABEL, ASSISTANT_SUBTITLE, ASSISTANT_TITLE, LOGO_FULL_URL, LOGO_MARK_URL, type AssistantLogos } from "./branding";
 import { Markdown, clampWords, countWords, revealWords } from "./markdown";
 import { answerTitle, menuFromChips, menuFromServer, type MenuTopic } from "./menu";
-import { looksSensitive, reduce } from "./state";
+import { looksSensitive, maskForHistory, reduce } from "./state";
 import { useLauncherOffset } from "./useLauncherOffset";
 import { FullLogo, ZTile } from "./ZTile";
 
@@ -154,13 +154,12 @@ type Theme = "light" | "dark";
 type MenuView = { kind: "main" } | { kind: "topic"; key: string };
 
 // Fallback copy for when /config has not loaded; the service's copy wins.
+// Doc 02 T01 quick actions.
 const STARTERS: Chip[] = [
-  { label: "Pricing and trial", message: "What plans are available, and is there a free trial?" },
-  { label: "Explore modules", message: "What modules does ZoikoSuite include?" },
-  { label: "Book a demo", message: "I'd like to book a demo" },
-  { label: "Security and trust", message: "How is data secured?" },
-  { label: "Integrations", message: "Which integrations does ZoikoSuite support?" },
-  { label: "Get support", message: "I need help from support" },
+  { label: "Explore platform", message: "What can ZoikoSuite do?" },
+  { label: "Compare plans", message: "What do the plans cost?" },
+  { label: "Book demo", message: "I'd like to book a demo" },
+  { label: "Security & trust", message: "How is data secured?" },
 ];
 
 const COPY: Record<string, string> = {
@@ -172,7 +171,7 @@ const COPY: Record<string, string> = {
   "ui.welcome.greeting": "Hi, I can explain ZoikoSuite plans, modules, trust and integrations. I can't see or change any account.",
   "ui.welcome.disclosure": "AI assistant. Answers use public ZoikoSuite information only.",
   "ui.more_topics": "More topics",
-  "ui.privacy": "Don't share passwords, payment, tax or account details.",
+  "ui.privacy": "Please don't share passwords, payment details, or private financial records.",
   "ui.privacy.link": "Privacy and AI notice",
   "ui.placeholder": "Ask about ZoikoSuite",
   "ui.loading": "Looking for verified information…", // Doc 02 §21
@@ -222,7 +221,8 @@ const COPY: Record<string, string> = {
   "ui.privacy.title": "Privacy and AI notice",
   "ui.privacy.body":
     "This assistant uses AI to answer from approved, public ZoikoSuite information. It can't see or change any account. Your messages are processed to answer you and to keep the service safe. Please don't share personal, payment, tax or account details.",
-  "ui.privacy.retention": "Chat records are kept for [period from signed policy], then deleted.",
+  // Empty until the signed retention policy sets the period (DEC-06).
+  "ui.privacy.retention": "",
   "ui.draft": "Draft content",
   "ui.status.VERIFIED": "Verified",
   "ui.status.Partner-Supported": "Partner-supported",
@@ -237,6 +237,7 @@ const ROUTE_LABELS: Record<string, string> = {
   core_modules: "Explore modules",
   trust: "Open Trust Center",
   signup_or_trial: "Start a trial",
+  "sign-in": "Sign in securely", // Doc 02 T17/T21
 };
 
 /** Shown in place of a message the service classed as sensitive (X03). */
@@ -247,6 +248,7 @@ const CHANNELS: Record<string, string> = {
   // Doc 10 §08 "Enquiry route only" copy: no follow-up is implied.
   demo: "Open our secure demo form to send your request.",
   support: "This opens the official support page.",
+  "sign-in": "This opens the official sign-in page.",
   trust: "This opens the official trust and security page.",
   pricing: "This opens the official pricing page.",
 };
@@ -317,7 +319,10 @@ function regionName(code: string): string {
 export function isPlaceholderUrl(url: string): boolean {
   let host: string;
   try {
-    host = new URL(url).hostname.toLowerCase();
+    const u = new URL(url);
+    // Only https pages are linked (Doc 06 §11): no http, data: or javascript:.
+    if (u.protocol !== "https:") return true;
+    host = u.hostname.toLowerCase();
   } catch {
     return true;
   }
@@ -879,7 +884,7 @@ export function AssistantWidget({
       if (m.role !== "visitor") return [];
       const reply = all.find((x): x is Extract<Message, { role: "assistant" }> => x.role === "assistant" && x.replyTo === m.id);
       if (!reply) return [];
-      return [{ q: m.text, a: reply.turn.status === "UNAVAILABLE" ? t("ui.unavailable") : reply.turn.text }];
+      return [{ q: maskForHistory(m.text), a: reply.turn.status === "UNAVAILABLE" ? t("ui.unavailable") : reply.turn.text }];
     });
   }
 
@@ -1011,6 +1016,8 @@ export function AssistantWidget({
   }
 
   const fallbackLinks = FALLBACK_ROUTES.map((r) => routeLink(r.key, r.label, false)).filter(Boolean);
+  // Kill switch on (Doc 08 §10): show the official routes and accept no input.
+  const chatOff = config?.capabilities?.chat_enabled === false;
 
   function failText(kind: FailKind, status?: number): string {
     let text: string;
@@ -1547,7 +1554,10 @@ export function AssistantWidget({
                 </button>
               </div>
               <p style={{ margin: "8px 0 0" }}>{t("ui.privacy.body")}</p>
-              <p style={{ margin: "8px 0 0" }}>{t("ui.privacy.retention")}</p>
+              {/* Doc 02 §17: no line until the signed policy sets the period; never a "[…]" placeholder. */}
+              {t("ui.privacy.retention") && !t("ui.privacy.retention").includes("[") && (
+                <p style={{ margin: "8px 0 0" }}>{t("ui.privacy.retention")}</p>
+              )}
               <p className="za-meta" style={{ margin: "8px 0 0" }}>
                 {t("ui.clear.notice")}
               </p>
@@ -1647,6 +1657,22 @@ export function AssistantWidget({
                   <p className="za-meta" role="status" style={{ marginBottom: 12 }}>
                     Chat cleared.
                   </p>
+                )}
+                {chatOff && (
+                  // Doc 08 §10: with the kill switch on, the official routes
+                  // come first; nothing is sent to the assistant.
+                  <div style={{ marginBottom: 12 }}>
+                    <ErrorPanel
+                      text={t("ui.unavailable")}
+                      links={fallbackLinks}
+                      retryLabel={t("ui.retry")}
+                      disabled={false}
+                      reference=""
+                      onRetry={() => {
+                        void loadAssistantConfig().then((r) => r.ok && setConfig(r.data));
+                      }}
+                    />
+                  </div>
                 )}
                 <ZTile src={logos.mark} size={48} radius={12} />
                 <p className="za-welcome-title">{title}</p>
@@ -1766,6 +1792,7 @@ export function AssistantWidget({
                   dispatch({ type: "TYPE" });
                 }}
                 onKeyDown={onComposerKey}
+                disabled={chatOff}
                 maxLength={MAX_MESSAGE}
                 placeholder={t("ui.placeholder")}
                 aria-invalid={sensitive || emptyHint}
