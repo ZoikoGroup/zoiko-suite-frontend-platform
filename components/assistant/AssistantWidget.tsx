@@ -84,7 +84,7 @@ import { useLauncherOffset } from "./useLauncherOffset";
 import { FullLogo, ZTile } from "./ZTile";
 
 type Feedback = { rating?: "useful" | "not_useful"; reason?: FeedbackReason; sent?: boolean };
-type FailKind = "network" | "rate_limited" | "busy" | "timeout";
+type FailKind = "network" | "rate_limited" | "busy" | "timeout" | "unavailable";
 
 type VisitorMessage = {
   id: string; // stable bubble id
@@ -327,6 +327,8 @@ export function isPlaceholderUrl(url: string): boolean {
 function failKind(e: PublicAIError): FailKind {
   if (e.kind === "http" && e.status === 429) return "rate_limited";
   if (e.kind === "http" && e.status === 409) return "busy";
+  if (e.kind === "http" && (e.status === 503 || e.status === 502 || e.status === 504)) return "unavailable";
+  if (e.kind === "unreachable") return "unavailable";
   if (e.kind === "timeout") return "timeout";
   return "network";
 }
@@ -782,7 +784,7 @@ export function AssistantWidget({
     if (!msg || inFlight.current) return;
     const turnId = fresh ? crypto.randomUUID() : msg.turnId;
     inFlight.current = turnId;
-    setVisitor(visitorId, { turnId, state: "sending", fail: undefined });
+    setVisitor(visitorId, { turnId, state: "sending" });
     dispatch({ type: "SEND" });
     setAnnounce(t("ui.loading") || t("ui.thinking"));
     const stillWanted = () => inFlight.current === turnId;
@@ -824,7 +826,7 @@ export function AssistantWidget({
       shownSeq.current = { session: s?.id ?? "", seq: turn.turn_sequence };
       // Doc 01 §16 / Doc 06 §20: input the service classed as sensitive is
       // never re-displayed; the bubble keeps a neutral notice instead.
-      setVisitor(visitorId, turn.reason === "SENSITIVE_INPUT" ? { state: "sent", text: SENSITIVE_REMOVED } : { state: "sent" });
+      setVisitor(visitorId, turn.reason === "SENSITIVE_INPUT" ? { state: "sent", text: SENSITIVE_REMOVED, fail: undefined } : { state: "sent", fail: undefined });
       update((all) => {
         const reply: Message = { id: turn.turn_id, role: "assistant", turn, feedback: {}, replyTo: visitorId };
         const i = all.findIndex((m) => m.role === "assistant" && m.replyTo === visitorId);
@@ -1021,6 +1023,8 @@ export function AssistantWidget({
         return t("ui.error.busy");
       case "timeout":
         return t("ui.error.timeout");
+      case "unavailable":
+        return t("ui.unavailable");
       default:
         return t("ui.error.unreachable");
     }
@@ -1666,7 +1670,7 @@ export function AssistantWidget({
                         <span className="za-sr-only">You said: </span>
                         {m.text}
                       </p>
-                      {m.state === "failed" && m.fail && (
+                      {m.fail && (
                         <div style={{ alignSelf: "stretch", marginTop: 8 }}>
                           <ErrorPanel
                             text={failText(m.fail.kind)}

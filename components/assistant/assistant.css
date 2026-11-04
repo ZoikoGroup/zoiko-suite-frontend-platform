@@ -331,7 +331,7 @@
   overflow: hidden;
   white-space: nowrap;
   color: var(--za-accent-text);
-  font-size: 1.0625rem;
+  font-size: var(--za-font-title);
   font-weight: 700;
   line-height: 1.375rem;
 }
@@ -339,12 +339,12 @@
 .za-title:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
 /* AI disclosure as the Kairos-style pill under the title. */
 .za-subtitle {
-  grid-column: 2 / span 2;
+  grid-column: 2 / -1;
   justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 100%;
+  max-width: none;
   margin: 4px 0 0;
   padding: 1px 10px;
   border: 1px solid var(--za-option-border);

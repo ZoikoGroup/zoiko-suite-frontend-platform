@@ -26,7 +26,7 @@ async function pass(request: Request, ctx: { params: Promise<{ path: string[] }>
       cache: "no-store",
       // The visitor's Stop aborts this request; the abort reaches the
       // service, which cancels the model call (Doc 05 §12).
-      signal: AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(4_000)]),
     });
   } catch {
     return problem(503, "The assistant is unavailable");
