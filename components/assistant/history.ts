@@ -4,14 +4,15 @@
 // By default history lives in sessionStorage: this tab only, gone when it
 // closes, because a long-lived browser transcript is not allowed by default.
 // The visitor may opt in to "Remember my chats on this device": history then
-// lives in localStorage for at most DEVICE_TTL_MS. Opting out deletes it.
+// lives in localStorage for at most DEVICE_TTL_MS (24 hours, the service's
+// own retention default). Opting out deletes it.
 // Questions are stored masked (maskForHistory), so the browser never keeps
 // more than the service does.
 
 export const SESSION_KEY = "zoiko-assistant-conversations";
 export const DEVICE_KEY = "zoiko-assistant-history-v1";
 export const REMEMBER_KEY = "zoiko-assistant-remember";
-export const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const DEVICE_TTL_MS = 24 * 60 * 60 * 1000;
 export const SESSION_MAX = 10;
 export const DEVICE_MAX = 50;
 

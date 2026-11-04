@@ -953,3 +953,91 @@ html[data-za-lock="true"], html[data-za-lock="true"] body { overflow: hidden; }
 .za-archive-turns > div + div { margin-top: 8px; }
 .za-archive-turns dt { color: var(--za-accent-text); font-size: var(--za-font-small); font-weight: 600; }
 .za-archive-turns dd { margin: 4px 0 0; font-size: var(--za-font-small); line-height: 1.25rem; }
+
+/* History card (Kairos style): an overlay on the conversation with a new-chat
+   button, every saved chat (question, answer preview, time) and the expiry
+   note. Clicking a chat reopens it. The panel is position: fixed, so it
+   anchors the card. */
+.za-history-card {
+  position: absolute;
+  z-index: 5;
+  top: 76px;
+  right: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 160px);
+  border: 1px solid var(--za-border);
+  border-radius: 16px;
+  background: var(--za-header-bg);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.za-history-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px 18px; border-bottom: 1px solid var(--za-border); }
+.za-history-title {
+  flex: 1;
+  margin: 0;
+  color: var(--za-accent-text);
+  font-size: var(--za-font-meta);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.za-history-new { padding: 14px 14px 12px; border-bottom: 1px solid var(--za-border); }
+.za-history-newbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--za-user-bg);
+  color: #fff;
+  font-size: var(--za-font-body);
+  font-weight: 600;
+  cursor: pointer;
+}
+.za-history-newbtn:disabled { opacity: 0.55; cursor: not-allowed; }
+.za-history-newbtn:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
+.za-history-items { flex: 1 1 auto; margin: 0; padding: 6px 8px; overflow-y: auto; list-style: none; }
+.za-history-item { position: relative; border-radius: 12px; }
+.za-history-item + .za-history-item { margin-top: 2px; }
+.za-history-item[data-current] { background: var(--za-surface-muted); }
+.za-history-open {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 44px 12px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--za-text);
+  text-align: left;
+  cursor: pointer;
+}
+.za-history-open:hover { background: var(--za-surface-muted); }
+.za-history-open:focus-visible { outline: 2px solid var(--za-focus); outline-offset: -2px; }
+.za-history-icon { flex: none; margin-top: 2px; color: var(--za-accent-text); }
+.za-history-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.za-history-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--za-font-body); font-weight: 600; }
+.za-history-a {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--za-text-muted);
+  font-size: var(--za-font-small);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.za-history-time { color: var(--za-text-muted); font-size: var(--za-font-meta); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.za-history-del { position: absolute; top: 8px; right: 6px; opacity: 0.7; }
+.za-history-item:hover .za-history-del, .za-history-del:focus-visible { opacity: 1; }
+.za-history-empty { margin: 0; padding: 16px 18px; }
+.za-history-foot { padding: 10px 18px 12px; border-top: 1px solid var(--za-border); color: var(--za-text-muted); font-size: var(--za-font-meta); }
+.za-history-foot p { margin: 6px 0 0; }
+.za-history-remember { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+@media (max-width: 767.98px) {
+  .za-history-card { top: 64px; right: 8px; left: 8px; max-height: calc(100% - 140px); }
+}

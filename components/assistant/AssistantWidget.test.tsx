@@ -57,6 +57,10 @@ const ok = <T,>(data: T) => ({ ok: true as const, data });
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
+  // Chats are saved as they go, so each test starts with empty history.
+  window.sessionStorage.clear();
+  window.localStorage.removeItem("zoiko-assistant-history-v1");
+  window.localStorage.removeItem("zoiko-assistant-remember");
   Element.prototype.scrollIntoView = vi.fn();
   api.loadAssistantConfig.mockResolvedValue(ok(config));
   // Structured responses off by default: /menu is 404 and the starter chips stay.
@@ -482,7 +486,9 @@ describe("Kairos-style menu, history and theme", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
     });
     const history = within(dialog).getByRole("region", { name: "Chat history" });
-    expect(within(history).getByRole("button", { name: "What plans are available?" })).toBeTruthy();
+    // Kairos-style list: the chat on screen is listed and marked current.
+    const row = within(history).getByRole("button", { name: /^What plans are available\?/ });
+    expect(row.getAttribute("aria-current")).toBe("true");
     await act(async () => {
       fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
     });
@@ -707,7 +713,7 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     const archive = within(dialog).getByTestId("assistant-archive");
     expect(archive.textContent).toContain("What plans are available?");
     expect(archive.textContent).toContain("Starter, Growth and Enterprise plans are available.");
-    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Kept in this browser tab only");
+    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Chats stay in this browser tab");
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Clear history" }));
@@ -781,5 +787,45 @@ describe("closing and device history", () => {
     await openWidget();
     await ask("What plans are available?");
     expect(window.localStorage.getItem("zoiko-assistant-history-v1")).toBeNull();
+  });
+});
+
+describe("Kairos-style history list", () => {
+  it("reopens an earlier chat from the list; Clear chat removes its entry", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Data is encrypted in transit and at rest." })));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    // Start a second chat; the first stays in the list.
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: /Start a new conversation/ }));
+    });
+    await ask("How is data secured?");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    const history = within(dialog).getByRole("region", { name: "Chat history" });
+    expect(within(history).getAllByRole("button", { name: /^(What plans|How is data)/ })).toHaveLength(2);
+
+    // Reopen the first chat: its question and answer are back, with a note.
+    await act(async () => {
+      fireEvent.click(within(history).getByRole("button", { name: /^What plans are available\?/ }));
+    });
+    expect(dialog.textContent).toContain("Starter, Growth and Enterprise plans are available.");
+    expect(dialog.textContent).toContain("Earlier conversation");
+    expect(dialog.textContent).not.toContain("Data is encrypted in transit");
+
+    // Clear chat deletes this entry from history.
+    await act(async () => {
+      fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
+    });
+    const stored = JSON.parse(window.sessionStorage.getItem("zoiko-assistant-conversations") ?? "[]");
+    expect(stored.map((c: { turns: { q: string }[] }) => c.turns[0].q)).toEqual(["How is data secured?"]);
   });
 });
