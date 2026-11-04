@@ -28,7 +28,8 @@ async function pass(request: Request, ctx: { params: Promise<{ path: string[] }>
       // service, which cancels the model call (Doc 05 §12).
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
     });
-  } catch {
+  } catch (err) {
+    console.error(`[assistant proxy] ${request.method} ${upstreamURL(path)} failed`, err);
     return problem(503, "The assistant is unavailable");
   }
   return new Response(upstream.status === 204 || upstream.status === 304 ? null : await upstream.text(), {

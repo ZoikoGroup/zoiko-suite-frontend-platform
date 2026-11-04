@@ -29,8 +29,9 @@ export async function KpiCardGrid() {
 
   const totalServices = domains.reduce((acc, d) => acc + d.total, 0);
   const readyServices = domains.reduce((acc, d) => acc + d.ready, 0);
-  const operationalPct = totalServices > 0 ? Math.round((readyServices / totalServices) * 100) : 100;
+  const operationalPct = totalServices > 0 ? Math.round((readyServices / totalServices) * 100) : null;
   const activeDomainsCount = domains.filter((d) => d.status === "operational").length;
+  const domainPct = domains.length > 0 ? Math.round((activeDomainsCount / domains.length) * 100) : null;
 
   const kpis: Kpi[] = [
     {
@@ -38,7 +39,7 @@ export async function KpiCardGrid() {
       value: `${readyServices} / ${totalServices}`,
       icon: Server,
       delta: {
-        text: "37 targets active",
+        text: totalServices > 0 ? `${readyServices} of ${totalServices} targets active` : "No targets configured",
         direction: "up",
         tone: "positive",
       },
@@ -49,7 +50,7 @@ export async function KpiCardGrid() {
       value: `${activeDomainsCount} / ${domains.length}`,
       icon: Layers,
       delta: {
-        text: "100% operational",
+        text: domainPct === null ? "Unknown" : `${domainPct}% operational`,
         direction: "up",
         tone: "positive",
       },
@@ -57,7 +58,7 @@ export async function KpiCardGrid() {
     },
     {
       label: "Cluster Readiness",
-      value: `${operationalPct}%`,
+      value: operationalPct === null ? "—" : `${operationalPct}%`,
       icon: ShieldCheck,
       delta: {
         text: "All probes responding",

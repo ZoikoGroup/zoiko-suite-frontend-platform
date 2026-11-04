@@ -93,7 +93,7 @@ type VisitorMessage = {
   market?: string;
   turnId: string; // client_turn_id = Idempotency-Key of the current attempt
   state: "sending" | "failed" | "sent" | "stopped";
-  fail?: { kind: FailKind; reference: string; retryAfter?: number };
+  fail?: { kind: FailKind; reference: string; retryAfter?: number; status?: number };
 };
 type Message =
   | VisitorMessage
@@ -786,9 +786,10 @@ export function AssistantWidget({
     const stillWanted = () => inFlight.current === turnId;
     const failed = (e: PublicAIError) => {
       if (!stillWanted()) return;
+      console.error("[assistant] request failed", { kind: e.kind, status: e.status, code: e.code, requestId: e.requestId, reference: e.requestId ?? turnId });
       // Doc01 §10 S08: a correlation id. The server's request id when there
       // is one, otherwise the client_turn_id this attempt was sent with.
-      setVisitor(visitorId, { state: "failed", fail: { kind: failKind(e), reference: e.requestId ?? turnId, retryAfter: e.retryAfterSeconds } });
+      setVisitor(visitorId, { state: "failed", fail: { kind: failKind(e), reference: e.requestId ?? turnId, retryAfter: e.retryAfterSeconds, status: e.status } });
       dispatch({ type: "FAIL" });
       setAnnounce(failText(failKind(e)));
     };
@@ -1011,17 +1012,26 @@ export function AssistantWidget({
 
   const fallbackLinks = FALLBACK_ROUTES.map((r) => routeLink(r.key, r.label, false)).filter(Boolean);
 
-  function failText(kind: FailKind): string {
+  function failText(kind: FailKind, status?: number): string {
+    let text: string;
     switch (kind) {
       case "rate_limited":
-        return t("ui.error.rate_limited");
+        text = t("ui.error.rate_limited");
+        break;
       case "busy":
-        return t("ui.error.busy");
+        text = t("ui.error.busy");
+        break;
       case "timeout":
-        return t("ui.error.timeout");
+        text = t("ui.error.timeout");
+        break;
       default:
-        return t("ui.error.unreachable");
+        text = t("ui.error.unreachable");
     }
+    const backendDown = kind === "network" && (status === undefined || status >= 500);
+    if (process.env.NODE_ENV === "development" && backendDown) {
+      text += " Dev: the assistant service (public-ai-svc) is not reachable at ZOIKO_PUBLIC_AI_URL (default http://127.0.0.1:8001). Start it from zoiko-suite-backend/services/public-ai-svc with PUBLIC_AI_ENABLED=true PUBLIC_AI_ENVIRONMENT=dev go run ./cmd/server.";
+    }
+    return text;
   }
 
   function qualifier(turn: TurnEnvelope) {
@@ -1661,7 +1671,7 @@ export function AssistantWidget({
                       {m.state === "failed" && m.fail && (
                         <div style={{ alignSelf: "stretch", marginTop: 8 }}>
                           <ErrorPanel
-                            text={failText(m.fail.kind)}
+                            text={failText(m.fail.kind, m.fail.status)}
                             links={fallbackLinks}
                             retryLabel={t("ui.retry")}
                             disabled={sending}

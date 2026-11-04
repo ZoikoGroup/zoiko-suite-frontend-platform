@@ -1099,6 +1099,14 @@ export default function ServiceInputsPage() {
   const resultsList = Object.values(results);
   const passed = resultsList.filter((r) => r.ok).length;
   const onlineCount = Object.values(healthMap).filter((h) => h.online).length;
+  const healthPct = SERVICES.length > 0 ? Math.round((onlineCount / SERVICES.length) * 100) : 0;
+  const healthLabel = `${healthPct}% Operational (${onlineCount}/${SERVICES.length})`;
+  const healthColor =
+    onlineCount === SERVICES.length && SERVICES.length > 0
+      ? "text-emerald-600 dark:text-emerald-400"
+      : onlineCount > 0
+        ? "text-amber-600 dark:text-amber-400"
+        : "text-rose-600 dark:text-rose-400";
 
   const filteredDomains = Object.entries(domainsGrouped).filter(([domain, svcs]) => {
     if (activeDomain && domain !== activeDomain) return false;
@@ -1166,7 +1174,7 @@ export default function ServiceInputsPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
             <div className="bg-slate-100/70 dark:bg-slate-800/50 p-2.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
               <span className="text-slate-500 font-medium">Cluster Health:</span>
-              <span className="font-bold text-emerald-600 dark:text-emerald-400">100% Operational</span>
+              <span className={`font-bold ${healthColor}`}>{healthLabel}</span>
             </div>
             <div className="bg-slate-100/70 dark:bg-slate-800/50 p-2.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
               <span className="text-slate-500 font-medium">Active Services:</span>
