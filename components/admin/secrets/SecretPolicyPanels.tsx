@@ -109,7 +109,7 @@ export async function ApplicableSecretPolicyPanel({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[52rem] border-collapse text-left">
+      <table data-testid="applicable-policies-table" className="w-full min-w-[52rem] border-collapse text-left">
         <thead className="border-b border-slate-200 dark:border-slate-800">
           <tr>
             <th scope="col" className={HEAD}>
@@ -248,7 +248,7 @@ export async function SecretVersionHistoryPanel({
       </p>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[48rem] border-collapse text-left">
+        <table data-testid="version-history-table" className="w-full min-w-[48rem] border-collapse text-left">
           <thead className="border-b border-slate-200 dark:border-slate-800">
             <tr>
               <th scope="col" className={HEAD}>

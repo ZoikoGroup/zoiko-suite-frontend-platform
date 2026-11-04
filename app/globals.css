@@ -38,6 +38,20 @@
   --color-gold-300: #e6c46f;
   --color-gold-200: #f1dd9e;
   --color-gold-100: #f8ecc7;
+  --color-gold-50: #fcf6e4;
+
+  /* The console's page background — a cool grey-blue behind white panels. */
+  --color-canvas: #f3f6fa;
+
+  /* The sidebar rail — sampled from the Control Center design mock. */
+  --color-rail: #011c3a;
+  --color-rail-raised: #062e4f;
+  --color-rail-line: #0a2647;
+  --color-rail-edge: #1b2e45;
+  --color-rail-card: #022a4c;
+  --color-rail-card-line: #154969;
+  --color-rail-bar: #e4ae4d;
+  --color-rail-spark: #ffd78c;
 
   --animate-fade-up: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-fade-in: fade-in 0.4s ease-out both;
@@ -183,6 +197,22 @@ body {
       var(--color-navy-900) 45%,
       var(--color-navy-950) 100%
     );
+  }
+
+  /* The navy rail. The same navy in dark mode — it is already dark. */
+  .bg-sidebar {
+    background-color: var(--color-rail);
+    box-shadow: inset -1px 0 0 var(--color-rail-edge);
+  }
+
+  /* The current page in the sidebar: an amber pill, darker at its leading edge. */
+  .bg-nav-active {
+    background-image: linear-gradient(90deg, #a47133, #e3a43b);
+  }
+
+  .scrollbar-dark {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
   }
 
   .scrollbar-thin {

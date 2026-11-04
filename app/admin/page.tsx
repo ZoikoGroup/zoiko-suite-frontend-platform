@@ -55,7 +55,7 @@ export default async function AdminOverviewPage() {
       </Suspense>
 
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <h2 className="mb-3 text-base font-semibold tracking-tight text-navy-950 dark:text-slate-100">
           Domain Operational Status
         </h2>
         <Suspense fallback={<DomainGridSkeleton />}>

@@ -5,10 +5,34 @@
 // Every downstream service trusts the envelope; this is the only place a
 // principal becomes a verified identity with tenant, legal entity, role profile,
 // delegations, and trust posture baked in.
+//
+// This module implements the ENTIRE service surface — the GOV-01 contract
+// commands (explain, cache refresh, tenant invalidate, support contexts) sit
+// alongside the original V1 read/write surface. Every route registered by
+// internal/context/handler.go is covered:
+//
+//   POST   /v1/authenticate
+//   GET    /.well-known/jwks.json
+//   POST   /v1/context/resolve
+//   GET    /v1/context/session/{id}
+//   GET    /v1/context/session/{id}/explain
+//   POST   /v1/context/session/{id}/invalidate
+//   POST   /v1/context/cache/refresh
+//   POST   /v1/context/tenant/invalidate
+//   POST   /v1/context/support
+//   GET    /v1/context/support/{id}
+//   DELETE /v1/context/support/{id}
+//   GET    /v1/principals/{id}
+//   GET    /v1/principals/{id}/roles
+//   GET    /v1/principals/{id}/delegations
+//   PUT    /v1/principals/{id}/status
+//   GET    /health
 
 import {
   apiGet,
   apiPost,
+  apiPut,
+  apiDelete,
   type ApiResult,
   type ApiWriteResult,
   type Identity,
@@ -31,16 +55,31 @@ export type ResolveRequest = {
   correlation_id: string;
 };
 
+/**
+ * The success body of POST /v1/context/resolve and
+ * GET /v1/context/session/{id}.
+ *
+ * The handler returns ResolveResponseV2 — `envelope_jwt` plus the evidence id and
+ * session id an auditor actually cares about. Older code reading only
+ * `envelope_jwt` is unaffected; the new fields are additive.
+ */
 export type ResolveResponse = {
   envelope_jwt: string;
+  /** The evidence object for this decision, so a caller can cite what granted it. */
+  evidence_id?: string;
+  session_context_id?: string;
+  /** Unix seconds at which the envelope expires. */
+  expires_at?: number;
 };
 
 export type GetSessionResponse = {
   envelope_jwt: string;
 };
 
+export type InvalidationReason = "LOGOUT" | "ADMIN_REVOKE" | "RISK_ESCALATION" | "DELEGATION_REVOKED";
+
 export type InvalidateSessionRequest = {
-  reason: "LOGOUT" | "ADMIN_REVOKE" | "RISK_ESCALATION" | "DELEGATION_REVOKED";
+  reason: InvalidationReason;
 };
 
 export type PrincipalStatus = "ACTIVE" | "SUSPENDED" | "DISABLED";
@@ -80,13 +119,143 @@ export type DelegatedAuthority = {
   revocation_status: "ACTIVE" | "REVOKED" | "EXPIRED";
 };
 
-// ─── POST /v1/context/resolve ────────────────────────────────────────────────
+// ─── GOV-01 completion shapes ─────────────────────────────────────────────────
+
+/** One of the six resolution dimensions, as frozen on the session_contexts row. */
+export type DimensionOutcome = {
+  dimension: number;
+  name: string;
+  result: string;
+  /** Where the value came from — the token, this store, an upstream, or risk cache. */
+  source: string;
+  detail?: string;
+};
+
+/** The recorded account of one resolution, reconstructed from the frozen row. */
+export type ContextExplanation = {
+  session_context_id: string;
+  decision_id: string;
+  evidence_id: string;
+  outcome: "RESOLVED" | "INVALIDATED" | "EXPIRED" | "RESOLVED_EVIDENCE_DISPOSED";
+  principal_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  environment: "local" | "development" | "staging" | "production";
+  ingress_source: string;
+  dimensions: DimensionOutcome[];
+  issued_at: string;
+  expires_at: string;
+  invalidated_at?: string;
+  invalidation_reason?: string;
+  support_context_id?: string;
+  as_of: string;
+  reconstructed_from: string;
+  correlation_id: string;
+  schema_version: string;
+};
+
+export type RefreshCacheRequest = {
+  /** Narrows the refresh. Empty refreshes every binding for the caller's tenant. */
+  ingress_identifiers?: string[];
+  reason: string;
+  correlation_id?: string;
+};
+
+export type RefreshCacheResponse = {
+  bindings_refreshed: number;
+  evidence_id: string;
+};
+
+export type InvalidateTenantContextRequest = {
+  reason?: InvalidationReason;
+  /** MANDATORY — the blast radius is every user of the tenant. */
+  justification: string;
+  correlation_id?: string;
+};
+
+export type InvalidateTenantContextResponse = {
+  sessions_revoked: number;
+  evidence_id: string;
+};
+
+export type SupportReasonCode = "INCIDENT_RESPONSE" | "CUSTOMER_TICKET" | "DATA_CORRECTION" | "AUDIT_REQUEST";
+
+export type AttachSupportContextRequest = {
+  tenant_id: string;
+  support_principal_id: string;
+  /** Narrows the grant to one principal's data. Omitted means tenant-wide. */
+  subject_principal_id?: string;
+  reason_code: SupportReasonCode;
+  justification: string;
+  ticket_ref: string;
+  approver_principal_id: string;
+  ttl_seconds?: number;
+  correlation_id?: string;
+};
+
+export type AttachSupportContextResponse = {
+  support_context_id: string;
+  expires_at: string;
+  evidence_id: string;
+};
+
+export type RevokeSupportContextRequest = {
+  reason?: string;
+  correlation_id?: string;
+};
+
+export type SupportContext = {
+  support_context_id: string;
+  tenant_id: string;
+  support_principal_id: string;
+  subject_principal_id?: string | null;
+  reason_code: SupportReasonCode;
+  justification: string;
+  ticket_ref: string;
+  approver_principal_id: string;
+  granted_at: string;
+  expires_at: string;
+  revoked_at?: string | null;
+  revocation_reason?: string | null;
+  /** The reconciliation half of the break-glass invariant. */
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  evidence_id: string;
+  correlation_id: string;
+};
+
+export type JWKSResponse = {
+  keys: Array<{
+    kty: string;
+    use: string;
+    kid: string;
+    alg: string;
+    n: string;
+    e: string;
+  }>;
+};
+
+export type HealthStatus = {
+  status: "healthy" | "degraded";
+  checks?: Record<string, string>;
+  checked_at?: string;
+};
+
+// ─── POST /v1/authenticate ────────────────────────────────────────────────────
 
 export type AuthenticateRequest = {
   tenant_id: string;
   email: string;
   password: string;
   correlation_id?: string;
+  /**
+   * The console's confidential OAuth client (Group 1 register R-1), so the
+   * session carries a VERIFIED source channel. Server-only: read from
+   * IDENTITY_CONSOLE_CLIENT_ID / IDENTITY_CONSOLE_CLIENT_SECRET, never a
+   * NEXT_PUBLIC_* variable.
+   */
+  client_id?: string;
+  client_secret?: string;
 };
 
 /**
@@ -136,6 +305,8 @@ export async function authenticate(
   );
 }
 
+// ─── POST /v1/context/resolve ────────────────────────────────────────────────
+
 /**
  * Resolve a bearer token (or SAML assertion) into a signed IdentityContextEnvelope.
  *
@@ -178,15 +349,65 @@ export async function resolveIdentity(input: {
  *
  * Returns the same envelope_jwt if the session is still valid (not invalidated,
  * not expired). Use for silent re-auth without re-verifying the IdP token.
+ *
+ * The handler requires both X-Tenant-Id and X-Principal-Id (self-exemption for
+ * reading your own session), so both are sent.
  */
 export async function getSession(input: {
   sessionContextId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
 }): Promise<ApiResult<GetSessionResponse>> {
   return apiGet<GetSessionResponse>(
     "identityContext",
     `/v1/context/session/${encodeURIComponent(input.sessionContextId)}`,
-    { identity: { tenantId: input.callerTenantId } },
+    {
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
+  );
+}
+
+// ─── GET /v1/context/session/{sessionContextID}/explain ───────────────────────
+
+/**
+ * Explain a context resolution (GOV-01 ExplainContextResolution).
+ *
+ * Returns the recorded account of one resolution: what each of the six
+ * dimensions resolved to, from which source, and what the decision's standing
+ * was at a given instant. Reconstructed from the frozen session_contexts row —
+ * never re-derived.
+ *
+ * Reading your OWN resolution needs no grant; reading anyone else's requires
+ * IDENTITY_CONTEXT_EXPLAIN. A session in another tenant answers 404, never 403.
+ *
+ * `asOf` is an RFC3339 instant; omitted means now. An as_of earlier than the
+ * session's invalidation reports the decision as it stood then.
+ */
+export async function explainContextResolution(input: {
+  sessionContextId: string;
+  asOf?: string;
+  callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
+}): Promise<ApiResult<ContextExplanation>> {
+  return apiGet<ContextExplanation>(
+    "identityContext",
+    `/v1/context/session/${encodeURIComponent(input.sessionContextId)}/explain`,
+    {
+      query: { as_of: input.asOf },
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
   );
 }
 
@@ -204,6 +425,8 @@ export async function invalidateSession(input: {
   actorPrincipalId: string;
   correlationId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
 }): Promise<ApiWriteResult<null>> {
   return apiPost<null>(
     "identityContext",
@@ -214,6 +437,7 @@ export async function invalidateSession(input: {
       identity: {
         principalId: input.actorPrincipalId,
         tenantId: input.callerTenantId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
@@ -225,15 +449,25 @@ export async function invalidateSession(input: {
  * Look up a principal by ID, scoped to the caller's tenant.
  *
  * Returns 404 if not found or belongs to another tenant (no enumeration).
+ * Requires X-Tenant-Id and X-Principal-Id headers (self-exemption read).
  */
 export async function getPrincipal(input: {
   principalId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
 }): Promise<ApiResult<Principal>> {
   return apiGet<Principal>(
     "identityContext",
     `/v1/principals/${encodeURIComponent(input.principalId)}`,
-    { identity: { tenantId: input.callerTenantId } },
+    {
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
   );
 }
 
@@ -249,13 +483,17 @@ export async function getPrincipalRoles(input: {
   principalId: string;
   legalEntityId?: string;
   callerTenantId: string;
+  callerPrincipalId: string;
 }): Promise<ApiResult<PrincipalRoleAssignment[]>> {
   const result = await apiGet<PrincipalRoleAssignment[]>(
     "identityContext",
     `/v1/principals/${encodeURIComponent(input.principalId)}/roles`,
     {
       query: { legal_entity_id: input.legalEntityId },
-      identity: { tenantId: input.callerTenantId },
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+      },
     },
   );
 
@@ -282,11 +520,20 @@ export async function getPrincipalRoles(input: {
 export async function getPrincipalDelegations(input: {
   principalId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
 }): Promise<ApiResult<DelegatedAuthority[]>> {
   const result = await apiGet<DelegatedAuthority[]>(
     "identityContext",
     `/v1/principals/${encodeURIComponent(input.principalId)}/delegations`,
-    { identity: { tenantId: input.callerTenantId } },
+    {
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
   );
 
   if (!result.ok) return result;
@@ -307,7 +554,8 @@ export async function getPrincipalDelegations(input: {
 /**
  * Transition a principal's status (ACTIVE ↔ SUSPENDED ↔ DISABLED).
  *
- * Requires X-Principal-Id + X-Tenant-Id headers.
+ * Route is PUT — matching the Go handler registration — and requires
+ * X-Principal-Id + X-Tenant-Id headers.
  * Authorization: caller must hold PRINCIPAL_STATUS_MANAGE at platform scope.
  * Status is validated against PrincipalStatus enum.
  * Idempotent — re-applying the same status is a no-op at DB level.
@@ -320,8 +568,10 @@ export async function updatePrincipalStatus(input: {
   actorPrincipalId: string;
   correlationId: string;
   callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
 }): Promise<ApiWriteResult<null>> {
-  return apiPost<null>(
+  return apiPut<null>(
     "identityContext",
     `/v1/principals/${encodeURIComponent(input.principalId)}/status`,
     { status: input.status, ...(input.reason ? { reason: input.reason } : {}) },
@@ -330,49 +580,732 @@ export async function updatePrincipalStatus(input: {
       identity: {
         principalId: input.actorPrincipalId,
         tenantId: input.callerTenantId,
+        legalEntityId: input.callerLegalEntityId,
       },
     },
   );
 }
 
+// ─── POST /v1/context/cache/refresh (GOV-01) ──────────────────────────────────
+
+/**
+ * Refresh tenant context cache (GOV-01 RefreshTenantContextCache).
+ *
+ * Marks the caller's tenant routing hints stale so the next resolution re-reads
+ * them from the registry. Does NOT delete the bindings. Scoped to the caller's
+ * own verified tenant — there is no all-tenants form. Requires
+ * IDENTITY_CONTEXT_CACHE_REFRESH and an Idempotency-Key.
+ */
+export async function refreshTenantContextCache(input: {
+  request: RefreshCacheRequest;
+  callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
+}): Promise<ApiWriteResult<RefreshCacheResponse>> {
+  return apiPost<RefreshCacheResponse>(
+    "identityContext",
+    "/v1/context/cache/refresh",
+    input.request,
+    {
+      correlationId: input.request.correlation_id,
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
+  );
+}
+
+// ─── POST /v1/context/tenant/invalidate (GOV-01) ──────────────────────────────
+
+/**
+ * Invalidate all tenant sessions (GOV-01 InvalidateTenantContext).
+ *
+ * Revokes every live session in the caller's tenant. A separate route and a
+ * separate authorization action from the per-session invalidate, deliberately.
+ * `justification` is MANDATORY — the blast radius is every user of the tenant —
+ * and travels on the event into SIEM at CRITICAL. Requires
+ * IDENTITY_CONTEXT_TENANT_INVALIDATE. No self-exemption.
+ */
+export async function invalidateTenantContext(input: {
+  request: InvalidateTenantContextRequest;
+  callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
+}): Promise<ApiWriteResult<InvalidateTenantContextResponse>> {
+  return apiPost<InvalidateTenantContextResponse>(
+    "identityContext",
+    "/v1/context/tenant/invalidate",
+    input.request,
+    {
+      correlationId: input.request.correlation_id,
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
+  );
+}
+
+// ─── POST /v1/context/support (GOV-01, privileged) ────────────────────────────
+
+/**
+ * Attach a support context (GOV-01 AttachSupportContext, privileged).
+ *
+ * Grants a scoped, time-limited, independently-approved elevation letting a
+ * support principal operate inside a customer tenant. This is NOT a role and
+ * grants no permissions — it makes the support principal's session resolvable in
+ * a tenant they do not belong to.
+ *
+ * Authorization is checked against the TARGET tenant, not the caller's own —
+ * that tenant travels in the BODY as `tenant_id`, and the backend authorizes
+ * IDENTITY_SUPPORT_CONTEXT_ATTACH against it.
+ *
+ * The envelope headers carry the CALLER: who is making this request, from which
+ * tenant and entity. Those are two different questions and both must be
+ * answered. X-Tenant-Id used to be omitted here on the reasoning that the
+ * support principal does not belong to the target tenant — true, but the
+ * canonical input contract requires tenant_id and legal_entity_id on every
+ * material write, so omitting them did not express that nuance, it just made
+ * the call impossible: identity-context-svc answered
+ * `401 envelope_incomplete: legal_entity_id, tenant_id` every time.
+ */
+export async function attachSupportContext(input: {
+  request: AttachSupportContextRequest;
+  /** The support principal requesting the elevation (X-Principal-Id). */
+  supportPrincipalId: string;
+  /** The CALLER's own tenant, for the envelope. Not the target tenant. */
+  callerTenantId?: string;
+  /** The CALLER's own legal entity, for the envelope. */
+  callerLegalEntityId?: string;
+}): Promise<ApiWriteResult<AttachSupportContextResponse>> {
+  return apiPost<AttachSupportContextResponse>(
+    "identityContext",
+    "/v1/context/support",
+    input.request,
+    {
+      correlationId: input.request.correlation_id,
+      identity: {
+        principalId: input.supportPrincipalId,
+        tenantId: input.callerTenantId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
+  );
+}
+
+// ─── GET /v1/context/support/{supportContextID} ──────────────────────────────
+
+/**
+ * Read a support context (GOV-01 AttachSupportContext surface).
+ *
+ * The consumer's own view of a grant. Tenant + principal must be supplied; a
+ * grant in another tenant answers 404, never 403.
+ */
+export async function getSupportContext(input: {
+  supportContextId: string;
+  callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
+}): Promise<ApiResult<SupportContext>> {
+  return apiGet<SupportContext>(
+    "identityContext",
+    `/v1/context/support/${encodeURIComponent(input.supportContextId)}`,
+    {
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
+  );
+}
+
+// ─── DELETE /v1/context/support/{supportContextID} ───────────────────────────
+
+/**
+ * Revoke a support context early (GOV-01 revokeSupportContext).
+ *
+ * Ends an elevation immediately. Idempotent — re-revoking reports success
+ * without a second event, and the FIRST reason stands. Guarded by
+ * IDENTITY_SUPPORT_CONTEXT_REVOKE, deliberately weaker than attach: revoking is
+ * de-escalation. The body is best-effort on the wire; submitting one carries a
+ * reason onto the record, omitting it defaults to MANUAL_REVOCATION.
+ */
+export async function revokeSupportContext(input: {
+  supportContextId: string;
+  reason?: string;
+  correlationId?: string;
+  callerTenantId: string;
+  /** The caller's legal entity — X-Legal-Entity-Id, mandatory on writes. */
+  callerLegalEntityId?: string;
+  callerPrincipalId: string;
+}): Promise<ApiWriteResult<null>> {
+  return apiDelete<null>(
+    "identityContext",
+    `/v1/context/support/${encodeURIComponent(input.supportContextId)}`,
+    {
+      data: { reason: input.reason, correlation_id: input.correlationId },
+      correlationId: input.correlationId,
+      identity: {
+        tenantId: input.callerTenantId,
+        principalId: input.callerPrincipalId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
+  );
+}
+
+// ─── GET /.well-known/jwks.json ──────────────────────────────────────────────
+
+/**
+ * The RSA public key downstream services use to verify the
+ * IdentityContextEnvelope. Envelopes are signed RS256 so verifiers hold no
+ * secret. Public — no identity headers.
+ */
+export async function getJWKS(): Promise<ApiResult<JWKSResponse>> {
+  return apiGet<JWKSResponse>("identityContext", "/.well-known/jwks.json");
+}
+
+// ─── GET /health ─────────────────────────────────────────────────────────────
+
+/** Liveness/readiness. Public — no identity headers. */
+export async function getIdentityHealth(): Promise<ApiResult<HealthStatus>> {
+  return apiGet<HealthStatus>("identityContext", "/health");
+}
+
 // ─── Error helpers ───────────────────────────────────────────────────────────
 
-export function explainIdentityError(message: string): string {
-  if (message.includes("token invalid or unverifiable")) {
-    return "The bearer token or SAML assertion could not be verified. Check the token format, signature, and expiry.";
-  }
-  if (message.includes("principal inactive or not found")) {
-    return "The principal does not exist in this tenant or is not ACTIVE. Check the identity provider subject mapping.";
-  }
-  if (message.includes("tenant inactive")) {
-    return "The tenant's lifecycle state is not ACTIVE. Contact platform operations.";
-  }
-  if (message.includes("principal not authorized for the requested legal entity")) {
-    return "The principal is not authorized for the requested legal entity. Check the entity registry assignment.";
-  }
-  if (message.includes("session blocked by trust posture policy")) {
+/**
+ * Turn an unreasonably terse service message into one a human can act on.
+ *
+ * Prefers the stable error_code when the service sent one (the half of the error
+ * body that "must not change with a refactor"), falling back to string matching
+ * for the plain writeError refusals that carry no code.
+ */
+export function explainIdentityError(message: string, errorCode?: string): string {
+  const code = (errorCode ?? "").toUpperCase();
+  if (code === "RESIDENCY_DENIED" || message.includes("residency denied"))
+    return "The legal entity or jurisdiction is outside the allowed residency scope. This decision is evidence-denied, not fixable by retrying.";
+  if (code === "SOD_CONFLICT" || message.includes("segregation of duties"))
+    return "Segregation of duties conflict — the action is refused because it would combine duties that must be separated. Use a different approver or route.";
+  if (code === "BREAK_GLASS_REQUIRED" || message.includes("break glass"))
+    return "Break-glass elevation is required — the request is outside the caller's standing grant. Attach an approved support context or escalate.";
+  if (code === "BREAK_GLASS_EXPIRED")
+    return "The break-glass elevation that would have covered this expired or was revoked. Re-attach a support context.";
+  if (code === "LEGAL_HOLD_ACTIVE")
+    return "A legal hold is active — disposition is blocked. See the retention registry for the hold details.";
+  if (code === "IDEMPOTENCY_MISMATCH")
+    return "The idempotency key was reused with a different request body. Never reuse a key across distinct actions.";
+  if (code === "TRUST_POSTURE_BLOCKED" || message.includes("posture policy"))
     return "Trust posture evaluated to BLOCKED (risk score ≥ 80). Requires MFA step-up or risk remediation.";
-  }
-  if (message.includes("upstream dependency unavailable")) {
-    return "A required upstream service (tenant registry, entity registry, etc.) is unreachable. Nothing was written.";
-  }
-  if (message.includes("exactly one of bearer_token or saml_assertion must be provided")) {
+  if (code === "UPSTREAM_UNAVAILABLE" || message.includes("upstream dependency unavailable"))
+    return "A required upstream service (tenant registry, entity registry, authorization) is unreachable. Nothing was written.";
+  if (code === "AUTHORIZATION_DENIED" || message.includes("authorization denied"))
+    return "Caller is not authorized for this action. Check the required permission grant at the acting scope.";
+  if (code === "UNSUPPORTED" || message.includes("unsupported"))
+    return "The request used a mode this deployment does not support (e.g. SAML assertions are inactive).";
+  if (code === "CONTEXT_UNRESOLVED" || message.includes("token invalid or unverifiable"))
+    return "The bearer token or SAML assertion could not be verified. Check the token format, signature, and expiry.";
+  if (message.includes("principal inactive or not found"))
+    return "The principal does not exist in this tenant or is not ACTIVE. Check the identity provider subject mapping.";
+  if (message.includes("tenant inactive"))
+    return "The tenant's lifecycle state is not ACTIVE. Contact platform operations.";
+  if (message.includes("principal not authorized for the requested legal entity"))
+    return "The principal is not authorized for the requested legal entity. Check the entity registry assignment.";
+  if (message.includes("exactly one of bearer_token or saml_assertion must be provided"))
     return "Provide either bearer_token or saml_assertion, not both and not neither.";
-  }
-  if (message.includes("invalid status")) {
+  if (message.includes("invalid status"))
     return "Status must be ACTIVE, SUSPENDED, or DISABLED.";
-  }
-  if (message.includes("missing X-Principal-Id header") || message.includes("caller identity missing")) {
+  if (message.includes("missing X-Principal-Id header") || message.includes("caller identity missing"))
     return "Request missing X-Principal-Id header. The gateway should set this from a verified identity envelope.";
-  }
-  if (message.includes("missing X-Tenant-Id header") || message.includes("caller tenant scope missing")) {
+  if (message.includes("missing X-Tenant-Id header") || message.includes("caller tenant scope missing"))
     return "Request missing X-Tenant-Id header. The gateway should set this from a verified identity envelope.";
-  }
-  if (message.includes("authorization denied")) {
-    return "Caller is not authorized for this action. Requires PRINCIPAL_STATUS_MANAGE at platform scope.";
-  }
-  if (message.includes("store unavailable")) {
+  if (message.includes("store unavailable"))
     return "identity-context-svc could not reach its database. Nothing was written.";
-  }
   return message;
+}
+// ─── Second factor (TOTP) and step-up ────────────────────────────────────────
+//
+// identity-context-svc identifies the caller of these routes by the session
+// envelope in Authorization — never by X-Principal-Id — so every call sends
+// the signed-in person's envelope. A step-up answers a NEW login token with
+// auth_time = now and amr [pwd, otp]; resolving it gives an envelope that
+// authorization-svc accepts for the 15 minutes its session routes allow.
+
+export type TotpEnrollment = {
+  factor_id: string;
+  secret: string;
+  otpauth_uri: string;
+  algorithm: string;
+  digits: number;
+  period: number;
+  status: string;
+};
+
+export type MfaFactor = {
+  factor_id: string;
+  principal_id: string;
+  type: string;
+  status: string;
+  created_at: string;
+  activated_at?: string | null;
+  last_used_at?: string | null;
+  retired_reason?: string | null;
+  failed_attempts: number;
+  locked_until?: string | null;
+};
+
+/** Start enrolling an authenticator app; the secret is returned exactly once. */
+export async function enrollTotp(identity: CallerIdentity): Promise<ApiWriteResult<TotpEnrollment>> {
+  return apiPost<TotpEnrollment>("identityContext", "/v1/mfa/totp/enroll", {}, { identity });
+}
+
+/** Prove the app works with one code; the factor becomes ACTIVE. */
+export async function activateTotp(
+  identity: CallerIdentity,
+  factorId: string,
+  code: string,
+): Promise<ApiWriteResult<MfaFactor>> {
+  return apiPost<MfaFactor>("identityContext", "/v1/mfa/totp/activate", { factor_id: factorId, code }, { identity });
+}
+
+/** Remove a factor (needs a recent step-up). */
+export async function revokeTotp(
+  identity: CallerIdentity,
+  factorId: string,
+  reasonCode: string,
+): Promise<ApiWriteResult<{ factor_id: string; status: string }>> {
+  return apiPost("identityContext", "/v1/mfa/totp/revoke", { factor_id: factorId, reason_code: reasonCode }, { identity });
+}
+
+/** The signed-in person's own factors, without secrets. */
+export async function listMfaFactors(identity: CallerIdentity): Promise<ApiResult<{ factors: MfaFactor[]; count: number }>> {
+  return apiGet("identityContext", "/v1/mfa/factors", { identity });
+}
+
+// ─── Passkeys (WebAuthn, AU-11) ─────────────────────────────────────────────
+//
+// begin returns the options for navigator.credentials.create / .get and a
+// single-use ceremony handle; finish takes the handle and the browser's
+// PublicKeyCredential with its binary fields base64url-encoded. A passkey
+// step-up answers a login token with amr [pwd, hwk]: resolving it gives an
+// envelope at assurance PHISHING_RESISTANT.
+
+export type PasskeyCeremony = { options: { publicKey: Record<string, unknown> }; ceremony: string };
+
+export type Passkey = {
+  credential_id: string;
+  nickname?: string;
+  transports: string[];
+  backup_eligible: boolean;
+  backup_state: boolean;
+  user_verified: boolean;
+  status: string;
+  created_at: string;
+  last_used_at?: string | null;
+};
+
+export async function beginPasskeyRegistration(identity: CallerIdentity): Promise<ApiWriteResult<PasskeyCeremony>> {
+  return apiPost<PasskeyCeremony>("identityContext", "/v1/mfa/passkeys/register/begin", {}, { identity });
+}
+
+export async function finishPasskeyRegistration(
+  identity: CallerIdentity,
+  ceremony: string,
+  credential: unknown,
+  nickname: string,
+): Promise<ApiWriteResult<Passkey>> {
+  return apiPost<Passkey>("identityContext", "/v1/mfa/passkeys/register/finish", { ceremony, credential, nickname }, { identity });
+}
+
+export async function listPasskeys(identity: CallerIdentity): Promise<ApiResult<{ passkeys: Passkey[]; count: number }>> {
+  return apiGet("identityContext", "/v1/mfa/passkeys", { identity });
+}
+
+/** Remove a passkey (needs a recent step-up). */
+export async function revokePasskey(
+  identity: CallerIdentity,
+  credentialId: string,
+  reasonCode: string,
+): Promise<ApiWriteResult<{ credential_id: string; status: string }>> {
+  return apiPost("identityContext", "/v1/mfa/passkeys/revoke", { credential_id: credentialId, reason_code: reasonCode }, { identity });
+}
+
+export async function beginPasskeyStepUp(identity: CallerIdentity): Promise<ApiWriteResult<PasskeyCeremony>> {
+  return apiPost<PasskeyCeremony>("identityContext", "/v1/authenticate/step-up/passkey/begin", {}, { identity });
+}
+
+export async function finishPasskeyStepUp(
+  identity: CallerIdentity,
+  ceremony: string,
+  credential: unknown,
+): Promise<ApiWriteResult<AuthenticateResponse>> {
+  return apiPost<AuthenticateResponse>("identityContext", "/v1/authenticate/step-up/passkey/finish", { ceremony, credential }, { identity });
+}
+
+/** Prove the second factor now: a new login token to resolve into an envelope. */
+export async function stepUp(
+  identity: CallerIdentity,
+  code: string,
+): Promise<ApiWriteResult<AuthenticateResponse>> {
+  return apiPost<AuthenticateResponse>("identityContext", "/v1/authenticate/step-up", { code }, { identity });
+}
+
+// ─── Console read models and governed commands (IC-2, IC-3, AU-09) ──────────
+//
+//   GET  /v1/identity/summary
+//   GET  /v1/principals                         (cursor-paged; filter[status], filter[principal_type], q)
+//   GET  /v1/principals/{id}/assurance-history
+//   GET  /v1/context/sessions                   (filter[principal_id], filter[status])
+//   GET  /v1/context/support                    (filter[status])
+//   GET  /v1/authentication-events              (filter[principal_id], filter[outcome], filter[since])
+//   GET  /v1/subjects/{id}                      (ETag; a merged id resolves to its survivor)
+//   POST /v1/subjects/{survivor}/merge          (If-Match, step-up)
+//   POST /v1/principals                         (create a person or workload)
+//   POST /v1/principals/{id}/invite
+//   POST /v1/principals/{id}/password-resets    (maker)
+//   GET  /v1/password-resets                    (filter[status], filter[principal_id])
+//   POST /v1/password-resets/{id}/decide        (checker, step-up)
+//   GET  /v1/federation/connections             (404 when federation is off)
+//   POST /v1/context/support/{id}/approve       (named approver, If-Match)
+//   POST /v1/principals/{id}/mfa/reset          (step-up)
+
+/** One page of a console list. next_cursor is absent on the last page. */
+export type Page<T> = { items: T[]; next_cursor?: string; page_size: number };
+
+export type PrincipalDetail = {
+  principal_id: string;
+  tenant_id: string;
+  principal_type: "HUMAN" | "SERVICE_ACCOUNT" | "API_CLIENT";
+  identity_provider_subject: string;
+  email: string;
+  display_name: string;
+  status: "PENDING_ACTIVATION" | PrincipalStatus;
+  created_at: string;
+  data_classification: string;
+  record_version: number;
+  external_id?: string;
+  source: string;
+  invited_at?: string;
+  activated_at?: string;
+  disabled_at?: string;
+  updated_at: string;
+};
+
+export type SessionSummary = {
+  session_context_id: string;
+  principal_id: string;
+  display_name: string;
+  principal_type: string;
+  legal_entity_id?: string;
+  trust_posture: string;
+  mfa_verified: boolean;
+  adaptive_risk_score: number;
+  source_channel?: string;
+  support_context_id?: string;
+  issued_at: string;
+  expires_at: string;
+  invalidated_at?: string;
+  invalidation_reason?: string;
+  state: "ACTIVE" | "EXPIRED" | "INVALIDATED";
+};
+
+export type AuthenticationEvent = {
+  event_id: string;
+  tenant_id: string;
+  principal_id: string;
+  event_type: "LOGIN" | "LOGOUT" | "FAILED_LOGIN" | "MFA_CHALLENGE" | "STEP_UP" | "SESSION_INVALIDATED" | "PASSWORD_RESET";
+  outcome: "SUCCESS" | "FAILURE";
+  assurance_level?: string;
+  occurred_at: string;
+  correlation_id?: string;
+  details?: { basis?: string; decision?: string };
+};
+
+export type AssuranceChange = {
+  history_id: string;
+  principal_id: string;
+  assurance_level: "PASSWORD" | "TOTP" | "PASSKEY";
+  changed_at: string;
+  changed_by?: string;
+  reason?: string;
+};
+
+export type IdentitySummary = {
+  generated_at: string;
+  principals_by_status: Record<string, number>;
+  active_principals_by_type: Record<string, number>;
+  active_sessions: number;
+  active_sessions_mfa_verified: number;
+  active_humans: number;
+  active_humans_with_mfa: number;
+  admins_without_mfa: number;
+  support_pending_approval: number;
+  support_active: number;
+  password_resets_pending: number;
+  failed_sign_ins_24h: number;
+  successful_sign_ins_24h: number;
+  factor_holders: Record<string, number>;
+  pipeline_24h: Record<string, number>;
+  mfa_by_role: { role_id: string; holders: number; with_mfa: number }[];
+  merged_identities: number;
+  session_invalidations_24h: Record<string, number>;
+};
+
+export type IdentityLink = {
+  link_id: string;
+  principal_id: string;
+  source: "federation_link" | "federated_identity";
+  identity_provider: string;
+  issuer?: string;
+  provider_subject: string;
+  status: string;
+  created_at: string;
+  last_login_at?: string;
+};
+
+export type SubjectIdentity = {
+  requested_id: string;
+  merged_into?: string;
+  principal: Principal & { record_version: number };
+  links: IdentityLink[];
+};
+
+export type ResetApproval = { approver_id: string; at: string; decision: "APPROVE" | "REJECT"; reason?: string };
+
+export type PasswordResetRequest = {
+  request_id: string;
+  tenant_id: string;
+  principal_id: string;
+  requested_by: string;
+  reason?: string;
+  /** As the register shows it: a pending or unused request past its expiry reads EXPIRED. */
+  status: "PENDING_APPROVAL" | "ISSUED" | "REJECTED" | "COMPLETED" | "EXPIRED";
+  approvals_required: number;
+  approvals?: ResetApproval[];
+  created_at?: string;
+  decided_at?: string | null;
+  expires_at?: string;
+};
+
+/** A tenant's enterprise identity provider connection (INT-10). */
+export type FederationConnection = {
+  connection_id: string;
+  tenant_id: string;
+  name: string;
+  protocol: string;
+  status: string;
+  status_reason?: string;
+  active_version: number | null;
+  latest_version: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** OIDC discovery (RFC 8414 / OIDC Discovery), as the hosted login publishes it. */
+export type OidcDiscovery = {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  jwks_uri: string;
+  userinfo_endpoint?: string;
+  code_challenge_methods_supported?: string[];
+  grant_types_supported?: string[];
+  token_endpoint_auth_methods_supported?: string[];
+  dpop_signing_alg_values_supported?: string[];
+};
+
+/** A support access request or grant as the Support access register lists it. */
+export type SupportRow = SupportContext & {
+  record_version?: number;
+  approval_status?: string;
+  requested_by_principal_id?: string;
+};
+
+type ListQuery = Record<string, string | number | undefined>;
+
+function listOf<T>(identity: CallerIdentity, path: string, query: ListQuery): Promise<ApiResult<Page<T>>> {
+  return apiGet<Page<T>>("identityContext", path, { identity, query });
+}
+
+export function getIdentitySummary(identity: CallerIdentity): Promise<ApiResult<IdentitySummary>> {
+  return apiGet<IdentitySummary>("identityContext", "/v1/identity/summary", { identity });
+}
+
+export function listPrincipals(
+  identity: CallerIdentity,
+  q: { status?: string; principalType?: string; search?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<PrincipalDetail>>> {
+  return listOf(identity, "/v1/principals", {
+    "filter[status]": q.status,
+    "filter[principal_type]": q.principalType,
+    q: q.search,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+export function listSessions(
+  identity: CallerIdentity,
+  q: { principalId?: string; state?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<SessionSummary>>> {
+  return listOf(identity, "/v1/context/sessions", {
+    "filter[principal_id]": q.principalId,
+    "filter[status]": q.state,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+export function listSupportContexts(
+  identity: CallerIdentity,
+  q: { state?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<SupportRow>>> {
+  return listOf(identity, "/v1/context/support", { "filter[status]": q.state, page_size: q.pageSize, cursor: q.cursor });
+}
+
+export function listAuthenticationEvents(
+  identity: CallerIdentity,
+  q: { principalId?: string; outcome?: string; since?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<AuthenticationEvent>>> {
+  return listOf(identity, "/v1/authentication-events", {
+    "filter[principal_id]": q.principalId,
+    "filter[outcome]": q.outcome,
+    "filter[since]": q.since,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+export function listPasswordResets(
+  identity: CallerIdentity,
+  q: { status?: string; principalId?: string; pageSize?: number; cursor?: string } = {},
+): Promise<ApiResult<Page<PasswordResetRequest>>> {
+  return listOf(identity, "/v1/password-resets", {
+    "filter[status]": q.status,
+    "filter[principal_id]": q.principalId,
+    page_size: q.pageSize,
+    cursor: q.cursor,
+  });
+}
+
+/** The tenant's federation connections. 404 means federation is not enabled on this deployment. */
+export function listFederationConnections(identity: CallerIdentity): Promise<ApiResult<FederationConnection[]>> {
+  return apiGet<FederationConnection[]>("identityContext", "/v1/federation/connections", { identity });
+}
+
+/** The hosted login's published metadata. Public. */
+export function getOidcDiscovery(): Promise<ApiResult<OidcDiscovery>> {
+  return apiGet<OidcDiscovery>("identityContext", "/.well-known/openid-configuration");
+}
+
+export function getAssuranceHistory(identity: CallerIdentity, principalId: string): Promise<ApiResult<Page<AssuranceChange>>> {
+  return listOf(identity, `/v1/principals/${encodeURIComponent(principalId)}/assurance-history`, { page_size: 20 });
+}
+
+export function getSubjectIdentity(identity: CallerIdentity, id: string): Promise<ApiResult<SubjectIdentity>> {
+  return apiGet<SubjectIdentity>("identityContext", `/v1/subjects/${encodeURIComponent(id)}`, { identity });
+}
+
+/** The ETag form identity-context-svc issues: "v<record_version>". */
+export function versionTag(version: number): string {
+  return `"v${version}"`;
+}
+
+export function createSubject(
+  identity: CallerIdentity,
+  body: { email?: string; display_name: string; principal_type: string; external_id?: string; invite?: boolean },
+  idempotencyKey?: string,
+): Promise<ApiWriteResult<PrincipalDetail>> {
+  return apiPost<PrincipalDetail>("identityContext", "/v1/principals", body, { identity, idempotencyKey });
+}
+
+export function inviteSubject(identity: CallerIdentity, principalId: string): Promise<ApiWriteResult<unknown>> {
+  return apiPost("identityContext", `/v1/principals/${encodeURIComponent(principalId)}/invite`, {}, { identity });
+}
+
+export function setPrincipalStatus(
+  identity: CallerIdentity,
+  principalId: string,
+  status: PrincipalStatus,
+  reason: string,
+  version: number,
+): Promise<ApiWriteResult<null>> {
+  return apiPut<null>("identityContext", `/v1/principals/${encodeURIComponent(principalId)}/status`, { status, reason }, {
+    identity,
+    ifMatch: versionTag(version),
+  });
+}
+
+export function requestPasswordReset(
+  identity: CallerIdentity,
+  principalId: string,
+  reason: string,
+): Promise<ApiWriteResult<PasswordResetRequest>> {
+  return apiPost<PasswordResetRequest>(
+    "identityContext",
+    `/v1/principals/${encodeURIComponent(principalId)}/password-resets`,
+    { reason },
+    { identity },
+  );
+}
+
+export function decidePasswordReset(
+  identity: CallerIdentity,
+  requestId: string,
+  decision: "APPROVE" | "REJECT",
+  reason?: string,
+): Promise<ApiWriteResult<PasswordResetRequest>> {
+  return apiPost<PasswordResetRequest>(
+    "identityContext",
+    `/v1/password-resets/${encodeURIComponent(requestId)}/decide`,
+    { decision, reason },
+    { identity },
+  );
+}
+
+export function getPasswordReset(identity: CallerIdentity, requestId: string): Promise<ApiResult<PasswordResetRequest>> {
+  return apiGet<PasswordResetRequest>("identityContext", `/v1/password-resets/${encodeURIComponent(requestId)}`, { identity });
+}
+
+export function approveSupportContext(identity: CallerIdentity, supportContextId: string, version: number): Promise<ApiWriteResult<SupportContext>> {
+  return apiPost<SupportContext>("identityContext", `/v1/context/support/${encodeURIComponent(supportContextId)}/approve`, {}, {
+    identity,
+    ifMatch: versionTag(version),
+  });
+}
+
+export function resetPrincipalMfa(
+  identity: CallerIdentity,
+  principalId: string,
+  reasonCode: string,
+  purpose: string,
+): Promise<ApiWriteResult<{ retired: number }>> {
+  return apiPost("identityContext", `/v1/principals/${encodeURIComponent(principalId)}/mfa/reset`, { reason_code: reasonCode, purpose }, { identity });
+}
+
+export function mergeSubjects(
+  identity: CallerIdentity,
+  survivorId: string,
+  duplicateId: string,
+  reason: string,
+  duplicateVersion: number,
+): Promise<ApiWriteResult<{ merge_id: string; survivor_id: string; duplicate_id: string; links_moved: number }>> {
+  return apiPost("identityContext", `/v1/subjects/${encodeURIComponent(survivorId)}/merge`, { duplicate_id: duplicateId, reason }, {
+    identity,
+    ifMatch: versionTag(duplicateVersion),
+  });
+}
+
+/** The problem code identity-context-svc put on a refusal, when it sent one. */
+export function identityProblemCode(error: { body?: unknown }): string {
+  const b = error.body as { code?: unknown } | undefined;
+  return typeof b?.code === "string" ? b.code : "";
 }

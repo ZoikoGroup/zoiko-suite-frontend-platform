@@ -12,11 +12,18 @@
 // client component, so it cannot end up in the RSC payload, the browser's memory,
 // or a screenshot. Only its existence is reported.
 //
-// This service performs no authorization of its own on the ADMIN routes: creating
-// a policy, versioning it, activating it, seeding material, and rotating are all
-// ungated beyond the console's session check. The broker route is the one that
-// authorizes — and it authorizes the requesting workload against the policy, not
-// the operator against the console.
+// TWO DIFFERENT THINGS AUTHORIZE, and confusing them sends a reader debugging a
+// 403 to the wrong place. Every ADMIN route is gated on a named action checked
+// against authorization-svc — SECRET_POLICY_CREATE, SECRET_POLICY_VERSION_CREATE,
+// SECRET_POLICY_VERSION_ACTIVATE, SECRET_MATERIAL_WRITE, SECRET_LEASE_REVOKE,
+// SECRET_ROTATE — so a refusal there is about the OPERATOR's grants (the
+// VAULT_FULL bundle in seed-demo-rbac.ps1). The broker route is the exception:
+// it carries no action requirement, because the policy version's
+// allowed_workload_ids IS its authorization, so a refusal there is about the
+// requesting WORKLOAD.
+//
+// This comment used to say the admin routes were ungated. They were, once; the
+// authorization guard was added to all six and nothing here was updated.
 
 import { cookies } from "next/headers";
 import { refresh } from "next/cache";
@@ -70,7 +77,7 @@ function writeFailure(
   return { status: "error", message: explainSecretVaultError(message, subject) };
 }
 
-/** Register a secret path. Step 1 of 3 — grants come from its versions. */
+/** Register a secret path. Step 1 of 4 — grants come from its versions. */
 export async function submitSecretPolicy(
   _previous: VaultWriteState,
   formData: FormData,
@@ -122,7 +129,7 @@ export async function submitSecretPolicy(
       };
 }
 
-/** Add a DRAFT access rule. Step 2 of 3 — no effect until activated. */
+/** Add a DRAFT access rule. Step 2 of 4 — no effect until activated. */
 export async function submitSecretVersion(
   _previous: VaultWriteState,
   formData: FormData,
@@ -189,7 +196,7 @@ export async function submitSecretVersion(
       };
 }
 
-/** Activate a DRAFT version. Step 3 of 3 for policy — material is separate. */
+/** Activate a DRAFT version. Step 3 of 4 — seeding material is step 4. */
 export async function submitSecretActivation(
   _previous: VaultWriteState,
   formData: FormData,

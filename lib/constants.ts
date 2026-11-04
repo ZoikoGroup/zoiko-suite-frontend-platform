@@ -11,6 +11,30 @@ import {
   Plug,
   CircleDollarSign,
   BrainCircuit,
+  Fingerprint,
+  Building2,
+  ToggleLeft,
+  KeyRound,
+  DoorOpen,
+  Bell,
+  Handshake,
+  KeySquare,
+  Globe2,
+  ScrollText,
+  Gavel,
+  LockKeyhole,
+  Workflow,
+  ClipboardCheck,
+  Landmark,
+  Wallet,
+  Calculator,
+  Settings2,
+  House,
+  Activity,
+  SquareCheckBig,
+  ListChecks,
+  TriangleAlert,
+  UserCheck,
 } from "lucide-react";
 
 export type DomainKey =
@@ -161,16 +185,17 @@ export const DOMAINS: Domain[] = [
     purpose:
       "The register of who may act for whom — time-bound, entity-scoped grants of one principal's authority to another.",
     status: "operational",
-    coreServices: ["Compliance Risk Scoring Service"],
+    coreServices: ["Delegated Authority Service"],
   },
   {
     key: "evidence",
     label: "Evidence",
     href: "/admin/evidence",
     icon: ClipboardList,
-    purpose: "Track filing evidence and preparation records required for compliance.",
+    purpose:
+      "The evidence each governed action must carry before it may proceed — a catalogue of requirements and the evaluation of whether one is met.",
     status: "operational",
-    coreServices: ["Filing Preparation Service"],
+    coreServices: ["Evidence Requirements Service"],
   },
 ];
 
@@ -187,15 +212,72 @@ export const SECONDARY_NAV = [
   { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
 ];
 
-export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
+/**
+ * Domains 1 and 2 of the service register (Zoiko-Suite Microservices Domain
+ * Ownership, 17 Sep 2026): one page per service, in the register's S.No order.
+ * They lead the sidebar because everything below them depends on them — no
+ * other domain can act without a tenant, an identity and an authorization
+ * decision from these two.
+ */
+const DOMAIN_1_IDENTITY: typeof SECONDARY_NAV = [
+  { label: "Identity Context", href: "/admin/identity", icon: Fingerprint },            // identity-context-svc
+  { label: "Tenants & Entities", href: "/admin/tenants", icon: Building2 },             // tenant-entity-registry-svc
+  { label: "Feature Flags & Config", href: "/admin/settings", icon: ToggleLeft },       // configuration-feature-flag-svc
+  { label: "Secret Vault", href: "/admin/secrets", icon: KeyRound },                    // secret-vault-integration-svc
+  { label: "Gateway Authentication", href: "/admin/gateway", icon: DoorOpen },          // gateway-auth-svc
+  // search-indexer-svc has no sidebar entry: searching is the top-bar box on
+  // every page, and its admin page (/admin/search) opens from that box.
+  { label: "Notifications", href: "/admin/notifications", icon: Bell },                 // notification-svc
+  { label: "Delegated Authority", href: "/admin/delegations", icon: Handshake },        // delegated-authority-svc
+  { label: "Roles & Access", href: "/admin/access-control", icon: KeySquare },          // access-control-svc
+];
+
+const DOMAIN_2_GOVERNANCE: typeof SECONDARY_NAV = [
+  { label: "Jurisdictions & Rules", href: "/admin/jurisdictions", icon: Globe2 },       // jurisdiction-rules-svc
+  { label: "Governance Log", href: "/admin/governance", icon: ScrollText },             // governance-decision-log-svc
+  { label: "Policies", href: "/admin/policies", icon: Gavel },                          // policy-svc
+  { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },            // obligations-svc
+  { label: "Authorization", href: "/admin/authorization", icon: LockKeyhole },          // authorization-svc
+  { label: "Workflows & Approvals", href: "/admin/workflows", icon: Workflow },         // workflow-svc
+  { label: "Evidence", href: "/admin/evidence", icon: ClipboardCheck },                 // evidence-requirements-svc
+];
+
+/**
+ * The sidebar's groups. Each is a collapsible heading, and its icon is what the
+ * collapsed rail shows for the whole group.
+ */
+export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECONDARY_NAV }[] = [
+  // Overview and My Work pages are "Coming soon" shells. The live Overview
+  // dashboard stays at /admin, reached from the logo.
+  {
+    title: "Overview",
+    icon: House,
+    items: [
+      { label: "Executive Dashboard", href: "/admin/overview/executive-dashboard", icon: LayoutDashboard },
+      { label: "Domain Health", href: "/admin/overview/domain-health", icon: Activity },
+    ],
+  },
+  {
+    title: "My Work",
+    icon: SquareCheckBig,
+    items: [
+      { label: "Tasks & Approvals", href: "/admin/my-work/tasks", icon: ListChecks },
+      { label: "Exceptions", href: "/admin/my-work/exceptions", icon: TriangleAlert },
+      { label: "Assigned Actions", href: "/admin/my-work/assigned-actions", icon: UserCheck },
+    ],
+  },
+  { title: "Identity, Scope & Foundation", icon: Fingerprint, items: DOMAIN_1_IDENTITY },
+  { title: "Governance Platform", icon: Landmark, items: DOMAIN_2_GOVERNANCE },
   {
     title: "Finance & Treasury",
+    icon: Wallet,
     items: [
       { label: "Finance & Payments", href: "/admin/finance", icon: CircleDollarSign },
     ],
   },
   {
     title: "Legal, Corporate & Commercial",
+    icon: Scale,
     items: [
       { label: "Legal & Contracts", href: "/admin/legal", icon: Scale },
       { label: "Commercial Ops", href: "/admin/commercial-ops", icon: ShoppingCart },
@@ -204,27 +286,32 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   },
   {
     title: "Tax & Compliance",
+    icon: Calculator,
     items: [
       { label: "Tax", href: "/admin/tax", icon: Percent },
       { label: "Compliance", href: "/admin/compliance", icon: ShieldCheck },
-      { label: "Evidence", href: "/admin/evidence", icon: ClipboardList },
-      { label: "Delegated Authority", href: "/admin/delegations", icon: ClipboardList },
+      // Evidence (evidence-requirements-svc) and Delegated Authority
+      // (delegated-authority-svc) moved to Governance Platform and Identity,
+      // Scope & Foundation — the domains their services belong to.
     ],
   },
   {
     title: "Intelligence & Reporting",
+    icon: BrainCircuit,
     items: [
       { label: "Intelligence & Reporting", href: "/admin/intelligence", icon: BrainCircuit },
     ],
   },
   {
     title: "Security & Trust",
+    icon: ShieldCheck,
     items: [
       { label: "Security & Trust", href: "/admin/security", icon: Lock },
     ],
   },
   {
     title: "Integration & Extensibility",
+    icon: Plug,
     items: [
       // Points at /admin/integration (singular) — the route with real panels
       // wired to live data. /admin/integrations (plural) is a static,
@@ -234,8 +321,37 @@ export const NAV_SECTIONS: { title: string; items: typeof SECONDARY_NAV }[] = [
   },
   {
     title: "Platform",
+    icon: Settings2,
     items: [
       { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
     ],
   },
 ];
+
+export type NavSection = (typeof NAV_SECTIONS)[number];
+export type NavEntry = NavSection["items"][number];
+
+/** Whether `href` is the page at `pathname` or one of its sub-pages. */
+export function isNavActive(pathname: string, href: string): boolean {
+  if (href === "/admin") return pathname === "/admin";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
+ * The sidebar group and entry a path sits under, for the active state and the
+ * page breadcrumb. The longest matching href wins, so a sub-page such as
+ * /admin/authorization/approvals resolves to its parent entry.
+ */
+export function findNavLocation(
+  pathname: string,
+): { section: NavSection; item: NavEntry } | null {
+  let best: { section: NavSection; item: NavEntry } | null = null;
+  for (const section of NAV_SECTIONS) {
+    for (const item of section.items) {
+      if (isNavActive(pathname, item.href) && (!best || item.href.length > best.item.href.length)) {
+        best = { section, item };
+      }
+    }
+  }
+  return best;
+}

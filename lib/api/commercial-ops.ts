@@ -5,7 +5,7 @@
 // - spend-controls-svc       (:8131)
 // - vendor-due-diligence-svc (:8135)
 
-import { type ApiResult, type Identity, apiGet, apiPost } from "./client";
+import { type ApiResult, type ApiWriteResult, type Identity, apiGet, apiPost } from "./client";
 import {
   listSpendPolicies,
   listPolicyUsage,
@@ -181,62 +181,170 @@ export async function listSpendLimits(identity?: Identity): Promise<ApiResult<Sp
 // Real reads go through lib/api/client.ts, which returns a discriminated
 // `ApiResult` so a failure has to be handled rather than silently replaced.
 
-// ─── 3. Procurement Workflows (procurement-workflow-svc :8134) ──────────────
+// ─── 3. Procurement Cases (procurement-workflow-svc :8134) ──────────────────
+//
+// The service orchestrates one procurement case end to end:
+//
+//   create → spend check → APPROVAL_PENDING (ALLOWED) | SPEND_BLOCKED (BLOCKED)
+//   APPROVAL_PENDING → approve → APPROVED | reject → REJECTED
+//   APPROVED → issue-order (calls purchase-order-svc) → COMPLETED
+//
+// Routes live under /v1/procurement-cases. Every call carries the identity
+// envelope: the service reads X-Tenant-Id / X-Principal-Id, and the requester
+// may not approve or reject their own case (403 self_approval_not_allowed).
 
-export type ProcurementWorkflow = {
-  workflow_id: string;
+export type ProcurementCaseStatus =
+  | "REQUESTED"
+  | "SPEND_BLOCKED"
+  | "APPROVAL_PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "COMPLETED";
+
+/** Wire shape of domain.ProcurementCase. */
+export type ProcurementCase = {
+  case_id: string;
   tenant_id: string;
   legal_entity_id: string;
-  workflow_type: string;
-  status: "IN_PROGRESS" | "APPROVED" | "REJECTED" | "CANCELLED";
-  initiated_by: string;
-  initiated_at: string;
-  steps_completed: number;
-  total_steps: number;
+  requested_by_principal_id: string;
+  description: string;
+  category: string;
+  amount: number;
+  currency_code: string;
+  vendor_profile_id?: string | null;
+  status: ProcurementCaseStatus;
+  spend_check_decision?: "ALLOWED" | "BLOCKED" | string;
+  spend_check_basis?: string;
+  purchase_order_id?: string | null;
+  approved_by_principal_id?: string | null;
+  rejected_by_principal_id?: string | null;
+  rejection_reason?: string | null;
+  correlation_id: string;
   created_at: string;
+  updated_at: string;
+  approved_at?: string | null;
+  rejected_at?: string | null;
+  completed_at?: string | null;
 };
 
-export type ProcurementWorkflowListResponse = {
-  workflows: ProcurementWorkflow[];
-  total: number;
-};
+type CaseIdentity = Identity & { tenantId: string };
+type CaseWriteIdentity = Identity & { tenantId: string; principalId: string };
 
-export async function listProcurementWorkflows(identity?: Identity): Promise<ApiResult<ProcurementWorkflow[]>> {
-  if (!identity?.tenantId) {
-    return {
-      ok: false,
-      error: {
-        kind: "http",
-        status: 401,
-        message: "procurement-workflow-svc requires a tenant scope",
-      },
-    };
-  }
-  const res = await apiGet<ProcurementWorkflowListResponse>("procurementWorkflow", "/api/v1/workflows", {
-    query: { tenant_id: identity.tenantId },
+const casePath = (id = "", suffix = "") =>
+  `/v1/procurement-cases${id ? `/${encodeURIComponent(id)}` : ""}${suffix}`;
+
+export async function listProcurementCases(
+  identity: CaseIdentity,
+  options: { legalEntityId?: string; status?: ProcurementCaseStatus } = {},
+): Promise<ApiResult<ProcurementCase[]>> {
+  const res = await apiGet<ProcurementCase[] | null>("procurementWorkflow", casePath(), {
+    query: { legal_entity_id: options.legalEntityId, status: options.status },
+    identity,
   });
   if (!res.ok) return res;
-  return { ok: true, data: res.data.workflows ?? [] };
-}
-
-export async function createProcurementWorkflow(
-  body: { workflow_type: string },
-  identity?: Identity
-): Promise<ApiResult<{ workflow: ProcurementWorkflow }>> {
-  if (!identity?.tenantId) {
+  if (res.data == null) return { ok: true, data: [] };
+  if (!Array.isArray(res.data)) {
     return {
       ok: false,
-      error: {
-        kind: "http",
-        status: 401,
-        message: "procurement-workflow-svc requires a tenant scope",
-      },
+      error: { kind: "malformed", message: "procurement-workflow-svc returned a non-array case list" },
     };
   }
-  return apiPost<{ workflow: ProcurementWorkflow }>("procurementWorkflow", "/api/v1/workflows", {
-    tenant_id: identity.tenantId,
-    legal_entity_id: identity.legalEntityId,
-    ...body,
-  });
+  return { ok: true, data: res.data };
+}
+
+export async function getProcurementCase(
+  caseId: string,
+  identity: CaseIdentity,
+): Promise<ApiResult<ProcurementCase>> {
+  return apiGet<ProcurementCase>("procurementWorkflow", casePath(caseId), { identity });
+}
+
+export type CreateProcurementCaseInput = {
+  identity: CaseWriteIdentity & { legalEntityId: string };
+  description: string;
+  category: string;
+  amount: number;
+  currencyCode: string;
+  vendorProfileId?: string;
+  /** Idempotency key for the case: a retry with the same id returns the stored case. */
+  correlationId?: string;
+};
+
+/**
+ * Open a case. The service runs the spend check immediately, so the case comes
+ * back APPROVAL_PENDING or SPEND_BLOCKED. 201 = created, 200 = replayed.
+ */
+export async function createProcurementCase(
+  input: CreateProcurementCaseInput,
+): Promise<ApiWriteResult<ProcurementCase>> {
+  return apiPost<ProcurementCase>(
+    "procurementWorkflow",
+    casePath(),
+    {
+      legal_entity_id: input.identity.legalEntityId,
+      description: input.description,
+      category: input.category,
+      amount: input.amount,
+      currency_code: input.currencyCode,
+      ...(input.vendorProfileId ? { vendor_profile_id: input.vendorProfileId } : {}),
+      correlation_id: input.correlationId ?? crypto.randomUUID(),
+    },
+    { identity: input.identity },
+  );
+}
+
+/** APPROVAL_PENDING → APPROVED. The requester may not approve their own case. */
+export async function approveProcurementCase(
+  caseId: string,
+  identity: CaseWriteIdentity,
+): Promise<ApiWriteResult<ProcurementCase>> {
+  return apiPost<ProcurementCase>("procurementWorkflow", casePath(caseId, "/approve"), {}, { identity });
+}
+
+/** APPROVAL_PENDING → REJECTED, with a required reason. */
+export async function rejectProcurementCase(
+  caseId: string,
+  reason: string,
+  identity: CaseWriteIdentity,
+): Promise<ApiWriteResult<ProcurementCase>> {
+  return apiPost<ProcurementCase>("procurementWorkflow", casePath(caseId, "/reject"), { reason }, { identity });
+}
+
+/** APPROVED → COMPLETED by issuing the purchase order. Replays if already COMPLETED. */
+export async function issueProcurementCaseOrder(
+  caseId: string,
+  identity: CaseWriteIdentity,
+): Promise<ApiWriteResult<ProcurementCase>> {
+  return apiPost<ProcurementCase>("procurementWorkflow", casePath(caseId, "/issue-order"), {}, { identity });
+}
+
+/** Turn a procurement-workflow-svc refusal into something an operator can act on. */
+export function explainProcurementCaseError(message: string): string {
+  if (message.includes("is unreachable at") || message.includes("did not respond within")) {
+    return "procurement-workflow-svc could not be reached, so nothing was changed.";
+  }
+  if (message.includes("self_approval_not_allowed")) {
+    return "You opened this case, so you cannot approve or reject it. Someone else has to decide it.";
+  }
+  if (message.includes("invalid_transition")) {
+    return "That step is not available from the case's current status. Reload to see where it stands.";
+  }
+  if (message.includes("missing_fields")) {
+    return "Description, category, amount and currency are all required to open a case (and a reason to reject one).";
+  }
+  if (message.includes("invalid_amount")) return "The amount has to be greater than zero.";
+  if (message.includes("spend_controls_unavailable")) {
+    return "The spend check could not be reached, so the case was not opened rather than opened unchecked.";
+  }
+  if (message.includes("purchase_order_service_unavailable")) {
+    return "purchase-order-svc could not be reached, so no order was issued. The case is still APPROVED — try again.";
+  }
+  if (message.includes("identity_missing")) return "Your session was not recognised — sign in again.";
+  if (message.includes("forbidden")) return "Your account is not authorized for this procurement action.";
+  if (message.includes("authz_unavailable")) {
+    return "Your permission could not be checked, so the action was refused rather than allowed unchecked.";
+  }
+  if (message.includes("not_found")) return "No procurement case with that ID exists for your organisation.";
+  return message;
 }
 

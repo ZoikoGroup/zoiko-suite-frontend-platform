@@ -1,26 +1,18 @@
 "use client";
 
-import { useState, useActionState, useEffect } from "react";
+import { useState, useActionState } from "react";
 import {
   Receipt,
   PlusCircle,
   Send,
   Search,
   CheckCircle2,
-  AlertCircle,
   Building2,
-  Calendar,
-  DollarSign,
-  TrendingUp,
-  TrendingDown,
-  Clock,
-  ShieldCheck,
-  FileCheck2,
   ArrowRight,
   Calculator,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Button } from "@/components/ui";
-import { FIELD, LABEL, HINT, BANNER_SUCCESS, BANNER_ERROR } from "@/components/admin/shared/form";
+import { FIELD, LABEL, HINT, BANNER_SUCCESS } from "@/components/admin/shared/form";
 import { JsonBlock } from "@/components/admin/shared/JsonBlock";
 import { ResultBanner } from "@/components/admin/shared/ResultBanner";
 import {
@@ -29,7 +21,7 @@ import {
   lookupVatReturnAction,
   type VatActionState,
 } from "@/app/admin/tax/vat-actions";
-import { IDLE_LOOKUP, type LookupState } from "@/components/admin/shared/lookup";
+import { type LookupState } from "@/components/admin/shared/lookup";
 import type { VATReturn } from "@/lib/api/tax";
 
 const IDLE_ACTION: VatActionState = { status: "idle" };
@@ -108,13 +100,17 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
   const [targetReturnId, setTargetReturnId] = useState("");
   const [lookupReturnId, setLookupReturnId] = useState("");
 
-  // Update targetReturnId when creation succeeds
-  useEffect(() => {
+  // Prefill the file and lookup ids when creation succeeds. Done during render
+  // when createState changes rather than in an effect, so the prefilled ids land
+  // in the same render instead of a cascading second one.
+  const [seenCreateState, setSeenCreateState] = useState(createState);
+  if (createState !== seenCreateState) {
+    setSeenCreateState(createState);
     if (createState.status === "success" && createState.returnId) {
       setTargetReturnId(createState.returnId);
       setLookupReturnId(createState.returnId);
     }
-  }, [createState]);
+  }
 
   const outputVal = parseFloat(outputTaxInput) || 0;
   const inputVal = parseFloat(inputTaxInput) || 0;

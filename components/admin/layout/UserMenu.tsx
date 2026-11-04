@@ -32,29 +32,33 @@ export function UserMenu({ name, email, role }: UserMenuProps) {
     router.refresh();
   }
 
-  const initials = name
-    .split(" ")
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  // Letters only: "Lingaraj (Super Admin)" is "LS", not "L(".
+  const initials =
+    name
+      .split(/\s+/)
+      .map((p) => p.replace(/[^\p{L}]/gu, ""))
+      .filter(Boolean)
+      .map((p) => p[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?";
 
   return (
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors duration-150 hover:bg-slate-100 dark:hover:bg-slate-800"
+        className="flex items-center gap-3 rounded-xl py-1.5 pl-1.5 pr-2 transition-colors duration-150 hover:bg-slate-100 dark:hover:bg-slate-800"
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-900 text-xs font-semibold text-gold-300 dark:bg-navy-700">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-navy-900 text-sm font-semibold text-white ring-2 ring-navy-100 dark:bg-navy-700 dark:ring-navy-900">
           {initials}
         </span>
         <span className="hidden text-left sm:block">
-          <span className="block text-sm font-medium leading-none text-slate-800 dark:text-slate-200">{name}</span>
-          <span className="mt-1 block text-xs leading-none text-slate-500 dark:text-slate-400">{role}</span>
+          <span className="block max-w-48 truncate text-sm font-semibold leading-tight text-navy-950 dark:text-slate-100">{name}</span>
+          <span className="mt-0.5 block max-w-48 truncate text-xs leading-tight text-slate-500 dark:text-slate-400">{role}</span>
         </span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 text-slate-400 transition-transform duration-200",
+            "ml-1 h-4 w-4 text-slate-400 transition-transform duration-200",
             open && "rotate-180",
           )}
         />

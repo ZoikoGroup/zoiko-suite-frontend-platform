@@ -15,8 +15,10 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import {
   submitPurchaseRequest,
+  submitRequestForApproval,
   submitRequestApproval,
   submitRequestRejection,
+  submitRequestCancellation,
 } from "@/app/admin/purchase-requests/actions";
 import {
   IDLE_REQUEST_STATE,
@@ -39,6 +41,16 @@ const FEEDBACK = {
     icon: ThumbsDown,
     className:
       "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300",
+  },
+  submitted: {
+    icon: CheckCircle2,
+    className:
+      "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300",
+  },
+  cancelled: {
+    icon: Info,
+    className:
+      "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300",
   },
   replayed: {
     icon: Info,
@@ -80,7 +92,7 @@ function Feedback({ state }: { state: RequestActionState }) {
         <feedback.icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <span className="break-words flex-1 font-medium">{state.message}</span>
       </div>
-      {state.requestId && (
+      {state.requestId && state.status === "approved" && (
         <div className="mt-1 flex flex-wrap items-center gap-3 pt-2 border-t border-black/5 dark:border-white/10 text-xs">
           <Link
             href={`/admin/commercial-ops`}
@@ -161,7 +173,7 @@ export function RaiseRequestForm() {
           {pending ? "Raising…" : "Raise request"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Step 1 of 2. Lands PENDING — no order can be issued against it until it is approved.
+          Step 1. Lands DRAFT — submit it below, then someone else approves it.
         </p>
       </div>
 
@@ -171,10 +183,16 @@ export function RaiseRequestForm() {
 }
 
 /**
- * Step 2 — decide. Approve and reject share one form because they are two
- * branches of the same single transition out of PENDING, and both are terminal.
+ * Step 2 — move a request through its lifecycle by ID: submit a DRAFT, then
+ * approve or reject it (someone other than the requester), or cancel it. The
+ * action reads the request's current version and sends it, so a request that
+ * changed in between is refused rather than overwritten.
  */
 export function DecideRequestForm() {
+  const [submitState, submitAction, submitPending] = useActionState<RequestActionState, FormData>(
+    submitRequestForApproval,
+    IDLE_REQUEST_STATE,
+  );
   const [approveState, approveAction, approvePending] = useActionState<
     RequestActionState,
     FormData
@@ -183,8 +201,15 @@ export function DecideRequestForm() {
     submitRequestRejection,
     IDLE_REQUEST_STATE,
   );
+  const [cancelState, cancelAction, cancelPending] = useActionState<RequestActionState, FormData>(
+    submitRequestCancellation,
+    IDLE_REQUEST_STATE,
+  );
 
-  const latest = rejectState.status !== "idle" ? rejectState : approveState;
+  // Show whichever action ran most recently that has a result.
+  const latest =
+    [cancelState, rejectState, approveState, submitState].find((s) => s.status !== "idle") ??
+    IDLE_REQUEST_STATE;
 
   return (
     <form className="space-y-4">
@@ -203,7 +228,7 @@ export function DecideRequestForm() {
         </div>
         <div>
           <label htmlFor="pr-reason" className={LABEL}>
-            Reason <span className="font-normal text-slate-400">(required to reject)</span>
+            Reason <span className="font-normal text-slate-400">(required to reject or cancel)</span>
           </label>
           <input
             id="pr-reason"
@@ -216,6 +241,15 @@ export function DecideRequestForm() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="submit"
+          formAction={submitAction}
+          loading={submitPending}
+          size="sm"
+          variant="secondary"
+        >
+          {submitPending ? "Submitting…" : "Submit for approval"}
+        </Button>
         <Button type="submit" formAction={approveAction} loading={approvePending} size="sm">
           {approvePending ? "Approving…" : "Approve"}
         </Button>
@@ -229,8 +263,18 @@ export function DecideRequestForm() {
         >
           {rejectPending ? "Rejecting…" : "Reject"}
         </Button>
+        <Button
+          type="submit"
+          formAction={cancelAction}
+          loading={cancelPending}
+          size="sm"
+          variant="ghost"
+        >
+          {cancelPending ? "Cancelling…" : "Cancel request"}
+        </Button>
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          Both decisions are terminal. A second decision is refused, not applied.
+          A request must be submitted before it can be decided. Rejection and cancellation are
+          final.
         </p>
       </div>
 

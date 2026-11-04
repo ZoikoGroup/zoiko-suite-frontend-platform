@@ -28,10 +28,21 @@
 //     answer is the delegations the caller is personally party to. There is no
 //     third mode: an unscoped read used to skip authorization entirely and
 //     return the tenant's complete map of who may act for whom.
-//  4. EXPIRY IS LAZY AND OBSERVED ON READ. Nothing sweeps in the background;
-//     a due grant flips to EXPIRED when the register is next read, and
-//     authority.expired is published at that moment. So the status shown here
-//     is current as of this request — not as of a scheduler run.
+//  4. EXPIRY IS ENFORCED, NOT OBSERVED. A background sweeper ends due grants in
+//     every tenant within EXPIRY_SWEEP_INTERVAL (30s by default) and publishes
+//     authority.expired then; the read paths also sweep their own tenant, so
+//     the status shown here is current as of this request AND does not depend
+//     on this request having been made.
+//
+//     This used to be the other way round — nothing swept in the background,
+//     and a due grant flipped only when somebody read the register. A tenant
+//     whose register nobody opened therefore expired nothing at all, and its
+//     delegates kept authority indefinitely with no authority.expired ever
+//     published to end their sessions.
+//
+//     For the same reason expired_at is the moment the authority ENDED (its
+//     effective_to), not the moment the sweep noticed. A duration computed
+//     from updated_at is the observation time, which is a different fact.
 //  5. NOTHING IS EVER DELETED. ACTIVE goes to REVOKED (explicitly) or EXPIRED
 //     (by time), both terminal. The history is the evidence of what authority
 //     was held and when, which is the whole point of the register.

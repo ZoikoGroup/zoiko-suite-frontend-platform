@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { describeEnsure, ensurePageServices, servicectlEnabled } from "@/lib/servicectl";
 
 export async function proxy(request: NextRequest) {
-  const session = request.cookies.get(SESSION_COOKIE)?.value;
+  const rawSession = request.cookies.get(SESSION_COOKIE)?.value;
+  const session = decodeSession(rawSession);
 
   if (!session) {
     const loginUrl = new URL("/login", request.url);

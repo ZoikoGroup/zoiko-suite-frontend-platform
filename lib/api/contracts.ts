@@ -1,36 +1,22 @@
 // contract-lifecycle-svc (:8119, /contract-lifecycle-svc through the gateway) —
 // the agreement register behind the Legal & Contracts domain.
 //
-// Lifecycle: DRAFT -> PENDING_APPROVAL -> ACTIVE -> TERMINATED. Revising a
-// contract does not change its status; it bumps `version` and appends an
-// immutable row to contract_versions, so every restatement of the terms stays
-// attributable. Activation and termination also snapshot a version, which is
-// why an ACTIVE contract is already at v3 rather than v1.
+// Lifecycle (LEG-05), as the service enforces it:
 //
-// TWO DIFFERENCES FROM purchase-order-svc THAT THE UI MUST NOT PAPER OVER:
+//   DRAFT ──submit-review──▶ REVIEW ──approve──▶ APPROVED
+//     APPROVED ──send-for-signature──▶ (signature_status SENT)
+//     APPROVED + SENT ──record-execution──▶ EFFECTIVE (signature_status COMPLETED)
+//     EFFECTIVE ──amend / renew──▶ EFFECTIVE (new version)
+//     APPROVED | EXECUTED | EFFECTIVE ──terminate──▶ TERMINATED
 //
-//  1. There is NO authorization check. The service constructs an authz client
-//     and stores it on its handler, but no handler ever calls it — so unlike a
-//     purchase order, a contract write is not checked against authorization-svc
-//     and cannot fail closed. Any caller the gateway admits may write.
-//  2. Activation does not require approval. POST /{id}/activate refuses only
-//     ACTIVE and TERMINATED contracts, so a DRAFT can be signed into force
-//     without ever passing through PENDING_APPROVAL.
+// Terms can be revised (PUT) only in DRAFT or REVIEW. Approval is a real gate:
+// it needs a governance_decision_id that governance-decision-log-svc confirms
+// was GRANTED for CONTRACT_APPROVE on this legal entity, and the principal who
+// submitted the contract for review may not approve it (403).
 //
-// Both are properties of the backend, not of this console, and the Legal pages
-// say so rather than implying a control that isn't there.
-//
-// Tenant isolation is real, but NOT because of the row-level security the schema
-// declares. An earlier version of this comment credited RLS; live testing proved
-// that false. The service connects as a Postgres superuser, which bypasses RLS
-// unconditionally, so a second tenant could read and mutate another tenant's
-// contracts by sending a different X-Tenant-Id. What makes isolation real is the
-// explicit `tenant_id = $n` predicate now present in every query in the service's
-// store — the same belt-and-braces purchase-order-svc was built with. Verified
-// live across all four write paths plus both reads.
-//
-// A read without the header falls back to the literal tenant "default" and
-// returns that tenant's rows — an empty register, not an error.
+// Every write is authorized against authorization-svc by the service itself,
+// and every read and write is scoped by X-Tenant-Id: another tenant's contract
+// reads as 404, and a request without a tenant is refused with 401.
 
 import {
   apiGet,
@@ -59,20 +45,32 @@ export const CONTRACT_TYPES = [
 export type ContractType = (typeof CONTRACT_TYPES)[number];
 
 /**
- * Lifecycle states.
+ * Lifecycle states, exactly as domain.ContractStatus declares them.
  *
- * EXPIRED and SUSPENDED are declared by the service but no endpoint produces
- * them — there is no deadline sweep and no suspend transition. They are kept in
- * the union so a row written by some future job still renders instead of
- * falling through to an unstyled badge.
+ * EXECUTED, EXPIRED and ARCHIVED are declared but no endpoint produces them
+ * today (record-execution goes straight to EFFECTIVE). They stay in the union so
+ * a row written by some future job still renders as a state.
  */
 export type ContractStatus =
   | "DRAFT"
-  | "PENDING_APPROVAL"
-  | "ACTIVE"
-  | "EXPIRED"
+  | "REVIEW"
+  | "APPROVED"
+  | "EXECUTED"
+  | "EFFECTIVE"
   | "TERMINATED"
-  | "SUSPENDED";
+  | "EXPIRED"
+  | "ARCHIVED";
+
+/** Signature progress, tracked separately from the lifecycle status. */
+export type SignatureStatus =
+  | "NOT_REQUESTED"
+  | "SENT"
+  | "PARTIALLY_SIGNED"
+  | "COMPLETED"
+  | "DECLINED"
+  | "EXPIRED"
+  | "PENDING_UNKNOWN"
+  | "VOIDED";
 
 /** Wire shape. Field names match the Go json tags exactly. */
 export type Contract = {
@@ -85,24 +83,36 @@ export type Contract = {
   counterparty_id: string;
   counterparty_name: string;
   status: ContractStatus;
+  signature_status: SignatureStatus;
   version: number;
   /** DATE column — "YYYY-MM-DD", not a timestamp. */
   effective_from: string;
   effective_to?: string | null;
-  signed_at?: string | null;
+  submitted_at?: string | null;
+  submitted_by?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  signature_sent_at?: string | null;
+  executed_at?: string | null;
   signed_by?: string | null;
+  effective_at?: string | null;
+  amended_at?: string | null;
+  amended_by?: string | null;
+  renewed_at?: string | null;
+  renewed_by?: string | null;
   terminated_at?: string | null;
   terminated_by?: string | null;
   termination_note?: string | null;
   currency: string;
   total_value: number;
   document_vault_id?: string | null;
+  governance_decision_id?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
 };
 
-/** Immutable snapshot appended on create, revise, activate, and terminate. */
+/** Immutable snapshot appended by the service on every material change. */
 export type ContractVersion = {
   version_id: string;
   contract_id: string;
@@ -128,19 +138,11 @@ export type WriteIdentity = Identity & { principalId: string; tenantId: string }
 
 export type ListContractsInput = {
   identity: TenantIdentity;
-  /** Optional narrowing. Tenant scoping is already enforced by RLS; this filters
-   *  further to one legal entity within the tenant. */
+  /** Optional narrowing to one legal entity within the tenant. */
   legalEntityId?: string;
 };
 
-/**
- * List contracts for the caller's tenant, newest first.
- *
- * Unlike purchase-order-svc there is no `tenant_id` query parameter — the
- * service reads X-Tenant-Id and lets row-level security do the filtering. That
- * makes the identity header the only thing standing between this call and
- * another tenant's agreements, so it is never optional.
- */
+/** List contracts for the caller's tenant, newest first. */
 export async function listContracts(
   input: ListContractsInput,
 ): Promise<ApiResult<Contract[]>> {
@@ -173,13 +175,7 @@ export async function listContracts(
   return { ok: true, data: sorted };
 }
 
-/**
- * Fetch one contract.
- *
- * Answers 404 both for an id that does not exist and for one that belongs to
- * another tenant — RLS hides the row before the handler can distinguish them,
- * which is the correct behaviour and worth knowing when reading the error.
- */
+/** Fetch one contract. 404 both for an unknown id and for another tenant's. */
 export async function getContract(
   contractId: string,
   identity: TenantIdentity,
@@ -189,15 +185,7 @@ export async function getContract(
   });
 }
 
-/**
- * Read a contract's immutable version history, oldest first.
- *
- * The service returns 200 with an empty list for a contract that does not
- * exist, rather than 404 — it never loads the contract to check. An empty
- * history therefore means "no such contract, or none visible to this tenant",
- * not "a contract with no versions": every contract gets a v1 snapshot at
- * creation.
- */
+/** Read a contract's immutable version history, oldest first. */
 export async function listContractVersions(
   contractId: string,
   identity: TenantIdentity,
@@ -240,14 +228,7 @@ export type DraftContractInput = {
   totalValue: number;
 };
 
-/**
- * Create a contract in DRAFT at version 1, with an "Initial draft" snapshot.
- *
- * `created_by` is taken from the request body, not from the identity headers,
- * and the service does not check that the two agree. The console always sends
- * the session principal so the attribution is true, but nothing downstream
- * enforces that.
- */
+/** Create a contract in DRAFT at version 1, signature NOT_REQUESTED. */
 export async function draftContract(
   input: DraftContractInput,
 ): Promise<ApiWriteResult<Contract>> {
@@ -279,19 +260,15 @@ export type ReviseContractInput = {
   effectiveTo?: string;
   currency?: string;
   totalValue?: number;
-  /** Stored on the appended version row. This is the audit record for the
-   *  restatement, so the console requires it even though the service does not. */
+  /** Stored on the appended version row — the audit record for the change. */
   changeSummary: string;
 };
 
 /**
- * Restate a DRAFT or PENDING_APPROVAL contract's terms.
+ * Restate a DRAFT or REVIEW contract's terms (409 from APPROVED onward).
  *
- * The service merges field-by-field and treats a zero-value as "not supplied":
- * an empty string leaves the old title, and `total_value: 0` leaves the old
- * value. So a field cannot be *cleared* through this endpoint, only changed —
- * which is why the console omits untouched fields entirely instead of sending
- * blanks and expecting them to apply.
+ * The service merges field-by-field and treats a zero value as "not supplied",
+ * so untouched fields are omitted rather than sent blank.
  */
 export async function reviseContract(
   input: ReviseContractInput,
@@ -312,56 +289,134 @@ export async function reviseContract(
   );
 }
 
-/**
- * Move a DRAFT contract to PENDING_APPROVAL. Legal only from DRAFT.
- *
- * This transition does NOT bump `version` and appends no snapshot — it is the
- * one lifecycle step that leaves no trace in contract_versions. It also records
- * no actor: the service declares a `submitted_by` field but never reads the
- * request body, so who submitted a contract for approval is not stored
- * anywhere.
- */
-export async function submitContractForApproval(
+/** DRAFT → REVIEW. The submitter is recorded and later barred from approving. */
+export async function submitContractForReview(
   contractId: string,
   identity: WriteIdentity,
 ): Promise<ApiWriteResult<Contract>> {
   return apiPost<Contract>(
     "contracts",
-    `/v1/contracts/${encodeURIComponent(contractId)}/submit`,
+    `/v1/contracts/${encodeURIComponent(contractId)}/submit-review`,
     { submitted_by: identity.principalId },
     { identity },
   );
 }
 
-export type ActivateContractInput = {
+export type ApproveContractInput = {
+  contractId: string;
+  identity: WriteIdentity;
+  /** The governance-decision-log-svc decision that authorizes this approval. */
+  governanceDecisionId: string;
+};
+
+/**
+ * REVIEW → APPROVED.
+ *
+ * 400 without a governance decision id, 400 if the decision is unknown to this
+ * tenant, 403 if it was not GRANTED or if the caller submitted the contract.
+ */
+export async function approveContract(
+  input: ApproveContractInput,
+): Promise<ApiWriteResult<Contract>> {
+  return apiPost<Contract>(
+    "contracts",
+    `/v1/contracts/${encodeURIComponent(input.contractId)}/approve`,
+    {
+      approved_by: input.identity.principalId,
+      governance_decision_id: input.governanceDecisionId,
+    },
+    { identity: input.identity },
+  );
+}
+
+/** APPROVED (signature NOT_REQUESTED) → signature SENT. Status stays APPROVED. */
+export async function sendContractForSignature(
+  contractId: string,
+  identity: WriteIdentity,
+): Promise<ApiWriteResult<Contract>> {
+  return apiPost<Contract>(
+    "contracts",
+    `/v1/contracts/${encodeURIComponent(contractId)}/send-for-signature`,
+    { sent_by: identity.principalId },
+    { identity },
+  );
+}
+
+export type RecordExecutionInput = {
   contractId: string;
   identity: WriteIdentity;
   /** Required by the service. */
   signedBy: string;
-  /** RFC3339. The service parses this into a time.Time and stores it verbatim,
-   *  so an omitted value would be recorded as the zero time, not as now. */
-  signedAt: string;
   documentVaultId?: string;
 };
 
 /**
- * Sign a contract into force.
+ * APPROVED + signature SENT → EFFECTIVE, signature COMPLETED.
  *
- * Refuses only ACTIVE and TERMINATED — a DRAFT activates without ever having
- * been submitted for approval. The console surfaces that rather than hiding it,
- * because a reader who assumes approval was enforced would draw the wrong
- * conclusion from an ACTIVE row.
+ * 409 if the signature request was never sent. Execution is caller-asserted:
+ * no e-signature adapter feeds this service yet, so the signatory named here is
+ * what the record will say.
  */
-export async function activateContract(
-  input: ActivateContractInput,
+export async function recordContractExecution(
+  input: RecordExecutionInput,
 ): Promise<ApiWriteResult<Contract>> {
   return apiPost<Contract>(
     "contracts",
-    `/v1/contracts/${encodeURIComponent(input.contractId)}/activate`,
+    `/v1/contracts/${encodeURIComponent(input.contractId)}/record-execution`,
     {
       signed_by: input.signedBy,
-      signed_at: input.signedAt,
       ...(input.documentVaultId ? { document_vault_id: input.documentVaultId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export type AmendContractInput = {
+  contractId: string;
+  identity: WriteIdentity;
+  title?: string;
+  counterpartyName?: string;
+  totalValue?: number;
+  changeSummary: string;
+};
+
+/** Amend an EFFECTIVE contract's terms; appends a version. */
+export async function amendContract(
+  input: AmendContractInput,
+): Promise<ApiWriteResult<Contract>> {
+  return apiPost<Contract>(
+    "contracts",
+    `/v1/contracts/${encodeURIComponent(input.contractId)}/amend`,
+    {
+      amended_by: input.identity.principalId,
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.counterpartyName ? { counterparty_name: input.counterpartyName } : {}),
+      ...(input.totalValue !== undefined ? { total_value: input.totalValue } : {}),
+      change_summary: input.changeSummary,
+    },
+    { identity: input.identity },
+  );
+}
+
+export type RenewContractInput = {
+  contractId: string;
+  identity: WriteIdentity;
+  /** "YYYY-MM-DD". Required by the service. */
+  newEffectiveTo: string;
+  changeSummary: string;
+};
+
+/** Extend an EFFECTIVE contract's term; appends a version. */
+export async function renewContract(
+  input: RenewContractInput,
+): Promise<ApiWriteResult<Contract>> {
+  return apiPost<Contract>(
+    "contracts",
+    `/v1/contracts/${encodeURIComponent(input.contractId)}/renew`,
+    {
+      renewed_by: input.identity.principalId,
+      new_effective_to: input.newEffectiveTo,
+      change_summary: input.changeSummary,
     },
     { identity: input.identity },
   );
@@ -374,13 +429,10 @@ export type TerminateContractInput = {
 };
 
 /**
- * Terminate a contract.
+ * Terminate an APPROVED or EFFECTIVE contract. Terminal.
  *
- * Backdates nothing and closes nothing off gradually: the service sets
- * `effective_to` to today, so the agreement reads as having ended the moment it
- * was terminated. Terminal — a TERMINATED contract cannot be revived, though
- * note the service will still let it be revised if it were somehow returned to
- * DRAFT.
+ * 409 for a DRAFT or REVIEW contract (withdrawing a draft is not termination)
+ * and for one that is already final.
  */
 export async function terminateContract(
   input: TerminateContractInput,
@@ -397,13 +449,16 @@ export async function terminateContract(
 }
 
 export type ContractStats = {
+  /** EFFECTIVE — in force. */
   active: number;
+  /** REVIEW — waiting on an approver. */
   awaitingApproval: number;
+  /** APPROVED — approved, not yet executed. */
+  awaitingSignature: number;
   draft: number;
   terminated: number;
-  /** Contracted value of ACTIVE agreements, by currency. Never summed across
-   *  currencies — this service holds no FX rate, and inventing one would
-   *  misstate the committed position. */
+  /** Contracted value of EFFECTIVE agreements, by currency. Never summed across
+   *  currencies — this service holds no FX rate. */
   activeValueByCurrency: Record<string, number>;
 };
 
@@ -412,18 +467,22 @@ export function summarise(contracts: Contract[]): ContractStats {
   const activeValueByCurrency: Record<string, number> = {};
   let active = 0;
   let awaitingApproval = 0;
+  let awaitingSignature = 0;
   let draft = 0;
   let terminated = 0;
 
   for (const contract of contracts) {
     switch (contract.status) {
-      case "ACTIVE":
+      case "EFFECTIVE":
         active += 1;
         activeValueByCurrency[contract.currency] =
           (activeValueByCurrency[contract.currency] ?? 0) + contract.total_value;
         break;
-      case "PENDING_APPROVAL":
+      case "REVIEW":
         awaitingApproval += 1;
+        break;
+      case "APPROVED":
+        awaitingSignature += 1;
         break;
       case "DRAFT":
         draft += 1;
@@ -432,65 +491,107 @@ export function summarise(contracts: Contract[]): ContractStats {
         terminated += 1;
         break;
       default:
-        // EXPIRED / SUSPENDED are counted in none of the tiles because no
-        // transition produces them. Deliberately not folded into `terminated`:
-        // an expired contract and a terminated one are different facts.
         break;
     }
   }
 
-  return { active, awaitingApproval, draft, terminated, activeValueByCurrency };
+  return { active, awaitingApproval, awaitingSignature, draft, terminated, activeValueByCurrency };
 }
 
-/** Lifecycle steps that are legal from a given status, per the service's own
- *  guards. Drives which row actions render at all, so the UI does not offer a
- *  transition the service will answer 409 to. */
-export function allowedTransitions(status: ContractStatus): {
+export type ContractTransitions = {
   revise: boolean;
   submit: boolean;
-  activate: boolean;
+  approve: boolean;
+  sendForSignature: boolean;
+  recordExecution: boolean;
+  amend: boolean;
+  renew: boolean;
   terminate: boolean;
-} {
+};
+
+/** Steps the service's own guards allow from this contract's current state.
+ *  Drives which row actions render, so the UI does not offer a 409. */
+export function allowedTransitions(
+  contract: Pick<Contract, "status" | "signature_status">,
+): ContractTransitions {
+  const { status } = contract;
+  const signature = contract.signature_status ?? "NOT_REQUESTED";
   return {
-    revise: status === "DRAFT" || status === "PENDING_APPROVAL",
+    revise: status === "DRAFT" || status === "REVIEW",
     submit: status === "DRAFT",
-    activate: status !== "ACTIVE" && status !== "TERMINATED",
-    terminate: status !== "TERMINATED",
+    approve: status === "REVIEW",
+    sendForSignature: status === "APPROVED" && signature === "NOT_REQUESTED",
+    recordExecution:
+      status === "APPROVED" && (signature === "SENT" || signature === "PARTIALLY_SIGNED"),
+    amend: status === "EFFECTIVE",
+    renew: status === "EFFECTIVE",
+    terminate: status === "APPROVED" || status === "EXECUTED" || status === "EFFECTIVE",
   };
 }
 
 /**
  * Turn a backend failure into something a legal user can act on.
  *
- * This service answers in prose rather than machine codes — `{"error": "only
- * DRAFT contracts can be submitted for approval"}` — so matching is on those
- * sentences. Where the prose omits the consequence, it is added: a 409 here
- * means the contract moved under the reader since the page was rendered, and
- * knowing that is the difference between retrying and investigating.
+ * Matches the service's own error strings (domain.Err* and the handler's
+ * writeError texts) and the client's transport messages.
  */
 export function explainContractError(message: string): string {
   const text = message.toLowerCase();
 
-  if (text.includes("contract not found")) {
-    return "That contract no longer exists, or it belongs to another tenant. Row-level security hides the two cases from each other, so both read as not found.";
+  if (text.includes("is unreachable at") || text.includes("did not respond within")) {
+    return "contract-lifecycle-svc could not be reached, so nothing was written. Try again once it is running.";
   }
-  if (text.includes("already active")) {
-    return "This contract is already ACTIVE — it was activated elsewhere since this page was rendered. Reload to see the current state.";
+  if (text.includes("contract not found")) {
+    return "That contract no longer exists, or it belongs to another tenant — both read as not found.";
+  }
+  if (text.includes("principal may not approve a contract they submitted")) {
+    return "You submitted this contract for review, so you cannot approve it. Another approver has to.";
+  }
+  if (text.includes("governance_decision_id is required")) {
+    return "Approval needs the ID of the governance decision that authorizes it.";
+  }
+  if (text.includes("governance_decision_id not found")) {
+    return "That governance decision ID is not on record for your organisation. Check the ID in the governance decision log.";
+  }
+  if (text.includes("governance decision was not granted")) {
+    return "That governance decision was not GRANTED for approving contracts on this legal entity, so the approval was refused.";
+  }
+  if (text.includes("governance decision log unavailable")) {
+    return "The governance decision log could not be reached, so the approval was refused rather than allowed unchecked. Try again shortly.";
+  }
+  if (text.includes("signature has not been sent")) {
+    return "Execution can only be recorded after the contract has been sent for signature.";
   }
   if (text.includes("already terminated")) {
     return "This contract is already TERMINATED. Termination is terminal and cannot be repeated or undone.";
   }
-  if (text.includes("contract is terminated")) {
-    return "This contract is TERMINATED and can no longer be activated.";
+  if (text.includes("only draft or review contracts can be updated")) {
+    return "Terms can only be revised while a contract is DRAFT or REVIEW. Once APPROVED, use an amendment after it takes effect.";
   }
-  if (text.includes("only draft contracts can be submitted")) {
-    return "Only a DRAFT can be submitted for approval — this contract has already moved past DRAFT. Reload to see where it is now.";
+  if (text.includes("envelope_incomplete")) {
+    return "The request was missing context the service requires on every change. This is a console fault, not something you entered.";
   }
-  if (text.includes("only draft or pending_approval contracts can be updated")) {
-    return "Terms can only be revised while a contract is DRAFT or PENDING_APPROVAL. Once ACTIVE, the agreement is fixed and a change needs a new contract.";
+  if (text.includes("not in the required status")) {
+    return "That step is not available from the contract's current status — it moved since this page loaded, or the step comes later in the lifecycle. Reload to see where it is now.";
+  }
+  if (text.includes("not authorized to perform this action")) {
+    return "Your account is not authorized to perform this step on this legal entity.";
+  }
+  if (text.includes("authorization service unavailable")) {
+    return "Your permission could not be checked, so the change was refused rather than allowed through unchecked. Try again shortly.";
+  }
+  if (
+    text.includes("tenant scope missing") ||
+    text.includes("missing_tenant_scope") ||
+    text.includes("x-principal-id header is required")
+  ) {
+    return "Your session was not recognised by contract-lifecycle-svc — sign in again.";
   }
   if (text.includes("signed_by is required")) {
-    return "A signatory is required to activate a contract.";
+    return "Name the signatory to record execution.";
+  }
+  if (text.includes("new_effective_to")) {
+    return "A renewal needs the new end date.";
   }
   if (text.includes("terminated_by is required")) {
     return "No caller identity reached the service, so termination could not be attributed. Sign in again.";
@@ -501,11 +602,8 @@ export function explainContractError(message: string): string {
   if (text.includes("invalid request body")) {
     return "contract-lifecycle-svc could not parse the request. This is a console bug, not a data problem.";
   }
-  if (text.includes("failed to create") || text.includes("failed to update")) {
-    return "contract-lifecycle-svc could not reach its database. Nothing was written.";
-  }
   if (text.includes("failed to")) {
-    return "contract-lifecycle-svc failed while serving this request. Its database may be unreachable.";
+    return "contract-lifecycle-svc failed while serving this request. Nothing was written.";
   }
 
   return message;

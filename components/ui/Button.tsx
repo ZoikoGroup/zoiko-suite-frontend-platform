@@ -4,22 +4,25 @@ import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "ghost";
+  variant?: "primary" | "secondary" | "ghost" | "accent";
   size?: "sm" | "md";
   loading?: boolean;
 };
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-lg font-medium " +
+  "inline-flex items-center justify-center gap-2 rounded-xl font-semibold " +
   "transition-all duration-200 ease-out focus-visible:outline-none " +
   "focus-visible:ring-2 focus-visible:ring-navy-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 " +
   "disabled:cursor-not-allowed disabled:opacity-60";
 
 const variants = {
   primary:
-    "bg-navy-900 text-white shadow-sm hover:bg-navy-800 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:bg-navy-950 dark:bg-navy-600 dark:hover:bg-navy-500",
+    "bg-navy-900 text-white shadow-sm hover:bg-navy-800 hover:shadow-md active:bg-navy-950 dark:bg-navy-600 dark:hover:bg-navy-500",
   secondary:
-    "border border-slate-300 bg-white text-navy-900 hover:border-navy-400 hover:bg-slate-50 hover:-translate-y-0.5 active:translate-y-0 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-navy-400 dark:hover:bg-slate-800",
+    "border border-slate-200 bg-white text-navy-900 shadow-sm hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800",
+  // The one call to action on a page header — gold, as on the brand mark.
+  accent:
+    "bg-gold-500 text-white shadow-sm shadow-gold-600/20 hover:bg-gold-600 hover:shadow-md active:bg-gold-700",
   ghost:
     "text-slate-600 hover:bg-slate-100 hover:text-navy-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100",
 };

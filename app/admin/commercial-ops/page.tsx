@@ -24,7 +24,11 @@ import {
 } from "@/components/admin/commercial-ops";
 import { DOMAINS } from "@/lib/constants";
 import type { OrderStatusFilter } from "@/lib/api/purchase-orders";
-import type { RequestStatus } from "@/lib/api/purchase-requests";
+import {
+  REQUEST_STATUSES,
+  normaliseRequestStatus,
+  type RequestStatus,
+} from "@/lib/api/purchase-requests";
 import {
   lookupOrder,
   lookupOrderAmendments,
@@ -48,7 +52,8 @@ const FILTERS: { label: string; value?: OrderStatusFilter }[] = [
 // silently re-filter the orders too.
 const REQUEST_FILTERS: { label: string; value?: RequestStatus }[] = [
   { label: "All" },
-  { label: "Pending", value: "PENDING" },
+  { label: "Draft", value: "DRAFT" },
+  { label: "Pending", value: "PENDING_APPROVAL" },
   { label: "Approved", value: "APPROVED" },
   { label: "Rejected", value: "REJECTED" },
 ];
@@ -164,10 +169,12 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
   const rawRequest = Array.isArray(params.request_status)
     ? params.request_status[0]
     : params.request_status;
-  const requestStatus: RequestStatus | undefined =
-    rawRequest === "PENDING" || rawRequest === "APPROVED" || rawRequest === "REJECTED"
-      ? rawRequest
-      : undefined;
+  const normalisedRequest = normaliseRequestStatus(rawRequest);
+  const requestStatus: RequestStatus | undefined = (REQUEST_STATUSES as readonly string[]).includes(
+    normalisedRequest,
+  )
+    ? (normalisedRequest as RequestStatus)
+    : undefined;
 
   // Both services accept legal_entity_id on their list route and compare it
   // against a uuid column, so a malformed value dies in the Postgres driver and
@@ -736,8 +743,8 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
       <div className="mt-6">
         <SectionCard
           icon={GitBranch}
-          title="Procurement Lifecycle Workflows"
-          subtitle="procurement-workflow-svc — end-to-end procurement orchestrations, step transitions, and approvals"
+          title="Procurement Cases"
+          subtitle="procurement-workflow-svc — spend-checked cases, approval, and purchase-order issue"
           ports="8134"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
