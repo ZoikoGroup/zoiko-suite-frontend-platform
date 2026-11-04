@@ -840,7 +840,16 @@ export function AssistantWidget({
     const stillWanted = () => inFlight.current === turnId;
     const failed = (e: PublicAIError) => {
       if (!stillWanted()) return;
-      console.error("[assistant] request failed", { kind: e.kind, status: e.status, code: e.code, requestId: e.requestId, reference: e.requestId ?? turnId });
+      // Rate limits and "still busy" are expected and shown to the visitor;
+      // only faults (network, timeout, server) are logged as errors.
+      const expected = e.kind === "http" && e.status !== undefined && e.status < 500;
+      (expected ? console.warn : console.error)("[assistant] request failed", {
+        kind: e.kind,
+        status: e.status,
+        code: e.code,
+        requestId: e.requestId,
+        reference: e.requestId ?? turnId,
+      });
       // Doc01 §10 S08: a correlation id. The server's request id when there
       // is one, otherwise the client_turn_id this attempt was sent with.
       setVisitor(visitorId, { state: "failed", fail: { kind: failKind(e), reference: e.requestId ?? turnId, retryAfter: e.retryAfterSeconds, status: e.status } });

@@ -162,7 +162,11 @@ async function call<T>(
   if (!response.ok) {
     const problem = body as { code?: string; request_id?: string; title?: string };
     const retry = Number(response.headers.get("Retry-After"));
-    console.error(`[assistant] ${method} ${BASE}${path} returned HTTP ${response.status}`, { requestId, code: problem?.code, title: problem?.title });
+    // An expected reply the widget handles itself (expired session -> new
+    // session and resend, busy, slow down) is a warning; a server fault is an
+    // error. In dev, Next.js turns every console.error into an overlay.
+    const log = response.status >= 500 ? console.error : console.warn;
+    log(`[assistant] ${method} ${BASE}${path} returned HTTP ${response.status}`, { requestId, code: problem?.code, title: problem?.title });
     return {
       ok: false,
       error: {
