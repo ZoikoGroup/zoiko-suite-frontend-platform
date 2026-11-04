@@ -144,6 +144,7 @@ async function call<T>(
     });
   } catch (err) {
     const timeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    console.error(`[assistant] ${method} ${BASE}${path} failed (${timeout ? "timeout" : "network"})`, err);
     return { ok: false, error: { kind: timeout ? "timeout" : "unreachable" } };
   }
 
@@ -153,11 +154,13 @@ async function call<T>(
   try {
     body = await response.json();
   } catch {
+    console.error(`[assistant] ${method} ${BASE}${path} returned HTTP ${response.status} with a non-JSON body`, { requestId });
     return { ok: false, error: { kind: response.status >= 500 ? "unreachable" : "malformed", status: response.status, requestId } };
   }
   if (!response.ok) {
-    const problem = body as { code?: string; request_id?: string };
+    const problem = body as { code?: string; request_id?: string; title?: string };
     const retry = Number(response.headers.get("Retry-After"));
+    console.error(`[assistant] ${method} ${BASE}${path} returned HTTP ${response.status}`, { requestId, code: problem?.code, title: problem?.title, body });
     return {
       ok: false,
       error: {

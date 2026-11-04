@@ -132,6 +132,18 @@ export function ActiveServicesTable() {
     }
   }
 
+  const reachableCount = ALL_SERVICES.filter((svc) => pingStates[svc.id]?.ok).length;
+  const checkedCount = ALL_SERVICES.filter((svc) => pingStates[svc.id] && !pingStates[svc.id].loading).length;
+  const allReachable = checkedCount === ALL_SERVICES.length && reachableCount === ALL_SERVICES.length;
+  const reachabilityTone =
+    checkedCount === 0
+      ? "text-slate-500 dark:text-slate-400"
+      : allReachable
+        ? "text-emerald-600 dark:text-emerald-400"
+        : reachableCount > 0
+          ? "text-amber-600 dark:text-amber-400"
+          : "text-rose-600 dark:text-rose-400";
+
   return (
     <Card className="overflow-hidden border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
       {/* Header */}
@@ -142,7 +154,7 @@ export function ActiveServicesTable() {
               <Server className="h-4 w-4" />
             </span>
             <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Active Microservices Directory (37 / 37 Live)
+              Active Microservices Directory ({reachableCount} / {ALL_SERVICES.length} Live)
             </h3>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -285,9 +297,11 @@ export function ActiveServicesTable() {
 
       <div className="border-t border-slate-200 dark:border-slate-800 px-6 py-3 bg-slate-50/50 dark:bg-slate-800/30 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <span>Showing {filtered.length} of {ALL_SERVICES.length} microservices</span>
-        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+        <span className={`inline-flex items-center gap-1 font-medium ${reachabilityTone}`}>
           <ShieldCheck className="h-3.5 w-3.5" />
-          All 37 Services Reachable on Localhost
+          {checkedCount === 0
+            ? "No services checked yet"
+            : `${reachableCount} of ${ALL_SERVICES.length} services reachable on localhost`}
         </span>
       </div>
     </Card>
