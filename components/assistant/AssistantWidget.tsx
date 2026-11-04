@@ -485,6 +485,18 @@ export function AssistantWidget({
   const [emptyHint, setEmptyHint] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // The MENU button and its dropdown: a press anywhere else closes the menu.
+  const moreRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && moreRef.current?.contains(target)) return;
+      setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [moreOpen]);
   const [moreTopics, setMoreTopics] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -1527,7 +1539,7 @@ export function AssistantWidget({
               >
                 {theme === "dark" ? <Sun aria-hidden /> : <Moon aria-hidden />}
               </button>
-              <span className="za-more">
+              <span className="za-more" ref={moreRef}>
                 <button
                   type="button"
                   className="za-control za-menu-button"

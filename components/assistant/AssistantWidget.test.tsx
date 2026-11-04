@@ -829,3 +829,24 @@ describe("Kairos-style history list", () => {
     expect(stored.map((c: { turns: { q: string }[] }) => c.turns[0].q)).toEqual(["How is data secured?"]);
   });
 });
+
+describe("MENU dropdown", () => {
+  it("closes on a press anywhere else in the chatbot; the chatbot stays open", async () => {
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Menu" }));
+    });
+    expect(within(dialog).getByRole("menu")).toBeTruthy();
+    // A press inside the menu keeps it open.
+    await act(async () => {
+      fireEvent.pointerDown(within(dialog).getByRole("menu"));
+    });
+    expect(within(dialog).queryByRole("menu")).not.toBeNull();
+    // A press elsewhere in the chatbot closes it.
+    await act(async () => {
+      fireEvent.pointerDown(within(dialog).getByTestId("assistant-welcome"));
+    });
+    expect(within(dialog).queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+});
