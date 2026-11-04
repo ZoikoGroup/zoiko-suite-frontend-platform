@@ -71,7 +71,15 @@ export async function POST(request: Request) {
   let identityProvider: "identity-context-svc" | "local-credentials" = "local-credentials";
 
   if (tenantId) {
-    const auth = await authenticate({ tenant_id: tenantId, email, password });
+    // The console's confidential client (R-1), when configured. Server-only env.
+    const clientId = process.env.IDENTITY_CONSOLE_CLIENT_ID;
+    const clientSecret = process.env.IDENTITY_CONSOLE_CLIENT_SECRET;
+    const auth = await authenticate({
+      tenant_id: tenantId,
+      email,
+      password,
+      ...(clientId && clientSecret ? { client_id: clientId, client_secret: clientSecret } : {}),
+    });
     if (auth.ok) {
       const legalEntityId = known?.legalEntityId ?? "";
       const resolved = await resolveIdentity({

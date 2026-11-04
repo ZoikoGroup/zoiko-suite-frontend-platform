@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { LoginBrandPanel, LoginForm } from "@/components/login";
-import { ThemeToggle } from "@/components/theme";
+import { Logo } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -22,19 +22,18 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const { redirect: redirectTo } = await searchParams;
 
   return (
-    <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
+    // Desktop is pinned to the viewport — the page never scrolls. Only on very
+    // short windows does the form column scroll internally. Layout is
+    // | space | photo | gap | form | space |: photo and form are centred as a
+    // group, so the spare width becomes equal side spaces.
+    <div className="flex min-h-dvh w-full flex-col bg-slate-100 lg:h-dvh lg:flex-row lg:justify-center lg:gap-6 lg:overflow-hidden lg:px-6 xl:gap-19">
       <LoginBrandPanel />
-      <div className="relative flex items-center justify-center overflow-hidden bg-white px-6 py-16 dark:bg-slate-950">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full bg-navy-500/6 blur-3xl animate-float-slow dark:bg-navy-400/8"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -bottom-24 -left-24 h-80 w-80 rounded-full bg-gold-500/5 blur-3xl animate-float-slower dark:bg-gold-500/8"
-        />
-        <ThemeToggle className="absolute right-6 top-6" />
-        <LoginForm redirectTo={redirectTo && redirectTo.startsWith("/admin") ? redirectTo : "/admin"} />
+      {/* Card max width (460px) plus px-2 gutters so its ring and shadow aren't clipped. */}
+      <div className="flex flex-1 flex-col px-4 py-6 lg:w-[calc(460px+1rem)] lg:flex-none lg:overflow-y-auto lg:px-2">
+        <div className="my-auto flex w-full flex-col items-center gap-6">
+          <Logo bare height={44} className="lg:hidden" />
+          <LoginForm redirectTo={redirectTo && redirectTo.startsWith("/admin") ? redirectTo : "/admin"} />
+        </div>
       </div>
     </div>
   );
