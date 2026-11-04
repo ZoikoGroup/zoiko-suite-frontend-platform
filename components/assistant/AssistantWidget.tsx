@@ -1495,6 +1495,16 @@ export function AssistantWidget({
                     </div>
                 )}
               </span>
+              <button
+                type="button"
+                className="za-control za-wide-only"
+                aria-label={expanded ? "Minimize chat" : "Expand chat"}
+                title={expanded ? "Minimize chat" : "Expand chat"}
+                aria-pressed={expanded}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                {expanded ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
+              </button>
               <button type="button" onClick={close} className="za-control" aria-label={t("ui.launcher.close")} title={t("ui.launcher.close")}>
                 <X aria-hidden />
               </button>

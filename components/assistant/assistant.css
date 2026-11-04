@@ -354,7 +354,7 @@
   white-space: nowrap;
   font-size: var(--za-font-meta);
   font-weight: 600;
-  line-height: 1rem;
+  line-height: 1.25rem;
 }
 .za-subtitle-icon { flex: none; }
 .za-subtitle-short { display: none; }
@@ -365,11 +365,11 @@
 }
 /* Title stays on one line: on narrow panels the wordmark shrinks, and on
    the narrowest it is dropped (it is decorative; the title names the panel). */
-@container za-panel (max-width: 410px) {
+@container za-panel (max-width: 360px) {
   .za-header-tile { height: 28px !important; padding: 0 6px !important; }
   .za-header-tile img { height: 20px !important; width: auto !important; }
 }
-@container za-panel (max-width: 380px) {
+@container za-panel (max-width: 330px) {
   .za-header-tile { display: none !important; }
 }
 .za-controls { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: var(--za-control-gap); }

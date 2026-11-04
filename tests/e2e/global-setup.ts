@@ -4,7 +4,7 @@
 // checkout that has the assistant (default: the sibling checkout).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BIN } from "./backend";
@@ -18,4 +18,7 @@ export default function globalSetup() {
   }
   mkdirSync(path.dirname(BIN), { recursive: true });
   execFileSync("go", ["build", "-o", BIN, "./cmd/server"], { cwd: dir, stdio: "inherit" });
+  if (process.platform !== "win32") {
+    try { chmodSync(BIN, 0o755); } catch { /* ignore */ }
+  }
 }
