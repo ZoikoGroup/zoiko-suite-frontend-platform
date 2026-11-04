@@ -287,3 +287,108 @@ export const DENIAL_REASONS: { code: string; status: number; meaning: string; fi
     fix: "Retry after the interval the gateway gives. Check tenant-entity-registry-svc.",
   },
 ];
+
+// GW-FE-1: Admin reads (server-only, token from file)
+// The admin listener is on a second port of the gateway container, never published through Traefik.
+// In production the console's server reads the token from GATEWAY_ADMIN_TOKEN_FILE.
+
+export type GatewayDecision = {
+  id: string;
+  tenant_id: string;
+  principal_id: string;
+  client_key: string;
+  method: string;
+  path: string;
+  api_version: string;
+  outcome: string;
+  code: string;
+  status: number;
+  detail: string;
+  correlation_id: string;
+  decided_at: string;
+};
+
+export type GatewayUsage = {
+  tenant_id: string;
+  admitted: number;
+  denied: number;
+  rate_limited: number;
+  step_up_required: number;
+};
+
+export type GatewayRateLimitState = {
+  scope: string;
+  key: string;
+  allowed: number;
+  used: number;
+  reset_at: string;
+};
+
+export type GatewayRouteVersionStatus = {
+  version: string;
+  supported: boolean;
+  deprecated_at?: string;
+  removed_at?: string;
+};
+
+export type GatewayPolicy = {
+  stripped_headers: string[];
+  injected_headers: string[];
+  carta_mode: string;
+  revocation_ttl_seconds: number;
+  revocation_fail: string;
+  ip_limit_per_second: number;
+  ip_burst: number;
+  tenant_limit_per_second: number;
+  tenant_burst: number;
+  login_limit_per_second: number;
+  login_burst: number;
+  max_in_flight: number;
+  max_body_bytes: number;
+  max_compressed_body_bytes: number;
+  allowed_encodings: string[];
+  supported_versions: string[];
+};
+
+async function adminFetch<T>(path: string): Promise<T | { error: string }> {
+  const base = serviceUrl("gatewayAdmin");
+  const res = await fetch(`${base}${path}`, {
+    method: "GET",
+    cache: "no-store",
+    signal: AbortSignal.timeout(Math.max(REQUEST_TIMEOUT_MS, 5000)),
+  });
+  if (!res.ok) return { error: `admin ${path} → ${res.status}` };
+  return res.json() as Promise<T>;
+}
+
+export async function listDeniedDecisions(params: {
+  outcome?: string;
+  tenant_id?: string;
+  limit?: number;
+}): Promise<GatewayDecision[] | { error: string }> {
+  const qs = new URLSearchParams();
+  if (params.outcome) qs.set("outcome", params.outcome);
+  if (params.tenant_id) qs.set("tenant_id", params.tenant_id);
+  if (params.limit) qs.set("limit", String(params.limit));
+  return adminFetch<GatewayDecision[]>(`/internal/v1/gateway/decisions?${qs}`);
+}
+
+export async function getGatewayDecision(id: string): Promise<GatewayDecision | { error: string }> {
+  return adminFetch<GatewayDecision>(`/internal/v1/gateway/decisions/${encodeURIComponent(id)}`);
+}
+
+export async function getClientUsage(): Promise<GatewayUsage[] | { error: string }> {
+  return adminFetch<GatewayUsage[]>(`/internal/v1/gateway/usage`);
+}
+
+export async function getRateLimitState(scope: string, key: string): Promise<GatewayRateLimitState | { error: string }> {
+  return adminFetch<GatewayRateLimitState>(`/internal/v1/gateway/rate-limit/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`);
+}
+
+export async function getRouteVersionStatus(): Promise<GatewayRouteVersionStatus[] | { error: string }> {
+  return adminFetch<GatewayRouteVersionStatus[]>(`/internal/v1/gateway/routes/versions`);
+}
+
+export async function getPolicy(): Promise<GatewayPolicy | { error: string }> {
+  return adminFetch<GatewayPolicy>(`/internal/v1/gateway/policy`);
+}
