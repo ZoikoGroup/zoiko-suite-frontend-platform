@@ -1,486 +1,365 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { cookies } from "next/headers";
-import {
-  CheckCircle2,
-  Clock,
-  ExternalLink,
-  History,
-  MonitorCheck,
-  Search,
-  ShieldAlert,
-  Users,
-  XCircle,
-} from "lucide-react";
+import Link from "next/link";
+import { BadgeCheck, Fingerprint, HeartPulse, KeyRound, ListChecks, Search, ShieldAlert, Timer } from "lucide-react";
 import { PageHeader } from "@/components/admin/shared";
-import { ButtonLink, ControlsFooter, RegisterCard, KpiCard, KpiGrid, ConsolePanel, PanelGrid, Pipeline, OrderedModel, BarList, PanelCallout, PanelNote } from "@/components/admin/console";
-import { RegisterBody, RegisterToolbar, RegisterTable, RegisterPager, RowLink, TwoLine, DetailDrawer, DrawerFacts, DrawerPane } from "@/components/admin/console/Register";
+import {
+  ButtonLink,
+  ConsolePanel,
+  ControlsFooter,
+  DetailDrawer,
+  DrawerFacts,
+  DrawerNote,
+  KpiCard,
+  KpiGrid,
+  OrderedModel,
+  PanelCallout,
+  PanelGrid,
+  Pipeline,
+  RegisterBody,
+  RegisterCard,
+  RegisterPager,
+  RegisterTable,
+  RegisterToolbar,
+  RowLink,
+  TwoLine,
+  type KpiTone,
+} from "@/components/admin/console";
+import { SignInAgain } from "@/components/admin/authorization/kit";
+import { SessionChip } from "@/components/admin/authorization/console/SessionChip";
 import { GatewayVerifyForm } from "@/components/admin/gateway/GatewayVerifyForm";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { Badge } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
 import {
   DENIAL_REASONS,
+  INJECTED_HEADERS,
   readGatewayHealth,
+  type GatewayHealth,
+  type GatewayStage,
   type ProbeResult,
-  listDeniedDecisions,
-  getClientUsage,
-  getRateLimitState,
-  getRouteVersionStatus,
-  getPolicy,
-  type GatewayDecision,
-  type GatewayUsage,
-  type GatewayPolicy,
 } from "@/lib/api/gateway-auth";
-import { currentSession } from "@/lib/authz-inbox";
+import { currentSession, sessionTrust, type SessionTrust } from "@/lib/authz-inbox";
 
 export const metadata: Metadata = { title: "Gateway Authentication | Zoiko Suite" };
 
+// gateway-auth-svc keeps no records of its own, so everything here is either
+// read live — its probes, the signing keys it verifies against, the viewer's
+// own session — or is the reference for the refusals it gives. Traffic counts
+// are deliberately absent: the gateway holds them in memory per replica, and
+// behind a load balancer each page load would land on a different replica.
+// Fleet traffic is in Grafana (gateway_* metrics); every denial goes to SIEM.
+
 const TABS = [
-  { key: "denied", label: "Denied requests" },
-  { key: "usage", label: "Tenant usage" },
-  { key: "ratelimits", label: "Rate limits" },
-  { key: "versions", label: "Versions & admission policy" },
+  { key: "reasons", label: "Denial reasons" },
   { key: "verify", label: "Verify my session" },
+  { key: "keys", label: "Signing keys" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
+type Query = Record<string, string>;
 
+/** /verify's stages in handler order; each refusal in DENIAL_REASONS names one. */
+const STAGES: { key: GatewayStage; label: string; caption: string }[] = [
+  { key: "admission", label: "Admission", caption: "size, version, rate" },
+  { key: "identity", label: "Identity", caption: "envelope, session" },
+  { key: "risk", label: "Risk", caption: "carta-svc" },
+  { key: "tenant", label: "Tenant", caption: "registry, residency" },
+];
+
+const STATUSES = [...new Set(DENIAL_REASONS.map((r) => r.status))].sort((a, b) => a - b);
+
+const PAGE_SIZE = 20;
+
+/** Outside the component: "now" is a fact about this request, read once. */
 function requestTime(): number {
   return Date.now();
 }
 
-async function loadGatewayData() {
-  const [decisions, usage, policy, versions] = await Promise.all([
-    listDeniedDecisions({ limit: 200 }),
-    getClientUsage(),
-    getPolicy(),
-    getRouteVersionStatus(),
-  ]);
-  return {
-    decisions: Array.isArray(decisions) ? decisions : [],
-    usage: Array.isArray(usage) ? usage : [],
-    policy: "error" in policy ? null : policy,
-    versions: Array.isArray(versions) ? versions : [],
-  };
+function href(q: Query): string {
+  const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v)).toString();
+  return qs ? `/admin/gateway?${qs}` : "/admin/gateway";
 }
 
-function countDecisions(data: Awaited<ReturnType<typeof loadGatewayData>>, tab: TabKey): number | null {
-  if (tab === "denied") return data.decisions.length;
-  if (tab === "usage") return data.usage.length;
-  if (tab === "ratelimits") return null;
-  if (tab === "versions") return data.versions.length;
-  if (tab === "verify") return null;
-  return null;
+function stageLabel(stage: GatewayStage): string {
+  return STAGES.find((s) => s.key === stage)?.label ?? stage;
 }
 
-async function deniedDrawerContent(id: string, decisions: GatewayDecision[]) {
-  const d = decisions.find((x) => x.id === id);
-  if (!d) return <PanelNote>Decision not found</PanelNote>;
-  return (
-    <DrawerFacts
-      items={[
-        { label: "Decision ID", value: <RowLink href={`?tab=denied&id=${d.id}`}>{d.id}</RowLink> },
-        { label: "Tenant", value: d.tenant_id },
-        { label: "Principal", value: d.principal_id },
-        { label: "Client", value: <code className="text-[11px]">{d.client_key}</code> },
-        { label: "Method", value: <code>{d.method}</code> },
-        { label: "Path", value: <code>{d.path}</code> },
-        { label: "API version", value: d.api_version },
-        { label: "Outcome", value: <span className="font-semibold text-rose-600 dark:text-rose-400">{d.outcome}</span> },
-        { label: "Code", value: <code>{d.code}</code> },
-        { label: "Status", value: String(d.status) },
-        { label: "Detail", value: d.detail },
-        { label: "Correlation ID", value: d.correlation_id },
-        { label: "Decided at", value: formatDateTime(d.decided_at) },
-      ]}
-    />
-  );
+/** 503 means nothing was decided; 4xx means the gateway decided against the request. */
+function statusTone(status: number): "danger" | "warning" | "info" {
+  if (status === 403) return "danger";
+  if (status === 401) return "info";
+  return "warning";
 }
 
-async function usageDrawerContent(tenantId: string, usage: GatewayUsage[], rateLimitsPromise: Promise<Awaited<ReturnType<typeof getRateLimitState>>>) {
-  const u = usage.find((x) => x.tenant_id === tenantId);
-  if (!u) return <PanelNote>No usage for this tenant</PanelNote>;
-  const rl = await rateLimitsPromise;
-  const limits = Array.isArray(rl) ? rl.filter((x) => x.key.startsWith(tenantId)) : [];
-  return (
-    <DrawerFacts
-      items={[
-        { label: "Tenant", value: u.tenant_id },
-        { label: "Admitted", value: u.admitted },
-        { label: "Denied", value: u.denied },
-        { label: "Rate-limited", value: u.rate_limited },
-        { label: "Step-up required", value: u.step_up_required },
-        { label: "Active rate-limit scopes", value: limits.length > 0 ? limits.map((l) => <code key={l.key} className="block text-[11px]">{l.scope}: {l.used}/{l.allowed}</code>) : "none" },
-      ]}
-    />
-  );
+function minutes(seconds: number): string {
+  if (seconds < 60) return "under a minute";
+  const m = Math.round(seconds / 60);
+  return m < 120 ? `${m} min` : `${Math.round(m / 60)} h`;
 }
 
-async function rateLimitDrawerContent(scope: string, key: string, rlPromise: Promise<Awaited<ReturnType<typeof getRateLimitState>>>) {
-  const rl = await rlPromise;
-  if ("error" in rl) return <PanelNote>{rl.error}</PanelNote>;
-  return (
-    <DrawerFacts
-      items={[
-        { label: "Scope", value: scope },
-        { label: "Key", value: <code>{key}</code> },
-        { label: "Allowed", value: rl.allowed },
-        { label: "Used", value: rl.used },
-        { label: "Resets at", value: formatDateTime(rl.reset_at) },
-      ]}    />  ); } async function versionDrawerContent(version: string, versions: Awaited<ReturnType<typeof loadGatewayData>>["versions"]) {
-  const v = versions.find((x) => x.version === version);
-  if (!v) return <PanelNote>Version not found</PanelNote>;
-  return (
-    <DrawerFacts
-      items={[
-        { label: "Version", value: v.version },
-        { label: "Supported", value: v.supported ? "Yes" : "No" },
-        { label: "Deprecated at", value: v.deprecated_at ? formatDateTime(v.deprecated_at) : "—" },
-        { label: "Removed at", value: v.removed_at ? formatDateTime(v.removed_at) : "—" },
-      ]}
-    />
-  );
+function probeOk(p: ProbeResult): boolean {
+  return p.reachable && p.status >= 200 && p.status < 300;
 }
 
-function Kpis({ data, policy }: { data: Awaited<ReturnType<typeof loadGatewayData>>; policy: GatewayPolicy | null }) {
+// ── KPIs ─────────────────────────────────────────────────────────────────────
+
+function Kpis({ health, trust, now }: { health: GatewayHealth; trust: SessionTrust; now: number }) {
+  const { liveness, readiness, jwks } = health;
+  const seconds = now / 1000;
+
+  const live: { value: string; tone: KpiTone; status: string; helper?: string } = !liveness.reachable
+    ? { value: "Down", tone: "red", status: "Not reachable", helper: liveness.detail }
+    : probeOk(liveness)
+      ? { value: "Running", tone: "green", status: "Answering", helper: `/healthz in ${liveness.latencyMs} ms` }
+      : { value: String(liveness.status), tone: "amber", status: "Unexpected answer", helper: "/healthz" };
+
+  // /readyz pings the signing keys from inside the gateway. Not ready means it
+  // cannot verify anything, so every gated request is being refused.
+  const ready: { value: string; tone: KpiTone; status: string; helper?: string } = !readiness.reachable
+    ? { value: "—", tone: "neutral", status: "Could not be read", helper: readiness.detail }
+    : probeOk(readiness)
+      ? { value: "Ready", tone: "green", status: "Can verify", helper: "fetches identity-context-svc's keys" }
+      : { value: "Not ready", tone: "red", status: "Refusing every request", helper: readiness.detail };
+
+  const keys: { value: string; tone: KpiTone; status: string; helper?: string } = !jwks.reachable
+    ? { value: "—", tone: "neutral", status: "Could not be read", helper: jwks.detail }
+    : jwks.keys.length === 0
+      ? { value: "0", tone: "red", status: "None published", helper: "every envelope fails as invalid_token" }
+      : { value: String(jwks.keys.length), tone: "green", status: "Published", helper: "by identity-context-svc" };
+
+  const expired = trust.signed && !!trust.expiresAt && trust.expiresAt < seconds;
+  const envelope: { value: string; tone: KpiTone; status: string; helper?: string } = !trust.signed
+    ? { value: "None", tone: "amber", status: "No envelope", helper: "the gateway refuses this session as no_token" }
+    : expired
+      ? { value: "Expired", tone: "red", status: "Sign in again", helper: "the gateway answers invalid_token" }
+      : trust.expiresAt
+        ? { value: minutes(trust.expiresAt - seconds), tone: "green", status: "Valid", helper: `until ${formatDateTime(new Date(trust.expiresAt * 1000).toISOString())}` }
+        : { value: "Present", tone: "green", status: "Valid", helper: "no expiry claim" };
+
+  const assurance: { value: string; tone: KpiTone; status: string; helper?: string } = !trust.signed
+    ? { value: "—", tone: "neutral", status: "Unknown", helper: "no envelope to read" }
+    : {
+        value: trust.mfa ? "MFA" : "Single factor",
+        tone: trust.mfa ? "green" : "navy",
+        status: trust.authTime ? `Signed in ${minutes(Math.max(0, seconds - trust.authTime))} ago` : "Sign-in age unknown",
+        helper: trust.authTime ? "sent as X-Authn-Age-Seconds" : "step-up treats an unknown age as not recent",
+      };
+
   return (
     <KpiGrid>
-      <KpiCard label="Admitted" value={data.usage.reduce((a, u) => a + u.admitted, 0)} icon={CheckCircle2} tone="green" status="this replica since start" />
-      <KpiCard label="Denied" value={data.usage.reduce((a, u) => a + u.denied, 0)} icon={XCircle} tone="red" status="this replica since start" />
-      <KpiCard label="Rate-limited" value={data.usage.reduce((a, u) => a + u.rate_limited, 0)} icon={Clock} tone="amber" status="this replica since start" />
-      <KpiCard label="Step-up required" value={data.usage.reduce((a, u) => a + u.step_up_required, 0)} icon={ShieldAlert} tone="amber" status="this replica since start" />
-      <KpiCard label="Risk engine unavailable" value={data.decisions.filter((d) => d.outcome === "carta_unavailable").length} icon={MonitorCheck} tone="red" status={policy?.carta_mode === "unavailable" ? "live" : "this replica since start"} />
+      <KpiCard label="Gateway process" icon={HeartPulse} {...live} />
+      <KpiCard label="Verifying sign-ins" icon={BadgeCheck} {...ready} />
+      <KpiCard label="Signing keys" icon={KeyRound} href={href({ tab: "keys" })} {...keys} />
+      <KpiCard label="Your envelope" icon={Timer} {...envelope} />
+      <KpiCard label="Your assurance level" icon={Fingerprint} href={href({ tab: "verify" })} {...assurance} />
     </KpiGrid>
   );
 }
 
-function PipelinePanel({ data }: { data: Awaited<ReturnType<typeof loadGatewayData>> }) {
-  const admitted = data.usage.reduce((a, u) => a + u.admitted, 0);
-  const denied = data.usage.reduce((a, u) => a + u.denied, 0);
-  const limited = data.usage.reduce((a, u) => a + u.rate_limited, 0);
-  const total = admitted + denied + limited;
-  return (
-    <ConsolePanel title="Request pipeline" description="Every gated request follows this path; the totals are for this replica since start.">
-      <Pipeline
-        stages={[
-          { label: "Received", value: total, caption: "all gated requests" },
-          { label: "Validating", value: total, caption: "JWT, tenant, risk" },
-          { label: "Admitted", value: admitted, caption: "forwarded to backend" },
-          { label: "Denied", value: denied, caption: "refused with reason" },
-          { label: "Rate-limited", value: limited, caption: "quota exhausted" },
-        ]}
-        note="A denial means the gateway itself refused; the backend never saw the request."
-      />
-    </ConsolePanel>
-  );
-}
+// ── panels ───────────────────────────────────────────────────────────────────
 
-function HeaderPolicyPanel({ policy }: { policy: GatewayPolicy | null }) {
-  if (!policy) {
-    return (
-      <ConsolePanel title="Trusted-header policy" description="Headers the edge strips vs. sets. Unavailable from the admin surface.">
-        <PanelNote>Policy unavailable — admin surface not reachable or not configured.</PanelNote>
+function Panels({ health }: { health: GatewayHealth }) {
+  const viaGateway = process.env.ZOIKO_USE_GATEWAY === "true";
+  const ready = probeOk(health.readiness);
+
+  return (
+    <PanelGrid>
+      <ConsolePanel
+        title="What /verify checks"
+        description="In order. Each figure is how many refusals that stage can give."
+        link={{ label: "All reasons", href: href({ tab: "reasons" }) }}
+      >
+        <Pipeline
+          stages={[
+            ...STAGES.map((s) => ({
+              label: s.label,
+              value: DENIAL_REASONS.filter((r) => r.stage === s.key).length,
+              caption: s.caption,
+              href: href({ tab: "reasons", stage: s.key }),
+            })),
+            { label: "Admitted", value: INJECTED_HEADERS.length, caption: "headers set" },
+          ]}
+          note="Every refusal names itself in X-Auth-Denial-Reason, so a gateway refusal is never mistaken for the service's own 403."
+        />
       </ConsolePanel>
-    );
-  }
-  return (
-    <ConsolePanel title="Trusted-header policy" description="Ordered list: client headers stripped at the edge (left) and server headers injected (right).">
-      <OrderedModel
-        steps={[
-          ...policy.stripped_headers.map((h) => ({
-            title: h,
-            caption: "stripped from client at the edge",
-            chip: "STRIPPED",
-            tone: "red" as const,
-          })),
-          ...policy.injected_headers.map((h) => ({
-            title: h,
-            caption: "set by gateway-auth-svc, forwarded by Traefik",
-            chip: "INJECTED",
-            tone: "green" as const,
-          })),
+
+      <ConsolePanel
+        title="Who may set an identity header"
+        description="Services read identity from headers, so this order is the control."
+      >
+        <OrderedModel
+          steps={[
+            { title: "Client copies removed", caption: "gtrm-edge-strip blanks X-Zoiko-Resolved-*, assurance and audience", chip: "EDGE", tone: "red" },
+            { title: "Routing context stamped", caption: "GTRM resolves tenant and region from the hostname", chip: "GTRM" },
+            { title: "Envelope verified", caption: "signed by identity-context-svc; nothing taken from the caller", chip: "GATEWAY" },
+            { title: "Identity headers set", caption: `${INJECTED_HEADERS.length} headers from the verified claims and the registry`, chip: "GATEWAY", tone: "green" },
+            { title: "Only listed headers forwarded", caption: "Traefik copies authResponseHeaders over any client copy", chip: "TRAEFIK", tone: "green" },
+          ]}
+        />
+      </ConsolePanel>
+
+      <ConsolePanel
+        title="This console and the gateway"
+        description="Read live on each page load."
+        link={{ label: "Verify", href: href({ tab: "verify" }) }}
+      >
+        <DrawerFacts
+          items={[
+            { label: "This console's reads", value: viaGateway ? "Through the gateway" : "Straight to each service" },
+            {
+              label: "Gateway readiness",
+              value: health.readiness.reachable ? `${health.readiness.status} in ${health.readiness.latencyMs} ms` : "Not reachable",
+            },
+            { label: "Keys the console sees", value: health.jwks.reachable ? health.jwks.keys.length : "Not reachable" },
+          ]}
+        />
+        {!ready ? (
+          <PanelCallout tone="warning">
+            The gateway cannot confirm it can fetch identity-context-svc&apos;s keys. While that lasts, every gated request is
+            refused as invalid_token.
+          </PanelCallout>
+        ) : viaGateway ? (
+          <PanelCallout tone="info">ZOIKO_USE_GATEWAY is on: every page of this console passes these checks.</PanelCallout>
+        ) : (
+          <PanelCallout tone="info">
+            ZOIKO_USE_GATEWAY is off, so this console&apos;s own reads skip the gateway. Verify my session shows what it would
+            decide.
+          </PanelCallout>
+        )}
+      </ConsolePanel>
+    </PanelGrid>
+  );
+}
+
+// ── registers ────────────────────────────────────────────────────────────────
+
+function matchingReasons(q: Query) {
+  const needle = (q.q ?? "").trim().toLowerCase();
+  return DENIAL_REASONS.filter(
+    (r) =>
+      (!q.stage || r.stage === q.stage) &&
+      (!q.status || String(r.status) === q.status) &&
+      (!needle || [r.code, r.meaning, r.fix].some((t) => t.toLowerCase().includes(needle))),
+  );
+}
+
+function ReasonsRegister({ q }: { q: Query }) {
+  const rows = matchingReasons(q);
+  const page = Math.max(1, Number(q.page) || 1);
+  const shown = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const keep = { tab: "reasons", q: q.q ?? "", stage: q.stage ?? "", status: q.status ?? "" };
+  const selected = q.id ? DENIAL_REASONS.find((r) => r.code === q.id) : undefined;
+
+  const drawer = selected && (
+    <DetailDrawer
+      heading="Denial reason"
+      closeHref={href({ ...keep, page: q.page ?? "" })}
+      icon={ShieldAlert}
+      title={selected.code}
+      subtitle={`HTTP ${selected.status} · ${stageLabel(selected.stage)} stage`}
+      status={{ label: String(selected.status), tone: statusTone(selected.status) }}
+    >
+      <DrawerFacts
+        items={[
+          { label: "Response header", value: <code className="text-[11px]">X-Auth-Denial-Reason: {selected.code}</code> },
+          { label: "Stage", value: stageLabel(selected.stage) },
+          { label: "Decided", value: selected.status === 503 ? "No — nothing could be determined" : "Yes — the gateway refused" },
+          { label: "Retry helps", value: selected.status === 503 || selected.status === 429 ? "Yes, after Retry-After" : "No" },
         ]}
       />
-      <PanelCallout tone="info">
-        CARTA mode: {policy.carta_mode} · Revocation TTL: {policy.revocation_ttl_seconds}s · Fail: {policy.revocation_fail}
-      </PanelCallout>
-    </ConsolePanel>
+      <DrawerNote>
+        <strong className="text-navy-950 dark:text-slate-100">What it means.</strong> {selected.meaning}
+      </DrawerNote>
+      <DrawerNote>
+        <strong className="text-navy-950 dark:text-slate-100">What to do.</strong> {selected.fix}
+      </DrawerNote>
+    </DetailDrawer>
   );
-}
 
-function DenialReasonsPanel({ data, policy }: { data: Awaited<ReturnType<typeof loadGatewayData>>; policy: GatewayPolicy | null }) {
-  const reasonCounts = new Map<string, number>();
-  for (const d of data.decisions) {
-    reasonCounts.set(d.code, (reasonCounts.get(d.code) ?? 0) + 1);
-  }
-  const total = data.decisions.length || 1;
-  const bars = [...reasonCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, count]) => ({
-      label,
-      percent: Math.round((count / total) * 100),
-      display: `${count}`,
-    }));
   return (
-    <ConsolePanel title="Denial reasons" description="Why the gateway refused, from the X-Auth-Denial-Reason header.">
-      <BarList bars={bars} />
-      {policy?.carta_mode === "unavailable" && (
-        <PanelCallout tone="warning">
-          Risk engine was unavailable — some write refusals are carta_unavailable instead of a risk decision.
-        </PanelCallout>
-      )}
-    </ConsolePanel>
-  );
-}
-
-function DeniedRegister({ data, query }: { data: Awaited<ReturnType<typeof loadGatewayData>>; query: Record<string, string> }) {
-  const rows = data.decisions.map((d) => ({
-    key: d.id,
-    href: `?tab=denied&q=${query.q ?? ""}&id=${d.id}&page=${query.page ?? 1}`,
-    selected: query.id === d.id,
-    cells: [
-      <TwoLine primary={<code>{d.id.slice(0, 12)}…</code>} secondary={d.decided_at ? formatDateTime(d.decided_at) : "—"} mono />,
-      <span className="font-semibold text-rose-600 dark:text-rose-400">{d.outcome}</span>,
-      <code>{d.code}</code>,
-      <span className="text-slate-500 dark:text-slate-400">{d.tenant_id.slice(0, 12)}…</span>,
-      <span className="text-slate-500 dark:text-slate-400">{d.principal_id.slice(0, 12)}…</span>,
-      <code>{d.method} {d.path}</code>,
-    ],
-  }));
-  const columns = [
-    { label: "Decision" },
-    { label: "Outcome" },
-    { label: "Code" },
-    { label: "Tenant" },
-    { label: "Principal" },
-    { label: "Request" },
-  ];
-  return (
-    <>
+    <RegisterBody drawer={drawer}>
       <RegisterToolbar
         action="/admin/gateway"
-        keep={{ tab: "denied" }}
-        search={{ name: "q", value: query.q ?? "", placeholder: "Search detail, tenant, principal…" }}
+        keep={{ tab: "reasons" }}
+        search={{ name: "q", value: q.q ?? "", placeholder: "Paste an X-Auth-Denial-Reason, or search what it means…" }}
         filters={[
-          { name: "outcome", allLabel: "All outcomes", options: DENIAL_REASONS.map((r) => [r.code, r.code]), value: query.outcome ?? "" },
+          { name: "stage", allLabel: "All stages", options: STAGES.map((s) => [s.key, s.label] as const), value: q.stage ?? "" },
+          { name: "status", allLabel: "All statuses", options: STATUSES.map((s) => [String(s), String(s)] as const), value: q.status ?? "" },
         ]}
-        clearHref="?tab=denied"
+        clearHref={q.q || q.stage || q.status ? href({ tab: "reasons" }) : undefined}
       />
-      <RegisterTable columns={columns} rows={rows} empty="No denied requests recorded." />
-      <RegisterPager
-        page={Number(query.page ?? 1)}
-        pageSize={20}
-        total={data.decisions.length}
-        noun="decisions"
-        hrefFor={(p) => `?tab=denied&q=${query.q ?? ""}&outcome=${query.outcome ?? ""}&page=${p}`}
+      <RegisterTable
+        columns={[{ label: "Code" }, { label: "Status" }, { label: "Stage" }, { label: "Meaning" }]}
+        rows={shown.map((r) => {
+          const open = href({ ...keep, page: q.page ?? "", id: r.code });
+          return {
+            key: r.code,
+            href: open,
+            selected: r.code === q.id,
+            cells: [
+              <RowLink key="code" href={open}>
+                {r.code}
+              </RowLink>,
+              <Badge key="status" tone={statusTone(r.status)}>
+                {r.status}
+              </Badge>,
+              stageLabel(r.stage),
+              <TwoLine key="meaning" primary={r.meaning} secondary={r.fix} />,
+            ],
+          };
+        })}
+        empty="No refusal matches. A code the gateway sends that is not listed here is a gap in this page — report it."
       />
-    </>
+      <RegisterPager page={page} pageSize={PAGE_SIZE} total={rows.length} noun="reasons" hrefFor={(p) => href({ ...keep, page: String(p) })} />
+    </RegisterBody>
   );
 }
 
-function UsageRegister({ data, query }: { data: Awaited<ReturnType<typeof loadGatewayData>>; query: Record<string, string> }) {
-  const rows = data.usage.map((u) => ({
-    key: u.tenant_id,
-    href: `?tab=usage&q=${query.q ?? ""}&id=${u.tenant_id}&page=${query.page ?? 1}`,
-    selected: query.id === u.tenant_id,
-    cells: [
-      <RowLink href={`?tab=usage&id=${u.tenant_id}`}>{u.tenant_id.slice(0, 12)}…</RowLink>,
-      <span className="text-emerald-600 dark:text-emerald-400">{u.admitted}</span>,
-      <span className="text-rose-600 dark:text-rose-400">{u.denied}</span>,
-      <span className="text-amber-600 dark:text-amber-400">{u.rate_limited}</span>,
-      <span className="text-amber-600 dark:text-amber-400">{u.step_up_required}</span>,
-    ],
-  }));
-  const columns = [
-    { label: "Tenant" },
-    { label: "Admitted", align: "right" as const },
-    { label: "Denied", align: "right" as const },
-    { label: "Rate-limited", align: "right" as const },
-    { label: "Step-up", align: "right" as const },
-  ];
+function KeysRegister({ health, q }: { health: GatewayHealth; q: Query }) {
+  const { jwks } = health;
+  const selected = q.id ? jwks.keys.find((k) => k.kid === q.id) : undefined;
+
+  const drawer = selected && (
+    <DetailDrawer heading="Signing key" closeHref={href({ tab: "keys" })} icon={KeyRound} title={selected.kid} subtitle="identity-context-svc JWKS">
+      <DrawerFacts
+        items={[
+          { label: "Key ID", value: <code className="text-[11px]">{selected.kid}</code> },
+          { label: "Algorithm", value: selected.alg ?? "not stated" },
+          { label: "Use", value: selected.use ?? "not stated" },
+        ]}
+      />
+      <DrawerNote>
+        The gateway verifies an envelope only against a key published here. It caches the set, so a key retired at
+        identity-context-svc stops verifying once that cache refreshes.
+      </DrawerNote>
+    </DetailDrawer>
+  );
+
   return (
-    <>
-      <RegisterToolbar
-        action="/admin/gateway"
-        keep={{ tab: "usage" }}
-        search={{ name: "q", value: query.q ?? "", placeholder: "Search tenant…" }}
+    <RegisterBody drawer={drawer}>
+      <RegisterTable
+        columns={[{ label: "Key ID" }, { label: "Algorithm" }, { label: "Use" }]}
+        rows={jwks.keys.map((k) => {
+          const open = href({ tab: "keys", id: k.kid });
+          return {
+            key: k.kid,
+            href: open,
+            selected: k.kid === q.id,
+            cells: [
+              <RowLink key="kid" href={open}>
+                {k.kid}
+              </RowLink>,
+              k.alg ?? "—",
+              k.use ?? "—",
+            ],
+          };
+        })}
+        empty={jwks.reachable ? "identity-context-svc publishes no signing keys, so no envelope can verify." : jwks.detail}
       />
-      <RegisterTable columns={columns} rows={rows} empty="No tenant usage recorded." />
-      <RegisterPager
-        page={Number(query.page ?? 1)}
-        pageSize={20}
-        total={data.usage.length}
-        noun="tenants"
-        hrefFor={(p) => `?tab=usage&q=${query.q ?? ""}&page=${p}`}
-      />
-    </>
+    </RegisterBody>
   );
 }
 
-function RateLimitsRegister({ query }: { query: Record<string, string> }) {
-  const search = query.q ?? "";
-  const [scope, key] = search.split(":");
-  const rl = getRateLimitState(scope, key);
-  return (
-    <>
-      <RegisterToolbar
-        action="/admin/gateway"
-        keep={{ tab: "ratelimits" }}
-        search={{ name: "q", value: search, placeholder: "Scope:key (e.g. ip:1.2.3.4 or tenant:tenant-abc)" }}
-      />
-      <Suspense fallback={<PanelNote>Loading…</PanelNote>}>
-        <RateLimitsTable promise={rl} />
-      </Suspense>
-    </>
-  );
-}
-
-async function RateLimitsTable({ promise }: { promise: Promise<Awaited<ReturnType<typeof getRateLimitState>>> }) {
-  const result = await promise;
-  if ("error" in result) return <PanelNote>{result.error}</PanelNote>;
-  return (
-    <RegisterTable
-      columns={[{ label: "Scope" }, { label: "Key" }, { label: "Allowed", align: "right" as const }, { label: "Used", align: "right" as const }, { label: "Resets at" }]}
-      rows={[
-        {
-          key: `${result.scope}:${result.key}`,
-          href: `?tab=ratelimits&q=${encodeURIComponent(`${result.scope}:${result.key}`)}`,
-          selected: true,
-          cells: [
-            result.scope,
-            <code>{result.key}</code>,
-            <span className="tabular-nums">{result.allowed}</span>,
-            <span className="tabular-nums">{result.used}</span>,
-            formatDateTime(result.reset_at),
-          ],
-        },
-      ]}
-      empty="Enter a scope:key above to look up its rate-limit state."
-    />
-  );
-}
-
-function VersionsRegister({ data, query }: { data: Awaited<ReturnType<typeof loadGatewayData>>; query: Record<string, string> }) {
-  const rows = data.versions.map((v) => ({
-    key: v.version,
-    href: `?tab=versions&q=${query.q ?? ""}&id=${v.version}&page=${query.page ?? 1}`,
-    selected: query.id === v.version,
-    cells: [
-      <RowLink href={`?tab=versions&id=${v.version}`}>{v.version}</RowLink>,
-      <span className={v.supported ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>
-        {v.supported ? "Supported" : "Unsupported"}
-      </span>,
-      v.deprecated_at ? formatDateTime(v.deprecated_at) : "—",
-      v.removed_at ? formatDateTime(v.removed_at) : "—",
-    ],
-  }));
-  const columns = [
-    { label: "Version" },
-    { label: "Status" },
-    { label: "Deprecated" },
-    { label: "Removed" },
-  ];
-  return (
-    <>
-      <RegisterToolbar
-        action="/admin/gateway"
-        keep={{ tab: "versions" }}
-        search={{ name: "q", value: query.q ?? "", placeholder: "Search version…" }}
-      />
-      <RegisterTable columns={columns} rows={rows} empty="No route versions recorded." />
-      <RegisterPager
-        page={Number(query.page ?? 1)}
-        pageSize={20}
-        total={data.versions.length}
-        noun="versions"
-        hrefFor={(p) => `?tab=versions&q=${query.q ?? ""}&page=${p}`}
-      />
-    </>
-  );
-}
-
-function VerifyTab() {
-  return <GatewayVerifyForm />;
-}
-
-function RegisterContent({ data, tab, query, policy }: { data: Awaited<ReturnType<typeof loadGatewayData>>; tab: TabKey; query: Record<string, string>; policy: GatewayPolicy | null }) {
-  const drawer = async () => {
-    if (!query.id) return null;
-    switch (tab) {
-      case "denied":
-        return (
-          <DetailDrawer
-            heading="Denied request"
-            closeHref={`?tab=denied&q=${query.q ?? ""}&page=${query.page ?? 1}`}
-            icon={XCircle}
-            title={query.id}
-            subtitle="Gateway decision"
-            status={{ label: "DENIED", tone: "danger" }}
-            panes={[{ key: "detail", label: "Detail", href: `?tab=denied&q=${query.q ?? ""}&id=${query.id}&page=${query.page ?? 1}&pane=detail` }]}
-            activePane="detail"
-          >
-            {await deniedDrawerContent(query.id, data.decisions)}
-          </DetailDrawer>
-        );
-      case "usage":
-        return (
-          <DetailDrawer
-            heading="Tenant usage"
-            closeHref={`?tab=usage&q=${query.q ?? ""}&page=${query.page ?? 1}`}
-            icon={Users}
-            title={query.id}
-            subtitle="Usage totals"
-            panes={[{ key: "detail", label: "Detail", href: `?tab=usage&q=${query.q ?? ""}&id=${query.id}&page=${query.page ?? 1}&pane=detail` }]}
-            activePane="detail"
-          >
-            {await usageDrawerContent(query.id, data.usage, getRateLimitState("tenant", query.id))}
-          </DetailDrawer>
-        );
-      case "ratelimits":
-        return (
-          <DetailDrawer
-            heading="Rate limit"
-            closeHref={`?tab=ratelimits&q=${query.q ?? ""}`}
-            icon={Clock}
-            title={query.id}
-            subtitle="Rate-limit state"
-            panes={[{ key: "detail", label: "Detail", href: `?tab=ratelimits&q=${encodeURIComponent(query.id)}&pane=detail` }]}
-            activePane="detail"
-          >
-            {await rateLimitDrawerContent(query.id.split(":")[0], query.id.split(":")[1], getRateLimitState(query.id.split(":")[0], query.id.split(":")[1]))}
-          </DetailDrawer>
-        );
-      case "versions":
-        return (
-          <DetailDrawer
-            heading="Version"
-            closeHref={`?tab=versions&q=${query.q ?? ""}&page=${query.page ?? 1}`}
-            icon={History}
-            title={query.id}
-            subtitle="Route version status"
-            panes={[{ key: "detail", label: "Detail", href: `?tab=versions&q=${query.q ?? ""}&id=${query.id}&page=${query.page ?? 1}&pane=detail` }]}
-            activePane="detail"
-          >
-            {await versionDrawerContent(query.id, data.versions)}
-          </DetailDrawer>
-        );
-      default:
-        return null;
-    }
-  };
-
-  const body = (
-    <>
-      {tab === "denied" && <DeniedRegister data={data} query={query} />}
-      {tab === "usage" && <UsageRegister data={data} query={query} />}
-      {tab === "ratelimits" && <RateLimitsRegister query={query} />}
-      {tab === "versions" && <VersionsRegister data={data} query={query} />}
-      {tab === "verify" && <VerifyTab />}
-    </>
-  );
-
-  return <RegisterBody drawer={drawer()}>{body}</RegisterBody>;
-}
+// ── page ─────────────────────────────────────────────────────────────────────
 
 export default async function GatewayPage({
   searchParams,
@@ -488,75 +367,72 @@ export default async function GatewayPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const query: Record<string, string> = Object.fromEntries(
-    Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? v[0] : (v ?? "")])
-  );
-  const tab: TabKey = TABS.some((t) => t.key === query.tab) ? (query.tab as TabKey) : "denied";
+  const q: Query = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? (v[0] ?? "") : (v ?? "")]));
+  const tab: TabKey = TABS.some((t) => t.key === q.tab) ? (q.tab as TabKey) : "reasons";
 
   const current = await currentSession();
   if (!current) {
     return (
       <div className="mx-auto max-w-3xl">
-        <div className="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 p-8 text-center">
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 mb-2">Sign in to continue</h1>
-          <p className="text-slate-500 dark:text-slate-400">This page requires a signed session.</p>
+        <div className="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <SignInAgain returnTo="/admin/gateway" />
         </div>
       </div>
     );
   }
 
   const now = requestTime();
-  const data = await loadGatewayData();
-  const signedOut = data.decisions.length === 0 && data.usage.length === 0 && data.policy === null && data.versions.length === 0;
+  const health = await readGatewayHealth();
+  const trust = sessionTrust(current.session);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Gateway Authentication"
-        description="The check every gated request passes before it reaches a service: is the caller who they say they are, may their tenant transact, and does the risk engine object."
-        meta={
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-slate-500 dark:text-slate-400">
-            <ExternalLink className="h-3.5 w-3.5" />
-            <span>This replica since start</span>
-          </span>
-        }
+        description="The check every gated request passes before it reaches a service: is the caller who they say they are, is the session still live, does the risk engine object, and may the tenant transact."
+        meta={<SessionChip session={current.session} now={now} />}
         actions={
           <>
-            <ButtonLink href="?tab=verify" icon={Search} size="md">
+            <ButtonLink href={href({ tab: "reasons" })} icon={ListChecks} size="md">
+              Look up a refusal
+            </ButtonLink>
+            <Link
+              href={href({ tab: "verify" })}
+              scroll={false}
+              className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-gold-500 px-4 text-sm font-semibold text-white shadow-sm shadow-gold-600/20 transition-colors hover:bg-gold-600 active:bg-gold-700"
+            >
+              <Search className="h-4 w-4" />
               Verify my session
-            </ButtonLink>
-            <ButtonLink href="?tab=denied&q=tenant_hostname_mismatch" icon={History} size="md">
-              Recent spoofing
-            </ButtonLink>
+            </Link>
           </>
         }
       />
 
-      {signedOut ? (
-        <div className="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 p-8 text-center">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Unable to read gateway data</h2>
-          <p className="mt-2 text-slate-500 dark:text-slate-400">The admin surface is not reachable. Check that GATEWAY_ADMIN_ADDR is configured and the token is valid.</p>
-        </div>
-      ) : (
-        <>
-          <Kpis data={data} policy={data.policy} />
-          <PanelGrid>
-            <PipelinePanel data={data} />
-            <HeaderPolicyPanel policy={data.policy} />
-            <DenialReasonsPanel data={data} policy={data.policy} />
-          </PanelGrid>
-          <RegisterCard
-            active={tab}
-            tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: countDecisions(data, t.key), href: `?tab=${t.key}` }))}
-          >
-            <RegisterContent data={data} tab={tab} query={query} policy={data.policy} />
-          </RegisterCard>
-        </>
-      )}
+      <Kpis health={health} trust={trust} now={now} />
+      <Panels health={health} />
 
-      <ControlsFooter right="gateway-auth-svc · live data">
-        Route and policy changes are governed configuration — this page has no write commands.
-        Required controls: tenant isolation · verified subject context · edge header sanitation · continuous risk scoring · session revocation within TTL
+      <RegisterCard
+        active={tab}
+        tabs={TABS.map((t) => ({
+          key: t.key,
+          label: t.label,
+          count: t.key === "reasons" ? DENIAL_REASONS.length : t.key === "keys" && health.jwks.reachable ? health.jwks.keys.length : null,
+          href: href({ tab: t.key }),
+        }))}
+      >
+        {tab === "reasons" && <ReasonsRegister q={q} />}
+        {tab === "verify" && (
+          <div className="p-5">
+            <GatewayVerifyForm />
+          </div>
+        )}
+        {tab === "keys" && <KeysRegister health={health} q={q} />}
+      </RegisterCard>
+
+      <ControlsFooter right="gateway-auth-svc · live probes">
+        No write commands: routes and policy are governed GTRM configuration. Fleet traffic is in Grafana (gateway_*
+        metrics) and every denial is in SIEM. Required controls: verified envelope · edge header sanitation · session
+        revocation within TTL · continuous risk scoring · tenant and residency context
       </ControlsFooter>
     </div>
   );

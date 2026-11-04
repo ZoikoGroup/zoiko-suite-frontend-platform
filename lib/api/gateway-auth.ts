@@ -190,205 +190,139 @@ async function readJwks(): Promise<GatewayHealth["jwks"]> {
 }
 
 /**
+ * The stages of /verify, in the order the handler runs them. Each refusal
+ * below belongs to exactly one, so the console can say where a request
+ * stopped. "identity" is envelope verification and the session-liveness check
+ * together: both answer "is this still the person who signed in". The tenant
+ * rate limit runs between those two, but it answers the same rate_limited as
+ * the client limit, so it is filed under admission with it.
+ */
+export type GatewayStage = "admission" | "identity" | "risk" | "tenant";
+
+/**
  * Each refusal the gateway can give, roughly in pipeline order, and what to do
  * about it. Taken from the handler's outcome constants rather than the openapi,
  * which still lists only seven — session revocation, step-up, CARTA outage,
  * rate limiting and request admission were added after it was written.
  */
-export const DENIAL_REASONS: { code: string; status: number; meaning: string; fix: string }[] = [
+export const DENIAL_REASONS: { code: string; status: number; stage: GatewayStage; meaning: string; fix: string }[] = [
   {
     code: "rate_limited",
     status: 429,
+    stage: "admission",
     meaning: "Too many requests from this client or tenant.",
     fix: "Wait for the interval the gateway gives, then retry.",
   },
   {
     code: "overloaded",
     status: 503,
+    stage: "admission",
     meaning: "The gateway is shedding load.",
     fix: "Retry shortly. Nothing was decided.",
   },
   {
     code: "version_unsupported",
     status: 400,
+    stage: "admission",
     meaning: "The route asked for an API version the gateway does not serve.",
     fix: "Use a supported version of the route.",
   },
   {
     code: "malformed_request",
     status: 400,
+    stage: "admission",
     meaning: "The request was refused at admission, before identity was checked (also request_too_large, request_encoding_refused).",
     fix: "Fix the request itself; identity is not the problem.",
   },
   {
     code: "no_token",
     status: 401,
+    stage: "identity",
     meaning: "The request carried no bearer envelope.",
     fix: "Sign in through the identity provider. A session from the offline fallback has no envelope.",
   },
   {
     code: "invalid_token",
     status: 401,
+    stage: "identity",
     meaning: "The envelope failed signature, expiry, issuer, audience or key checks — or the gateway could not fetch identity-context-svc's keys.",
     fix: "Envelopes last minutes: sign in again. If a fresh one also fails, check the gateway's readiness above (a JWKS outage lands here too).",
   },
   {
     code: "incomplete_claims",
     status: 401,
+    stage: "identity",
     meaning: "The envelope verified but names no principal or no tenant.",
     fix: "identity-context-svc minted a malformed envelope. Not a caller problem — report it.",
   },
   {
     code: "session_revoked",
     status: 401,
+    stage: "identity",
     meaning: "The envelope is valid but its session was ended — signed out, or revoked by an administrator.",
     fix: "Sign in again.",
   },
   {
     code: "session_status_unavailable",
     status: 503,
+    stage: "identity",
     meaning: "identity-context-svc could not say whether the session is still live, so the gateway refused rather than assumed.",
     fix: "Retry. If it persists, check identity-context-svc.",
   },
   {
     code: "tenant_hostname_mismatch",
     status: 403,
+    stage: "identity",
     meaning: "The envelope's tenant disagrees with the tenant resolved from the hostname. This is the spoofing shape, and it is streamed to SIEM.",
     fix: "Use the hostname of the tenant you signed in to.",
   },
   {
     code: "step_up_required",
     status: 401,
+    stage: "risk",
     meaning: "Continuous risk assessment (carta-svc) wants a second factor before this request.",
     fix: "Complete identity-context-svc's TOTP step-up, then retry. This console has no step-up screen yet, so it cannot do that for you.",
   },
   {
     code: "carta_blocked",
     status: 403,
+    stage: "risk",
     meaning: "Continuous risk assessment (carta-svc) refused this session.",
     fix: "Re-authenticating does not change it. A security reviewer has to clear the risk.",
   },
   {
     code: "carta_unavailable",
     status: 503,
+    stage: "risk",
     meaning: "carta-svc is configured but did not answer, and this was a write — writes fail closed, reads fail open.",
     fix: "Retry. If it persists, check carta-svc.",
   },
   {
     code: "tenant_context_denied",
     status: 403,
+    stage: "tenant",
     meaning: "The tenant registry refused: unknown or suspended tenant, or a legal entity that belongs to another tenant.",
     fix: "Re-authenticating does not change it. Check the tenant's status on Tenants & Entities.",
   },
   {
     code: "tenant_context_unresolved",
     status: 503,
+    stage: "tenant",
     meaning: "The tenant registry could not be reached, so no decision exists. Nothing was refused and nothing was allowed.",
     fix: "Retry after the interval the gateway gives. Check tenant-entity-registry-svc.",
   },
+  {
+    code: "residency_denied",
+    status: 403,
+    stage: "tenant",
+    meaning: "A write under a STRICT_REGION residency policy reached the edge in a region other than the one the policy pins — or the policy itself could not be found. Reads are never checked.",
+    fix: "Use the tenant's regional hostname. If the policy is wrong, correct it on Tenants & Entities.",
+  },
+  {
+    code: "residency_unresolved",
+    status: 503,
+    stage: "tenant",
+    meaning: "The tenant registry could not be reached to read the residency policy, and this was a write. Nothing was refused and nothing was allowed.",
+    fix: "Retry after the interval the gateway gives. Check tenant-entity-registry-svc.",
+  },
 ];
-
-// GW-FE-1: Admin reads (server-only, token from file)
-// The admin listener is on a second port of the gateway container, never published through Traefik.
-// In production the console's server reads the token from GATEWAY_ADMIN_TOKEN_FILE.
-
-export type GatewayDecision = {
-  id: string;
-  tenant_id: string;
-  principal_id: string;
-  client_key: string;
-  method: string;
-  path: string;
-  api_version: string;
-  outcome: string;
-  code: string;
-  status: number;
-  detail: string;
-  correlation_id: string;
-  decided_at: string;
-};
-
-export type GatewayUsage = {
-  tenant_id: string;
-  admitted: number;
-  denied: number;
-  rate_limited: number;
-  step_up_required: number;
-};
-
-export type GatewayRateLimitState = {
-  scope: string;
-  key: string;
-  allowed: number;
-  used: number;
-  reset_at: string;
-};
-
-export type GatewayRouteVersionStatus = {
-  version: string;
-  supported: boolean;
-  deprecated_at?: string;
-  removed_at?: string;
-};
-
-export type GatewayPolicy = {
-  stripped_headers: string[];
-  injected_headers: string[];
-  carta_mode: string;
-  revocation_ttl_seconds: number;
-  revocation_fail: string;
-  ip_limit_per_second: number;
-  ip_burst: number;
-  tenant_limit_per_second: number;
-  tenant_burst: number;
-  login_limit_per_second: number;
-  login_burst: number;
-  max_in_flight: number;
-  max_body_bytes: number;
-  max_compressed_body_bytes: number;
-  allowed_encodings: string[];
-  supported_versions: string[];
-};
-
-async function adminFetch<T>(path: string): Promise<T | { error: string }> {
-  const base = serviceUrl("gatewayAdmin");
-  const res = await fetch(`${base}${path}`, {
-    method: "GET",
-    cache: "no-store",
-    signal: AbortSignal.timeout(Math.max(REQUEST_TIMEOUT_MS, 5000)),
-  });
-  if (!res.ok) return { error: `admin ${path} → ${res.status}` };
-  return res.json() as Promise<T>;
-}
-
-export async function listDeniedDecisions(params: {
-  outcome?: string;
-  tenant_id?: string;
-  limit?: number;
-}): Promise<GatewayDecision[] | { error: string }> {
-  const qs = new URLSearchParams();
-  if (params.outcome) qs.set("outcome", params.outcome);
-  if (params.tenant_id) qs.set("tenant_id", params.tenant_id);
-  if (params.limit) qs.set("limit", String(params.limit));
-  return adminFetch<GatewayDecision[]>(`/internal/v1/gateway/decisions?${qs}`);
-}
-
-export async function getGatewayDecision(id: string): Promise<GatewayDecision | { error: string }> {
-  return adminFetch<GatewayDecision>(`/internal/v1/gateway/decisions/${encodeURIComponent(id)}`);
-}
-
-export async function getClientUsage(): Promise<GatewayUsage[] | { error: string }> {
-  return adminFetch<GatewayUsage[]>(`/internal/v1/gateway/usage`);
-}
-
-export async function getRateLimitState(scope: string, key: string): Promise<GatewayRateLimitState | { error: string }> {
-  return adminFetch<GatewayRateLimitState>(`/internal/v1/gateway/rate-limit/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`);
-}
-
-export async function getRouteVersionStatus(): Promise<GatewayRouteVersionStatus[] | { error: string }> {
-  return adminFetch<GatewayRouteVersionStatus[]>(`/internal/v1/gateway/routes/versions`);
-}
-
-export async function getPolicy(): Promise<GatewayPolicy | { error: string }> {
-  return adminFetch<GatewayPolicy>(`/internal/v1/gateway/policy`);
-}

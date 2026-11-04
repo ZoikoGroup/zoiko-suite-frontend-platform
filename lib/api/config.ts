@@ -37,7 +37,6 @@ const DEFAULTS = {
   // pointing it at 8080 sent /verify to identity-context-svc, which has no such
   // route.
   gatewayAuth:                "http://127.0.0.1:8092",  // gateway-auth-svc
-  gatewayAdmin:               "http://127.0.0.1:8192",  // gateway-auth-svc admin
   schemaRegistry:             "http://127.0.0.1:8093",  // schema-registry-svc
 
   // ── BLOCK 2 · General Ledger & Finance Hub ───────────────────────────────
@@ -173,7 +172,6 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   tenantRegistry:             "/tenant-entity-registry-svc",
   identityContext:            "/identity-context-svc",
   gatewayAuth:                "/gateway-auth-svc",
-  gatewayAdmin:               "/gateway-auth-svc",  // same container, different port
   schemaRegistry:             "/schema-registry-svc",
 
   // Finance
