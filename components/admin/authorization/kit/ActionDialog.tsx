@@ -14,17 +14,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
-import { CheckCircle2, Clock, Fingerprint, LogIn, ShieldAlert, X, XCircle } from "lucide-react";
-import { stepUpAction } from "@/app/admin/account/actions";
+import { CheckCircle2, Clock, Fingerprint, KeyRound, LogIn, ShieldAlert, X, XCircle } from "lucide-react";
+import { beginPasskeyStepUpAction, finishPasskeyStepUpAction, stepUpAction } from "@/app/admin/account/actions";
+import { getPasskeyAssertion, passkeysSupported } from "@/lib/webauthn-browser";
 import { REASONS, type AuthzResult, type ReasonSet } from "@/app/admin/authorization/state";
 import { FIELD, LABEL } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 
-type Tone = "primary" | "secondary" | "danger" | "ghost" | "approve";
+type Tone = "primary" | "secondary" | "danger" | "ghost" | "approve" | "accent";
 
 const TRIGGER: Record<Tone, string> = {
   primary: "bg-navy-900 text-white hover:bg-navy-800 dark:bg-navy-600 dark:hover:bg-navy-500",
   approve: "bg-emerald-600 text-white hover:bg-emerald-700",
+  // The one gold command in a page header or a drawer footer, as on the brand mark.
+  accent: "bg-gold-500 text-white shadow-sm shadow-gold-600/20 hover:bg-gold-600",
   secondary:
     "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
   danger:
@@ -125,6 +128,32 @@ export function ActionDialog({
     });
   }
 
+  // The same proof with a passkey instead of a code (phishing-resistant).
+  function verifyWithPasskey() {
+    startTransition(async () => {
+      const begun = await beginPasskeyStepUpAction();
+      if (!begun.ok) {
+        setVerifyMessage({ text: begun.notEnrolled ? "You have no passkey yet. Use your authenticator app, or add a passkey first." : begun.message });
+        if (begun.signin) settle({ status: "signin", message: begun.message });
+        return;
+      }
+      let assertion: unknown;
+      try {
+        assertion = await getPasskeyAssertion(begun.ceremony.options);
+      } catch {
+        setVerifyMessage({ text: "The passkey prompt was cancelled or timed out. Try again, or enter a code." });
+        return;
+      }
+      const v = await finishPasskeyStepUpAction(begun.ceremony.ceremony, assertion);
+      if (!v.ok) {
+        setVerifyMessage({ text: v.message });
+        if (v.signin) settle({ status: "signin", message: v.message });
+        return;
+      }
+      if (saved) settle(await action({ status: "idle", message: "" }, saved));
+    });
+  }
+
   const drawer = variant === "drawer";
   return (
     <>
@@ -214,7 +243,13 @@ export function ActionDialog({
                       disabled={busy}
                       className={cn(
                         "inline-flex h-10 items-center gap-2 rounded-lg px-5 text-sm font-medium text-white disabled:opacity-60",
-                        tone === "danger" ? "bg-rose-600 hover:bg-rose-700" : tone === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-navy-900 hover:bg-navy-800 dark:bg-navy-600",
+                        tone === "danger"
+                          ? "bg-rose-600 hover:bg-rose-700"
+                          : tone === "approve"
+                            ? "bg-emerald-600 hover:bg-emerald-700"
+                            : tone === "accent"
+                              ? "bg-gold-500 hover:bg-gold-600"
+                              : "bg-navy-900 hover:bg-navy-800 dark:bg-navy-600",
                       )}
                     >
                       {busy ? "Working…" : submitLabel}
@@ -267,6 +302,17 @@ export function ActionDialog({
                   </p>
                 )}
                 <div className="flex items-center justify-end gap-2">
+                  {passkeysSupported() && (
+                    <button
+                      type="button"
+                      onClick={verifyWithPasskey}
+                      disabled={busy}
+                      className="mr-auto inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                      Use a passkey instead
+                    </button>
+                  )}
                   <button type="button" onClick={close} className="h-10 rounded-lg px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
                     Cancel
                   </button>
@@ -357,6 +403,32 @@ function ResultView({ result, returnTo, onDone }: { result: AuthzResult; returnT
             </div>
           ))}
         </dl>
+      )}
+      {result.table && (
+        <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+          <table className="min-w-full text-left text-[12.5px]">
+            <thead className="bg-slate-50 dark:bg-slate-800/60">
+              <tr>
+                {result.table.headers.map((h) => (
+                  <th key={h} scope="col" className="whitespace-nowrap px-3 py-2 font-medium text-slate-500">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {result.table.rows.map((row, r) => (
+                <tr key={r}>
+                  {row.map((cell, c) => (
+                    <td key={c} className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <div className="flex justify-end">
         <button type="button" onClick={onDone} className="h-10 rounded-lg bg-navy-900 px-5 text-sm font-medium text-white hover:bg-navy-800 dark:bg-navy-600">
