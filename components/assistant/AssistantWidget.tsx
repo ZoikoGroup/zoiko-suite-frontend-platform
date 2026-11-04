@@ -108,7 +108,7 @@ const MAX_STARTERS = 4; // Doc01 §06: max four quick-action prompts
 const MOBILE_STARTERS = 3; // Doc01 §06: 2-3 visible chips at a time on mobile
 const MOTION_MS = 180;
 // Doc 01 §12: a default answer is at most 120 words before an optional expand.
-const ANSWER_WORDS = 500;
+const ANSWER_WORDS = 120;
 // Typing reveal of the final, validated answer (Doc 01 §06 "streaming"
 // state). Doc 05 §14 forbids streaming raw model tokens, so nothing is shown
 // before the service has validated the whole answer; this only paces it.

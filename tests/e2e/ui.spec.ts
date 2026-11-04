@@ -379,11 +379,13 @@ test.describe("scrolling", () => {
     const convo = dialog.getByTestId("assistant-conversation");
     await ask(page, "Give me the long version");
     const answer = dialog.getByTestId("assistant-answer").last();
-    await expect(answer).toContainText("Line 28");
     const a = (await answer.boundingBox())!;
     const c = (await convo.boundingBox())!;
     expect(a.y).toBeGreaterThanOrEqual(c.y - 1); // the START of the answer is visible
     expect(a.y).toBeLessThan(c.y + 80);
+    const more = answer.getByRole("button", { name: /Show more/ });
+    if (await more.isVisible()) await more.click();
+    await expect(answer).toContainText("Line 28");
 
     await ask(page, "and the long one again");
     await expect(dialog.getByTestId("assistant-answer")).toHaveCount(2);
