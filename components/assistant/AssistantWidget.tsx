@@ -80,6 +80,15 @@ import { ASSISTANT_LABEL, ASSISTANT_SUBTITLE, ASSISTANT_TITLE, LOGO_FULL_URL, LO
 import { Markdown, clampWords, countWords, revealWords } from "./markdown";
 import { answerTitle, menuFromChips, menuFromServer, type MenuTopic } from "./menu";
 import { looksSensitive, maskForHistory, reduce } from "./state";
+import {
+  type SavedConversation,
+  clearAllHistory,
+  readHistory,
+  rememberOn,
+  setRemember as storeRemember,
+  upsert,
+  writeHistory,
+} from "./history";
 import { useLauncherOffset } from "./useLauncherOffset";
 import { FullLogo, ZTile } from "./ZTile";
 
@@ -113,38 +122,6 @@ const ANSWER_WORDS = 120;
 // state). Doc 05 §14 forbids streaming raw model tokens, so nothing is shown
 // before the service has validated the whole answer; this only paces it.
 // Never longer than TYPE_MAX_MS, and off under prefers-reduced-motion.
-// Earlier conversations of this visit, kept in sessionStorage: this browser
-// tab only, gone when it closes. Doc 02 §10 allows no persistent visitor
-// profile by default and §27 puts stored transcripts behind a Doc 07 DPIA,
-// so nothing is kept across browser sessions or sent to the service.
-const ARCHIVE_KEY = "zoiko-assistant-conversations";
-const ARCHIVE_MAX = 10;
-type SavedConversation = { id: string; startedAt: number; turns: { q: string; a: string }[] };
-
-function readArchive(): SavedConversation[] {
-  try {
-    const raw = window.sessionStorage.getItem(ARCHIVE_KEY);
-    const list: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? (list as SavedConversation[]).filter((c) => c && Array.isArray(c.turns)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeArchive(list: SavedConversation[]) {
-  try {
-    if (list.length) window.sessionStorage.setItem(ARCHIVE_KEY, JSON.stringify(list));
-    else window.sessionStorage.removeItem(ARCHIVE_KEY);
-  } catch {
-    // storage blocked: history lasts for this page view only
-  }
-}
-
-/** A finished conversation for the archive, stamped now. */
-function archiveEntry(turns: SavedConversation["turns"]): SavedConversation {
-  return { id: crypto.randomUUID(), startedAt: Date.now(), turns };
-}
-
 const TYPE_TICK_MS = 40;
 const TYPE_MAX_MS = 2400;
 // Per-visitor theme choice (a convenience only: the widget works without it).
@@ -208,8 +185,12 @@ const COPY: Record<string, string> = {
   "ui.history": "Chat history",
   "ui.history.current": "This conversation",
   "ui.history.earlier": "Earlier conversations",
-  "ui.history.none": "No earlier conversations in this tab yet.",
+  "ui.history.none": "No earlier conversations yet.",
   "ui.history.note": "Kept in this browser tab only and removed when you close it. Nothing is saved to your account.",
+  "ui.history.note.device":
+    "Saved in this browser for 30 days, with contact details and secrets masked. Nothing is saved to your account or sent anywhere.",
+  "ui.history.remember": "Remember my chats on this device",
+  "ui.history.delete": "Delete this conversation",
   "ui.history.clear": "Clear history",
   "ui.new_conversation": "New conversation",
   "ui.new_conversation.started": "New conversation started.",
@@ -510,6 +491,12 @@ export function AssistantWidget({
   // The answer being revealed: words shown so far of its total.
   const [typing, setTyping] = useState<{ id: string; shown: number; total: number; step: number } | null>(null);
   const [archive, setArchive] = useState<SavedConversation[]>([]);
+  // Opt-in device history (Doc 06 §11: no long-lived transcript by default).
+  const [remember, setRememberState] = useState(false);
+  // The conversation on screen, so autosave updates one entry, not many.
+  const currentConvo = useRef<{ id: string; startedAt: number }>({ id: "", startedAt: 0 });
+  const [currentId, setCurrentId] = useState("");
+  const earlier = archive.filter((c) => c.id !== currentId);
   const session = useRef<Session | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const inFlight = useRef<string | null>(null); // turnId of the attempt awaiting a reply
@@ -563,9 +550,33 @@ export function AssistantWidget({
   }, [open]);
 
   useEffect(() => {
-    const load = () => setArchive(readArchive());
+    const load = () => {
+      const on = rememberOn();
+      setRememberState(on);
+      setArchive(readHistory(on));
+    };
     load();
   }, []);
+
+  // With device history on, the conversation on screen is saved as it goes
+  // (like a chat app), so closing the tab loses nothing.
+  useEffect(() => {
+    if (!remember) return;
+    const turns = currentTurns();
+    if (!turns.length) return;
+    if (!currentConvo.current.id) {
+      currentConvo.current = { id: crypto.randomUUID(), startedAt: Date.now() };
+      setCurrentId(currentConvo.current.id);
+    }
+    const entry: SavedConversation = { ...currentConvo.current, updatedAt: Date.now(), turns };
+    setArchive((prev) => {
+      const next = upsert(prev, entry);
+      writeHistory(next, true);
+      return next;
+    });
+    // currentTurns reads messagesRef; messages is the change signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, remember]);
 
   function toggleTheme() {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -692,6 +703,20 @@ export function AssistantWidget({
     setUnread(false);
     dispatch({ type: "OPEN", hasMessages: messagesRef.current.length > 0, waiting: inFlight.current !== null });
   }
+
+  // A press outside the panel (and outside the launcher, which toggles on
+  // its own) closes it, like Escape. The conversation is kept.
+  useEffect(() => {
+    if (!open || closing) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target || !target.isConnected) return;
+      if (panel.current?.contains(target) || launcher.current?.contains(target)) return;
+      close();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [open, closing, close]);
 
   // W02: on small screens the device back button closes the sheet first.
   useEffect(() => {
@@ -892,10 +917,13 @@ export function AssistantWidget({
     setMoreOpen(false);
     const turns = currentTurns();
     if (turns.length) {
-      const next = [archiveEntry(turns), ...archive].slice(0, ARCHIVE_MAX);
+      const base = currentConvo.current.id ? currentConvo.current : { id: crypto.randomUUID(), startedAt: Date.now() };
+      const next = upsert(archive, { ...base, updatedAt: Date.now(), turns });
       setArchive(next);
-      writeArchive(next);
+      writeHistory(next, remember);
     }
+    currentConvo.current = { id: "", startedAt: 0 };
+    setCurrentId("");
     await confirmClear();
     setAnnounce(t("ui.new_conversation.started"));
     composer.current?.focus();
@@ -903,7 +931,22 @@ export function AssistantWidget({
 
   function clearArchive() {
     setArchive([]);
-    writeArchive([]);
+    clearAllHistory();
+  }
+
+  function deleteConversation(id: string) {
+    const next = archive.filter((c) => c.id !== id);
+    setArchive(next);
+    writeHistory(next, remember);
+  }
+
+  // Opting in moves this tab's history to the device; opting out deletes the
+  // device copy and keeps the list for this tab only.
+  function toggleRemember(on: boolean) {
+    storeRemember(on);
+    setRememberState(on);
+    writeHistory(archive, on);
+    if (on) writeHistory([], false);
   }
 
   async function confirmClear() {
@@ -911,6 +954,9 @@ export function AssistantWidget({
     session.current = null;
     inFlight.current = null;
     update(() => []);
+    // What comes next is a new conversation in the history.
+    currentConvo.current = { id: "", startedAt: 0 };
+    setCurrentId("");
     setDraft("");
     setMoreTopics(false);
     setMenuView(null);
@@ -1600,20 +1646,35 @@ export function AssistantWidget({
                 </p>
               )}
               <h4 className="za-history-heading">{t("ui.history.earlier")}</h4>
-              {archive.length === 0 ? (
+              {earlier.length === 0 ? (
                 <p className="za-meta" style={{ margin: "4px 0 0" }}>
                   {t("ui.history.none")}
                 </p>
               ) : (
                 <ol className="za-archive" data-testid="assistant-archive">
-                  {archive.map((c) => (
-                    <li key={c.id}>
+                  {earlier.map((c) => (
+                    <li key={c.id} style={{ position: "relative" }}>
+                      <button
+                        type="button"
+                        className="za-control"
+                        onClick={() => deleteConversation(c.id)}
+                        aria-label={`${t("ui.history.delete")}: ${c.turns[0]?.q ?? ""}`}
+                        title={t("ui.history.delete")}
+                        style={{ position: "absolute", top: 2, right: 0 }}
+                      >
+                        <Trash2 size={16} aria-hidden />
+                      </button>
                       <details>
-                        <summary>
+                        <summary style={{ paddingRight: 40 }}>
                           <span className="za-archive-title">{c.turns[0]?.q}</span>
                           <span className="za-meta">
-                            {new Date(c.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {c.turns.length}{" "}
-                            {c.turns.length === 1 ? "question" : "questions"}
+                            {new Date(c.updatedAt ?? c.startedAt).toLocaleString([], {
+                              day: "numeric",
+                              month: "short",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}{" "}
+                            · {c.turns.length} {c.turns.length === 1 ? "question" : "questions"}
                           </span>
                         </summary>
                         <dl className="za-archive-turns">
@@ -1631,8 +1692,12 @@ export function AssistantWidget({
                   ))}
                 </ol>
               )}
+              <label className="za-meta" style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={remember} onChange={(e) => toggleRemember(e.target.checked)} data-testid="assistant-remember" />
+                {t("ui.history.remember")}
+              </label>
               <p className="za-meta" style={{ margin: "8px 0 0" }}>
-                {t("ui.history.note")}{" "}
+                {t(remember ? "ui.history.note.device" : "ui.history.note")}{" "}
                 {archive.length > 0 && (
                   <button type="button" className="za-linkbutton" style={{ minHeight: 24, padding: 0, fontSize: "inherit" }} onClick={clearArchive}>
                     {t("ui.history.clear")}

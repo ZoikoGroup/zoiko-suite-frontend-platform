@@ -740,3 +740,46 @@ describe("kill switch (Doc 08 §10)", () => {
     expect(api.askAssistant).not.toHaveBeenCalled();
   });
 });
+
+describe("closing and device history", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  it("a press outside the panel closes it; a press inside does not", async () => {
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.pointerDown(dialog);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    await act(async () => {
+      fireEvent.pointerDown(document.body);
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("with Remember on, the conversation is saved on the device as it goes, masked", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByTestId("assistant-remember"));
+    });
+    await ask("Email me at jane@example.org: what plans are available?");
+    const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1")!);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].turns[0].q).not.toContain("jane@example.org");
+    expect(stored[0].turns[0].a).toBe("Starter, Growth and Enterprise plans are available.");
+  });
+
+  it("without Remember nothing is written to device storage", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    await openWidget();
+    await ask("What plans are available?");
+    expect(window.localStorage.getItem("zoiko-assistant-history-v1")).toBeNull();
+  });
+});
