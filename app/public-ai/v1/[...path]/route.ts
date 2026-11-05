@@ -26,9 +26,9 @@ async function pass(request: Request, ctx: { params: Promise<{ path: string[] }>
       headers: forwardHeaders(request.headers),
       body: body || undefined,
       cache: "no-store",
-      // The visitor's Stop aborts this request, so no reply is waited for.
-      // It does not stop the turn: the service runs it detached from the
-      // client to completion, and a retry with the same key replays it.
+      // The visitor's Stop aborts this request; the service then cancels the
+      // model call (Doc 05 §12) and still records the turn, so the next
+      // question is accepted and a retry with the same key replays it.
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
     });
   } catch (err) {

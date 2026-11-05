@@ -85,11 +85,6 @@ jobs:
     # repository is public, so the default token can check it out; a
     # BACKEND_REPO_TOKEN secret is used instead when one is set.
     needs: [validate]
-    # Reported, not yet blocking: 10 tests have drifted from earlier widget
-    # redesigns (screenshots at 400 px vs the 480 px dialog, the wide-screen
-    # close button, typing reveal, long-answer scroll, Try again). Fix them,
-    # then remove this line so the P0 browser tests block (Doc 07 §10).
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

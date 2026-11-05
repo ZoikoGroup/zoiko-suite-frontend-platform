@@ -116,6 +116,8 @@ for (const scheme of ["light", "dark"] as const) {
       await page.setViewportSize({ width: 1280, height: 800 });
       // Visible edge on any page background: a 1 px border on the launcher.
       const border = await launcher.evaluate((el) => getComputedStyle(el).borderTopWidth + " " + getComputedStyle(el).borderTopColor);
+      // The closed launcher follows the page theme once mounted (it used to
+      // stay on the dark edge until first open: invisible on a light page).
       expect(border).toBe(scheme === "light" ? "1px rgba(0, 0, 0, 0.12)" : "1px rgba(255, 255, 255, 0.18)");
       await launcher.screenshot({ path: `${shotDir}/launcher-closed-${scheme}.png` });
       await page.screenshot({ path: `${shotDir}/page-closed-${scheme}.png` });

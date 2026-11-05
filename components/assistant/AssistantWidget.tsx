@@ -558,9 +558,9 @@ export function AssistantWidget({
   }, [open]);
 
   // Theme: the visitor's saved choice, else the site's dark class or the OS
-  // preference, read again on each open so it follows the page.
+  // preference, read on mount (so the closed launcher's edge matches the page,
+  // Doc01 K10) and again on each open/close so it follows the page.
   useEffect(() => {
-    if (!open) return;
     const init = () => {
       let saved: string | null = null;
       try {
