@@ -188,6 +188,69 @@ export async function listEvidenceRequirements(
   return { ok: true, data: sorted };
 }
 
+/**
+ * Cursor-paginated requirement catalog (API-4).
+ */
+export type CursorPage<T> = {
+  items: T[];
+  next_cursor: string | null;
+};
+
+export type ListRequirementsCursorFilters = RequirementFilters & {
+  /** Opaque cursor token from a previous response. */
+  cursor?: string;
+  /** Page size (1-200). */
+  pageSize?: number;
+  /** Sort string (e.g., "domain_code,-effective_from"). */
+  sort?: string;
+};
+
+/**
+ * The requirement catalog (cursor-paginated, API-4).
+ *
+ * Uses opaque, HMAC-signed cursor tokens. The cursor encodes tenant_id, route,
+ * filter, sort, offset, and last_id. A tampered or foreign cursor returns 400.
+ */
+export async function listEvidenceRequirementsCursor(
+  filters: ListRequirementsCursorFilters,
+  identity: TenantIdentity,
+): Promise<ApiResult<CursorPage<EvidenceRequirement>>> {
+  const { cursor, pageSize, sort, ...rest } = filters;
+  const result = await apiGet<CursorPage<EvidenceRequirement>>(
+    "evidence",
+    "/v1/evidence-requirements/cursor",
+    {
+      query: {
+        tenant_id: rest.tenantId,
+        legal_entity_id: rest.legalEntityId,
+        domain_code: rest.domainCode,
+        action_type: rest.actionType,
+        as_of: rest.asOf,
+        cursor,
+        page_size: pageSize,
+        sort,
+      },
+      identity,
+    },
+  );
+
+  if (!result.ok) return result;
+  const data = result.data as CursorPage<EvidenceRequirement> | undefined;
+  if (!data || !Array.isArray(data.items)) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "evidence-requirements-svc returned an invalid cursor page",
+      },
+    };
+  }
+
+  // The service returns items already sorted by the cursor's sort order.
+  // No client-side re-sort needed.
+  return { ok: true, data };
+}
+
 /** One requirement by id. Requires the tenant header — a 400 means it never
  *  arrived, which is a different problem from a 404. */
 export async function getEvidenceRequirement(
@@ -225,9 +288,13 @@ export type CreateRequirementInput = {
  *
  * The body's tenant_id must equal the header's; the service answers 403
  * `tenant_scope_mismatch` otherwise, so this always sends the session tenant.
+ *
+ * If-Match / ETag (API-3): optional optimistic concurrency. When provided, the
+ * write only succeeds if the resource's current record_version matches. On
+ * mismatch, the service returns 412 with a version_mismatch code.
  */
 export async function createEvidenceRequirement(
-  input: CreateRequirementInput,
+  input: CreateRequirementInput & { ifMatch?: string },
 ): Promise<ApiWriteResult<EvidenceRequirement>> {
   return apiPost<EvidenceRequirement>(
     "evidence",
@@ -241,6 +308,7 @@ export async function createEvidenceRequirement(
       ...(input.spec ? { requirement_payload: input.spec } : {}),
       ...(input.effectiveFrom ? { effective_from: input.effectiveFrom } : {}),
       correlation_id: input.correlationId,
+      ...(input.ifMatch ? { if_match: input.ifMatch } : {}),
     },
     { identity: input.identity, correlationId: input.correlationId },
   );
@@ -262,6 +330,10 @@ export async function retireEvidenceRequirement(input: {
   reason: string;
   /** RFC3339. Defaults to now server-side. */
   effectiveTo?: string;
+  /** If-Match / ETag (API-3): optimistic concurrency. When provided, the write
+   *  only succeeds if the resource's current record_version matches. On mismatch,
+   *  the service returns 412 with a version_mismatch code. */
+  ifMatch?: string;
 }): Promise<ApiWriteResult<EvidenceRequirement>> {
   return apiPost<EvidenceRequirement>(
     "evidence",
@@ -269,6 +341,7 @@ export async function retireEvidenceRequirement(input: {
     {
       reason: input.reason,
       ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
+      ...(input.ifMatch ? { if_match: input.ifMatch } : {}),
     },
     { identity: input.identity },
   );
@@ -323,6 +396,173 @@ export async function getEvidenceEvaluation(
     `/v1/evidence/evaluations/${encodeURIComponent(evaluationId)}`,
     { identity },
   );
+}
+export type ListEvaluationsCursorFilters = {
+  /** Required by the service — 400 without it. */
+  tenantId: string;
+  legalEntityId?: string;
+  domainCode?: string;
+  actionType?: string;
+  /** SATISFIED, MISSING, or NO_REQUIREMENTS_DEFINED. */
+  outcome?: string;
+  /** Only evaluations since this instant (RFC3339). */
+  since?: string;
+  /** Opaque cursor token from a previous response. */
+  cursor?: string;
+  /** Page size (1-200). */
+  pageSize?: number;
+  /** Sort string (e.g., "-evaluated_at,domain_code"). */
+  sort?: string;
+};
+
+/** Evaluation list (cursor-paginated, API-4). */
+export type EvaluationCursorPage = CursorPage<EvidenceEvaluation>;
+
+/**
+ * List evaluations with cursor pagination (API-4).
+ *
+ * Evaluations are append-only records. The default sort is -evaluated_at (newest
+ * first). The cursor encodes tenant_id, route, filter, sort, offset, and last_id.
+ */
+export async function listEvaluationsCursor(
+  filters: ListEvaluationsCursorFilters,
+  identity: TenantIdentity,
+): Promise<ApiResult<EvaluationCursorPage>> {
+  const { cursor, pageSize, sort, ...rest } = filters;
+  const result = await apiGet<EvaluationCursorPage>(
+    "evidence",
+    "/v1/evidence/evaluations",
+    {
+      query: {
+        tenant_id: rest.tenantId,
+        legal_entity_id: rest.legalEntityId,
+        domain_code: rest.domainCode,
+        action_type: rest.actionType,
+        outcome: rest.outcome,
+        since: rest.since,
+        cursor,
+        page_size: pageSize,
+        sort,
+      },
+      identity,
+    },
+  );
+
+  if (!result.ok) return result;
+  const data = result.data as EvaluationCursorPage | undefined;
+  if (!data || !Array.isArray(data.items)) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "evidence-requirements-svc returned an invalid cursor page",
+      },
+    };
+  }
+  return { ok: true, data };
+}
+
+/** Evidence summary for the dashboard. */
+export type EvidenceSummary = {
+  active_requirements: number;
+  evaluations_satisfied_30d: number;
+  evaluations_missing_30d: number;
+  actions_with_no_requirements_30d: number;
+  open_pbc_requests: number;
+  overdue_pbc_requests: number;
+  unpublished_outbox_older_than_5_minutes: number;
+};
+
+/**
+ * Get aggregate evidence counts for the dashboard.
+ */
+export async function getEvidenceSummary(
+  identity: TenantIdentity,
+): Promise<ApiResult<EvidenceSummary>> {
+  return apiGet<EvidenceSummary>(
+    "evidence",
+    "/v1/evidence/summary",
+    { identity },
+  );
+}
+
+// ─── PBC (Provided-by-Client) Requests ────────────────────────────────────────
+//
+// These types mirror the service's domain types for the PBC request lifecycle.
+
+export type EvidenceRequestStatus =
+  | "DRAFT"
+  | "SENT"
+  | "VIEWED"
+  | "RESPONSE_RECEIVED"
+  | "UNDER_EVALUATION"
+  | "CLARIFICATION_REQUIRED"
+  | "SATISFIED"
+  | "CLOSED";
+
+export type EvidenceRequest = {
+  request_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  requirement_id: string | null;
+  title: string;
+  description: string;
+  assigned_to_principal_id: string;
+  due_at: string;
+  status: EvidenceRequestStatus;
+  created_by_principal_id: string;
+  correlation_id: string;
+  created_at: string;
+  is_overdue: boolean;
+};
+
+export type PBCRequestFilters = {
+  tenantId: string;
+  legalEntityId?: string;
+  status?: EvidenceRequestStatus;
+  cursor?: string;
+  pageSize?: number;
+  sort?: string;
+};
+
+export type PBCRequestCursorPage = CursorPage<EvidenceRequest>;
+
+/**
+ * List open PBC requests with cursor pagination (API-4).
+ */
+export async function listPBCRequestsCursor(
+  filters: PBCRequestFilters,
+  identity: TenantIdentity,
+): Promise<ApiResult<PBCRequestCursorPage>> {
+  const { cursor, pageSize, sort, ...rest } = filters;
+  const result = await apiGet<PBCRequestCursorPage>(
+    "evidence",
+    "/v1/pbc/requests/cursor",
+    {
+      query: {
+        tenant_id: rest.tenantId,
+        legal_entity_id: rest.legalEntityId,
+        status: rest.status,
+        cursor,
+        page_size: pageSize,
+        sort,
+      },
+      identity,
+    },
+  );
+
+  if (!result.ok) return result;
+  const data = result.data as PBCRequestCursorPage | undefined;
+  if (!data || !Array.isArray(data.items)) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "evidence-requirements-svc returned an invalid cursor page",
+      },
+    };
+  }
+  return { ok: true, data };
 }
 
 // ─── Derived views ───────────────────────────────────────────────────────────
