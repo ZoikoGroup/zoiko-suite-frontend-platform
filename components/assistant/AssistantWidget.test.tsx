@@ -57,6 +57,10 @@ const ok = <T,>(data: T) => ({ ok: true as const, data });
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
+  // Chats are saved as they go, so each test starts with empty history.
+  window.sessionStorage.clear();
+  window.localStorage.removeItem("zoiko-assistant-history-v1");
+  window.localStorage.removeItem("zoiko-assistant-remember");
   Element.prototype.scrollIntoView = vi.fn();
   api.loadAssistantConfig.mockResolvedValue(ok(config));
   // Structured responses off by default: /menu is 404 and the starter chips stay.
@@ -100,16 +104,16 @@ describe("K10 Z-tile branding", () => {
     expect(tileSize(img)).toEqual({ w: "56px", h: "56px", r: "16px" });
     expect(img.className).toContain("object-contain");
     expect(img.className).not.toMatch(/rounded-full|filter|grayscale|invert/);
-    expect(within(launcher).queryByTestId("launcher-close-badge")).toBeNull();
+    expect(within(launcher).queryByTestId("launcher-close")).toBeNull();
   });
 
-  it("open, the launcher keeps the tile and adds the close badge", async () => {
+  it("open, the whole launcher becomes the close (X) button", async () => {
     await openWidget();
     const launcher = screen.getByTestId("assistant-launcher");
     expect(launcher.getAttribute("aria-expanded")).toBe("true");
     expect(launcher.getAttribute("aria-label")).toBe("Close chat");
-    expect(within(launcher).getByTestId("ztile").getAttribute("src")).toBe("/logo-z.png");
-    expect(within(launcher).getByTestId("launcher-close-badge").className).toContain("za-close-badge"); // 18 px token
+    expect(within(launcher).getByTestId("launcher-close").className).toContain("za-launcher-close");
+    expect(within(launcher).queryByTestId("ztile")).toBeNull(); // no logo behind a small badge
   });
 
   it("welcome card has the 48 px tile, title, greeting and topic menu; header shows the full wordmark", async () => {
@@ -120,13 +124,11 @@ describe("K10 Z-tile branding", () => {
     expect(welcome.textContent).toContain("Hi, I can explain ZoikoSuite plans, modules, trust and integrations. I can't see or change any account.");
     // Doc01: at most four quick-action prompts; the rest behind "More topics".
     expect(within(within(welcome).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.querySelector(".za-option-label")!.textContent)).toEqual([
-      "Pricing and trial", "Explore modules", "Book a demo", "Security and trust",
+      "Explore platform", "Compare plans", "Book demo", "Security & trust",
     ]);
     expect(welcome.textContent).toContain("AI assistant. Answers use public ZoikoSuite information only.");
-    await act(async () => {
-      fireEvent.click(within(welcome).getByRole("button", { name: "More topics" }));
-    });
-    expect(within(welcome).getByRole("button", { name: /Get support/ })).toBeTruthy();
+    // Doc 02 T01: exactly the four quick actions; nothing hidden behind them.
+    expect(within(welcome).queryByRole("button", { name: /Get support/ })).toBeNull();
     const header = dialog.querySelector("header")!;
     expect(within(header).queryByTestId("ztile")).toBeNull(); // the Z tile stays on the launcher only
     expect(within(header).getByTestId("full-logo").querySelector("img")!.getAttribute("src")).toBe("/logo.png");
@@ -158,7 +160,8 @@ describe("K10 Z-tile branding", () => {
     const notice = within(dialog).getByRole("region", { name: "Privacy and AI notice" });
     const wordmark = notice.querySelector('img[src="/logo.png"]')!;
     expect(wordmark.parentElement!.className).toContain("bg-white");
-    expect(notice.textContent).toContain("[period from signed policy]");
+    // Doc 02 §17: no unresolved placeholder in the notice.
+    expect(notice.textContent).not.toMatch(/\[[^\]]+\]/);
   });
 
   it("shows a 24 px avatar and the speaker label beside each assistant answer", async () => {
@@ -400,7 +403,7 @@ describe("Kairos-style menu, history and theme", () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
     const dialog = await openWidget();
     await act(async () => {
-      fireEvent.click(within(within(dialog).getByTestId("assistant-welcome")).getByRole("button", { name: /Book a demo/ }));
+      fireEvent.click(within(within(dialog).getByTestId("assistant-welcome")).getByRole("button", { name: /Book demo/ }));
     });
     expect(api.askAssistant.mock.calls[0][3]).toBe("I'd like to book a demo");
   });
@@ -483,7 +486,9 @@ describe("Kairos-style menu, history and theme", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
     });
     const history = within(dialog).getByRole("region", { name: "Chat history" });
-    expect(within(history).getByRole("button", { name: "What plans are available?" })).toBeTruthy();
+    // Kairos-style list: the chat on screen is listed and marked current.
+    const row = within(history).getByRole("button", { name: /^What plans are available\?/ });
+    expect(row.getAttribute("aria-current")).toBe("true");
     await act(async () => {
       fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
     });
@@ -708,7 +713,7 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     const archive = within(dialog).getByTestId("assistant-archive");
     expect(archive.textContent).toContain("What plans are available?");
     expect(archive.textContent).toContain("Starter, Growth and Enterprise plans are available.");
-    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Kept in this browser tab only");
+    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Chats stay in this browser tab");
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Clear history" }));
@@ -728,5 +733,120 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
       fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
     });
     expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).toBeNull();
+  });
+});
+
+describe("kill switch (Doc 08 §10)", () => {
+  it("with chat_enabled false, the official routes show first and the composer is disabled", async () => {
+    api.loadAssistantConfig.mockResolvedValue(ok({ ...config, capabilities: { chat_enabled: false } }));
+    const dialog = await openWidget();
+    const welcome = within(dialog).getByTestId("assistant-welcome");
+    expect(within(welcome).getByTestId("assistant-unavailable")).toBeTruthy();
+    expect((within(dialog).getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    expect(api.askAssistant).not.toHaveBeenCalled();
+  });
+});
+
+describe("closing and device history", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  it("a press outside the panel closes it; a press inside does not", async () => {
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.pointerDown(dialog);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    await act(async () => {
+      fireEvent.pointerDown(document.body);
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("with Remember on, the conversation is saved on the device as it goes, masked", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByTestId("assistant-remember"));
+    });
+    await ask("Email me at jane@example.org: what plans are available?");
+    const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1")!);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].turns[0].q).not.toContain("jane@example.org");
+    expect(stored[0].turns[0].a).toBe("Starter, Growth and Enterprise plans are available.");
+  });
+
+  it("without Remember nothing is written to device storage", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    await openWidget();
+    await ask("What plans are available?");
+    expect(window.localStorage.getItem("zoiko-assistant-history-v1")).toBeNull();
+  });
+});
+
+describe("Kairos-style history list", () => {
+  it("reopens an earlier chat from the list; Clear chat removes its entry", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Data is encrypted in transit and at rest." })));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    // Start a second chat; the first stays in the list.
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: /Start a new conversation/ }));
+    });
+    await ask("How is data secured?");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    const history = within(dialog).getByRole("region", { name: "Chat history" });
+    expect(within(history).getAllByRole("button", { name: /^(What plans|How is data)/ })).toHaveLength(2);
+
+    // Reopen the first chat: its question and answer are back, with a note.
+    await act(async () => {
+      fireEvent.click(within(history).getByRole("button", { name: /^What plans are available\?/ }));
+    });
+    expect(dialog.textContent).toContain("Starter, Growth and Enterprise plans are available.");
+    expect(dialog.textContent).toContain("Earlier conversation");
+    expect(dialog.textContent).not.toContain("Data is encrypted in transit");
+
+    // Clear chat deletes this entry from history.
+    await act(async () => {
+      fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
+    });
+    const stored = JSON.parse(window.sessionStorage.getItem("zoiko-assistant-conversations") ?? "[]");
+    expect(stored.map((c: { turns: { q: string }[] }) => c.turns[0].q)).toEqual(["How is data secured?"]);
+  });
+});
+
+describe("MENU dropdown", () => {
+  it("closes on a press anywhere else in the chatbot; the chatbot stays open", async () => {
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Menu" }));
+    });
+    expect(within(dialog).getByRole("menu")).toBeTruthy();
+    // A press inside the menu keeps it open.
+    await act(async () => {
+      fireEvent.pointerDown(within(dialog).getByRole("menu"));
+    });
+    expect(within(dialog).queryByRole("menu")).not.toBeNull();
+    // A press elsewhere in the chatbot closes it.
+    await act(async () => {
+      fireEvent.pointerDown(within(dialog).getByTestId("assistant-welcome"));
+    });
+    expect(within(dialog).queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog")).not.toBeNull();
   });
 });

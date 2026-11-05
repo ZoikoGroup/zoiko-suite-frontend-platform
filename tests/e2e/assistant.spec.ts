@@ -116,6 +116,8 @@ for (const scheme of ["light", "dark"] as const) {
       await page.setViewportSize({ width: 1280, height: 800 });
       // Visible edge on any page background: a 1 px border on the launcher.
       const border = await launcher.evaluate((el) => getComputedStyle(el).borderTopWidth + " " + getComputedStyle(el).borderTopColor);
+      // The closed launcher follows the page theme once mounted (it used to
+      // stay on the dark edge until first open: invisible on a light page).
       expect(border).toBe(scheme === "light" ? "1px rgba(0, 0, 0, 0.12)" : "1px rgba(255, 255, 255, 0.18)");
       await launcher.screenshot({ path: `${shotDir}/launcher-closed-${scheme}.png` });
       await page.screenshot({ path: `${shotDir}/page-closed-${scheme}.png` });
@@ -123,8 +125,9 @@ for (const scheme of ["light", "dark"] as const) {
       await launcher.click();
       await expect(launcher).toHaveAttribute("aria-label", "Close chat");
       await expect(launcher).toHaveAttribute("aria-expanded", "true");
-      await expect(launcher.getByTestId("ztile")).toHaveAttribute("src", "/logo-z.png");
-      await expect(launcher.getByTestId("launcher-close-badge")).toBeVisible();
+      // Open: the whole launcher is the close (X) button.
+      await expect(launcher.getByTestId("launcher-close")).toBeVisible();
+      await expect(launcher.getByTestId("ztile")).toHaveCount(0);
       await page.screenshot({ path: `${shotDir}/launcher-open-${scheme}.png` });
 
       const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
@@ -175,7 +178,8 @@ for (const scheme of ["light", "dark"] as const) {
       const dialog = await openAssistant(page);
       await dialog.getByRole("button", { name: "Privacy and AI notice" }).first().click();
       const notice = dialog.getByRole("region", { name: "Privacy and AI notice" });
-      await expect(notice).toContainText("[period from signed policy]");
+      // Doc 02 §17: never an unresolved "[…]" placeholder in the notice.
+      await expect(notice).not.toContainText(/\[[^\]]+\]/);
       await expect(notice.locator('img[src="/logo.png"]')).toBeVisible();
       await dialog.screenshot({ path: `${shotDir}/privacy-${scheme}.png` });
     });
