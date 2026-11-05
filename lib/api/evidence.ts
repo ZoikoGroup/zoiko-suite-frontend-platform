@@ -5,7 +5,8 @@
 // Two halves. A catalog of effective-dated requirements, keyed on
 // (domain_code, action_type), each saying what artifact must be present. And an
 // evaluator that takes a list of asserted artifacts and answers SATISFIED,
-// MISSING, or NO_REQUIREMENTS_DEFINED.
+// MISSING, or NO_REQUIREMENTS_DEFINED. Beside them, evidence requests (PBC):
+// asking a named person for an artifact by a date, and recording what came back.
 //
 // THREE OUTCOMES, NOT TWO — and this is the whole point of the service. An empty
 // requirement catalog is a legitimate data state, and reporting it as SATISFIED
@@ -13,22 +14,19 @@
 // complete". NO_REQUIREMENTS_DEFINED exists so a caller cannot mistake the first
 // for the second, and the console never merges the two into a green tick.
 //
-// This is the strictest service in the suite about its own boundaries, and every
-// one of these is a real behaviour rather than a claim:
+// Behaviours the console relies on (each is real in the service):
 //
-//   - Catalog writes are authorization-gated against authorization-svc, and the
-//     check fails CLOSED: an unreachable authorization-svc refuses the write.
-//   - A missing X-Tenant-Id is a 400, never defaulted to a placeholder tenant.
-//   - A missing X-Principal-Id is a 401.
-//   - A body tenant_id that disagrees with the header is a 403, so a caller
-//     cannot write into another tenant's catalog.
-//   - Artifacts of type SUPPORTING_DOCUMENT are verified against
-//     document-vault-svc, and an unreachable vault yields 503 rather than a
-//     MISSING verdict — writing a false fact into an append-only ledger is worse
-//     than admitting the determination could not be made.
-//
-// Evaluations are append-only records, so the gate's own decisions are auditable
-// evidence too.
+//   - Supporting documents, evidence manifests and signatures are verified with
+//     the service that owns them (document-vault, evidence-manifest,
+//     e-signature). An owner that cannot answer is a 503 and NOTHING is
+//     recorded — writing a false fact into an append-only ledger is worse than
+//     admitting the determination could not be made. Other evidence types are
+//     taken on the caller's word.
+//   - API-3: a requirement and an evidence request carry record_version, served
+//     as the ETag "v<n>". Every change to one sends If-Match: without it the
+//     service answers 428, with an out-of-date one 412.
+//   - API-4: the lists are paged with filter[...] parameters and a signed
+//     next_cursor bound to the tenant and the filters that produced it.
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
 import { humanizeCode } from "../humanize";
@@ -55,6 +53,8 @@ export type EvidenceRequirement = {
   created_at: string;
   created_by_principal_id: string;
   correlation_id: string;
+  /** API-3 version; send `"v<record_version>"` as If-Match to change it. */
+  record_version: number;
 };
 
 /** The decoded shape of requirement_payload. Every field optional; a completely
@@ -84,9 +84,8 @@ export type EvidenceEvaluationResult = {
   correlation_id: string;
 };
 
-/** The stored evaluation record, as returned by the lookup route. Carries the
- *  payloads frozen at decision time, so it stays truthful after the catalog
- *  changes underneath it. */
+/** The stored evaluation record. Carries the payloads frozen at decision time,
+ *  so it stays truthful after the catalog changes underneath it. */
 export type EvidenceEvaluation = {
   evaluation_id: string;
   tenant_id: string;
@@ -96,6 +95,8 @@ export type EvidenceEvaluation = {
   outcome: EvidenceOutcome;
   unmet_payload: unknown;
   present_artifacts_payload: unknown;
+  /** The requirement set the determination was tested against. */
+  requirement_ids?: string[] | null;
   evaluated_at: string;
   evaluated_for_principal_id: string;
   correlation_id: string;
@@ -104,391 +105,133 @@ export type EvidenceEvaluation = {
 /** One artifact the caller asserts exists. */
 export type PresentArtifact = {
   evidence_type: string;
-  /** For SUPPORTING_DOCUMENT this is a document-vault-svc document_id and IS
-   *  verified. Other types are taken on the caller's word. */
+  /** For the verified types this is the owner's id (document, manifest or
+   *  envelope) and IS checked with that owner. Other types are taken on the
+   *  caller's word. */
   reference_id: string;
   artifact_subtype?: string;
 };
 
-/** The one evidence type whose references are verifiable against another
- *  service. Not a business constant — a reference-resolution rule. */
-export const VERIFIED_EVIDENCE_TYPE = "SUPPORTING_DOCUMENT";
+/** The evidence types whose references are verified with the service that owns
+ *  them, and that owner. Not a business constant — a reference-resolution rule. */
+export const VERIFIED_BY: Record<string, string> = {
+  SUPPORTING_DOCUMENT: "Document vault",
+  EVIDENCE_MANIFEST: "Evidence manifest",
+  SIGNATURE: "E-signature",
+};
 
 /** Evidence types the console offers when creating a requirement. Free-form data
  *  in the service — nothing there enumerates a permitted set. */
 export const EVIDENCE_TYPES = [
   "SUPPORTING_DOCUMENT",
+  "EVIDENCE_MANIFEST",
   "SIGNATURE",
   "APPROVAL_RECORD",
   "RECONCILIATION_PROOF",
   "THIRD_PARTY_CONFIRMATION",
 ] as const;
 
+/** The ETag the service serves for a record_version (API-3). */
+export function etagOf(version: number | null | undefined): string | undefined {
+  return version && version > 0 ? `"v${version}"` : undefined;
+}
+
+// ─── Lists (API-4) ───────────────────────────────────────────────────────────
+
+/** One page of a console list. `next_cursor` is absent on the last page. */
+export type Page<T> = { items: T[]; next_cursor?: string; page_size: number };
+
+export type PageRequest = { pageSize?: number; cursor?: string };
+
+function pageQuery(filters: Record<string, string | undefined>, page: PageRequest): Record<string, string | number | undefined> {
+  const q: Record<string, string | number | undefined> = { page_size: page.pageSize, cursor: page.cursor };
+  for (const [k, v] of Object.entries(filters)) if (v) q[`filter[${k}]`] = v;
+  return q;
+}
+
+async function getPage<T>(path: string, query: Record<string, string | number | undefined>, identity: TenantIdentity): Promise<ApiResult<Page<T>>> {
+  const result = await apiGet<Page<T>>("evidence", path, { query, identity });
+  if (!result.ok) return result;
+  if (!result.data || !Array.isArray(result.data.items)) {
+    return { ok: false, error: { kind: "malformed", message: `evidence-requirements-svc returned an unreadable page for ${path}` } };
+  }
+  return result;
+}
+
+/**
+ * Read every page of a list, up to `limit` rows. The console's registers filter
+ * and page in memory, so they read the whole (bounded) list; `more` says the
+ * limit cut it short, so a count is never presented as complete when it is not.
+ */
+export async function readAll<T>(
+  read: (page: PageRequest) => Promise<ApiResult<Page<T>>>,
+  limit = 1000,
+): Promise<ApiResult<{ rows: T[]; more: boolean }>> {
+  const rows: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const r = await read({ pageSize: 200, cursor });
+    if (!r.ok) return r;
+    rows.push(...r.data.items);
+    cursor = r.data.next_cursor;
+    if (!cursor) return { ok: true, data: { rows, more: false } };
+    if (rows.length >= limit) return { ok: true, data: { rows, more: true } };
+  }
+}
+
 export type RequirementFilters = {
-  /** Required by the service — 400 without it. */
-  tenantId: string;
   legalEntityId?: string;
   domainCode?: string;
   actionType?: string;
-  /**
-   * "now" for currently-effective only, an RFC3339 instant for a point-in-time
-   * view, or omitted for EVERYTHING including retired requirements.
-   *
-   * Omitted is the auditor's view and it is the console's default here: a
-   * catalog listing that silently hid retired rows would misrepresent what the
-   * gate used to require.
-   */
+  evidenceType?: string;
+  /** "now", an RFC3339 instant, or omitted for the full history (retired included). */
   asOf?: string;
 };
 
-/**
- * The requirement catalog.
- *
- * Note the identity asymmetry: tenant_id is a QUERY PARAMETER here, not read
- * from the header, so this read is scoped by what the caller asks for. The
- * console always passes the session tenant.
- */
-export async function listEvidenceRequirements(
-  filters: RequirementFilters,
-  identity: TenantIdentity,
-): Promise<ApiResult<EvidenceRequirement[]>> {
-  const result = await apiGet<EvidenceRequirement[]>(
-    "evidence",
-    "/v1/evidence-requirements/",
-    {
-      query: {
-        tenant_id: filters.tenantId,
+/** The requirement catalogue (GET /v1/evidence-requirements). */
+export function listEvidenceRequirements(identity: TenantIdentity, filters: RequirementFilters = {}, page: PageRequest = {}) {
+  return getPage<EvidenceRequirement>(
+    "/v1/evidence-requirements",
+    pageQuery(
+      {
         legal_entity_id: filters.legalEntityId,
         domain_code: filters.domainCode,
         action_type: filters.actionType,
+        evidence_type: filters.evidenceType,
         as_of: filters.asOf,
       },
-      identity,
-    },
-  );
-
-  if (!result.ok) return result;
-  if (!Array.isArray(result.data)) {
-    return {
-      ok: false,
-      error: {
-        kind: "malformed",
-        message: "evidence-requirements-svc returned a non-array requirement list",
-      },
-    };
-  }
-
-  // Effective-from descending, retired rows last — the order an operator reads
-  // a catalog in. The service promises no ordering on this route.
-  const sorted = [...result.data].sort((a, b) => {
-    const retired = Number(Boolean(a.effective_to)) - Number(Boolean(b.effective_to));
-    if (retired !== 0) return retired;
-    return new Date(b.effective_from).getTime() - new Date(a.effective_from).getTime();
-  });
-  return { ok: true, data: sorted };
-}
-
-/**
- * Cursor-paginated requirement catalog (API-4).
- */
-export type CursorPage<T> = {
-  items: T[];
-  next_cursor: string | null;
-};
-
-export type ListRequirementsCursorFilters = RequirementFilters & {
-  /** Opaque cursor token from a previous response. */
-  cursor?: string;
-  /** Page size (1-200). */
-  pageSize?: number;
-  /** Sort string (e.g., "domain_code,-effective_from"). */
-  sort?: string;
-};
-
-/**
- * The requirement catalog (cursor-paginated, API-4).
- *
- * Uses opaque, HMAC-signed cursor tokens. The cursor encodes tenant_id, route,
- * filter, sort, offset, and last_id. A tampered or foreign cursor returns 400.
- */
-export async function listEvidenceRequirementsCursor(
-  filters: ListRequirementsCursorFilters,
-  identity: TenantIdentity,
-): Promise<ApiResult<CursorPage<EvidenceRequirement>>> {
-  const { cursor, pageSize, sort, ...rest } = filters;
-  const result = await apiGet<CursorPage<EvidenceRequirement>>(
-    "evidence",
-    "/v1/evidence-requirements/cursor",
-    {
-      query: {
-        tenant_id: rest.tenantId,
-        legal_entity_id: rest.legalEntityId,
-        domain_code: rest.domainCode,
-        action_type: rest.actionType,
-        as_of: rest.asOf,
-        cursor,
-        page_size: pageSize,
-        sort,
-      },
-      identity,
-    },
-  );
-
-  if (!result.ok) return result;
-  const data = result.data as CursorPage<EvidenceRequirement> | undefined;
-  if (!data || !Array.isArray(data.items)) {
-    return {
-      ok: false,
-      error: {
-        kind: "malformed",
-        message: "evidence-requirements-svc returned an invalid cursor page",
-      },
-    };
-  }
-
-  // The service returns items already sorted by the cursor's sort order.
-  // No client-side re-sort needed.
-  return { ok: true, data };
-}
-
-/** One requirement by id. Requires the tenant header — a 400 means it never
- *  arrived, which is a different problem from a 404. */
-export async function getEvidenceRequirement(
-  requirementId: string,
-  identity: TenantIdentity,
-): Promise<ApiResult<EvidenceRequirement>> {
-  return apiGet<EvidenceRequirement>(
-    "evidence",
-    `/v1/evidence-requirements/${encodeURIComponent(requirementId)}`,
-    { identity },
+      page,
+    ),
+    identity,
   );
 }
 
-export type CreateRequirementInput = {
-  identity: WriteIdentity;
-  domainCode: string;
-  actionType: string;
-  evidenceType: string;
-  /** Optional. Omitted means "one artifact of this type must be present". */
-  spec?: RequirementSpec;
-  /** Scope. Omit to apply the requirement tenant-wide, which also widens the
-   *  authorization check to the tenant itself. */
-  legalEntityId?: string;
-  /** RFC3339. Defaults to now server-side when omitted. */
-  effectiveFrom?: string;
-  correlationId: string;
-};
-
-/**
- * Add a requirement to the catalog.
- *
- * Authorization-gated on EVIDENCE_REQUIREMENT_CREATE, checked against the legal
- * entity when the requirement is entity-scoped and against the tenant when it is
- * tenant-wide — the broader scope for the broader rule. The check fails closed.
- *
- * The body's tenant_id must equal the header's; the service answers 403
- * `tenant_scope_mismatch` otherwise, so this always sends the session tenant.
- *
- * If-Match / ETag (API-3): optional optimistic concurrency. When provided, the
- * write only succeeds if the resource's current record_version matches. On
- * mismatch, the service returns 412 with a version_mismatch code.
- */
-export async function createEvidenceRequirement(
-  input: CreateRequirementInput & { ifMatch?: string },
-): Promise<ApiWriteResult<EvidenceRequirement>> {
-  return apiPost<EvidenceRequirement>(
-    "evidence",
-    "/v1/admin/evidence-requirements/",
-    {
-      tenant_id: input.identity.tenantId,
-      ...(input.legalEntityId ? { legal_entity_id: input.legalEntityId } : {}),
-      domain_code: input.domainCode,
-      action_type: input.actionType,
-      evidence_type: input.evidenceType,
-      ...(input.spec ? { requirement_payload: input.spec } : {}),
-      ...(input.effectiveFrom ? { effective_from: input.effectiveFrom } : {}),
-      correlation_id: input.correlationId,
-      ...(input.ifMatch ? { if_match: input.ifMatch } : {}),
-    },
-    { identity: input.identity, correlationId: input.correlationId },
-  );
-}
-
-/**
- * Retire a requirement by end-dating it.
- *
- * There is no DELETE route and no soft-delete flag anywhere in this service —
- * retirement is effective end-dating, and the retired row stays readable so a
- * past evaluation remains explicable.
- *
- * A reason is mandatory. End-dating one that already carries an effective_to is
- * 422 `already_retired`, never a silent no-op.
- */
-export async function retireEvidenceRequirement(input: {
-  requirementId: string;
-  identity: WriteIdentity;
-  reason: string;
-  /** RFC3339. Defaults to now server-side. */
-  effectiveTo?: string;
-  /** If-Match / ETag (API-3): optimistic concurrency. When provided, the write
-   *  only succeeds if the resource's current record_version matches. On mismatch,
-   *  the service returns 412 with a version_mismatch code. */
-  ifMatch?: string;
-}): Promise<ApiWriteResult<EvidenceRequirement>> {
-  return apiPost<EvidenceRequirement>(
-    "evidence",
-    `/v1/admin/evidence-requirements/${encodeURIComponent(input.requirementId)}/end-date`,
-    {
-      reason: input.reason,
-      ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
-      ...(input.ifMatch ? { if_match: input.ifMatch } : {}),
-    },
-    { identity: input.identity },
-  );
-}
-
-export type EvaluateEvidenceInput = {
-  identity: WriteIdentity;
-  legalEntityId: string;
-  domainCode: string;
-  actionType: string;
-  presentArtifacts: PresentArtifact[];
-  /** Required. Also the replay key — a repeat evaluation returns the ORIGINAL
-   *  determination rather than re-deciding against a changed catalog. */
-  correlationId: string;
-};
-
-/**
- * Determine whether the required evidence exists.
- *
- * Always answers 200 on a completed determination — MISSING is a verdict, not an
- * error, so `ok: true` here does NOT mean the action may proceed. Read `outcome`.
- *
- * A replayed correlation_id returns the stored determination unchanged. That is
- * deliberate: the recorded decision must not be rewritten because the catalog
- * moved, so a replay can legitimately disagree with what a fresh evaluation
- * would now say.
- */
-export async function evaluateEvidence(
-  input: EvaluateEvidenceInput,
-): Promise<ApiWriteResult<EvidenceEvaluationResult>> {
-  return apiPost<EvidenceEvaluationResult>(
-    "evidence",
-    "/v1/evidence/evaluate",
-    {
-      legal_entity_id: input.legalEntityId,
-      domain_code: input.domainCode,
-      action_type: input.actionType,
-      present_artifacts: input.presentArtifacts,
-      correlation_id: input.correlationId,
-    },
-    { identity: input.identity, correlationId: input.correlationId },
-  );
-}
-
-/** One stored evaluation by id. */
-export async function getEvidenceEvaluation(
-  evaluationId: string,
-  identity: TenantIdentity,
-): Promise<ApiResult<EvidenceEvaluation>> {
-  return apiGet<EvidenceEvaluation>(
-    "evidence",
-    `/v1/evidence/evaluations/${encodeURIComponent(evaluationId)}`,
-    { identity },
-  );
-}
-export type ListEvaluationsCursorFilters = {
-  /** Required by the service — 400 without it. */
-  tenantId: string;
-  legalEntityId?: string;
+export type EvaluationFilters = {
+  outcome?: EvidenceOutcome;
   domainCode?: string;
   actionType?: string;
-  /** SATISFIED, MISSING, or NO_REQUIREMENTS_DEFINED. */
-  outcome?: string;
-  /** Only evaluations since this instant (RFC3339). */
+  legalEntityId?: string;
+  /** RFC3339. */
   since?: string;
-  /** Opaque cursor token from a previous response. */
-  cursor?: string;
-  /** Page size (1-200). */
-  pageSize?: number;
-  /** Sort string (e.g., "-evaluated_at,domain_code"). */
-  sort?: string;
 };
 
-/** Evaluation list (cursor-paginated, API-4). */
-export type EvaluationCursorPage = CursorPage<EvidenceEvaluation>;
-
-/**
- * List evaluations with cursor pagination (API-4).
- *
- * Evaluations are append-only records. The default sort is -evaluated_at (newest
- * first). The cursor encodes tenant_id, route, filter, sort, offset, and last_id.
- */
-export async function listEvaluationsCursor(
-  filters: ListEvaluationsCursorFilters,
-  identity: TenantIdentity,
-): Promise<ApiResult<EvaluationCursorPage>> {
-  const { cursor, pageSize, sort, ...rest } = filters;
-  const result = await apiGet<EvaluationCursorPage>(
-    "evidence",
+/** The evaluation ledger, newest first (GET /v1/evidence/evaluations). */
+export function listEvaluations(identity: TenantIdentity, filters: EvaluationFilters = {}, page: PageRequest = {}) {
+  return getPage<EvidenceEvaluation>(
     "/v1/evidence/evaluations",
-    {
-      query: {
-        tenant_id: rest.tenantId,
-        legal_entity_id: rest.legalEntityId,
-        domain_code: rest.domainCode,
-        action_type: rest.actionType,
-        outcome: rest.outcome,
-        since: rest.since,
-        cursor,
-        page_size: pageSize,
-        sort,
+    pageQuery(
+      {
+        outcome: filters.outcome,
+        domain_code: filters.domainCode,
+        action_type: filters.actionType,
+        legal_entity_id: filters.legalEntityId,
+        since: filters.since,
       },
-      identity,
-    },
-  );
-
-  if (!result.ok) return result;
-  const data = result.data as EvaluationCursorPage | undefined;
-  if (!data || !Array.isArray(data.items)) {
-    return {
-      ok: false,
-      error: {
-        kind: "malformed",
-        message: "evidence-requirements-svc returned an invalid cursor page",
-      },
-    };
-  }
-  return { ok: true, data };
-}
-
-/** Evidence summary for the dashboard. */
-export type EvidenceSummary = {
-  active_requirements: number;
-  evaluations_satisfied_30d: number;
-  evaluations_missing_30d: number;
-  actions_with_no_requirements_30d: number;
-  open_pbc_requests: number;
-  overdue_pbc_requests: number;
-  unpublished_outbox_older_than_5_minutes: number;
-};
-
-/**
- * Get aggregate evidence counts for the dashboard.
- */
-export async function getEvidenceSummary(
-  identity: TenantIdentity,
-): Promise<ApiResult<EvidenceSummary>> {
-  return apiGet<EvidenceSummary>(
-    "evidence",
-    "/v1/evidence/summary",
-    { identity },
+      page,
+    ),
+    identity,
   );
 }
-
-// ─── PBC (Provided-by-Client) Requests ────────────────────────────────────────
-//
-// These types mirror the service's domain types for the PBC request lifecycle.
 
 export type EvidenceRequestStatus =
   | "DRAFT"
@@ -504,7 +247,7 @@ export type EvidenceRequest = {
   request_id: string;
   tenant_id: string;
   legal_entity_id: string;
-  requirement_id: string | null;
+  requirement_id?: string | null;
   title: string;
   description: string;
   assigned_to_principal_id: string;
@@ -514,55 +257,226 @@ export type EvidenceRequest = {
   correlation_id: string;
   created_at: string;
   is_overdue: boolean;
+  /** API-3 version; send `"v<record_version>"` as If-Match to change it. */
+  record_version: number;
 };
 
-export type PBCRequestFilters = {
-  tenantId: string;
+export type EvidenceRequestFilters = {
   legalEntityId?: string;
   status?: EvidenceRequestStatus;
-  cursor?: string;
-  pageSize?: number;
-  sort?: string;
+  /** false lists closed and satisfied requests too. Default: open only. */
+  open?: boolean;
 };
 
-export type PBCRequestCursorPage = CursorPage<EvidenceRequest>;
+/** The evidence request register, soonest due first (GET /v1/pbc/requests). */
+export function listEvidenceRequests(identity: TenantIdentity, filters: EvidenceRequestFilters = {}, page: PageRequest = {}) {
+  return getPage<EvidenceRequest>(
+    "/v1/pbc/requests",
+    pageQuery(
+      {
+        legal_entity_id: filters.legalEntityId,
+        status: filters.status,
+        open: filters.open === false ? "false" : undefined,
+      },
+      page,
+    ),
+    identity,
+  );
+}
+
+/** One action evaluated with no requirement in force. */
+export type UncoveredAction = { domain_code: string; action_type: string; evaluations: number; last_evaluated_at: string };
+
+/** The console's KPI row and panels (GET /v1/evidence/summary). */
+export type EvidenceSummary = {
+  active_requirements: number;
+  evaluations_satisfied_30d: number;
+  evaluations_missing_30d: number;
+  evaluations_no_requirements_30d: number;
+  actions_with_no_requirements_30d: number;
+  open_pbc_requests: number;
+  overdue_pbc_requests: number;
+  /** Platform-wide: events recorded but not yet published after 5 minutes. */
+  unpublished_outbox_older_than_5_minutes: number;
+  requirements_by_evidence_type: Record<string, number>;
+  requirements_by_domain: Record<string, number>;
+  uncovered_actions: UncoveredAction[];
+};
+
+export function getEvidenceSummary(identity: TenantIdentity): Promise<ApiResult<EvidenceSummary>> {
+  return apiGet<EvidenceSummary>("evidence", "/v1/evidence/summary", { identity });
+}
+
+// ─── Records ─────────────────────────────────────────────────────────────────
+
+/** One requirement by id. */
+export function getEvidenceRequirement(requirementId: string, identity: TenantIdentity): Promise<ApiResult<EvidenceRequirement>> {
+  return apiGet<EvidenceRequirement>("evidence", `/v1/evidence-requirements/${encodeURIComponent(requirementId)}`, { identity });
+}
+
+/** One stored evaluation by id. */
+export function getEvidenceEvaluation(evaluationId: string, identity: TenantIdentity): Promise<ApiResult<EvidenceEvaluation>> {
+  return apiGet<EvidenceEvaluation>("evidence", `/v1/evidence/evaluations/${encodeURIComponent(evaluationId)}`, { identity });
+}
+
+/** One evidence request by id. */
+export function getEvidenceRequest(requestId: string, identity: TenantIdentity): Promise<ApiResult<EvidenceRequest>> {
+  return apiGet<EvidenceRequest>("evidence", `/v1/pbc/requests/${encodeURIComponent(requestId)}`, { identity });
+}
+
+// ─── Catalogue commands ──────────────────────────────────────────────────────
+
+export type CreateRequirementInput = {
+  identity: WriteIdentity;
+  domainCode: string;
+  actionType: string;
+  evidenceType: string;
+  /** Optional. Omitted means "one artifact of this type must be present". */
+  spec?: RequirementSpec;
+  /** Scope. Omit to apply the requirement tenant-wide, which also widens the
+   *  authorization check to the PLATFORM scope. */
+  legalEntityId?: string;
+  /** RFC3339. Defaults to now server-side when omitted. */
+  effectiveFrom?: string;
+  correlationId: string;
+  /** Collapses a double-submitted form into one requirement. */
+  idempotencyKey?: string;
+};
 
 /**
- * List open PBC requests with cursor pagination (API-4).
+ * Add a requirement to the catalog (EVIDENCE_REQUIREMENT_CREATE, at the entity
+ * or at PLATFORM for a tenant-wide one; fails closed). The body's tenant_id must
+ * equal the session's, so this always sends the session tenant.
  */
-export async function listPBCRequestsCursor(
-  filters: PBCRequestFilters,
-  identity: TenantIdentity,
-): Promise<ApiResult<PBCRequestCursorPage>> {
-  const { cursor, pageSize, sort, ...rest } = filters;
-  const result = await apiGet<PBCRequestCursorPage>(
+export function createEvidenceRequirement(input: CreateRequirementInput): Promise<ApiWriteResult<EvidenceRequirement>> {
+  return apiPost<EvidenceRequirement>(
     "evidence",
-    "/v1/pbc/requests/cursor",
+    "/v1/admin/evidence-requirements",
     {
-      query: {
-        tenant_id: rest.tenantId,
-        legal_entity_id: rest.legalEntityId,
-        status: rest.status,
-        cursor,
-        page_size: pageSize,
-        sort,
-      },
-      identity,
+      tenant_id: input.identity.tenantId,
+      ...(input.legalEntityId ? { legal_entity_id: input.legalEntityId } : {}),
+      domain_code: input.domainCode,
+      action_type: input.actionType,
+      evidence_type: input.evidenceType,
+      ...(input.spec ? { requirement_payload: input.spec } : {}),
+      ...(input.effectiveFrom ? { effective_from: input.effectiveFrom } : {}),
+      correlation_id: input.correlationId,
+    },
+    { identity: input.identity, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey },
+  );
+}
+
+/**
+ * Retire a requirement by end-dating it (EVIDENCE_REQUIREMENT_RETIRE). There is
+ * no DELETE: the retired row stays readable so a past evaluation remains
+ * explicable. A reason and the version last read (If-Match) are mandatory.
+ */
+export function retireEvidenceRequirement(input: {
+  requirementId: string;
+  identity: WriteIdentity;
+  reason: string;
+  /** record_version of the last read; refused with 412 when out of date. */
+  version: number;
+  /** RFC3339. Defaults to now server-side. */
+  effectiveTo?: string;
+}): Promise<ApiWriteResult<EvidenceRequirement>> {
+  return apiPost<EvidenceRequirement>(
+    "evidence",
+    `/v1/admin/evidence-requirements/${encodeURIComponent(input.requirementId)}/end-date`,
+    { reason: input.reason, ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}) },
+    { identity: input.identity, ifMatch: etagOf(input.version) },
+  );
+}
+
+export type EvaluateEvidenceInput = {
+  identity: WriteIdentity;
+  legalEntityId: string;
+  domainCode: string;
+  actionType: string;
+  presentArtifacts: PresentArtifact[];
+  correlationId: string;
+  /** The replay key: the same key and body return the ORIGINAL determination. */
+  idempotencyKey?: string;
+};
+
+/**
+ * Determine whether the required evidence exists. A completed determination is
+ * 200 whatever the outcome — `ok: true` does NOT mean the action may proceed.
+ */
+export function evaluateEvidence(input: EvaluateEvidenceInput): Promise<ApiWriteResult<EvidenceEvaluationResult>> {
+  return apiPost<EvidenceEvaluationResult>(
+    "evidence",
+    "/v1/evidence/evaluate",
+    {
+      legal_entity_id: input.legalEntityId,
+      domain_code: input.domainCode,
+      action_type: input.actionType,
+      present_artifacts: input.presentArtifacts,
+      correlation_id: input.correlationId,
+    },
+    {
+      identity: { ...input.identity, legalEntityId: input.legalEntityId },
+      correlationId: input.correlationId,
+      idempotencyKey: input.idempotencyKey,
     },
   );
+}
 
-  if (!result.ok) return result;
-  const data = result.data as PBCRequestCursorPage | undefined;
-  if (!data || !Array.isArray(data.items)) {
-    return {
-      ok: false,
-      error: {
-        kind: "malformed",
-        message: "evidence-requirements-svc returned an invalid cursor page",
-      },
-    };
-  }
-  return { ok: true, data };
+// ─── Evidence request (PBC) commands ─────────────────────────────────────────
+
+export type CreateEvidenceRequestInput = {
+  identity: WriteIdentity;
+  legalEntityId: string;
+  title: string;
+  description?: string;
+  assignedTo: string;
+  /** RFC3339. */
+  dueAt: string;
+  requirementId?: string;
+  correlationId: string;
+};
+
+export function createEvidenceRequest(input: CreateEvidenceRequestInput): Promise<ApiWriteResult<EvidenceRequest>> {
+  return apiPost<EvidenceRequest>(
+    "evidence",
+    "/v1/pbc/requests",
+    {
+      legal_entity_id: input.legalEntityId,
+      title: input.title,
+      description: input.description ?? "",
+      assigned_to_principal_id: input.assignedTo,
+      due_at: input.dueAt,
+      ...(input.requirementId ? { requirement_id: input.requirementId } : {}),
+      correlation_id: input.correlationId,
+    },
+    { identity: { ...input.identity, legalEntityId: input.legalEntityId }, correlationId: input.correlationId },
+  );
+}
+
+/** The manager commands on a request; each needs the version last read. */
+export type EvidenceRequestCommand = "send" | "reassign" | "extend-due-date" | "clarify" | "mark-satisfied" | "close";
+
+export function commandEvidenceRequest(input: {
+  identity: WriteIdentity;
+  requestId: string;
+  command: EvidenceRequestCommand;
+  version: number;
+  body?: Record<string, unknown>;
+  correlationId?: string;
+}): Promise<ApiWriteResult<EvidenceRequest>> {
+  return apiPost<EvidenceRequest>(
+    "evidence",
+    `/v1/pbc/requests/${encodeURIComponent(input.requestId)}/${input.command}`,
+    input.body ?? {},
+    { identity: input.identity, ifMatch: etagOf(input.version), correlationId: input.correlationId },
+  );
+}
+
+/** The scanner's callback: CLEAN or QUARANTINED for one response. */
+export function recordScanResult(input: { identity: WriteIdentity; responseId: string; result: "CLEAN" | "QUARANTINED" }) {
+  return apiPost<unknown>("evidence", `/v1/pbc/responses/${encodeURIComponent(input.responseId)}/scan-result`, { result: input.result }, {
+    identity: input.identity,
+  });
 }
 
 // ─── Derived views ───────────────────────────────────────────────────────────
@@ -641,9 +555,11 @@ export type EvidenceTypeExplanation = {
   plural: string;
   /** One line on what this kind of evidence is. */
   meaning: string;
-  /** Whether the platform checks the reference itself, or takes the caller's
-   *  word for it. Only SUPPORTING_DOCUMENT is checked. */
+  /** Whether the platform checks the reference with its owner, or takes the
+   *  caller's word for it. */
   verified: boolean;
+  /** The service that confirms it, when verified. */
+  verifiedBy?: string;
   raw: string;
 };
 
@@ -655,12 +571,19 @@ const EVIDENCE_TYPE_COPY: Record<
     label: "Supporting document",
     plural: "supporting documents",
     meaning:
-      "A document that has to be on file in the document store. This is the only kind of evidence the platform checks for itself — it looks the document up rather than taking anyone's word that it exists.",
+      "A document that has to be on file in the document vault. The platform looks it up there, in this company, rather than taking anyone's word that it exists.",
+  },
+  EVIDENCE_MANIFEST: {
+    label: "Evidence manifest",
+    plural: "evidence manifests",
+    meaning:
+      "A built evidence set from the evidence manifest service. The platform looks it up there, in this company, before it counts.",
   },
   SIGNATURE: {
     label: "Signature",
     plural: "signatures",
-    meaning: "A signature that has to have been captured before the action can go ahead.",
+    meaning:
+      "A signing envelope from the e-signature service. The platform confirms the envelope exists for this company before it counts.",
   },
   APPROVAL_RECORD: {
     label: "Approval record",
@@ -682,11 +605,12 @@ const EVIDENCE_TYPE_COPY: Record<
 /**
  * What a kind of evidence is, and whether the platform verifies it.
  *
- * The second half is the part a reader cannot get from the code. Four of the
- * five types are recorded exactly as asserted — nothing looks them up — so a
- * requirement for a signature is satisfied by someone claiming a signature
- * exists. That is a real limit of the gate and the console says so rather than
- * letting a green tick imply more checking than happened.
+ * The second half is the part a reader cannot get from the code. Documents,
+ * evidence manifests and signatures are looked up with the service that owns
+ * them; every other type is recorded exactly as asserted, so a requirement for
+ * an approval record is satisfied by someone claiming one exists. That is a real
+ * limit of the gate and the console says so rather than letting a green tick
+ * imply more checking than happened.
  */
 export function describeEvidenceType(evidenceType: string): EvidenceTypeExplanation {
   const stored = evidenceType?.trim() ?? "";
@@ -701,7 +625,8 @@ export function describeEvidenceType(evidenceType: string): EvidenceTypeExplanat
       "This console has no description for this kind of evidence — it was added to the service after this page was written.",
     // Computed from the code, never from the copy table: an unrecognised type is
     // not verified, and must not be presented as though it were.
-    verified: stored === VERIFIED_EVIDENCE_TYPE,
+    verified: stored in VERIFIED_BY,
+    verifiedBy: VERIFIED_BY[stored],
     raw: stored || "(empty)",
   };
 }
@@ -898,7 +823,7 @@ export function explainEvidenceOutcome(
     return {
       headline: "Everything required is on file",
       meaning:
-        "Every requirement that applies to this action was matched by the evidence supplied, so it can go ahead. Bear in mind that only documents are looked up by the platform — other kinds of evidence are recorded as asserted.",
+        "Every requirement that applies to this action was matched by the evidence supplied, so it can go ahead. Documents, evidence manifests and signatures were confirmed with the service that holds them; other kinds of evidence are recorded as asserted.",
       shortLabel: "Can go ahead",
       tone: "success",
       kind: "satisfied",
@@ -1079,14 +1004,18 @@ export function explainUnmetReason(reason: string, evidenceType: string): UnmetE
   };
 }
 
-/** The two reasons the service gives for discounting an artifact that was
- *  offered, without naming the service that did the looking. */
+/** The reasons the service gives for discounting an artifact that was offered,
+ *  without naming the service that did the looking. */
 function explainRejection(rejected: string): string {
+  const what = rejected.includes("manifest") ? "An evidence manifest" : rejected.includes("esignature") || rejected.includes("signature envelope") ? "A signature" : rejected.includes("document") ? "A document" : "An item";
   if (rejected.includes("does not exist")) {
-    return "A document was listed, but no such document is on file — so it does not count towards this.";
+    return `${what} was listed, but no such record exists — so it does not count towards this.`;
   }
   if (rejected.includes("different tenant or legal entity")) {
-    return "A document was listed, but it belongs to another company — so it does not count towards this.";
+    return `${what} was listed, but it belongs to another company — so it does not count towards this.`;
+  }
+  if (rejected.includes("empty reference_id")) {
+    return `${what} was listed with no reference at all — so it does not count towards this.`;
   }
   return rejected;
 }
@@ -1134,7 +1063,46 @@ export function explainEvidenceError(message: string): string {
     return "There is no past check with that reference. Check it against the reference returned when the check was run.";
   }
   if (message.includes("document_service_unavailable")) {
-    return "The documents you listed could not be looked up, so no answer was given. This is deliberate: recording evidence as missing because of an outage would put something untrue into a permanent record. Try again once the document store is reachable.";
+    return "The documents you listed could not be looked up, so no answer was given and nothing was recorded. This is deliberate: recording evidence as missing because of an outage would put something untrue into a permanent record. Try again once the document vault is reachable.";
+  }
+  if (message.includes("evidence_manifest_unavailable")) {
+    return "The evidence manifests you listed could not be looked up, so no answer was given and nothing was recorded. Try again once the evidence manifest service is reachable.";
+  }
+  if (message.includes("esignature_unavailable")) {
+    return "The signatures you listed could not be confirmed with the e-signature service, so no answer was given and nothing was recorded. Try again once it is reachable.";
+  }
+  if (message.includes("registry_unavailable")) {
+    return "The company could not be confirmed with the entity registry, so nothing was decided or recorded. Try again shortly.";
+  }
+  if (message.includes("legal_entity_not_found")) {
+    return "That company does not exist in your business, so the check was refused and nothing was recorded.";
+  }
+  if (message.includes("legal_entity_mismatch")) {
+    return "The company in the form does not match the company you are working in. Switch company, or check the one you chose.";
+  }
+  if (message.includes("precondition_failed")) {
+    return "Someone else changed this record after you opened it, so your change was not applied. Reload it and try again.";
+  }
+  if (message.includes("precondition_required")) {
+    return "The change did not say which version of the record it was made against, so it was refused. Reload the page and try again.";
+  }
+  if (message.includes("idempotency_mismatch")) {
+    return "This request reused a reference already used for a different request, so it was refused rather than answered with the earlier result. Submit it again as a new request.";
+  }
+  if (message.includes("invalid_identifier") || message.includes("invalid_field")) {
+    return "One of the references is not in the expected form. Check it and try again.";
+  }
+  if (message.includes("self_evaluation_not_allowed")) {
+    return "The person who submitted the latest response cannot be the one who marks it satisfied. Ask someone else to review it.";
+  }
+  if (message.includes("artifact_not_scanned")) {
+    return "The latest response has not been confirmed clean by the malware scan yet, so it cannot be marked satisfied.";
+  }
+  if (message.includes("invalid_evidence_request_state")) {
+    return "The request is not in a state that allows this. Reload it to see where it stands.";
+  }
+  if (message.includes("evidence_request_not_found")) {
+    return "There is no evidence request with that reference in your business.";
   }
   if (message.includes("as_of")) {
     return "The date to check against could not be read. Use a full date and time, or leave it as “now”.";

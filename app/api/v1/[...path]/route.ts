@@ -53,7 +53,7 @@ import {
   evaluateCompliance,
 } from "@/lib/api/compliance";
 
-import { listEvidenceRequirements } from "@/lib/api/evidence";
+import { listEvidenceRequirements, readAll } from "@/lib/api/evidence";
 import { listFeatureFlags, listConfigEntries } from "@/lib/api/configuration";
 import { listDelegations, getDelegation } from "@/lib/api/delegations";
 import { listLeases, listApplicableSecretPolicyVersions, listSecretAudit } from "@/lib/api/secret-vault";
@@ -217,8 +217,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   // ── Evidence Domain ────────────────────────────────────────────────────────
   if (endpoint === "evidence/requirements") {
     const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listEvidenceRequirements({ tenantId }, { ...identity, tenantId });
-    return NextResponse.json({ requirements: res.ok ? res.data : [] });
+    const res = await readAll((page) => listEvidenceRequirements({ ...identity, tenantId }, {}, page));
+    return NextResponse.json({ requirements: res.ok ? res.data.rows : [] });
   }
 
   // ── Configuration / Service Inputs ─────────────────────────────────────────
