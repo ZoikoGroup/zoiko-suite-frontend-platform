@@ -28,7 +28,8 @@ describe("conversation history storage (Doc 02 §10, Doc 06 §11)", () => {
     expect(window.localStorage.getItem(DEVICE_KEY)).toBeNull();
   });
 
-  it("keeps device history only after opting in, and drops it after 30 days", () => {
+  it("keeps device history only after opting in, and drops it after 24 hours", () => {
+    expect(DEVICE_TTL_MS).toBe(24 * 60 * 60 * 1000);
     setRemember(true);
     expect(rememberOn()).toBe(true);
     const now = Date.now();

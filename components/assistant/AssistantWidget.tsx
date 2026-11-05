@@ -375,7 +375,8 @@ function ErrorPanel(props: {
           {props.retryLabel}
         </button>
       </div>
-      <p className="za-meta" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }} data-testid="assistant-reference">
+      {/* Doc 02 §21 ui.error / T24: the reference is shown only when one exists. */}
+      {props.reference && <p className="za-meta" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }} data-testid="assistant-reference">
         <span style={{ whiteSpace: "nowrap" }}>Reference:</span>
         <code style={{ minWidth: 0, overflowWrap: "anywhere" }}>{props.reference}</code>
         <button
@@ -392,7 +393,7 @@ function ErrorPanel(props: {
           <Copy size={14} aria-hidden />
         </button>
         {copied && <span role="status">Copied</span>}
-      </p>
+      </p>}
     </div>
   );
 }

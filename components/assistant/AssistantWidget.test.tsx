@@ -743,6 +743,8 @@ describe("kill switch (Doc 08 §10)", () => {
     const welcome = within(dialog).getByTestId("assistant-welcome");
     expect(within(welcome).getByTestId("assistant-unavailable")).toBeTruthy();
     expect((within(dialog).getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    // Doc 02 §21 ui.error: no trace id here, so no empty "Reference:" line.
+    expect(within(welcome).queryByTestId("assistant-reference")).toBeNull();
     expect(api.askAssistant).not.toHaveBeenCalled();
   });
 });
