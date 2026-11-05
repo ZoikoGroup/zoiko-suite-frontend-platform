@@ -142,10 +142,11 @@ export async function listSoDRules(identity: Identity): Promise<ApiResult<SoDRul
  * with the change (authz_config_history) and travels on the IAM event as
  * `command_reason`, so it is what an auditor reads later.
  *
- * `expectedVersion` is the row's `version` as the operator saw it. Sent where
- * the service honours it (retire / reactivate of roles, bundles, SoD and ABAC
- * rules); a stale one is `409 version_conflict` rather than a silent overwrite
- * of somebody else's change.
+ * `expectedVersion` is the row's `version` as the operator saw it. Required
+ * where the service versions the record (retire / reactivate of roles,
+ * bundles, SoD and ABAC rules; change / retire of authority limits): missing
+ * is `428 precondition_required`, stale is `412 stale_version` rather than a
+ * silent overwrite of somebody else's change.
  */
 export type CommandReason = {
   reasonCode: string;
@@ -1829,6 +1830,8 @@ export type PrivilegedSession = {
   review_notes?: string | null;
   requester_step_up?: StepUpEvidence | null;
   approver_step_up?: StepUpEvidence | null;
+  /** Optimistic-concurrency token (000037); revoking sends it as If-Match. */
+  record_version?: number;
 };
 
 export type BreakGlassSession = {
@@ -1859,6 +1862,8 @@ export type BreakGlassSession = {
   rejected_by?: string | null;
   rejected_at?: string | null;
   request_expires_at?: string | null;
+  /** Optimistic-concurrency token (000037); revoking sends it as If-Match. */
+  record_version?: number;
 };
 
 export type SupportSession = {
@@ -1878,6 +1883,8 @@ export type SupportSession = {
   revoked_at?: string | null;
   revoked_by?: string | null;
   requested_by?: string | null;
+  /** Optimistic-concurrency token (000037); revoking sends it as If-Match. */
+  record_version?: number;
 };
 
 /** The service's maximums (B-01): longer is refused, never shortened. */
@@ -1952,11 +1959,15 @@ export async function revokeSession(input: {
   sessionId: string;
   reason: CommandReason;
 }): Promise<ApiWriteResult<{ session_id: string; status: string }>> {
+  // A revoke is a mutation of an existing session (API-3): the service takes
+  // the version from If-Match only — a body expected_version is not read —
+  // and answers 428 without it. The version comes from the row the person saw.
+  const version = input.reason.expectedVersion;
   return apiPost(
     SERVICE,
     `${SESSION_BASE[input.kind]}/${encodeURIComponent(input.sessionId)}/revoke`,
     commandBody(input.reason),
-    { identity: input.identity },
+    { identity: input.identity, ifMatch: version && version > 0 ? `"v${version}"` : undefined },
   );
 }
 
@@ -2163,6 +2174,8 @@ const ADMIN_ERRORS: [string, string][] = [
   ["approval_not_pending", "This is no longer waiting for a decision."],
   ["invalid_state", "This is not in a state that allows that change. Reload to see where it stands."],
   ["invalid_transition", "This has already ended, so it cannot be changed."],
+  ["stale_version", "Somebody changed this since you loaded the page. Reload and try again."],
+  ["precondition_required", "The page did not say which version of this you were looking at. Reload and try again."],
   ["version_conflict", "Somebody changed this since you loaded the page. Reload and try again."],
   ["sod_conflict", "Refused: this would give somebody two duties that must not be held together."],
   ["protected_privilege_not_delegable", "Access-administration and platform powers cannot be lent."],
