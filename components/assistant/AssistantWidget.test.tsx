@@ -972,3 +972,35 @@ describe("Doc 02 §27 browser analytics", () => {
     expect(JSON.stringify(call)).not.toContain("https://");
   });
 });
+
+describe("negative paths (Doc 06 SEC-T004, SEC-T024)", () => {
+  it("a 401 mid-chat starts a new session and retries once with a new turn id, in the same bubble", async () => {
+    api.askAssistant
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } })
+      .mockResolvedValueOnce(ok(envelope({ text: "Recovered answer." })));
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "grant-1", expires_at: "" }))
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_2", session_grant: "grant-2", expires_at: "" }));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(api.startAssistantSession).toHaveBeenCalledTimes(2);
+    expect(api.askAssistant).toHaveBeenCalledTimes(2);
+    const [first, second] = api.askAssistant.mock.calls;
+    expect(second[0]).toBe("grant-2");
+    expect(second[2]).not.toBe(first[2]); // a new client_turn_id for the new session
+    expect(within(dialog).getAllByTestId("visitor-bubble")).toHaveLength(1);
+    expect(within(dialog).getByTestId("assistant-answer").textContent).toContain("Recovered answer.");
+  });
+
+  it("markup in an answer is shown as text, never run (XSS)", async () => {
+    const payload = `<img src=x onerror="window.__xss=1"><script>window.__xss=2</script><a href="javascript:alert(1)">click</a>`;
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: `Plans: ${payload}` })));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    const answer = within(dialog).getByTestId("assistant-answer");
+    expect(answer.querySelector("img, script, iframe")).toBeNull();
+    expect(answer.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect((window as unknown as { __xss?: number }).__xss).toBeUndefined();
+    expect(answer.textContent).toContain("<script>");
+  });
+});

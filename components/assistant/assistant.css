@@ -363,10 +363,16 @@
 }
 .za-subtitle-icon { flex: none; }
 .za-subtitle-short { display: none; }
-/* The disclosure never clips: shorter approved copy when the panel is narrow. */
-@container za-panel (max-width: 420px) {
+/* The disclosure never clips: shorter approved copy when the panel is narrow.
+   Measured in em (the panel's 15 px body text, 420 px = 28em), so enlarged
+   text (WCAG 1.4.4 text-only zoom) switches to the short copy too, and at
+   very large text sizes the pill may wrap instead of overflowing. */
+@container za-panel (max-width: 28em) {
   .za-subtitle-full { display: none; }
   .za-subtitle-short { display: inline; }
+}
+@container za-panel (max-width: 17em) {
+  .za-subtitle { white-space: normal; border-radius: 12px; }
 }
 /* Title stays on one line: on narrow panels the wordmark shrinks, and on
    the narrowest it is dropped (it is decorative; the title names the panel). */
