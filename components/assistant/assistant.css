@@ -179,7 +179,19 @@
   border-radius: calc(var(--za-launcher-radius) - 1px) !important;
 }
 .za-launcher:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 3px; }
-.za-close-badge,
+/* Open state: a full-size close button covering the whole launcher. */
+.za-launcher-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: calc(var(--za-launcher-radius) - 1px);
+  background: #0a1a30;
+  color: #ffffff;
+}
+.za-launcher-close svg { width: 50%; height: 50%; }
+.za-launcher:hover .za-launcher-close { background: #12294a; }
 .za-unread {
   position: absolute;
   top: calc(var(--za-close-badge) / -3);
@@ -188,13 +200,6 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-}
-.za-close-badge {
-  width: var(--za-close-badge);
-  height: var(--za-close-badge);
-  background: #0a1a30;
-  color: #ffffff;
-  box-shadow: 0 0 0 2px #ffffff;
 }
 .za-unread {
   width: var(--za-unread-dot);

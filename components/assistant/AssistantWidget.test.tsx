@@ -104,16 +104,16 @@ describe("K10 Z-tile branding", () => {
     expect(tileSize(img)).toEqual({ w: "56px", h: "56px", r: "16px" });
     expect(img.className).toContain("object-contain");
     expect(img.className).not.toMatch(/rounded-full|filter|grayscale|invert/);
-    expect(within(launcher).queryByTestId("launcher-close-badge")).toBeNull();
+    expect(within(launcher).queryByTestId("launcher-close")).toBeNull();
   });
 
-  it("open, the launcher keeps the tile and adds the close badge", async () => {
+  it("open, the whole launcher becomes the close (X) button", async () => {
     await openWidget();
     const launcher = screen.getByTestId("assistant-launcher");
     expect(launcher.getAttribute("aria-expanded")).toBe("true");
     expect(launcher.getAttribute("aria-label")).toBe("Close chat");
-    expect(within(launcher).getByTestId("ztile").getAttribute("src")).toBe("/logo-z.png");
-    expect(within(launcher).getByTestId("launcher-close-badge").className).toContain("za-close-badge"); // 18 px token
+    expect(within(launcher).getByTestId("launcher-close").className).toContain("za-launcher-close");
+    expect(within(launcher).queryByTestId("ztile")).toBeNull(); // no logo behind a small badge
   });
 
   it("welcome card has the 48 px tile, title, greeting and topic menu; header shows the full wordmark", async () => {

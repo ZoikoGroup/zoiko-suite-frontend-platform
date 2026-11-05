@@ -123,8 +123,9 @@ for (const scheme of ["light", "dark"] as const) {
       await launcher.click();
       await expect(launcher).toHaveAttribute("aria-label", "Close chat");
       await expect(launcher).toHaveAttribute("aria-expanded", "true");
-      await expect(launcher.getByTestId("ztile")).toHaveAttribute("src", "/logo-z.png");
-      await expect(launcher.getByTestId("launcher-close-badge")).toBeVisible();
+      // Open: the whole launcher is the close (X) button.
+      await expect(launcher.getByTestId("launcher-close")).toBeVisible();
+      await expect(launcher.getByTestId("ztile")).toHaveCount(0);
       await page.screenshot({ path: `${shotDir}/launcher-open-${scheme}.png` });
 
       const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });

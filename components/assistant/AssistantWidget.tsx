@@ -1494,11 +1494,14 @@ export function AssistantWidget({
         className="za-launcher"
         style={{ ["--za-launcher-offset" as string]: `${offset}px` }}
       >
-        <ZTile src={logos.mark} size={56} radius={16} />
-        {open && (
-          <span data-testid="launcher-close-badge" aria-hidden="true" className="za-close-badge">
-            <X size={12} strokeWidth={3} />
+        {open ? (
+          // Open: the whole launcher becomes the close button (a full-size X,
+          // as in Kairos), not the logo with a small corner badge.
+          <span data-testid="launcher-close" aria-hidden="true" className="za-launcher-close">
+            <X strokeWidth={2.5} />
           </span>
+        ) : (
+          <ZTile src={logos.mark} size={56} radius={16} />
         )}
         {!open && unread && <span data-testid="launcher-unread" aria-hidden="true" className="za-unread" />}
         {!open && unread && <span className="za-sr-only">New reply</span>}
