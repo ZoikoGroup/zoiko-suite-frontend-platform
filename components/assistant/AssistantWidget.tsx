@@ -23,6 +23,7 @@
 import "./assistant.css";
 import { useCallback, useEffect, useId, useLayoutEffect, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
+  Accessibility,
   ArrowDown,
   CircleCheck,
   CircleHelp,
@@ -68,6 +69,7 @@ import {
   loadAssistantConfig,
   loadAssistantMenu,
   rateAssistantAnswer,
+  recordAssistantEvent,
   recordAssistantHandoff,
   startAssistantSession,
   type AssistantMenu,
@@ -223,12 +225,40 @@ const COPY: Record<string, string> = {
   "ui.status.Partner-Supported": "Partner-supported",
   "ui.status.Not Available": "Not available",
   "ui.status.MARKET_DEPENDENT": "Depends on your country",
+  // Doc 02 §21 registry keys the widget renders.
+  "ui.disclosure": "AI assistant. Product information only.",
+  "ui.source": "View source",
+  "ui.sources": "Sources",
+  "ui.feedback.yes": "This was helpful",
+  "ui.feedback.no": "This did not answer my question",
+  "ui.feedback.reason": "What was wrong?",
+  "ui.feedback.reason.incorrect": "Incorrect",
+  "ui.feedback.reason.incomplete": "Incomplete",
+  "ui.feedback.reason.not_relevant": "Not relevant",
+  "ui.feedback.reason.unclear": "Unclear",
+  "ui.end.yes": "Yes, this chat was helpful",
+  "ui.end.no": "No, this chat wasn't helpful",
+  "ui.error": "I couldn't connect. Please try again or open support.",
+  "ui.reference": "Reference:",
+  "ui.accessibility": "Report an accessibility issue",
+  "ui.accessibility.message": "I'd like to report an accessibility issue.",
+  "ui.refused": "Not something I can do here",
+  "ui.stopped": "Stopped. Ask again whenever you're ready.",
+  "ui.stopped.short": "Stopped.",
+  "ui.cleared": "Chat cleared.",
+  "ui.choose": "Choose an answer",
+  "ui.suggested": "Suggested questions",
+  "ui.link.official": "(official ZoikoSuite page, opens in a new tab)",
+  "ui.link.new_tab": "(opens in a new tab)",
+  "ui.route.default": "Open official page",
+  "ui.retry_after": "You can try again in {seconds} s.",
+  "ui.source.reviewed": "Reviewed {date}",
 };
 
 const ROUTE_LABELS: Record<string, string> = {
   pricing: "Compare plans",
   demo: "Book a demo",
-  support: "Open support",
+  support: "Open secure support", // Doc 09 §11 OFFERED
   core_modules: "Explore modules",
   trust: "Open Trust Center",
   signup_or_trial: "Start a trial",
@@ -242,8 +272,9 @@ export const SENSITIVE_REMOVED = "Sensitive details removed from this message.";
 const CHANNELS: Record<string, string> = {
   // Doc 10 §08 "Enquiry route only" copy: no follow-up is implied.
   demo: "Open our secure demo form to send your request.",
-  support: "This opens the official support page.",
-  "sign-in": "This opens the official sign-in page.",
+  // Doc 09 §11: visible before the visitor leaves for the secure destination.
+  support: "You are leaving the assistant for secure support.",
+  "sign-in": "You are leaving the assistant for the secure sign-in page.",
   trust: "This opens the official trust and security page.",
   pricing: "This opens the official pricing page.",
 };
@@ -295,12 +326,28 @@ function canRetry(turn: TurnEnvelope): boolean {
   return isUnverified(turn) && (!turn.reason || RETRYABLE_REASONS.has(turn.reason));
 }
 
+// Route labels, channel notes and fallback page names as i18n keys
+// (ui.route.<key>, ui.channel.<key>, ui.fallback.<key>; Doc 02 §23).
+const KEYED_COPY: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(ROUTE_LABELS).map(([k, v]) => [`ui.route.${k}`, v])),
+  ...Object.fromEntries(Object.entries(CHANNELS).map(([k, v]) => [`ui.channel.${k}`, v])),
+  ...Object.fromEntries(FALLBACK_ROUTES.map((r) => [`ui.fallback.${r.key}`, r.label])),
+};
+
 const REASONS: { value: FeedbackReason; label: string }[] = [
   { value: "incorrect", label: "Incorrect" },
   { value: "incomplete", label: "Incomplete" },
   { value: "not_relevant", label: "Not relevant" },
   { value: "unclear", label: "Unclear" },
 ];
+
+/** Doc 02 §23: an unambiguous date ("October 12, 2026"), never 10/12/2026. */
+export function reviewedOn(iso?: string): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(d);
+}
 
 function regionName(code: string): string {
   try {
@@ -359,25 +406,40 @@ function ErrorPanel(props: {
   retryLabel: string;
   disabled: boolean;
   reference: string;
+  referenceLabel: string;
+  /** Doc 01 §14: seconds from Retry-After; the retry waits until they pass. */
+  retryAfter?: number;
+  retryAfterText?: string;
   onRetry: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [wait, setWait] = useState(Math.max(0, Math.ceil(props.retryAfter ?? 0)));
+  useEffect(() => {
+    if (wait <= 0) return;
+    const id = window.setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => window.clearTimeout(id);
+  }, [wait]);
   return (
     <div data-testid="assistant-unavailable" className="za-bubble za-bubble-assistant" data-tone="error" role="group" aria-label="Assistant unavailable">
       <p style={{ display: "flex", gap: 6, margin: 0 }}>
         <TriangleAlert size={18} aria-hidden style={{ flex: "none", marginTop: 2 }} />
         {props.text}
       </p>
+      {wait > 0 && props.retryAfterText && (
+        <p className="za-meta" data-testid="assistant-retry-after" style={{ margin: "6px 0 0" }}>
+          {props.retryAfterText.replace("{seconds}", String(wait))}
+        </p>
+      )}
       {props.links.length > 0 && <div className="za-chips" style={{ marginTop: 8 }}>{props.links}</div>}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8 }}>
-        <button type="button" className="za-chip" disabled={props.disabled} onClick={props.onRetry}>
+        <button type="button" className="za-chip" disabled={props.disabled || wait > 0} onClick={props.onRetry}>
           <RotateCcw size={16} aria-hidden style={{ display: "inline", marginRight: 6, verticalAlign: "-3px" }} />
           {props.retryLabel}
         </button>
       </div>
       {/* Doc 02 §21 ui.error / T24: the reference is shown only when one exists. */}
       {props.reference && <p className="za-meta" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }} data-testid="assistant-reference">
-        <span style={{ whiteSpace: "nowrap" }}>Reference:</span>
+        <span style={{ whiteSpace: "nowrap" }}>{props.referenceLabel}</span>
         <code style={{ minWidth: 0, overflowWrap: "anywhere" }}>{props.reference}</code>
         <button
           type="button"
@@ -546,12 +608,16 @@ export function AssistantWidget({
 
   const open = ui !== "S00_CLOSED";
   const sending = ui === "S03_WAITING";
-  const t = (key: string) => config?.microcopy?.[key] ?? COPY[key] ?? "";
+  const t = (key: string) => config?.microcopy?.[key] ?? COPY[key] ?? KEYED_COPY[key] ?? "";
   const title = t("ui.header.title") || ASSISTANT_TITLE;
   const allStarters = (config?.chips?.[pageContext] ?? config?.chips?.other ?? STARTERS).slice(0, 6);
   const visibleCount = isMobile ? MOBILE_STARTERS : MAX_STARTERS;
   const menu = serverMenu ? menuFromServer(serverMenu) : menuFromChips(allStarters);
-  const visibleTopics = moreTopics ? menu : menu.slice(0, visibleCount);
+  // Doc 02 §22: a page with its own starter set (pricing, platform, trust,
+  // support, demo) opens with those chips; the full guided menu stays one
+  // tap away ("More topics"). Home and unknown pages use the general menu.
+  const pageChips = pageContext !== "other" && pageContext !== "home" ? config?.chips?.[pageContext] : undefined;
+  const visibleTopics = moreTopics ? menu : pageChips?.length ? menuFromChips(pageChips.slice(0, visibleCount)) : menu.slice(0, visibleCount);
   const sensitive = looksSensitive(draft);
 
   useEffect(() => {
@@ -726,6 +792,8 @@ export function AssistantWidget({
 
   function openPanel() {
     setUnread(false);
+    // Doc 02 §27 chat_opened: the page enum and locale only.
+    void Promise.resolve(recordAssistantEvent({ event: "chat_opened", page_context: pageContext, locale: "en-US" })).catch(() => undefined);
     dispatch({ type: "OPEN", hasMessages: messagesRef.current.length > 0, waiting: inFlight.current !== null });
   }
 
@@ -822,8 +890,8 @@ export function AssistantWidget({
     inFlight.current = null;
     dispatch({ type: "CANCEL" });
     if (stopped) setVisitor(stopped.id, { state: "stopped" });
-    update((m) => [...m, { id: crypto.randomUUID(), role: "notice", text: "Stopped. Ask again whenever you're ready." }]);
-    setAnnounce("Stopped.");
+    update((m) => [...m, { id: crypto.randomUUID(), role: "notice", text: t("ui.stopped") }]);
+    setAnnounce(t("ui.stopped.short"));
     composer.current?.focus();
   }
 
@@ -1125,12 +1193,12 @@ export function AssistantWidget({
       >
         {label}
         <ExternalLink size={16} aria-hidden />
-        <span className="za-sr-only">(official ZoikoSuite page, opens in a new tab)</span>
+        <span className="za-sr-only">{t("ui.link.official")}</span>
       </a>
     );
   }
 
-  const fallbackLinks = FALLBACK_ROUTES.map((r) => routeLink(r.key, r.label, false)).filter(Boolean);
+  const fallbackLinks = FALLBACK_ROUTES.map((r) => routeLink(r.key, t(`ui.fallback.${r.key}`), false)).filter(Boolean);
   // Kill switch on (Doc 08 §10): show the official routes and accept no input.
   const chatOff = config?.capabilities?.chat_enabled === false;
 
@@ -1147,7 +1215,8 @@ export function AssistantWidget({
         text = t("ui.error.timeout");
         break;
       default:
-        text = t("ui.error.unreachable");
+        // Doc 02 §21 ui.error; the reference line is added only when one exists.
+        text = t("ui.error");
     }
     const backendDown = kind === "network" && (status === undefined || status >= 500);
     if (process.env.NODE_ENV === "development" && backendDown) {
@@ -1212,7 +1281,7 @@ export function AssistantWidget({
           type="button"
           className="za-thumb"
           aria-pressed={m.feedback.rating === "useful"}
-          aria-label="Yes, this was helpful"
+          aria-label={t("ui.feedback.yes")}
           onClick={() => void rate(m.turn.turn_id, "useful")}
         >
           <ThumbsUp size={16} aria-hidden />
@@ -1221,15 +1290,15 @@ export function AssistantWidget({
           type="button"
           className="za-thumb"
           aria-pressed={m.feedback.rating === "not_useful"}
-          aria-label="No, this wasn't helpful"
+          aria-label={t("ui.feedback.no")}
           onClick={() => setFeedback(m.turn.turn_id, { rating: "not_useful" })}
         >
           <ThumbsDown size={16} aria-hidden />
         </button>
         {m.feedback.rating === "not_useful" &&
           chipList(
-            "What was wrong?",
-            REASONS.map((r) => ({ label: r.label, onClick: () => void rate(m.turn.turn_id, "not_useful", r.value) })),
+            t("ui.feedback.reason"),
+            REASONS.map((r) => ({ label: t(`ui.feedback.reason.${r.value}`) || r.label, onClick: () => void rate(m.turn.turn_id, "not_useful", r.value) })),
           )}
       </div>
     );
@@ -1243,7 +1312,7 @@ export function AssistantWidget({
     const primary = turn.cta?.primary;
     const cta = primary
       ? routeLink(primary.route_key, primary.label, true, primary.url)
-      : turn.actions[0] && routeLink(turn.actions[0].route_key, ROUTE_LABELS[turn.actions[0].route_key] ?? "Open official page", true);
+      : turn.actions[0] && routeLink(turn.actions[0].route_key, t(`ui.route.${turn.actions[0].route_key}`) || t("ui.route.default"), true);
     const secondary = turn.cta?.secondary && routeLink(turn.cta.secondary.route_key, turn.cta.secondary.label, false, turn.cta.secondary.url);
     const asked = messages.find((x) => x.role === "visitor" && x.id === m.replyTo);
     const clamp = clampWords(turn.text, ANSWER_WORDS);
@@ -1275,7 +1344,7 @@ export function AssistantWidget({
           {turn.status === "REFUSED_ACTION" && (
             <p className="za-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 4px", fontWeight: 600 }}>
               <ShieldAlert size={14} aria-hidden />
-              Not something I can do here
+              {t("ui.refused")}
             </p>
           )}
           {isUnverified(turn) && (
@@ -1311,7 +1380,7 @@ export function AssistantWidget({
             turn.clarification &&
             m.id === lastAssistant &&
             chipList(
-              "Choose an answer",
+              t("ui.choose"),
               turn.clarification.options.map((opt) => {
                 const label = opt === OVERVIEW_OPTION ? t("ui.clarify.overview") : opt === OTHER_OPTION ? t("ui.clarify.other") : regionName(opt);
                 const market = opt === OVERVIEW_OPTION || opt === OTHER_OPTION ? undefined : opt;
@@ -1323,14 +1392,14 @@ export function AssistantWidget({
             turn.suggestions.length > 0 &&
             m.id === lastAssistant &&
             chipList(
-              "Suggested questions",
+              t("ui.suggested"),
               turn.suggestions.map((s) => ({ label: s.label, onClick: () => send(s.message) })),
             )}
 
           {sources.length > 0 && (
             <div className="za-section">
               <p className="za-meta" style={{ margin: 0 }}>
-                Sources
+                {t("ui.sources")}
               </p>
               <ul className="za-sources" data-testid="assistant-sources">
                 {sources.map((c) => {
@@ -1342,13 +1411,33 @@ export function AssistantWidget({
                   return (
                     <li key={c.url_key}>
                       {url ? (
-                        <a className="za-source" href={url} target="_blank" rel="noopener noreferrer">
+                        <a
+                          className="za-source"
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={t("ui.source")}
+                          onClick={() => {
+                            // Doc 02 §27 source_opened: the approved link id and intent only.
+                            const s = session.current;
+                            void Promise.resolve(
+                              recordAssistantEvent({ event: "source_opened", link_id: c.url_key, intent_id: turn.intent_id }, s ? { grant: s.grant, id: s.id } : undefined),
+                            ).catch(() => undefined);
+                          }}
+                        >
+                          <span className="za-sr-only">{t("ui.source")}: </span>
                           <span>{name}</span>
                           <ExternalLink size={14} aria-hidden />
-                          <span className="za-sr-only">(opens in a new tab)</span>
+                          <span className="za-sr-only">{t("ui.link.new_tab")}</span>
                         </a>
                       ) : (
                         <span className="za-source">{name}</span>
+                      )}
+                      {reviewedOn(c.reviewed_at) && (
+                        <span className="za-meta za-source-date" data-testid="assistant-source-date">
+                          {" "}
+                          {t("ui.source.reviewed").replace("{date}", reviewedOn(c.reviewed_at))}
+                        </span>
                       )}
                     </li>
                   );
@@ -1361,8 +1450,8 @@ export function AssistantWidget({
           {cta}
           {secondary && <div style={{ marginTop: 8 }}>{secondary}</div>}
 
-          {turn.status === "HANDOFF" && turn.actions[0] && CHANNELS[turn.actions[0].route_key] && (
-            <p className="za-meta za-channel">{CHANNELS[turn.actions[0].route_key]}</p>
+          {turn.status === "HANDOFF" && turn.actions[0] && t(`ui.channel.${turn.actions[0].route_key}`) && (
+            <p className="za-meta za-channel" data-testid="assistant-channel">{t(`ui.channel.${turn.actions[0].route_key}`)}</p>
           )}
 
           {canRetry(turn) && m.id === lastAssistant && (
@@ -1390,7 +1479,7 @@ export function AssistantWidget({
         all={menu}
         view={view}
         disabled={sending}
-        showMore={messages.length === 0 && !moreTopics && menu.length > visibleCount}
+        showMore={messages.length === 0 && !moreTopics && (pageChips?.length ? serverMenu !== null : menu.length > visibleCount)}
         copy={{ main: t("ui.menu.main"), back: t("ui.menu.back"), more: t("ui.more_topics") }}
         onView={setMenuView}
         onMore={() => setMoreTopics(true)}
@@ -1441,22 +1530,22 @@ export function AssistantWidget({
           <span className="za-meta" style={{ marginRight: 4 }}>
             {t("ui.end.prompt")}
           </span>
-          <button type="button" className="za-thumb" aria-pressed={endRating.rating === "useful"} aria-label="Yes, this chat was helpful" onClick={() => void rateEnd("useful")}>
+          <button type="button" className="za-thumb" aria-pressed={endRating.rating === "useful"} aria-label={t("ui.end.yes")} onClick={() => void rateEnd("useful")}>
             <ThumbsUp size={16} aria-hidden />
           </button>
           <button
             type="button"
             className="za-thumb"
             aria-pressed={endRating.rating === "not_useful"}
-            aria-label="No, this chat wasn't helpful"
+            aria-label={t("ui.end.no")}
             onClick={() => setEndRating({ rating: "not_useful" })}
           >
             <ThumbsDown size={16} aria-hidden />
           </button>
           {endRating.rating === "not_useful" &&
             chipList(
-              "What was wrong?",
-              REASONS.map((r) => ({ label: r.label, onClick: () => void rateEnd("not_useful", r.value) })),
+              t("ui.feedback.reason"),
+              REASONS.map((r) => ({ label: t(`ui.feedback.reason.${r.value}`) || r.label, onClick: () => void rateEnd("not_useful", r.value) })),
             )}
         </div>
       )}
@@ -1610,6 +1699,21 @@ export function AssistantWidget({
                     >
                       <Info size={18} aria-hidden />
                       {t("ui.privacy.title")}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="assistant-accessibility"
+                      disabled={sending || chatOff}
+                      onClick={() => {
+                        setMoreOpen(false);
+                        const url = routeUrl("accessibility");
+                        if (url) window.open(url, "_blank", "noopener,noreferrer");
+                        else send(t("ui.accessibility.message"));
+                      }}
+                    >
+                      <Accessibility size={18} aria-hidden />
+                      {t("ui.accessibility")}
                     </button>
                     <button type="button" role="menuitem" disabled={messages.length === 0} onClick={startEnd}>
                       <Trash2 size={18} aria-hidden />
@@ -1773,7 +1877,7 @@ export function AssistantWidget({
               <div data-testid="assistant-welcome" className="za-welcome">
                 {ui === "S09_END" && (
                   <p className="za-meta" role="status" style={{ marginBottom: 12 }}>
-                    Chat cleared.
+                    {t("ui.cleared")}
                   </p>
                 )}
                 {chatOff && (
@@ -1784,6 +1888,7 @@ export function AssistantWidget({
                       text={t("ui.unavailable")}
                       links={fallbackLinks}
                       retryLabel={t("ui.retry")}
+                      referenceLabel={t("ui.reference")}
                       disabled={false}
                       reference=""
                       onRetry={() => {
@@ -1818,6 +1923,9 @@ export function AssistantWidget({
                             text={failText(m.fail.kind, m.fail.status)}
                             links={fallbackLinks}
                             retryLabel={t("ui.retry")}
+                            referenceLabel={t("ui.reference")}
+                            retryAfter={m.fail.kind === "rate_limited" ? m.fail.retryAfter : undefined}
+                            retryAfterText={t("ui.retry_after")}
                             disabled={sending}
                             reference={m.fail.reference}
                             onRetry={() => void attempt(m.id)}
@@ -1832,6 +1940,7 @@ export function AssistantWidget({
                       text={t("ui.unavailable")}
                       links={fallbackLinks}
                       retryLabel={t("ui.retry")}
+                      referenceLabel={t("ui.reference")}
                       disabled={sending}
                       reference={m.turn.request_id}
                       onRetry={() => void attempt(m.replyTo, true)}

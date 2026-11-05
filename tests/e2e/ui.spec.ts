@@ -502,7 +502,7 @@ test.describe("states S00-S09 and reduced motion", () => {
     await expect(s3.locator(".za-source")).toHaveCount(2);
     await expect(s3.locator(".za-source").first()).not.toContainText("zoikosuite.com"); // no raw domain
     await expect(s3.locator(".za-cta")).toHaveCount(1);
-    await expect(s3.getByRole("button", { name: "Yes, this was helpful" })).toBeVisible();
+    await expect(s3.getByRole("button", { name: "This was helpful" })).toBeVisible();
 
     await ask(page, "What plans are available?"); // S04
     await expect(dialog.getByRole("list", { name: "Choose an answer" }).getByRole("button")).toHaveText(["United States", "United Kingdom", "Other", "Show general overview"]);
