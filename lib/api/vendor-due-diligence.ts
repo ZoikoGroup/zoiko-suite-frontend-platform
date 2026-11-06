@@ -198,7 +198,9 @@ export async function startVendorCheck(
       // pointer to nothing.
       ...(input.documentReference ? { document_reference: input.documentReference } : {}),
     },
-    { identity: input.identity },
+    // vendor-due-diligence-svc requires X-Purpose-Context on writes; without it
+    // every check was refused with 400 envelope_incomplete.
+    { identity: input.identity, purposeContext: "procurement.vendor.due_diligence" },
   );
 }
 

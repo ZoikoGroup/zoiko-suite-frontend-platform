@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Scale, FileText, CheckSquare, Vote } from "lucide-react";
+import { fetchPanelListOrNull } from "@/lib/panel-fetch";
 
 type Kpi = {
   icon: React.ElementType;
@@ -20,70 +21,55 @@ function useLiveLegalKpis(): { kpis: Kpi[]; loading: boolean } {
     let cancelled = false;
     async function fetch_() {
       try {
-        const [contractsRes, clausesRes, obligationsRes, resolutionsRes] = await Promise.allSettled([
-          fetch("/api/v1/contracts", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/clauses", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/obligations", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/resolutions", { signal: AbortSignal.timeout(5000) }),
+        type Row = { status?: string };
+        // A list that could not be read is null and shows "Unavailable" —
+        // never 0, which is what a failed read used to look like.
+        const [contracts, clauses, obligations, resolutions] = await Promise.all([
+          fetchPanelListOrNull<Row>("/api/v1/contracts", "contracts"),
+          fetchPanelListOrNull<Row>("/api/v1/clauses", "clauses"),
+          fetchPanelListOrNull<Row>("/api/v1/obligations", "obligations"),
+          fetchPanelListOrNull<Row>("/api/v1/resolutions", "resolutions"),
         ]);
         if (cancelled) return;
+        const value = (rows: Row[] | null) => (rows ? String(rows.length) : "Unavailable");
+        const sub = (rows: Row[] | null, svc: string, ok: (r: Row[]) => string) =>
+          rows ? ok(rows) : `${svc} could not be read`;
+        const inForce = (r: Row[]) => r.filter((c) => c.status === "EXECUTED" || c.status === "EFFECTIVE").length;
 
-        const contractsJson = contractsRes.status === "fulfilled" && contractsRes.value.ok
-          ? await contractsRes.value.json().catch(() => ({ contracts: [] }))
-          : { contracts: [] };
-        const clausesJson = clausesRes.status === "fulfilled" && clausesRes.value.ok
-          ? await clausesRes.value.json().catch(() => ({ clauses: [] }))
-          : { clauses: [] };
-        const obligationsJson = obligationsRes.status === "fulfilled" && obligationsRes.value.ok
-          ? await obligationsRes.value.json().catch(() => ({ obligations: [] }))
-          : { obligations: [] };
-        const resolutionsJson = resolutionsRes.status === "fulfilled" && resolutionsRes.value.ok
-          ? await resolutionsRes.value.json().catch(() => ({ resolutions: [] }))
-          : { resolutions: [] };
-
-        const contracts: Array<Record<string, unknown>> = contractsJson.contracts ?? [];
-        const clauses: Array<Record<string, unknown>> = clausesJson.clauses ?? [];
-        const obligations: Array<Record<string, unknown>> = obligationsJson.obligations ?? [];
-        const resolutions: Array<Record<string, unknown>> = resolutionsJson.resolutions ?? [];
-
-        if (!cancelled) {
-          setKpis([
-            {
-              icon: FileText,
-              label: "Active Contracts",
-              value: String(contracts.length),
-              sub: "From contract-lifecycle-svc",
-              accent: "text-indigo-600 dark:text-indigo-400",
-              bg: "bg-indigo-100 dark:bg-indigo-500/20",
-            },
-            {
-              icon: Scale,
-              label: "Clause Library",
-              value: String(clauses.length),
-              sub: "Pre-vetted templates & terms",
-              accent: "text-purple-600 dark:text-purple-400",
-              bg: "bg-purple-100 dark:bg-purple-500/20",
-            },
-            {
-              icon: CheckSquare,
-              label: "Tracked Obligations",
-              value: String(obligations.length),
-              sub: "Compliance & SLA tracking",
-              accent: "text-amber-600 dark:text-amber-400",
-              bg: "bg-amber-100 dark:bg-amber-500/20",
-            },
-            {
-              icon: Vote,
-              label: "Board Resolutions",
-              value: String(resolutions.length),
-              sub: "From board-resolutions-svc",
-              accent: "text-emerald-600 dark:text-emerald-400",
-              bg: "bg-emerald-100 dark:bg-emerald-500/20",
-            },
-          ]);
-        }
-      } catch {
-        if (!cancelled) setLoading(false);
+        setKpis([
+          {
+            icon: FileText,
+            label: "Contracts",
+            value: value(contracts),
+            sub: sub(contracts, "contract-lifecycle-svc", (r) => `${inForce(r)} executed or in effect`),
+            accent: "text-indigo-600 dark:text-indigo-400",
+            bg: "bg-indigo-100 dark:bg-indigo-500/20",
+          },
+          {
+            icon: Scale,
+            label: "Clause Library",
+            value: value(clauses),
+            sub: sub(clauses, "clause-template-svc", (r) => `${r.filter((c) => c.status === "ACTIVE").length} active`),
+            accent: "text-purple-600 dark:text-purple-400",
+            bg: "bg-purple-100 dark:bg-purple-500/20",
+          },
+          {
+            icon: CheckSquare,
+            label: "Tracked Obligations",
+            value: value(obligations),
+            sub: sub(obligations, "obligation-tracking-svc", () => "From obligation-tracking-svc"),
+            accent: "text-amber-600 dark:text-amber-400",
+            bg: "bg-amber-100 dark:bg-amber-500/20",
+          },
+          {
+            icon: Vote,
+            label: "Board Resolutions",
+            value: value(resolutions),
+            sub: sub(resolutions, "board-resolutions-svc", () => "From board-resolutions-svc"),
+            accent: "text-emerald-600 dark:text-emerald-400",
+            bg: "bg-emerald-100 dark:bg-emerald-500/20",
+          },
+        ]);
       } finally {
         if (!cancelled) setLoading(false);
       }
