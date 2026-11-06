@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dispatchHeaders, dispatchIdentity, dispatchPort } from "@/lib/dev-dispatch";
 
 export async function POST(req: NextRequest) {
+  const identity = dispatchIdentity(req);
+  if (identity instanceof NextResponse) return identity;
   try {
     const payload = await req.json();
     const { port, path = "/", method = "GET", headers = {}, body } = payload;
 
-    const portNum = parseInt(port, 10);
-    if (isNaN(portNum) || portNum < 1000 || portNum > 65535) {
-      return NextResponse.json({ ok: false, error: "Invalid port" }, { status: 400 });
-    }
+    const portNum = dispatchPort(port);
+    if (portNum instanceof NextResponse) return portNum;
 
     const start = Date.now();
     let targetUrl = `http://127.0.0.1:${portNum}${path.startsWith("/") ? path : `/${path}`}`;
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        ...headers,
+        ...dispatchHeaders(identity, headers),
       },
       signal: AbortSignal.timeout(4000),
       cache: "no-store",

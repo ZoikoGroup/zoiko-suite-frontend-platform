@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dispatchHeaders, dispatchIdentity, dispatchPort } from "@/lib/dev-dispatch";
 
 export async function POST(req: NextRequest) {
+  const identity = dispatchIdentity(req);
+  if (identity instanceof NextResponse) return identity;
   try {
     const { port, method = "POST", path, body, queryParams } = await req.json();
 
@@ -11,7 +14,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let targetUrl = `http://127.0.0.1:${port}${path}`;
+    const portNum = dispatchPort(port);
+    if (portNum instanceof NextResponse) return portNum;
+
+    let targetUrl = `http://127.0.0.1:${portNum}${String(path).startsWith("/") ? path : `/${path}`}`;
     if (queryParams && typeof queryParams === "object") {
       const entries = Object.entries(queryParams).filter(
         ([, v]) => v !== undefined && v !== null && v !== ""
@@ -27,9 +33,7 @@ export async function POST(req: NextRequest) {
     const t0 = Date.now();
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "X-Tenant-Id": "11111111-1111-1111-1111-111111111111",
-      "X-Principal-Id": "33333333-3333-3333-3333-333333333333",
-      "X-Legal-Entity-Id": "22222222-2222-2222-2222-222222222222",
+      ...dispatchHeaders(identity),
     };
 
     let fetchRes: Response;

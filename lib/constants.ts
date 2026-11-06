@@ -11,6 +11,10 @@ import {
   Plug,
   CircleDollarSign,
   BrainCircuit,
+  LayoutGrid,
+  FileArchive,
+  Users,
+  Store,
   Fingerprint,
   Building2,
   ToggleLeft,
@@ -151,19 +155,19 @@ export const DOMAINS: Domain[] = [
     href: "/admin/security",
     icon: Lock,
     purpose:
-      "Govern mTLS certificates, SIEM integrations, cryptographic key lifecycle, and cap table records.",
+      "Govern mTLS certificates, SIEM exporters, key metadata and rotation, and zero-trust access-risk assessments.",
     status: "operational",
     coreServices: [
       "mTLS Management Service",
       "SIEM Integration Service",
-      "Carta Cap Table Service",
+      "CARTA Access-Risk Service",
       "Key Management Service",
     ],
   },
   {
     key: "integrations",
     label: "Integrations",
-    href: "/admin/integrations",
+    href: "/admin/integration",
     icon: Plug,
     purpose:
       "Govern all external system connectors — banking, HRIS, tax authority, eSignature, and data feeds.",
@@ -196,6 +200,144 @@ export const DOMAINS: Domain[] = [
       "The evidence each governed action must carry before it may proceed — a catalogue of requirements and the evaluation of whether one is met.",
     status: "operational",
     coreServices: ["Evidence Requirements Service"],
+  },
+];
+
+/**
+ * The eleven business domains of docs/ZOIKOSUITE_PLATFORM_BRIEF.md §3, as shown
+ * on /admin/platform.
+ *
+ * Kept apart from DOMAINS above: DOMAINS keys the Overview status grid and the
+ * /readyz probes in lib/api/health.ts, and its entries are pages rather than
+ * domains (Purchase Requests, Evidence and Delegated Authority are each one).
+ *
+ * `destinations` lists only routes that have a page.tsx. An empty list means the
+ * domain has no page in this console yet and is rendered as "Not yet available"
+ * with no link. `gap` names what the brief describes that has no page.
+ */
+export type BusinessDomain = {
+  section: string;
+  key: string;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  destinations: { label: string; href: string }[];
+  gap?: string;
+};
+
+export const BUSINESS_DOMAINS: BusinessDomain[] = [
+  {
+    section: "3.1",
+    key: "identity-foundation",
+    label: "Identity, Scope & Foundation",
+    description:
+      "Identity context, tenant and entity registry, gateway auth, delegated authority, access control, secrets, configuration and notifications.",
+    icon: Fingerprint,
+    destinations: [{ label: "Delegated Authority", href: "/admin/delegations" }],
+    gap: "Identity, tenants, access control, secrets, settings and notifications have no page.",
+  },
+  {
+    section: "3.2",
+    key: "governance",
+    label: "Governance Platform",
+    description:
+      "The non-bypassable control spine: authorization, policy, jurisdiction rules, workflow, obligations, evidence requirements and the decision log.",
+    icon: Landmark,
+    destinations: [{ label: "Evidence Requirements", href: "/admin/evidence" }],
+    gap: "Policies, jurisdictions, obligations and the governance decision log have no page.",
+  },
+  {
+    section: "3.3",
+    key: "evidence-audit",
+    label: "Evidence, Audit & Utility",
+    description:
+      "Audit event store, document vault, evidence manifests, workflow history, schema and retention registries, source authority and kill switches.",
+    icon: FileArchive,
+    destinations: [{ label: "Source Authority", href: "/admin/source-authority" }],
+    gap: "Audit events, documents, schemas and retention have no page.",
+  },
+  {
+    section: "3.4",
+    key: "finance",
+    label: "Finance",
+    description:
+      "General ledger, payables, receivables, bank reconciliation, treasury, financial close, intercompany, consolidation and invoice approval.",
+    icon: CircleDollarSign,
+    destinations: [{ label: "Finance & Payments", href: "/admin/finance" }],
+  },
+  {
+    section: "3.5",
+    key: "payroll-workforce",
+    label: "Payroll & Workforce",
+    description:
+      "Employee master, employment contracts, payroll runs, compensation, benefits, payroll tax, leave, org structure and workforce compliance.",
+    icon: Users,
+    destinations: [],
+    gap: "HR and payroll pages were removed; only their server actions remain.",
+  },
+  {
+    section: "3.6",
+    key: "legal-commercial",
+    label: "Legal, Corporate & Commercial",
+    description:
+      "Contract lifecycle, clauses, board resolutions, corporate actions, counterparties, procurement, purchase requests and orders, and spend controls.",
+    icon: Scale,
+    destinations: [
+      { label: "Legal & Contracts", href: "/admin/legal" },
+      { label: "Commercial Ops", href: "/admin/commercial-ops" },
+      { label: "Purchase Requests", href: "/admin/purchase-requests" },
+    ],
+  },
+  {
+    section: "3.7",
+    key: "tax-compliance",
+    label: "Tax & Compliance",
+    description:
+      "Tax rules and determination, VAT/GST, corporate and withholding tax, filing preparation and tracking, compliance status and escalation.",
+    icon: Percent,
+    destinations: [
+      { label: "Tax", href: "/admin/tax" },
+      { label: "Compliance", href: "/admin/compliance" },
+    ],
+  },
+  {
+    section: "3.8",
+    key: "intelligence",
+    label: "Intelligence & Reporting",
+    description:
+      "Anomaly detection, forecasting, risk scoring, reconciliation intelligence, reporting, decision support and migration integrity.",
+    icon: BrainCircuit,
+    destinations: [
+      { label: "Intelligence & Reporting", href: "/admin/intelligence" },
+      { label: "Migration Integrity", href: "/admin/migrations" },
+    ],
+  },
+  {
+    section: "3.9",
+    key: "security-trust",
+    label: "Security & Trust",
+    description: "mTLS certificates, SIEM integration, cryptographic key management and CARTA risk assessment.",
+    icon: Lock,
+    destinations: [{ label: "Security & Trust", href: "/admin/security" }],
+  },
+  {
+    section: "3.10",
+    key: "integration",
+    label: "Integration & Extensibility",
+    description:
+      "Governed connectors to banks, HRIS, tax authorities, eSignature providers and external data feeds.",
+    icon: Plug,
+    // Singular route: /admin/integrations (plural) is the static placeholder.
+    destinations: [{ label: "Integrations", href: "/admin/integration" }],
+  },
+  {
+    section: "3.11",
+    key: "commercial-plane",
+    label: "Commercial Plane",
+    description: "The monetization layer: commercial accounts, capability registry and AI governance.",
+    icon: Store,
+    destinations: [{ label: "AI Governance", href: "/admin/ai-governance" }],
+    gap: "Commercial accounts and the capability registry have no page.",
   },
 ];
 
@@ -323,6 +465,7 @@ export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECO
     title: "Platform",
     icon: Settings2,
     items: [
+      { label: "Business Domains", href: "/admin/platform", icon: LayoutGrid },
       { label: "Service Inputs", href: "/admin/service-inputs", icon: Sliders },
     ],
   },
