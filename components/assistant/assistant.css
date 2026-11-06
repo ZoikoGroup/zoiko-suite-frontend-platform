@@ -518,8 +518,10 @@
 }
 .za-avatar { flex: none; margin-top: 2px; }
 .za-md p { margin: 0; }
-.za-md p + p, .za-md ul + p, .za-md p + ul { margin-top: var(--za-space-2); }
+.za-md p + p, .za-md ul + p, .za-md p + ul, .za-md ol + p, .za-md p + ol { margin-top: var(--za-space-2); }
 .za-md ul { margin: 0; padding-left: 1.1rem; list-style: disc; }
+.za-md ol { margin: 0; padding-left: 1.4rem; list-style: decimal; }
+.za-md ol > li + li { margin-top: 2px; }
 .za-md code { padding: 0 4px; border-radius: 4px; background: var(--za-border); font-size: 0.85em; }
 .za-meta { font-size: var(--za-font-meta); line-height: 1rem; color: var(--za-text-muted); }
 [data-tone="warn"] .za-meta, [data-tone="error"] .za-meta { color: inherit; }
@@ -921,7 +923,8 @@ html[data-za-lock="true"], html[data-za-lock="true"] body { overflow: hidden; }
    word. Never runs under reduced motion (the reveal itself is skipped). */
 .za-bubble[data-typing] { cursor: pointer; }
 .za-bubble[data-typing] .za-md > p:last-child::after,
-.za-bubble[data-typing] .za-md > ul:last-child > li:last-child::after {
+.za-bubble[data-typing] .za-md > ul:last-child > li:last-child::after,
+.za-bubble[data-typing] .za-md > ol:last-child > li:last-child::after {
   content: "";
   display: inline-block;
   width: 0.45em;

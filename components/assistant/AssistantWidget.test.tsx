@@ -535,6 +535,37 @@ describe("answer format (Doc 01 §12, Doc 02 §16)", () => {
     expect(clampWords(long, 120).text.split(" ")).toHaveLength(120);
   });
 
+  it("renders how-to steps as a numbered list with the intro on its own line", async () => {
+    const { Markdown } = await import("./markdown");
+    const { container } = render(
+      <Markdown
+        text={[
+          "Register a jurisdiction adds a jurisdiction to the register.",
+          "To register a jurisdiction:",
+          "1. Sign in to your ZoikoSuite account.",
+          "2. In the left menu, open **Governance Platform**.",
+          "3. Select **Register jurisdiction**.",
+          "Submitting the same details again changes nothing.",
+        ].join("\n")}
+      />,
+    );
+    const html = container.innerHTML;
+    expect(html).toContain("<p>Register a jurisdiction adds a jurisdiction to the register.</p><p>To register a jurisdiction:</p><ol>");
+    expect(html.match(/<li>/g)).toHaveLength(3);
+    expect(html).toContain("<strong>Governance Platform</strong>");
+    expect(html).not.toContain("<ul>");
+  });
+
+  it("clampWords never cuts a numbered list of steps part-way", async () => {
+    const { clampWords } = await import("./markdown");
+    const words = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(" ");
+    const steps = Array.from({ length: 7 }, (_, i) => `${i + 1}. ${words(18, `s${i}x`)}`);
+    const text = [words(20, "lead"), ...steps, words(30, "note")].join("\n");
+    const out = clampWords(text, 120);
+    expect(out.clamped).toBe(true);
+    expect(out.text).toBe([words(20, "lead"), ...steps].join("\n"));
+  });
+
   it("shows a long answer's first 120 words with Show more / Show less", async () => {
     const words = Array.from({ length: 150 }, (_, i) => `word${i}`).join(" ");
     api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: words })));
