@@ -109,7 +109,7 @@ export async function FinanceSummaryBar() {
           which was stale twice over — it calls five, and four of them now resolve.
           What is left worth saying is which figure is not real yet. */}
       {stats.cashAvailableMixedCurrency === null ? (
-        <IllustrativeNotice services="Treasury cash is not available: treasury-svc's route is unverified and the service has never run in this environment. Every other figure here is read from a live service." />
+        <IllustrativeNotice services="Treasury cash is not available: treasury-svc could not be read, or the session has no legal entity. Every other figure here is read from a live service." />
       ) : null}
       <div
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"

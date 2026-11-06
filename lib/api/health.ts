@@ -68,11 +68,15 @@ const DOMAIN_SERVICES: Record<DomainKey, { name: string; key: ServiceName }[]> =
     { name: "esignature-integration-svc",  key: "esignature" },
     { name: "external-data-feed-svc",      key: "externalDataFeed" },
   ],
+  // Each probes the registry key its own page's client calls (lib/api/
+  // delegations.ts, lib/api/evidence.ts), so the card and the page agree in
+  // direct and gateway mode. These named compliance-risk-scoring-svc and
+  // filing-preparation-svc, which neither page uses.
   delegations: [
-    { name: "compliance-risk-scoring-svc", key: "complianceRiskScoring" },
+    { name: "delegated-authority-svc",   key: "delegatedAuthority" },
   ],
   evidence: [
-    { name: "filing-preparation-svc",    key: "filingPreparation" },
+    { name: "evidence-requirements-svc", key: "evidence" },
   ],
   integration: [
     { name: "connectivity-api-bridge-svc", key: "connectivityBridge" },

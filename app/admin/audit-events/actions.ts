@@ -14,8 +14,26 @@
 // None of these actions are authorised decisions about the data — they surface
 // what audit-event-store-svc returns without adding policy.
 
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import { getAuditEvents, verifyAuditChain } from "@/lib/api/audit-events";
 import type { VerifyChainState, FilterState, ExportState, AuditDomain } from "./state";
+
+// audit-event-store-svc refuses reads without a principal and tenant, so these
+// actions need the session's identity. They are also reachable by direct POST,
+// so they check the session themselves rather than relying on the /admin proxy.
+async function requireIdentity(): Promise<SessionIdentity | null> {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.email) return null;
+  return {
+    principalId: session.principalId,
+    tenantId: session.tenantId,
+    legalEntityId: session.legalEntityId,
+  };
+}
+
+const SESSION_EXPIRED = "Your session has expired — sign in again.";
 
 /**
  * Trigger a cryptographic hash-chain verification on the audit event log.
@@ -28,8 +46,10 @@ export async function verifyChainAction(
   _previous: VerifyChainState,
   _formData: FormData,
 ): Promise<VerifyChainState> {
+  const identity = await requireIdentity();
+  if (!identity) return { status: "error", message: SESSION_EXPIRED };
   try {
-    const result = await verifyAuditChain();
+    const result = await verifyAuditChain(identity);
     if (result.verified) {
       return {
         status: "verified",
@@ -75,7 +95,13 @@ export async function filterAuditEventsAction(
     };
   }
 
-  const result = await getAuditEvents();
+  const identity = await requireIdentity();
+  if (!identity) return { status: "error", message: SESSION_EXPIRED };
+
+  const result = await getAuditEvents(identity);
+  if (!result.ok) {
+    return { status: "error", message: `Audit events could not be read: ${result.error}` };
+  }
 
   let events = result.data;
 
@@ -133,7 +159,13 @@ export async function exportAuditLogAction(
   _previous: ExportState,
   _formData: FormData,
 ): Promise<ExportState> {
-  const result = await getAuditEvents();
+  const identity = await requireIdentity();
+  if (!identity) return { status: "error", message: SESSION_EXPIRED };
+
+  const result = await getAuditEvents(identity);
+  if (!result.ok) {
+    return { status: "error", message: `Nothing was exported — audit events could not be read: ${result.error}` };
+  }
 
   if (result.data.length === 0) {
     return {
@@ -145,8 +177,9 @@ export async function exportAuditLogAction(
   const exportData = {
     exported_at: new Date().toISOString(),
     event_count: result.data.length,
+    total_matching_events: result.summary.totalEvents,
+    // The service's verdict for the events in this export, not the whole log.
     hash_chain_verified: result.summary.hashChainVerified,
-    is_mock_data: result.isMock,
     events: result.data,
   };
 
@@ -156,6 +189,6 @@ export async function exportAuditLogAction(
     status: "exported",
     payload: JSON.stringify(exportData, null, 2),
     filename,
-    message: `${result.data.length} events exported${result.isMock ? " (mock data — connect audit-event-store-svc for live records)" : ""}. Click the download link to save the file.`,
+    message: `${result.data.length} of ${result.summary.totalEvents} events exported (one page from audit-event-store-svc). Click the download link to save the file.`,
   };
 }
