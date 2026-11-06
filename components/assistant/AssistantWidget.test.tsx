@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   loadAssistantConfig: vi.fn(),
   loadAssistantMenu: vi.fn(),
   rateAssistantAnswer: vi.fn(),
+  recordAssistantEvent: vi.fn(),
   recordAssistantHandoff: vi.fn(),
   startAssistantSession: vi.fn(),
 }));
@@ -534,6 +535,37 @@ describe("answer format (Doc 01 §12, Doc 02 §16)", () => {
     expect(clampWords(long, 120).text.split(" ")).toHaveLength(120);
   });
 
+  it("renders how-to steps as a numbered list with the intro on its own line", async () => {
+    const { Markdown } = await import("./markdown");
+    const { container } = render(
+      <Markdown
+        text={[
+          "Register a jurisdiction adds a jurisdiction to the register.",
+          "To register a jurisdiction:",
+          "1. Sign in to your ZoikoSuite account.",
+          "2. In the left menu, open **Governance Platform**.",
+          "3. Select **Register jurisdiction**.",
+          "Submitting the same details again changes nothing.",
+        ].join("\n")}
+      />,
+    );
+    const html = container.innerHTML;
+    expect(html).toContain("<p>Register a jurisdiction adds a jurisdiction to the register.</p><p>To register a jurisdiction:</p><ol>");
+    expect(html.match(/<li>/g)).toHaveLength(3);
+    expect(html).toContain("<strong>Governance Platform</strong>");
+    expect(html).not.toContain("<ul>");
+  });
+
+  it("clampWords never cuts a numbered list of steps part-way", async () => {
+    const { clampWords } = await import("./markdown");
+    const words = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(" ");
+    const steps = Array.from({ length: 7 }, (_, i) => `${i + 1}. ${words(18, `s${i}x`)}`);
+    const text = [words(20, "lead"), ...steps, words(30, "note")].join("\n");
+    const out = clampWords(text, 120);
+    expect(out.clamped).toBe(true);
+    expect(out.text).toBe([words(20, "lead"), ...steps].join("\n"));
+  });
+
   it("shows a long answer's first 120 words with Show more / Show less", async () => {
     const words = Array.from({ length: 150 }, (_, i) => `word${i}`).join(" ");
     api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: words })));
@@ -743,6 +775,8 @@ describe("kill switch (Doc 08 §10)", () => {
     const welcome = within(dialog).getByTestId("assistant-welcome");
     expect(within(welcome).getByTestId("assistant-unavailable")).toBeTruthy();
     expect((within(dialog).getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    // Doc 02 §21 ui.error: no trace id here, so no empty "Reference:" line.
+    expect(within(welcome).queryByTestId("assistant-reference")).toBeNull();
     expect(api.askAssistant).not.toHaveBeenCalled();
   });
 });
@@ -848,5 +882,181 @@ describe("MENU dropdown", () => {
     });
     expect(within(dialog).queryByRole("menu")).toBeNull();
     expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+});
+
+describe("Doc 02 §21-22 copy and page chips", () => {
+  it("feedback buttons use the §21 strings; sources say View source", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ citations: [{ source_version_id: "s1", claim_ids: [], url_key: "x", title: "Plans", url: "https://www.zoikosuite.com/pricing" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).getByRole("button", { name: "This was helpful" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "This did not answer my question" })).toBeTruthy();
+    expect(within(dialog).getByRole("link", { name: /View source:\s*Plans/ })).toBeTruthy();
+  });
+
+  it("a 429 with Retry-After says when to try again and holds the retry until then", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.askAssistant.mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 429, retryAfterSeconds: 2 } });
+      await openWidget();
+      await ask("What plans are available?");
+      const panel = screen.getByTestId("assistant-unavailable");
+      expect(within(panel).getByTestId("assistant-retry-after").textContent).toBe("You can try again in 2 s.");
+      expect((within(panel).getByRole("button", { name: /Try again/ }) as HTMLButtonElement).disabled).toBe(true);
+      for (let i = 0; i < 3; i++) {
+        await act(async () => {
+          vi.advanceTimersByTime(1000);
+        });
+      }
+      expect(within(panel).queryByTestId("assistant-retry-after")).toBeNull();
+      expect((within(panel).getByRole("button", { name: /Try again/ }) as HTMLButtonElement).disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a page with its own §22 starter set opens with those chips", async () => {
+    api.loadAssistantConfig.mockResolvedValue(
+      ok({
+        ...config,
+        chips: {
+          other: [{ label: "Explore platform", message: "What can ZoikoSuite do?" }],
+          pricing: [
+            { label: "Plan differences", message: "What is the difference between the plans?" },
+            { label: "Trial terms", message: "What are the trial terms?" },
+          ],
+        },
+      }),
+    );
+    render(<AssistantWidget logos={LOGOS} pageContext="pricing" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Chat with ZoikoSuite" }));
+    });
+    const welcome = screen.getByTestId("assistant-welcome");
+    expect(within(welcome).getByText("Plan differences")).toBeTruthy();
+    expect(within(welcome).queryByText("Explore platform")).toBeNull();
+  });
+
+  it("a support handoff says the visitor is leaving for secure support", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ status: "HANDOFF", intent_id: "I21", answer_class: "HANDOFF_UNKNOWN", text: "Please use secure support.", citations: [], actions: [{ type: "OPEN_OFFICIAL_ROUTE", route_key: "support" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("I need help with my account");
+    expect(within(dialog).getByTestId("assistant-channel").textContent).toBe("You are leaving the assistant for secure support.");
+  });
+
+  it("Report an accessibility issue sends the request to the assistant when no approved link exists", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ status: "HANDOFF", intent_id: "I27", citations: [] })));
+    await openWidget();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Menu" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("assistant-accessibility"));
+    });
+    expect(api.askAssistant.mock.calls[0][3]).toBe("I'd like to report an accessibility issue.");
+  });
+});
+
+describe("source review date (Doc 01 FR-03, AT-01)", () => {
+  it("shows an unambiguous review date under a cited source", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ citations: [{ source_version_id: "s1", claim_ids: [], url_key: "pricing", title: "Plans", reviewed_at: "2026-10-12" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).getByTestId("assistant-source-date").textContent?.trim()).toBe("Reviewed October 12, 2026");
+  });
+
+  it("ignores a missing or malformed date", async () => {
+    const { reviewedOn } = await import("./AssistantWidget");
+    expect(reviewedOn(undefined)).toBe("");
+    expect(reviewedOn("12/10/2026")).toBe("");
+    expect(reviewedOn("2026-02-30")).not.toBe("2026-02-30");
+  });
+});
+
+describe("Doc 02 §27 browser analytics", () => {
+  it("opening the chat records chat_opened with the page enum only", async () => {
+    render(<AssistantWidget logos={LOGOS} pageContext="pricing" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Chat with ZoikoSuite" }));
+    });
+    expect(api.recordAssistantEvent).toHaveBeenCalledWith({ event: "chat_opened", page_context: "pricing", locale: "en-US" });
+  });
+
+  it("opening a source records source_opened with its link id and intent, never the URL", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ intent_id: "I05", citations: [{ source_version_id: "s1", claim_ids: [], url_key: "pricing", title: "Plans", url: "https://www.zoikosuite.com/pricing" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("link", { name: /View source/ }));
+    });
+    const call = api.recordAssistantEvent.mock.calls.find((c) => c[0].event === "source_opened");
+    expect(call?.[0]).toEqual({ event: "source_opened", link_id: "pricing", intent_id: "I05" });
+    expect(JSON.stringify(call)).not.toContain("https://");
+  });
+});
+
+describe("negative paths (Doc 06 SEC-T004, SEC-T024)", () => {
+  it("a 401 mid-chat starts a new session and retries once with a new turn id, in the same bubble", async () => {
+    api.askAssistant
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } })
+      .mockResolvedValueOnce(ok(envelope({ text: "Recovered answer." })));
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "grant-1", expires_at: "" }))
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_2", session_grant: "grant-2", expires_at: "" }));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(api.startAssistantSession).toHaveBeenCalledTimes(2);
+    expect(api.askAssistant).toHaveBeenCalledTimes(2);
+    const [first, second] = api.askAssistant.mock.calls;
+    expect(second[0]).toBe("grant-2");
+    expect(second[2]).not.toBe(first[2]); // a new client_turn_id for the new session
+    expect(within(dialog).getAllByTestId("visitor-bubble")).toHaveLength(1);
+    expect(within(dialog).getByTestId("assistant-answer").textContent).toContain("Recovered answer.");
+  });
+
+  it("markup in an answer is shown as text, never run (XSS)", async () => {
+    const payload = `<img src=x onerror="window.__xss=1"><script>window.__xss=2</script><a href="javascript:alert(1)">click</a>`;
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: `Plans: ${payload}` })));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    const answer = within(dialog).getByTestId("assistant-answer");
+    expect(answer.querySelector("img, script, iframe")).toBeNull();
+    expect(answer.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect((window as unknown as { __xss?: number }).__xss).toBeUndefined();
+    expect(answer.textContent).toContain("<script>");
+  });
+});
+
+describe("expired session (Doc 02 §21 ui.timeout)", () => {
+  it("when a new session takes over, no 'session ended' banner stays on screen", async () => {
+    api.askAssistant
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } })
+      .mockResolvedValueOnce(ok(envelope({ text: "Answer in the new session." })));
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "g1", expires_at: "" }))
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_2", session_grant: "g2", expires_at: "" }));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).queryByTestId("assistant-session-ended")).toBeNull();
+    expect(within(dialog).getByTestId("assistant-answer").textContent).toContain("Answer in the new session.");
+  });
+
+  it("when no new session can start, the banner tells the visitor", async () => {
+    api.askAssistant.mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } });
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "g1", expires_at: "" }))
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 503 } });
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).getByTestId("assistant-session-ended").textContent).toContain("Your public chat session has ended");
   });
 });

@@ -16,6 +16,8 @@ function inline(text: string): ReactNode[] {
 }
 
 const ITEM = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/;
+// STEP is one numbered step ("3. Select Save the limit.").
+const STEP = /^\s*\d+[.)]\s+\S/;
 
 export const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
@@ -44,7 +46,10 @@ export function revealWords(text: string, n: number): string {
 /**
  * Doc 01 §12: a default answer shows at most `max` words before an optional
  * expand. Cuts at a line boundary so a list item is never split; only when
- * the first line alone is longer is it cut mid-line, with an ellipsis.
+ * the first line alone is longer is it cut mid-line, with an ellipsis. A
+ * numbered list of steps is never cut part-way: a visitor following a how-to
+ * needs every step, so a started numbered list is kept to its end (up to
+ * `max` × 1.5 words) and only what follows it is clamped.
  */
 export function clampWords(text: string, max: number): { text: string; clamped: boolean } {
   if (countWords(text) <= max) return { text, clamped: false };
@@ -52,7 +57,8 @@ export function clampWords(text: string, max: number): { text: string; clamped: 
   let used = 0;
   for (const line of text.split("\n")) {
     const n = countWords(line);
-    if (used + n > max) {
+    const continuesSteps = STEP.test(line) && kept.length > 0 && STEP.test(kept[kept.length - 1]);
+    if (used + n > max && !(continuesSteps && used + n <= max * 1.5)) {
       if (used === 0) {
         const m = ITEM.exec(line);
         const body = m ? m[1] : line;
@@ -70,6 +76,7 @@ export function clampWords(text: string, max: number): { text: string; clamped: 
 export function Markdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   let items: string[] = [];
+  let ordered = false;
   let para: string[] = [];
   const flushPara = () => {
     if (para.length) blocks.push(<p key={blocks.length}>{inline(para.join(" "))}</p>);
@@ -77,13 +84,9 @@ export function Markdown({ text }: { text: string }) {
   };
   const flushList = () => {
     if (items.length) {
-      blocks.push(
-        <ul key={blocks.length}>
-          {items.map((it, i) => (
-            <li key={i}>{inline(it)}</li>
-          ))}
-        </ul>,
-      );
+      const lis = items.map((it, i) => <li key={i}>{inline(it)}</li>);
+      // Numbered steps stay numbered: a how-to is followed in order.
+      blocks.push(ordered ? <ol key={blocks.length}>{lis}</ol> : <ul key={blocks.length}>{lis}</ul>);
     }
     items = [];
   };
@@ -91,12 +94,18 @@ export function Markdown({ text }: { text: string }) {
     const m = ITEM.exec(line);
     if (m) {
       flushPara();
+      const step = STEP.test(line);
+      if (items.length && step !== ordered) flushList();
+      ordered = step;
       items.push(m[1]);
     } else if (line.trim() === "") {
       flushPara();
       flushList();
     } else {
       flushList();
+      // A line that introduces a list ("To register a jurisdiction:") is a
+      // paragraph of its own, not the tail of the one before it.
+      if (line.trim().endsWith(":")) flushPara();
       para.push(line.trim());
     }
   }

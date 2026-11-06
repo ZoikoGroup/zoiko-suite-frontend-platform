@@ -502,7 +502,7 @@ test.describe("states S00-S09 and reduced motion", () => {
     await expect(s3.locator(".za-source")).toHaveCount(2);
     await expect(s3.locator(".za-source").first()).not.toContainText("zoikosuite.com"); // no raw domain
     await expect(s3.locator(".za-cta")).toHaveCount(1);
-    await expect(s3.getByRole("button", { name: "Yes, this was helpful" })).toBeVisible();
+    await expect(s3.getByRole("button", { name: "This was helpful" })).toBeVisible();
 
     await ask(page, "What plans are available?"); // S04
     await expect(dialog.getByRole("list", { name: "Choose an answer" }).getByRole("button")).toHaveText(["United States", "United Kingdom", "Other", "Show general overview"]);
@@ -729,3 +729,33 @@ for (const width of [1280, 768, 375]) {
     });
   }
 }
+
+// WCAG 1.4.4 / Doc 07 §15 (QA-T051/T052): text-only zoom to 200 %. The widget
+// sizes text in rem, so doubling the root font size doubles every text size
+// without changing the viewport; nothing may be clipped or scroll sideways.
+test.describe("text-only zoom 200%", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("text doubles; no horizontal scroll; composer, send and answer stay reachable", async ({ page }) => {
+    await mockApi(page);
+    await page.goto("/assistant");
+    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+    await page.getByTestId("assistant-launcher").click();
+    const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
+    await expect(dialog.getByTestId("assistant-welcome")).toBeVisible();
+    await ask(page, "What does Legal and Contracts do?");
+    const answer = dialog.getByTestId("assistant-answer").last();
+    await expect(answer).toBeVisible();
+    const px = await answer.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(px).toBeGreaterThanOrEqual(29); // 15 px body text at 200 %
+
+    const doc = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+    expect(doc.sw).toBeLessThanOrEqual(doc.cw);
+    const panel = await dialog.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+    expect(panel.sw).toBeLessThanOrEqual(panel.cw);
+    for (const name of ["Message", "Send message"]) {
+      const el = name === "Message" ? dialog.getByRole("textbox", { name }) : dialog.getByRole("button", { name });
+      await expect(el).toBeInViewport();
+    }
+  });
+});
