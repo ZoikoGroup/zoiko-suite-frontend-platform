@@ -2,20 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { ShieldCheck, RefreshCw } from "lucide-react";
-
-type RiskScore = {
-  score_id: string;
-  legal_entity_id: string;
-  risk_score: number;
-  risk_level: string;
-  factors: string[];
-  evaluated_at: string;
-  valid_until: string;
-};
+import { fetchPanelList } from "@/lib/panel-fetch";
+import { RiskScoreCreateForm } from "./IntelligenceCreateForms";
+import type { RiskScore } from "@/lib/api/intelligence";
 
 const LEVEL_STYLES: Record<string, { bar: string; badge: string }> = {
   LOW: { bar: "bg-emerald-500", badge: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400" },
-  MEDIUM: { bar: "bg-amber-500", badge: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" },
+  MODERATE: { bar: "bg-amber-500", badge: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" },
   HIGH: { bar: "bg-orange-500", badge: "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-400" },
   CRITICAL: { bar: "bg-red-500", badge: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400" },
 };
@@ -29,11 +22,10 @@ export function RiskScoringPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/intelligence/risk-scores", { signal: AbortSignal.timeout(5000) });
-      const json = await res.json().catch(() => ({ scores: [] }));
-      setScores(json.scores ?? []);
-    } catch {
-      setError("compliance-risk-scoring-svc (:8162) could not be reached.");
+      setScores(await fetchPanelList<RiskScore>("/api/v1/intelligence/risk-scores", "scores", "compliance-risk-scoring-svc"));
+    } catch (e) {
+      setScores([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -47,7 +39,7 @@ export function RiskScoringPanel() {
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-violet-500" aria-hidden="true" />
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Compliance Risk Scores</p>
-          <code className="text-[10px] font-mono text-slate-400">compliance-risk-scoring-svc :8162</code>
+          <code className="text-[10px] font-mono text-slate-400">compliance-risk-scoring-svc</code>
         </div>
         <button
           id="risk-score-refresh-btn"
@@ -61,6 +53,10 @@ export function RiskScoringPanel() {
       </div>
 
       <div className="p-5">
+        <div className="mb-4">
+          <RiskScoreCreateForm onCreated={load} />
+        </div>
+
         {error && (
           <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{error}</p>
         )}
@@ -74,21 +70,22 @@ export function RiskScoringPanel() {
         {scores.length > 0 && (
           <div className="space-y-4">
             {scores.map((sc) => {
-              const style = LEVEL_STYLES[sc.risk_level] ?? LEVEL_STYLES.MEDIUM;
-              const pct = Math.min(sc.risk_score, 100);
+              const style = LEVEL_STYLES[sc.risk_tier] ?? LEVEL_STYLES.MODERATE;
+              const score = Number.parseFloat(sc.composite_risk_score);
+              const pct = Number.isFinite(score) ? Math.min(Math.max(score, 0), 100) : 0;
               return (
-                <div key={sc.score_id} className="space-y-1.5">
+                <div key={sc.id} className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <p className="text-xs font-medium text-slate-700 dark:text-slate-300 font-mono">
-                        {sc.legal_entity_id.slice(0, 8)}…
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        {sc.assessment_name}
                       </p>
                       <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${style.badge}`}>
-                        {sc.risk_level}
+                        {sc.risk_tier}
                       </span>
                     </div>
                     <span className="text-sm font-bold tabular-nums text-slate-800 dark:text-slate-200">
-                      {sc.risk_score}
+                      {sc.composite_risk_score}
                     </span>
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800">
@@ -97,13 +94,11 @@ export function RiskScoringPanel() {
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  {sc.factors.length > 0 && (
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                      Factors: {sc.factors.join(", ")}
-                    </p>
-                  )}
                   <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                    Valid until {new Date(sc.valid_until).toLocaleDateString()}
+                    {sc.subject_type.replace(/_/g, " ")} · {sc.model_version} · review {sc.review_status.replace(/_/g, " ").toLowerCase()}
+                  </p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                    Evaluated {new Date(sc.evaluated_at).toLocaleString()}
                   </p>
                 </div>
               );

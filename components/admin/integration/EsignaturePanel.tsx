@@ -1,48 +1,34 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileSignature, RefreshCw, CheckCircle2, Clock, Ban } from "lucide-react";
-
-type Signatory = {
-  name: string;
-  email: string;
-  role: string;
-  status: "PENDING" | "SIGNED" | "DECLINED";
-};
-
-type Envelope = {
-  envelope_id: string;
-  document_id: string;
-  provider: string;
-  signatories: Signatory[];
-  status: "DRAFT" | "SENT" | "DELIVERED" | "COMPLETED" | "DECLINED" | "VOIDED";
-  sent_at: string;
-  completed_at: string | null;
-};
+import { FileSignature, RefreshCw } from "lucide-react";
+import { fetchPanelList } from "@/lib/panel-fetch";
+import { EnvelopeCreateForm, SignatureProfilesSection } from "./IntegrationCreateForms";
+import type { EsignatureEnvelope } from "@/lib/api/integration";
 
 const STATUS_COLORS: Record<string, string> = {
-  COMPLETED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  SIGNED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
   SENT: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
   DELIVERED: "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300",
-  DRAFT: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  DECLINED: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+  PENDING: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
   VOIDED: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
 };
 
 export function EsignaturePanel() {
-  const [envelopes, setEnvelopes] = useState<Envelope[]>([]);
+  const [envelopes, setEnvelopes] = useState<EsignatureEnvelope[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchEnvelopes = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch("/api/v1/integration/envelopes");
-      if (res.ok) {
-        const data = await res.json();
-        setEnvelopes(data.envelopes ?? []);
-      }
-    } catch {
-      // fallback
+      setEnvelopes(
+        await fetchPanelList<EsignatureEnvelope>("/api/v1/integration/envelopes", "envelopes", "esignature-integration-svc"),
+      );
+    } catch (e) {
+      setEnvelopes([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -56,8 +42,8 @@ export function EsignaturePanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
-          <span>Digital Signature Envelopes & Routing</span>
-          <span className="font-mono text-[11px] text-slate-400">(:8174)</span>
+          <span>Signature envelopes (no DocuSign/Adobe adapter configured)</span>
+          <span className="font-mono text-[11px] text-slate-400">esignature-integration-svc</span>
         </div>
         <button
           type="button"
@@ -69,15 +55,22 @@ export function EsignaturePanel() {
         </button>
       </div>
 
+      <SignatureProfilesSection />
+      <EnvelopeCreateForm onCreated={fetchEnvelopes} />
+
       {loading && envelopes.length === 0 ? (
         <div className="space-y-2 animate-pulse">
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
         </div>
+      ) : error ? (
+        <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{error}</p>
       ) : envelopes.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center dark:border-slate-800">
           <FileSignature className="mx-auto h-8 w-8 text-slate-400" />
-          <p className="mt-2 text-xs text-slate-500">No active eSignature envelopes.</p>
+          <p className="mt-2 text-xs text-slate-500">
+            No eSignature envelopes. Sending one is refused (503) until a provider adapter is configured.
+          </p>
         </div>
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
@@ -98,7 +91,7 @@ export function EsignaturePanel() {
                       </span>
                       <span
                         className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          STATUS_COLORS[env.status] || STATUS_COLORS.DRAFT
+                          STATUS_COLORS[env.status] || STATUS_COLORS.PENDING
                         }`}
                       >
                         {env.status}
@@ -106,19 +99,17 @@ export function EsignaturePanel() {
                     </div>
 
                     <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
-                      <span>Signers:</span>
-                      {env.signatories?.map((s, idx) => (
-                        <span key={idx} className="font-medium text-slate-700 dark:text-slate-300">
-                          {s.name} ({s.status}){idx < env.signatories.length - 1 ? "," : ""}
-                        </span>
-                      ))}
+                      <span>{env.document_title} • Signer:</span>
+                      <span className="font-medium text-slate-700 dark:text-slate-300">
+                        {env.signer_name} ({env.signer_email})
+                      </span>
                     </div>
                   </div>
                 </div>
 
                 <div className="text-right text-[11px] text-slate-400">
-                  <div>Sent: {new Date(env.sent_at).toLocaleDateString()}</div>
-                  <div className="text-[10px] font-mono">Doc: {env.document_id}</div>
+                  <div>Created: {new Date(env.created_at).toLocaleDateString()}</div>
+                  {env.external_ref && <div className="text-[10px] font-mono">Ref: {env.external_ref}</div>}
                 </div>
               </div>
             </div>

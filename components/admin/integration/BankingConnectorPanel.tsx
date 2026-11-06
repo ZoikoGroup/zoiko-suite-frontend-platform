@@ -1,33 +1,30 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Building2, RefreshCw, ArrowRightLeft, CheckCircle2, AlertCircle } from "lucide-react";
+import { Building2, RefreshCw, ArrowRightLeft, CheckCircle2 } from "lucide-react";
+import { fetchPanelList } from "@/lib/panel-fetch";
+import { BankConnectionCreateForm } from "./IntegrationCreateForms";
+import type { BankConnection } from "@/lib/api/integration";
 
-type BankConn = {
-  connection_id: string;
-  bank_name: string;
-  institution_code: string;
-  protocol: string;
-  status: "CONNECTED" | "SYNCING" | "DISCONNECTED" | "ERROR";
-  last_sync_at: string;
-  sync_lag_seconds: number;
-};
+// banking-connector-svc has no sync operation and no real bank adapter yet:
+// statements arrive through POST /v1/banking/statements/ingest, and /refresh
+// only rotates a credential lease. The Sync control is kept, disabled, so the
+// gap is visible rather than wired to the wrong operation.
+const SYNC_UNAVAILABLE = "banking-connector-svc has no sync operation; no bank adapter is connected yet.";
 
 export function BankingConnectorPanel() {
-  const [banks, setBanks] = useState<BankConn[]>([]);
+  const [banks, setBanks] = useState<BankConnection[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchBanks = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch("/api/v1/integration/banking");
-      if (res.ok) {
-        const data = await res.json();
-        setBanks(data.connections ?? []);
-      }
-    } catch {
-      // fallback
+      setBanks(await fetchPanelList<BankConnection>("/api/v1/integration/banking", "connections", "banking-connector-svc"));
+    } catch (e) {
+      setBanks([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -37,24 +34,12 @@ export function BankingConnectorPanel() {
     fetchBanks();
   }, []);
 
-  const handleSync = async (connId: string) => {
-    setSyncing(connId);
-    try {
-      await fetch(`/api/v1/integration/banking/${connId}/sync`, { method: "POST" });
-      await fetchBanks();
-    } catch {
-      // fallback
-    } finally {
-      setSyncing(null);
-    }
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
-          <span>Open Banking, SWIFT & Clearing Feeds</span>
-          <span className="font-mono text-[11px] text-slate-400">(:8171)</span>
+          <span>Bank connections (recorded; no live bank adapter)</span>
+          <span className="font-mono text-[11px] text-slate-400">banking-connector-svc</span>
         </div>
         <button
           type="button"
@@ -66,11 +51,15 @@ export function BankingConnectorPanel() {
         </button>
       </div>
 
+      <BankConnectionCreateForm onCreated={fetchBanks} />
+
       {loading && banks.length === 0 ? (
         <div className="space-y-2 animate-pulse">
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
         </div>
+      ) : error ? (
+        <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{error}</p>
       ) : banks.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center dark:border-slate-800">
           <Building2 className="mx-auto h-8 w-8 text-slate-400" />
@@ -91,14 +80,14 @@ export function BankingConnectorPanel() {
                         {b.bank_name}
                       </span>
                       <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                        {b.protocol}
+                        {b.currency}
                       </span>
                       <span className="text-[11px] font-mono text-slate-400">
-                        {b.institution_code}
+                        {b.bic}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-500">
-                      Sync Lag: {b.sync_lag_seconds}s • Last Synced: {new Date(b.last_sync_at).toLocaleTimeString()}
+                      Account {b.account_number} • IBAN {b.iban} • health {b.health_status.toLowerCase()}
                     </p>
                   </div>
                 </div>
@@ -117,11 +106,12 @@ export function BankingConnectorPanel() {
 
                   <button
                     type="button"
-                    disabled={syncing === b.connection_id}
-                    onClick={() => handleSync(b.connection_id)}
-                    className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    disabled
+                    title={SYNC_UNAVAILABLE}
+                    aria-label={`Sync unavailable: ${SYNC_UNAVAILABLE}`}
+                    className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 opacity-50 cursor-not-allowed dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                   >
-                    <ArrowRightLeft className={`h-3 w-3 ${syncing === b.connection_id ? "animate-spin text-cyan-600" : ""}`} />
+                    <ArrowRightLeft className="h-3 w-3" />
                     Sync
                   </button>
                 </div>
