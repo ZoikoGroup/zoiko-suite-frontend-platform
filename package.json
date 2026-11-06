@@ -11,7 +11,8 @@
     "lint": "eslint",
     "test": "vitest run && node --test components/assistant/state.test.mjs \"tests/*.test.mjs\"",
     "test:unit": "vitest run",
-    "test:e2e": "next build && playwright test"
+    "test:e2e": "next build && playwright test",
+    "test:e2e:blocks": "playwright test -c playwright.blocks.config.ts"
   },
   "dependencies": {
     "@swc/helpers": "^0.5.15",

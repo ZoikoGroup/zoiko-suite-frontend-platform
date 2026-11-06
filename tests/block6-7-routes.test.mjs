@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
 
 const DEAD = [
   ["lib/api/contracts.ts", /\/v1\/contracts\/\$\{[^}]+\}\/submit[`"]/, "contract /submit (use /submit-review)"],
