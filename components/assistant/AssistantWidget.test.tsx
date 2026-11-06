@@ -1004,3 +1004,28 @@ describe("negative paths (Doc 06 SEC-T004, SEC-T024)", () => {
     expect(answer.textContent).toContain("<script>");
   });
 });
+
+describe("expired session (Doc 02 §21 ui.timeout)", () => {
+  it("when a new session takes over, no 'session ended' banner stays on screen", async () => {
+    api.askAssistant
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } })
+      .mockResolvedValueOnce(ok(envelope({ text: "Answer in the new session." })));
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "g1", expires_at: "" }))
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_2", session_grant: "g2", expires_at: "" }));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).queryByTestId("assistant-session-ended")).toBeNull();
+    expect(within(dialog).getByTestId("assistant-answer").textContent).toContain("Answer in the new session.");
+  });
+
+  it("when no new session can start, the banner tells the visitor", async () => {
+    api.askAssistant.mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } });
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "g1", expires_at: "" }))
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 503 } });
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).getByTestId("assistant-session-ended").textContent).toContain("Your public chat session has ended");
+  });
+});

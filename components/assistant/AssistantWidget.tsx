@@ -932,9 +932,14 @@ export function AssistantWidget({
       let r: PublicAIResult<TurnEnvelope> = await askAssistant(s.grant, s.id, turnId, msg.text, msg.market, pageContext, abortTurn.current.signal);
       if (!r.ok && r.error.kind === "http" && r.error.status === 401) {
         // Session expired: a new session needs a new turn id; same bubble.
+        // Doc 02 §21 ui.timeout: the visitor is told only when the
+        // conversation cannot continue. When a new session takes over,
+        // the question is simply re-sent and nothing stays on screen.
         s = await ensureSession(true);
-        setSessionEnded(true);
-        setAnnounce(t("ui.timeout"));
+        if (!s) {
+          setSessionEnded(true);
+          setAnnounce(t("ui.timeout"));
+        }
         if (s) {
           const renewed = crypto.randomUUID();
           inFlight.current = renewed;
@@ -949,6 +954,7 @@ export function AssistantWidget({
       // Doc 05 §10: an unsupported schema version or unknown status is never shown.
       if (!validEnvelope(r.data)) return failed({ kind: "malformed" });
       const turn = r.data;
+      setSessionEnded(false); // a reply arrived: the conversation is live again
       // CT-014: a reply older than one already shown is out of order; never
       // render it over newer state (the server keeps the canonical order).
       if (shownSeq.current.session === s?.id && turn.turn_sequence < shownSeq.current.seq) return failed({ kind: "malformed" });
