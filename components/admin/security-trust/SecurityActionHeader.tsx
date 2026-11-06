@@ -1,6 +1,6 @@
 "use client";
 
-import { Shield, Key, RefreshCw, PlusCircle, FileCheck } from "lucide-react";
+import { Shield, RefreshCw } from "lucide-react";
 
 export function SecurityActionHeader() {
   return (
@@ -14,7 +14,7 @@ export function SecurityActionHeader() {
             Security & Zero-Trust Posture
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Cryptographic identity, mutual TLS enforcement, SIEM streaming, and KMS key operations
+            mTLS certificates, recorded SIEM events, CARTA access evaluations and customer key metadata
           </p>
         </div>
       </div>
@@ -29,23 +29,6 @@ export function SecurityActionHeader() {
           Refresh Stream
         </button>
 
-        <button
-          type="button"
-          onClick={() => alert("Issue Certificate dialog: connect to mtls-management-svc")}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-emerald-700"
-        >
-          <PlusCircle className="h-3.5 w-3.5" />
-          Issue mTLS Cert
-        </button>
-
-        <button
-          type="button"
-          onClick={() => alert("Rotate KMS Key triggered")}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/30 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300"
-        >
-          <Key className="h-3.5 w-3.5" />
-          Rotate Active Key
-        </button>
       </div>
     </div>
   );

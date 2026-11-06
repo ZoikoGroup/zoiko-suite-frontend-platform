@@ -1,20 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Shield, RefreshCw, CheckCircle, Clock, AlertTriangle, Key } from "lucide-react";
-
-type MtlsCert = {
-  cert_id: string;
-  common_name: string;
-  status: "ACTIVE" | "EXPIRED" | "REVOKED";
-  issued_at: string;
-  expires_at: string;
-  fingerprint: string;
-};
+import { Shield, RefreshCw, CheckCircle, AlertTriangle } from "lucide-react";
+import { fetchPanelList } from "@/lib/panel-fetch";
+import type { MtlsCertificate } from "@/lib/api/security-trust";
+import { MtlsIssueDialog } from "./MtlsIssueDialog";
 
 export function MtlsManagementPanel() {
-  const [certs, setCerts] = useState<MtlsCert[]>([]);
+  const [certs, setCerts] = useState<MtlsCertificate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
 
   useEffect(() => {
@@ -27,14 +22,12 @@ export function MtlsManagementPanel() {
 
   const fetchCerts = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch("/api/v1/security/certificates");
-      if (res.ok) {
-        const data = await res.json();
-        setCerts(data.certificates ?? []);
-      }
-    } catch {
-      // fallback
+      setCerts(await fetchPanelList<MtlsCertificate>("/api/v1/security/certificates", "certificates", "mtls-management-svc"));
+    } catch (e) {
+      setCerts([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -58,11 +51,15 @@ export function MtlsManagementPanel() {
         </button>
       </div>
 
+      <MtlsIssueDialog onIssued={fetchCerts} />
+
       {loading && certs.length === 0 ? (
         <div className="space-y-2 animate-pulse">
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
         </div>
+      ) : error ? (
+        <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{error}</p>
       ) : certs.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center dark:border-slate-800">
           <Shield className="mx-auto h-8 w-8 text-slate-400" />
@@ -71,9 +68,9 @@ export function MtlsManagementPanel() {
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {certs.map((c) => {
-            const isExpiring = new Date(c.expires_at).getTime() - currentTime < 30 * 86400000;
+            const isExpiring = new Date(c.valid_to).getTime() - currentTime < 30 * 86400000;
             return (
-              <div key={c.cert_id} className="p-3.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
+              <div key={c.id} className="p-3.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-7 w-7 items-center justify-center rounded bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
@@ -102,14 +99,14 @@ export function MtlsManagementPanel() {
                         )}
                       </div>
                       <p className="mt-0.5 font-mono text-[11px] text-slate-400 truncate max-w-sm sm:max-w-md">
-                        SHA-256: {c.fingerprint}
+                        {c.service_name} · SHA-256: {c.fingerprint}
                       </p>
                     </div>
                   </div>
 
                   <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                    <div>Expires: {new Date(c.expires_at).toLocaleDateString()}</div>
-                    <div className="text-[10px] text-slate-400 font-mono">{c.cert_id}</div>
+                    <div>Expires: {new Date(c.valid_to).toLocaleDateString()}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">{c.id}</div>
                   </div>
                 </div>
               </div>

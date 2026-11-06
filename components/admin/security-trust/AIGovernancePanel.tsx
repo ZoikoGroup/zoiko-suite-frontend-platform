@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Bot, RefreshCw, ShieldCheck, AlertTriangle, CheckCircle, XCircle, Cpu, Globe, BarChart3 } from "lucide-react";
+import { IllustrativeNotice } from "@/components/admin/shared/IllustrativeNotice";
 
 type GuardrailStatus = "PASSED" | "FLAGGED" | "BLOCKED";
 type RiskTier = "TIER_1_CRITICAL" | "TIER_2_HIGH" | "TIER_3_MEDIUM" | "TIER_4_LOW";
@@ -168,6 +169,11 @@ export function AIGovernancePanel() {
   const [runs, setRuns] = useState<AIRun[]>([]);
   const [risk, setRisk] = useState<RiskClassification[]>([]);
   const [loading, setLoading] = useState(true);
+  // Whether anything shown came from hardcoded rows: the API flags its own
+  // examples as `illustrative`, and MOCK_RUNS / MOCK_RISK fill in when it fails.
+  // Today that is always true; see the AI governance mappings in
+  // app/api/v1/[...path]/route.ts.
+  const [illustrative, setIllustrative] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -176,19 +182,16 @@ export function AIGovernancePanel() {
         fetch("/api/v1/ai-governance/runs").then((r) => (r.ok ? r.json() : null)),
         fetch("/api/v1/ai-governance/risk-classifications").then((r) => (r.ok ? r.json() : null)),
       ]);
-      setRuns(
-        runsRes.status === "fulfilled" && runsRes.value?.runs
-          ? runsRes.value.runs
-          : MOCK_RUNS,
-      );
-      setRisk(
-        riskRes.status === "fulfilled" && riskRes.value?.classifications
-          ? riskRes.value.classifications
-          : MOCK_RISK,
-      );
+      const liveRuns = runsRes.status === "fulfilled" && runsRes.value?.runs ? runsRes.value : null;
+      const liveRisk =
+        riskRes.status === "fulfilled" && riskRes.value?.classifications ? riskRes.value : null;
+      setRuns(liveRuns ? liveRuns.runs : MOCK_RUNS);
+      setRisk(liveRisk ? liveRisk.classifications : MOCK_RISK);
+      setIllustrative(!liveRuns || !liveRisk || liveRuns.illustrative === true || liveRisk.illustrative === true);
     } catch {
       setRuns(MOCK_RUNS);
       setRisk(MOCK_RISK);
+      setIllustrative(true);
     } finally {
       setLoading(false);
     }
@@ -205,6 +208,10 @@ export function AIGovernancePanel() {
 
   return (
     <div className="space-y-4">
+      {!loading && illustrative && (
+        <IllustrativeNotice services="ai-governance-svc exposes no AI-run list, and this panel does not yet read its risk-classification list." />
+      )}
+
       {/* Summary row */}
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <span>AI Runs &amp; Guardrail Outcomes</span>

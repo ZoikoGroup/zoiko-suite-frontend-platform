@@ -29,7 +29,7 @@ const PANELS = [
   {
     name: "siem-integration-svc",
     port: 8141,
-    purpose: "Security telemetry, audit logging & real-time SIEM event streaming",
+    purpose: "SIEM exporters and the events recorded per exporter; no external sink is delivered to",
     icon: Shield,
     Panel: SiemIntegrationPanel,
   },
@@ -43,7 +43,7 @@ const PANELS = [
   {
     name: "key-management-svc",
     port: 8143,
-    purpose: "Hardware Security Module (HSM) master key management, BYOK & envelope encryption",
+    purpose: "Customer key metadata registry (BYOK/HYOK references); performs no cryptographic operation",
     icon: Key,
     Panel: KeyManagementPanel,
   },

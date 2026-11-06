@@ -82,44 +82,47 @@ export type ValidateMigrationRequest = {
   target_service: string;
   required_fields: string[];
   records: MigrationRecord[];
+  /** Who owns the exceptions the run raises (required). */
+  exception_owner_id: string;
+  /** From the extract manifest; the service reconciles the batch against them (required). */
+  control_totals: { amount_field: string; record_count: number; amount_total: string };
 };
 
+/** migration-integrity-svc RemediateRequest. A waiver is time-limited. */
+export type RemediateInput = {
+  disposition: "REMEDIATED" | "WAIVED";
+  remediation_reason: string;
+  remediation_evidence_ref: string;
+  waiver_expires_at?: string;
+};
+
+/**
+ * The caller's identity, always the session's.
+ *
+ * This used to be optional caller-supplied options with a demo tenant,
+ * principal and legal entity as defaults, and the server actions forwarded
+ * whatever the browser sent, so any signed-in user could read and write as
+ * any tenant. Empty values were also used to strip headers for "negative"
+ * tests.
+ */
 export type HeaderOptions = {
-  tenantId?: string;
-  principalId?: string;
+  tenantId: string;
+  principalId: string;
   legalEntityId?: string;
-  requestId?: string;
-  correlationId?: string;
-  sourceChannel?: string;
-  idempotencyKey?: string;
 };
 
-const DEFAULT_TENANT = "11111111-1111-1111-1111-111111111111";
-const DEFAULT_PRINCIPAL = "33333333-3333-3333-3333-333333333333";
-const DEFAULT_ENTITY = "22222222-2222-2222-2222-222222222222";
-
-function buildHeaders(opts?: HeaderOptions): HeadersInit {
+function buildHeaders(opts: HeaderOptions, write = false): HeadersInit {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "X-Tenant-Id": opts?.tenantId !== undefined ? opts.tenantId : DEFAULT_TENANT,
-    "X-Principal-Id": opts?.principalId !== undefined ? opts.principalId : DEFAULT_PRINCIPAL,
-    "X-Actor-Subject-Id": opts?.principalId !== undefined ? opts.principalId : DEFAULT_PRINCIPAL,
-    "X-Legal-Entity-Id": opts?.legalEntityId !== undefined ? opts.legalEntityId : DEFAULT_ENTITY,
-    "X-Request-Id": opts?.requestId || `req-mig-${Date.now()}`,
-    "X-Correlation-Id": opts?.correlationId || `corr-mig-${Date.now()}`,
-    "X-Source-Channel": opts?.sourceChannel || "web",
-    "Idempotency-Key": opts?.idempotencyKey || `idemp-mig-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    "X-Tenant-Id": opts.tenantId,
+    "X-Principal-Id": opts.principalId,
+    "X-Actor-Subject-Id": opts.principalId,
+    "X-Request-Id": crypto.randomUUID(),
+    "X-Correlation-Id": crypto.randomUUID(),
+    "X-Source-Channel": "web",
   };
-
-  // Remove empty headers to test missing header negative paths
-  if (opts?.tenantId === "") {
-    delete headers["X-Tenant-Id"];
-  }
-  if (opts?.principalId === "") {
-    delete headers["X-Principal-Id"];
-    delete headers["X-Actor-Subject-Id"];
-  }
-
+  if (opts.legalEntityId) headers["X-Legal-Entity-Id"] = opts.legalEntityId;
+  if (write) headers["Idempotency-Key"] = crypto.randomUUID();
   return headers;
 }
 
@@ -141,12 +144,12 @@ export async function getMigrationIntegrityHealth(): Promise<{
         ok: true,
         service: data.service || "migration-integrity-svc",
         status: data.status || "ok",
-        port: "8139",
+        port: "",
       };
     }
-    return { ok: false, service: "migration-integrity-svc", status: `HTTP ${res.status}`, port: "8139" };
+    return { ok: false, service: "migration-integrity-svc", status: `HTTP ${res.status}`, port: "" };
   } catch (err: any) {
-    return { ok: false, service: "migration-integrity-svc", status: err.message, port: "8139" };
+    return { ok: false, service: "migration-integrity-svc", status: err.message, port: "" };
   }
 }
 
@@ -155,16 +158,13 @@ export async function getMigrationIntegrityHealth(): Promise<{
  */
 export async function validateMigration(
   req: ValidateMigrationRequest,
-  opts?: HeaderOptions
+  opts: HeaderOptions
 ): Promise<{ ok: boolean; status: number; data: MigrationJob | any }> {
   const url = serviceUrl("migrationIntegrity");
   try {
     const res = await fetch(`${url}/v1/migrations/validate`, {
       method: "POST",
-      headers: buildHeaders({
-        ...opts,
-        legalEntityId: req.legal_entity_id || opts?.legalEntityId,
-      }),
+      headers: buildHeaders(opts, true),
       body: JSON.stringify(req),
       cache: "no-store",
     });
@@ -180,8 +180,8 @@ export async function validateMigration(
  * List migration jobs (GET /v1/migrations/).
  */
 export async function listMigrationJobs(
-  filters?: { legalEntityId?: string; status?: string },
-  opts?: HeaderOptions
+  filters: { legalEntityId?: string; status?: string },
+  opts: HeaderOptions
 ): Promise<{ ok: boolean; status: number; jobs: MigrationJob[]; count: number; error?: string }> {
   const url = serviceUrl("migrationIntegrity");
   try {
@@ -211,11 +211,11 @@ export async function listMigrationJobs(
  */
 export async function getMigrationJobById(
   id: string,
-  opts?: HeaderOptions
+  opts: HeaderOptions
 ): Promise<{ ok: boolean; status: number; job?: MigrationJob; error?: string }> {
   const url = serviceUrl("migrationIntegrity");
   try {
-    const res = await fetch(`${url}/v1/migrations/${id}`, {
+    const res = await fetch(`${url}/v1/migrations/${encodeURIComponent(id)}`, {
       method: "GET",
       headers: buildHeaders(opts),
       cache: "no-store",
@@ -237,15 +237,15 @@ export async function getMigrationJobById(
 export async function remediateAuditEntry(
   jobId: string,
   entryId: string,
-  notes: string,
-  opts?: HeaderOptions
+  input: RemediateInput,
+  opts: HeaderOptions
 ): Promise<{ ok: boolean; status: number; entry?: AuditEntry; error?: string }> {
   const url = serviceUrl("migrationIntegrity");
   try {
-    const res = await fetch(`${url}/v1/migrations/${jobId}/audit/${entryId}/remediate`, {
+    const res = await fetch(`${url}/v1/migrations/${encodeURIComponent(jobId)}/audit/${encodeURIComponent(entryId)}/remediate`, {
       method: "POST",
-      headers: buildHeaders(opts),
-      body: JSON.stringify({ notes }),
+      headers: buildHeaders(opts, true),
+      body: JSON.stringify(input),
       cache: "no-store",
     });
 
@@ -264,13 +264,13 @@ export async function remediateAuditEntry(
  */
 export async function archiveMigrationJob(
   id: string,
-  opts?: HeaderOptions
+  opts: HeaderOptions
 ): Promise<{ ok: boolean; status: number; data?: any; error?: string }> {
   const url = serviceUrl("migrationIntegrity");
   try {
-    const res = await fetch(`${url}/v1/migrations/${id}`, {
+    const res = await fetch(`${url}/v1/migrations/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      headers: buildHeaders(opts),
+      headers: buildHeaders(opts, true),
       cache: "no-store",
     });
 
