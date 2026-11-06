@@ -62,3 +62,15 @@ export type BoardActionState = {
 };
 
 export const IDLE_BOARD_STATE: BoardActionState = { status: "idle", message: "" };
+
+/** Outcome of a create against obligation-tracking-svc, counterparty-management-svc
+ *  or corporate-actions-svc. `record` is the service's response body, so the
+ *  form reads back what was stored; on error `message` is the service's refusal
+ *  as it was sent. */
+export type LegalCreateState<T> = {
+  status: "idle" | "success" | "error";
+  message: string;
+  record?: T;
+};
+
+export const IDLE_LEGAL_CREATE: LegalCreateState<never> = { status: "idle", message: "" };

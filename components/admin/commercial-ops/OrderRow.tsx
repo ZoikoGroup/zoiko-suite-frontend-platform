@@ -57,7 +57,8 @@ export function OrderRow({ order, columnCount }: OrderRowProps) {
     IDLE_ORDER_STATE,
   );
 
-  const isClosed = order.po_status === "CLOSED";
+  // purchase-order-svc amends and closes only an ISSUED order.
+  const isClosed = order.po_status !== "ISSUED";
   const error =
     amendState.status === "error"
       ? amendState.message
@@ -78,12 +79,12 @@ export function OrderRow({ order, columnCount }: OrderRowProps) {
           {order.po_number}
         </td>
         <td className={CELL}>
-          {isClosed ? (
-            <Badge tone="neutral">Closed</Badge>
-          ) : (
+          {order.po_status === "ISSUED" ? (
             <Badge tone="success" dot>
               Issued
             </Badge>
+          ) : (
+            <Badge tone="neutral">{order.po_status.replace(/_/g, " ")}</Badge>
           )}
         </td>
         <td className={cn(CELL, "text-right tabular-nums")}>
@@ -97,7 +98,9 @@ export function OrderRow({ order, columnCount }: OrderRowProps) {
         </td>
         <td className={cn(CELL, "text-right")}>
           {isClosed ? (
-            <span className="text-xs text-slate-400 dark:text-slate-500">Terminal</span>
+            <span className="text-xs text-slate-400 dark:text-slate-500">
+              {order.po_status === "CLOSED" || order.po_status === "CANCELLED" ? "Terminal" : "—"}
+            </span>
           ) : (
             <div className="flex items-center justify-end gap-1.5">
               <Button

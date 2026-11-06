@@ -3,8 +3,6 @@ import { Suspense } from "react";
 import {
   FileStack,
   Gavel,
-  Handshake,
-  ScrollText,
   Scale,
   FileText,
   CheckSquare,
@@ -41,19 +39,9 @@ const DOMAIN = DOMAINS.find((d) => d.key === "legal")!;
 /** Services in this domain that are not yet wired to the console. */
 const UPCOMING = [
   {
-    icon: ScrollText,
-    title: "Clause & Template Service",
-    body: "Approved clause library. A drafted contract should assemble from vetted clauses rather than free text.",
-  },
-  {
     icon: Gavel,
     title: "Legal Approvals Service",
     body: "The approval matrix behind REVIEW → APPROVED. Today approval is gated by a GRANTED governance decision and segregation of duties.",
-  },
-  {
-    icon: Handshake,
-    title: "Counterparty Management",
-    body: "The register the counterparty ID on a contract should resolve to, with screening state.",
   },
   {
     icon: FileStack,
@@ -72,13 +60,11 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
-  ports,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle: string;
-  ports: string;
   children: React.ReactNode;
 }) {
   return (
@@ -96,9 +82,6 @@ function SectionCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          :{ports}
-        </span>
       </div>
 
       <div className="p-5">{children}</div>
@@ -270,7 +253,6 @@ export default function LegalPage() {
           icon={FileText}
           title="Contract Lifecycle Management"
           subtitle="contract-lifecycle-svc — active contracts, negotiations, and signature status"
-          ports="8119"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ContractLifecyclePanel />
@@ -281,7 +263,6 @@ export default function LegalPage() {
           icon={Scale}
           title="Clause Library & Template Governance"
           subtitle="clause-template-svc & legal-approvals-svc — pre-vetted indemnity and liability templates"
-          ports="8120, 8123"
         >
           <Suspense fallback={<PanelSkeleton rows={3} />}>
             <ClausesAndTemplatesPanel />
@@ -292,7 +273,6 @@ export default function LegalPage() {
           icon={CheckSquare}
           title="Legal Obligation Tracking"
           subtitle="obligation-tracking-svc — compliance milestones, audit triggers, and SLA deadlines"
-          ports="8121"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ObligationTrackingPanel />
@@ -303,7 +283,6 @@ export default function LegalPage() {
           icon={Vote}
           title="Board Governance & Resolutions"
           subtitle="board-resolutions-svc — board meeting minutes, voting logs, and shareholder resolutions"
-          ports="8122"
         >
           <Suspense fallback={<PanelSkeleton rows={3} />}>
             <BoardResolutionsPanel />
@@ -314,7 +293,6 @@ export default function LegalPage() {
           icon={Building2}
           title="Corporate Actions & Counterparty Risk"
           subtitle="corporate-actions-svc & counterparty-management-svc — entity changes, share issuances, and UBO verification"
-          ports="8123, 8124"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <CorporateActionsAndCounterpartiesPanel />

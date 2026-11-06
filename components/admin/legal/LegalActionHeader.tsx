@@ -1,58 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Edit3, Vote, CheckCircle2, X, Server, Zap, Loader2 } from "lucide-react";
+import { Plus, Edit3, Vote, CheckCircle2, X, Loader2 } from "lucide-react";
 import { BoardResolutionForm } from "./BoardResolutionForm";
+import { DraftContractForm } from "./DraftContractForm";
 
-const SERVICES = [
-  { name: "contract-lifecycle-svc",     port: "8119", color: "bg-emerald-500" },
-  { name: "clause-template-svc",        port: "8120", color: "bg-emerald-500" },
-  { name: "obligation-tracking-svc",    port: "8121", color: "bg-emerald-500" },
-  { name: "board-resolutions-svc",      port: "8122", color: "bg-emerald-500" },
-  { name: "corporate-actions-svc",      port: "8123", color: "bg-emerald-500" },
-  { name: "counterparty-management-svc", port: "8124", color: "bg-emerald-500" },
-  { name: "obligations-svc",            port: "8088", color: "bg-emerald-500" },
-];
-
+/**
+ * Draft a contract, from the domain header.
+ *
+ * A shell around DraftContractForm, like ProposeResolutionModal below. It used
+ * to post {title, contract_type, status} with a prefilled title to
+ * /api/v1/contracts; the service requires a counterparty, an effective date,
+ * a currency and a value, so every attempt was refused with 400.
+ */
 function CreateContractModal({ onClose }: { onClose: () => void }) {
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [title, setTitle] = useState("Enterprise Cloud MSA — Acme Corp");
-  const [type, setType] = useState("MSA");
-
-  async function handleCreate() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/v1/contracts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          contract_type: type,
-          status: "DRAFT",
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Failed to create contract");
-        setSubmitting(false);
-        return;
-      }
-    } catch (err) {
-      console.warn("API call degraded safely:", err);
-      setError("Network error - service may be unavailable");
-      setSubmitting(false);
-      return;
-    }
-    setSubmitting(false);
-    setDone(true);
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 dark:bg-indigo-500/20">
@@ -60,55 +24,12 @@ function CreateContractModal({ onClose }: { onClose: () => void }) {
             </span>
             <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Create Contract Draft</h2>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-slate-400 hover:text-slate-600">
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="p-5">
-          {done ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-              <p className="font-semibold text-slate-800 dark:text-slate-200">Contract Draft Created</p>
-              <p className="text-xs text-slate-500">Contract registered in contract-lifecycle-svc (:8119).</p>
-              <button onClick={onClose} className="mt-2 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white">Done</button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {error && (
-                <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 dark:bg-red-500/10 dark:border-red-500/20">
-                  <p className="text-xs text-red-700 dark:text-red-300">{error}</p>
-                </div>
-              )}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Contract Title</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Contract Type</label>
-                <select
-                  value={type}
-                  onChange={(e) => setType(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
-                >
-                  <option value="MSA">MSA (Master Services Agreement)</option>
-                  <option value="NDA">NDA (Non-Disclosure Agreement)</option>
-                  <option value="SLA">SLA (Service Level Agreement)</option>
-                </select>
-              </div>
-              <button
-                onClick={handleCreate}
-                disabled={submitting}
-                className="w-full rounded-lg bg-indigo-600 py-2 text-xs font-medium text-white flex items-center justify-center gap-1.5"
-              >
-                {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Create Contract Draft"}
-              </button>
-            </div>
-          )}
+          <DraftContractForm />
         </div>
       </div>
     </div>
@@ -122,6 +43,8 @@ function DraftClauseModal({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("CONFIDENTIALITY");
   const [body, setBody] = useState("");
+  const [jurisdiction, setJurisdiction] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState("");
 
   async function handleCreate() {
     setSubmitting(true);
@@ -134,18 +57,25 @@ function DraftClauseModal({ onClose }: { onClose: () => void }) {
           title,
           category,
           body,
-          jurisdiction_id: "uk-gov-01",
+          jurisdiction_id: jurisdiction.trim(),
+          effective_from: effectiveFrom,
         }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Failed to create clause");
+        const data = await res.json().catch(() => ({}));
+        setError(
+          res.status === 401
+            ? "Your session has expired — sign in again."
+            : data.error === "missing_fields"
+              ? `Required: ${(data.fields ?? []).join(", ")}`
+              : data.error || `clause-template-svc refused the clause (HTTP ${res.status})`,
+        );
         setSubmitting(false);
         return;
       }
     } catch (err) {
-      console.warn("API call degraded safely:", err);
-      setError("Network error - service may be unavailable");
+      console.warn("clause create failed:", err);
+      setError("The console API could not be reached.");
       setSubmitting(false);
       return;
     }
@@ -172,7 +102,7 @@ function DraftClauseModal({ onClose }: { onClose: () => void }) {
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <CheckCircle2 className="h-10 w-10 text-emerald-500" />
               <p className="font-semibold text-slate-800 dark:text-slate-200">Clause Drafted</p>
-              <p className="text-xs text-slate-500">Clause registered in clause-template-svc (:8120).</p>
+              <p className="text-xs text-slate-500">Recorded in clause-template-svc as a draft. It needs legal review and approval before use.</p>
               <button onClick={onClose} className="mt-2 rounded-lg bg-purple-600 px-4 py-2 text-xs font-medium text-white">Done</button>
             </div>
           ) : (
@@ -208,6 +138,28 @@ function DraftClauseModal({ onClose }: { onClose: () => void }) {
                   <option value="OTHER">Other</option>
                 </select>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="clause-jurisdiction" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Jurisdiction ID</label>
+                  <input
+                    id="clause-jurisdiction"
+                    type="text"
+                    value={jurisdiction}
+                    onChange={(e) => setJurisdiction(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="clause-effective-from" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Effective from</label>
+                  <input
+                    id="clause-effective-from"
+                    type="date"
+                    value={effectiveFrom}
+                    onChange={(e) => setEffectiveFrom(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                  />
+                </div>
+              </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Clause Body</label>
                 <textarea
@@ -220,7 +172,7 @@ function DraftClauseModal({ onClose }: { onClose: () => void }) {
               </div>
               <button
                 onClick={handleCreate}
-                disabled={submitting || !title || !body}
+                disabled={submitting || !title || !body || !jurisdiction.trim() || !effectiveFrom}
                 className="w-full rounded-lg bg-purple-600 py-2 text-xs font-medium text-white flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
                 {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Create Clause"}
@@ -297,12 +249,9 @@ export function LegalActionHeader() {
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              7 services in compose
-            </span>
-          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Writes go to the Block 6 legal services; each refusal is shown as the service gave it.
+          </p>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -329,20 +278,6 @@ export function LegalActionHeader() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-2.5 dark:border-slate-800 dark:bg-slate-800/30">
-          <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 mr-1">
-            <Server className="h-3 w-3" /> Services:
-          </span>
-          {SERVICES.map((svc) => (
-            <span key={svc.port} className="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-200 px-2 py-0.5 text-[10px] font-mono text-slate-600 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400">
-              <span className={`h-1.5 w-1.5 rounded-full ${svc.color}`} />
-              :{svc.port}
-            </span>
-          ))}
-          <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
-            <Zap className="h-3 w-3" /> All nominal
-          </span>
-        </div>
       </div>
     </>
   );
