@@ -71,16 +71,30 @@ export async function startAssistant(): Promise<void> {
 
   for (let i = 0; i < 100; i++) {
     if (await healthy()) return;
+    if (started.exitCode !== null) {
+      // e.g. the port is still held: say why instead of timing out.
+      proc = null;
+      throw new Error(`public-ai-svc exited with code ${started.exitCode}: ${stderr.trim().split("\n").slice(-3).join(" | ")}`);
+    }
     await new Promise((r) => setTimeout(r, 200));
   }
   throw new Error(`public-ai-svc did not become healthy after 20s.\nLogs:\n${serverLogs.join("")}`);
 }
 
+// Simulates an outage: the process is killed outright, and we wait until it
+// has exited. A plain SIGTERM starts the service's graceful shutdown (Doc 08
+// OPR-012: not ready, 5 s drain), during which it still holds the port, so a
+// restart right after would fail to bind on Linux. (On Windows kill() is
+// always immediate, which is why this only showed in CI.)
 export async function stopAssistant(): Promise<void> {
   if (!proc) return;
   const p = proc;
   proc = null;
-  p.kill();
+  if (p.exitCode === null && p.signalCode === null) {
+    const exited = new Promise<void>((resolve) => p.once("exit", () => resolve()));
+    p.kill("SIGKILL");
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 10_000))]);
+  }
   for (let i = 0; i < 50 && (await healthy()); i++) {
     await new Promise((r) => setTimeout(r, 100));
   }

@@ -85,3 +85,21 @@ const SENSITIVE: RegExp[] = [
 export function looksSensitive(text: string): boolean {
   return SENSITIVE.some((re) => re.test(text));
 }
+
+const CONTACT: RegExp[] = [
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, // email
+  /\+?\d[\d\s().-]{7,}\d/g, // phone-like
+];
+
+/**
+ * The text kept in this tab's history (Doc 06 §11, SEC-T044): secrets,
+ * identifiers and contact details the service masks are masked here too, so
+ * the browser never keeps more than the service does.
+ */
+export function maskForHistory(text: string): string {
+  let out = text;
+  for (const re of [...SENSITIVE.map((r) => new RegExp(r.source, r.flags.includes("g") ? r.flags : r.flags + "g")), ...CONTACT]) {
+    out = out.replace(re, "•••");
+  }
+  return out;
+}
