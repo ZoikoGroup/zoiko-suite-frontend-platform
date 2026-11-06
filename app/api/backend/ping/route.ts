@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dispatchIdentity, dispatchPort } from "@/lib/dev-dispatch";
 
 export async function GET(req: NextRequest) {
+  const identity = dispatchIdentity(req);
+  if (identity instanceof NextResponse) return identity;
   const searchParams = req.nextUrl.searchParams;
   const port = searchParams.get("port");
 
@@ -8,10 +11,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Missing port parameter" }, { status: 400 });
   }
 
-  const portNum = parseInt(port, 10);
-  if (isNaN(portNum) || portNum < 1000 || portNum > 65535) {
-    return NextResponse.json({ ok: false, error: "Invalid port number" }, { status: 400 });
-  }
+  const portNum = dispatchPort(port);
+  if (portNum instanceof NextResponse) return portNum;
 
   const start = Date.now();
   try {

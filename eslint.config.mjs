@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     "scratch/**",
     "**/scratch/**",
     "zoiko-suite-frontend-platform/**",
+    // Playwright output (reports, traces), gitignored and generated per run.
+    "test-results/**",
   ]),
   {
     files: [

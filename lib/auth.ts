@@ -288,10 +288,11 @@ export function decodeSession(value: string | undefined | null): SessionPayload 
       return null;
     }
 
-    return {
-      ...DEMO_IDENTITY,
-      ...parsed,
-    } as SessionPayload;
+    // Only what the signed cookie carries. This used to spread the demo identity
+    // underneath, so a session without a legal entity silently acted as the
+    // demo entity; now it simply has none, and writes that need one are
+    // refused by the service.
+    return parsed as SessionPayload;
   } catch {
     return null;
   }
