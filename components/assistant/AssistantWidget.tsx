@@ -203,7 +203,7 @@ const COPY: Record<string, string> = {
   "ui.history.current": "Current",
   "ui.history.restored": "Earlier conversation. Answers reflect what was known then; ask again for the latest.",
   "ui.history.note.device":
-    "Chats stay available in this browser for 24 hours, then expire automatically. Contact details and secrets are masked; nothing is saved to your account.",
+    "Chats are saved in this browser until you delete them. Contact details and secrets are masked; nothing is saved to your account.",
   "ui.history.remember": "Remember my chats on this device",
   "ui.history.delete": "Delete this conversation",
   "ui.history.clear": "Clear history",
@@ -217,7 +217,7 @@ const COPY: Record<string, string> = {
   "ui.retention.link": "Retention notice",
   "ui.privacy.title": "Privacy and AI notice",
   "ui.privacy.body":
-    "This assistant uses AI to answer from approved, public ZoikoSuite information. It can't see or change any account. Your messages are processed to answer you and to keep the service safe. Please don't share personal, payment, tax or account details.",
+    "This assistant uses AI to answer from approved, public ZoikoSuite information. It can't see or change any account. Your messages are processed to answer you and to keep the service safe. Your chats are saved in this browser until you delete them or turn off \"Remember my chats on this device\". Please don't share personal, payment, tax or account details.",
   // Empty until the signed retention policy sets the period (DEC-06).
   "ui.privacy.retention": "",
   "ui.draft": "Draft content",
