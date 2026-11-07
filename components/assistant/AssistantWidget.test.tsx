@@ -709,7 +709,7 @@ describe("expired market claims (Doc 02 T06)", () => {
   });
 });
 
-describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
+describe("New conversation and saved history (Doc 02 §10, §27)", () => {
   beforeEach(() => window.sessionStorage.clear());
 
   async function openMenu(dialog: HTMLElement) {
@@ -724,7 +724,7 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     expect((within(dialog).getByRole("menuitem", { name: "New conversation" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("starts fresh, ends the old session and keeps its questions and answers in this tab's history", async () => {
+  it("starts fresh, ends the old session and keeps its questions and answers in the saved history", async () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
     const dialog = await openWidget();
     await ask("What plans are available?");
@@ -735,9 +735,9 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     expect(screen.queryByTestId("visitor-bubble")).toBeNull(); // fresh conversation
     expect(within(dialog).getByTestId("assistant-welcome")).toBeTruthy();
     expect(api.endAssistantSession).toHaveBeenCalled();
-    const stored = JSON.parse(window.sessionStorage.getItem("zoiko-assistant-conversations")!);
+    // Saved on this device by default, until the visitor deletes it.
+    const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1")!);
     expect(stored[0].turns).toEqual([{ q: "What plans are available?", a: "Starter, Growth and Enterprise plans are available." }]);
-    expect(window.localStorage.getItem("zoiko-assistant-conversations")).toBeNull(); // never beyond the tab
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
@@ -745,13 +745,13 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     const archive = within(dialog).getByTestId("assistant-archive");
     expect(archive.textContent).toContain("What plans are available?");
     expect(archive.textContent).toContain("Starter, Growth and Enterprise plans are available.");
-    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Chats stay in this browser tab");
+    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Chats are saved in this browser until you delete them");
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Clear history" }));
     });
     expect(within(dialog).queryByTestId("assistant-archive")).toBeNull();
-    expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).toBeNull();
+    expect(window.localStorage.getItem("zoiko-assistant-history-v1")).toBeNull();
   });
 
   it("Clear chat erases the conversation without keeping it in history", async () => {
@@ -800,15 +800,9 @@ describe("closing and device history", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("with Remember on, the conversation is saved on the device as it goes, masked", async () => {
+  it("by default the conversation is saved on the device as it goes, masked", async () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
-    const dialog = await openWidget();
-    await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
-    });
-    await act(async () => {
-      fireEvent.click(within(dialog).getByTestId("assistant-remember"));
-    });
+    await openWidget();
     await ask("Email me at jane@example.org: what plans are available?");
     const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1")!);
     expect(stored).toHaveLength(1);
@@ -816,11 +810,18 @@ describe("closing and device history", () => {
     expect(stored[0].turns[0].a).toBe("Starter, Growth and Enterprise plans are available.");
   });
 
-  it("without Remember nothing is written to device storage", async () => {
+  it("with Remember turned off nothing is written to device storage", async () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
-    await openWidget();
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByTestId("assistant-remember"));
+    });
     await ask("What plans are available?");
     expect(window.localStorage.getItem("zoiko-assistant-history-v1")).toBeNull();
+    expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).not.toBeNull();
   });
 });
 
@@ -859,7 +860,7 @@ describe("Kairos-style history list", () => {
     await act(async () => {
       fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
     });
-    const stored = JSON.parse(window.sessionStorage.getItem("zoiko-assistant-conversations") ?? "[]");
+    const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1") ?? "[]");
     expect(stored.map((c: { turns: { q: string }[] }) => c.turns[0].q)).toEqual(["How is data secured?"]);
   });
 });
