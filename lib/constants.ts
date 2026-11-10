@@ -35,6 +35,11 @@ import {
   ListChecks,
   TriangleAlert,
   UserCheck,
+  History,
+  FileArchive,
+  Users,
+  FileText,
+  Banknote,
 } from "lucide-react";
 
 export type DomainKey =
@@ -247,8 +252,7 @@ const DOMAIN_2_GOVERNANCE: typeof SECONDARY_NAV = [
  * collapsed rail shows for the whole group.
  */
 export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECONDARY_NAV }[] = [
-  // Overview and My Work pages are "Coming soon" shells. The live Overview
-  // dashboard stays at /admin, reached from the logo.
+  // The live Overview dashboard stays at /admin, reached from the logo.
   {
     title: "Overview",
     icon: House,
@@ -269,10 +273,26 @@ export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECO
   { title: "Identity, Scope & Foundation", icon: Fingerprint, items: DOMAIN_1_IDENTITY },
   { title: "Governance Platform", icon: Landmark, items: DOMAIN_2_GOVERNANCE },
   {
+    title: "Evidence & Audit",
+    icon: FileArchive,
+    items: [
+      { label: "Audit Events", href: "/admin/audit-events", icon: History },
+      { label: "Document Vault", href: "/admin/documents", icon: FileText },
+    ],
+  },
+  {
     title: "Finance & Treasury",
     icon: Wallet,
     items: [
       { label: "Finance & Payments", href: "/admin/finance", icon: CircleDollarSign },
+    ],
+  },
+  {
+    title: "Payroll & Workforce",
+    icon: Users,
+    items: [
+      { label: "HR & Workforce", href: "/admin/hr", icon: Users },
+      { label: "Payroll", href: "/admin/payroll", icon: Banknote },
     ],
   },
   {
