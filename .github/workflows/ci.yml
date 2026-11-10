@@ -43,11 +43,11 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
           NEXT_TELEMETRY_DISABLED: 1
 
-  # The browser tests need access to the backend repository.
-  # If BACKEND_REPO_TOKEN is set it will be used; otherwise, the repository
-  # is checked for public/authenticated access.
-  backend-access:
-    name: Backend repo access
+  # Doc 07 §04 L0: dependency (SCA) and secret scans. The audit reports
+  # production advisories without blocking until the Next.js upgrade lands
+  # (next, sharp, postcss advisories need next >= 16.4); gitleaks blocks.
+  security:
+    name: Dependency audit & secret scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -57,13 +57,17 @@ jobs:
 
       - name: npm audit (production dependencies, report-only)
         run: |
-          if [ -n "$TOKEN" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          elif git ls-remote https://github.com/ZoikoGroup/zoiko-suite-backend.git HEAD >/dev/null 2>&1; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
+          npm audit --omit=dev --audit-level=high || echo "::warning title=npm audit::High or critical advisories in production dependencies; see the log."
+
+      - name: Resolve commit range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "opts=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            echo "opts=-1 ${{ github.sha }}" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning title=Assistant browser tests skipped::ZoikoGroup/zoiko-suite-backend is not accessible and BACKEND_REPO_TOKEN is not set."
-            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "opts=${{ github.event.before }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: gitleaks (new commits)
@@ -72,7 +76,8 @@ jobs:
 
   # Doc 07 §04 L4 / §10: the assistant's browser tests (axe, keyboard, the
   # public-only boundary, 52 cases) against a real public-ai-svc built from
-  # the backend repository.
+  # the backend repository. Needs the BACKEND_REPO_TOKEN secret (read-only
+  # access to ZoikoGroup/zoiko-suite-backend).
   assistant-e2e:
     name: Assistant browser tests (Playwright)
     runs-on: ubuntu-latest
@@ -126,7 +131,5 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: assistant-playwright-report
-          path: |
-            playwright-report
-            test-results
+          path: playwright-report
           if-no-files-found: ignore
