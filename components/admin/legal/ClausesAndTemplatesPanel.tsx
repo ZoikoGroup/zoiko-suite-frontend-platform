@@ -19,7 +19,7 @@ export async function ClausesAndTemplatesPanel() {
     listTemplates(identity),
   ]);
 
-  if (!clausesRes.ok && clausesRes.error.kind === "unreachable") {
+  if (!clausesRes.ok) {
     return <PanelEmptyState icon={CloudOff} tone="warning" label="clause-template-svc unavailable" hint={clausesRes.error.message} />;
   }
 
@@ -39,7 +39,7 @@ export async function ClausesAndTemplatesPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Title", "Category", "Standard", "Status"].map((h) => (
+                  {["Title", "Category", "Version", "Status"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -49,7 +49,7 @@ export async function ClausesAndTemplatesPanel() {
                   <tr key={c.clause_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{c.title}</td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{c.category}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-indigo-600">{c.is_standard ? "Yes" : "Custom"}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600">v{c.version}</td>
                     <td className="px-4 py-3 text-xs font-medium text-emerald-600">{c.status}</td>
                   </tr>
                 ))}
@@ -63,14 +63,16 @@ export async function ClausesAndTemplatesPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Contract Templates ({templates.length})
         </h3>
-        {templates.length === 0 ? (
+        {!templatesRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="clause-template-svc (templates) could not be read" hint={templatesRes.error.message} />
+        ) : templates.length === 0 ? (
           <PanelEmptyState icon={FileCode} label="No templates created" hint="Templates in clause-template-svc will appear here." />
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Template Name", "Type", "Version", "Status"].map((h) => (
+                  {["Template", "Type", "Version", "Status"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -78,7 +80,7 @@ export async function ClausesAndTemplatesPanel() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {templates.map((t) => (
                   <tr key={t.template_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{t.name}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{t.title}</td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{t.contract_type}</td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-600">v{t.version}</td>
                     <td className="px-4 py-3 text-xs font-medium text-emerald-600">{t.status}</td>

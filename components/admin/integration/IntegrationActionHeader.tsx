@@ -1,6 +1,6 @@
 "use client";
 
-import { Network, RefreshCw, PlusCircle, ArrowRightLeft, Radio } from "lucide-react";
+import { Network, RefreshCw } from "lucide-react";
 
 export function IntegrationActionHeader() {
   return (
@@ -29,23 +29,6 @@ export function IntegrationActionHeader() {
           Poll Connectors
         </button>
 
-        <button
-          type="button"
-          onClick={() => alert("Triggering Global Sync across Banking & HRIS pipelines...")}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-cyan-700"
-        >
-          <ArrowRightLeft className="h-3.5 w-3.5" />
-          Sync All Feeds
-        </button>
-
-        <button
-          type="button"
-          onClick={() => alert("New Bridge Connection dialog")}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-600/30 bg-cyan-50 px-3 py-1.5 text-xs font-medium text-cyan-700 hover:bg-cyan-100 dark:border-cyan-500/30 dark:bg-cyan-950/40 dark:text-cyan-300"
-        >
-          <PlusCircle className="h-3.5 w-3.5" />
-          Add Connection
-        </button>
       </div>
     </div>
   );

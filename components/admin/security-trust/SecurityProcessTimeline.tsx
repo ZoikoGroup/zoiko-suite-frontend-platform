@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Shield, Key, Eye, ShieldCheck, Bot, CheckCircle2 } from "lucide-react";
+import { Shield, Key, Eye, ShieldCheck, Bot } from "lucide-react";
 
+// A map of what each service does today, not a live status: nothing here is
+// probed. Descriptions state current capability only (fix/blocks-6-10-final).
 type Stage = {
   id: string;
   title: string;
   svc: string;
-  port: string;
-  status: "active" | "pending" | "healthy";
   icon: React.ElementType;
   description: string;
 };
@@ -16,48 +16,38 @@ type Stage = {
 const STAGES: Stage[] = [
   {
     id: "mtls",
-    title: "mTLS Mutual Auth",
+    title: "mTLS Certificates",
     svc: "mtls-management-svc",
-    port: "8140",
-    status: "healthy",
     icon: Shield,
-    description: "Every inter-service gRPC / HTTP payload verified via X.509 client certificates and strict SAN pinning.",
+    description: "Issues and rotates X.509 service certificates from an internal CA and records service-to-service policies. Lifecycle changes are not yet sent to the audit trail.",
   },
   {
     id: "siem",
-    title: "Threat Telemetry",
+    title: "SIEM Events",
     svc: "siem-integration-svc",
-    port: "8141",
-    status: "healthy",
     icon: Eye,
-    description: "Streaming audit trails, authentication anomalies, and rate-limit triggers routed directly to SIEM (Datadog/Splunk).",
+    description: "Records security events against configured exporters. No external SIEM delivery exists yet: an event the service stores is recorded, not sent.",
   },
   {
     id: "carta",
-    title: "CARTA Zero-Trust Risk",
+    title: "CARTA Access Risk",
     svc: "carta-svc",
-    port: "8142",
-    status: "healthy",
     icon: ShieldCheck,
-    description: "Continuous Adaptive Risk and Trust Assessment evaluating subject identity, device posture, and action authorization.",
+    description: "Scores an access request on device trust, location, resource sensitivity and time, and returns ALLOW, STEP_UP_MFA, ISOLATE or DENY.",
   },
   {
     id: "kms",
-    title: "Envelope Encryption",
+    title: "Key Registry",
     svc: "key-management-svc",
-    port: "8143",
-    status: "healthy",
     icon: Key,
-    description: "AES-256-GCM data keys generated and wrapped via HSM-backed root keys with automated rotation & BYOK / HYOK support.",
+    description: "Registers customer keys (alias, provider, ARN, version, state). Metadata only: it performs no encryption, wrapping or HSM operation.",
   },
   {
     id: "ai-gov",
-    title: "AI Safety Guardrails",
+    title: "AI Governance",
     svc: "ai-governance-svc",
-    port: "8183",
-    status: "healthy",
     icon: Bot,
-    description: "Dynamic LLM output moderation, data residency enforcement, and autonomous action risk tier classification.",
+    description: "Records AI runs, action risk classifications and model providers. It has no list of AI runs, so run counts here are not available.",
   },
 ];
 
@@ -69,16 +59,13 @@ export function SecurityProcessTimeline() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            Cryptographic Trust Chain & AI Governance Pipeline
+            Security &amp; Trust Services
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            End-to-end zero-trust architecture protecting transport, keys, telemetry, access risk, and autonomous agents
+            What each service does today. Live data is in the panels below.
           </p>
         </div>
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Zero-Trust Verified
-        </span>
+        <span className="text-xs font-medium text-slate-400 dark:text-slate-500">Service map, not a status check</span>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -103,7 +90,7 @@ export function SecurityProcessTimeline() {
                   </span>
                   <div className="flex items-center gap-1.5">
                     <span className="font-mono text-[10px] text-slate-400">Step {idx + 1}</span>
-                    <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                    <span className="inline-block h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" />
                   </div>
                 </div>
 
@@ -111,7 +98,6 @@ export function SecurityProcessTimeline() {
                   <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100">{stage.title}</h4>
                   <div className="mt-0.5 flex items-center gap-1 font-mono text-[10px] text-slate-500 dark:text-slate-400">
                     <span>{stage.svc}</span>
-                    <span>:{stage.port}</span>
                   </div>
                 </div>
               </div>
@@ -128,7 +114,7 @@ export function SecurityProcessTimeline() {
         <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-slate-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-slate-200">
           <div className="flex items-center justify-between">
             <span className="font-semibold text-emerald-900 dark:text-emerald-300">
-              {selected.title} Deep Dive ({selected.svc}:{selected.port})
+              {selected.title} ({selected.svc})
             </span>
             <button
               type="button"

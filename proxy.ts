@@ -22,7 +22,11 @@ export async function proxy(request: NextRequest) {
       return res;
     }
 
-    return NextResponse.redirect(loginUrl);
+    // An expired or invalid cookie is removed on the way out, so the browser
+    // stops presenting it.
+    const res = NextResponse.redirect(loginUrl);
+    if (rawSession) res.cookies.delete(SESSION_COOKIE);
+    return res;
   }
 
   // Start the backend services this route reads, before it renders.

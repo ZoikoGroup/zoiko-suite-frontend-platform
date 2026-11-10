@@ -61,14 +61,21 @@ export type JournalHeader = {
   created_at: string;
 };
 
+/**
+ * treasury-svc's per-account cash position, from GET /v1/treasury/positions.
+ *
+ * Field names match domain.CashPositionResponse's json tags. The old type
+ * (`account_id`, `currency`, `status`, `balance`) matched nothing the service
+ * sends. Accounts with no recorded balance are omitted by the service, not
+ * returned as zero.
+ */
 export type CashPosition = {
-  account_id: string;
-  bank_name?: string;
-  currency: string;
+  bank_account_id: string;
+  account_name: string;
+  currency_code: string;
+  ledger_balance: number;
   available_balance: number;
-  swept_balance?: number;
-  balance?: number;
-  status: "ACTIVE" | "LOCKED";
+  as_of_timestamp: string;
 };
 
 /**
@@ -128,7 +135,11 @@ export type FiscalPeriod = {
   period_name: string;
   period_start: string;
   period_end: string;
-  close_status: "OPEN" | "CLOSED" | "LOCKED";
+  /** The close state machine's value (OPEN, SOFT_CLOSE, CLOSE_REVIEW,
+   *  HARD_CLOSED, ...; see financial-close-svc period_state.go). It was typed
+   *  `OPEN | CLOSED | LOCKED`, two of which the service never sends. Only
+   *  displayed here, so it stays a string rather than a union to keep current. */
+  close_status: string;
   close_locked_at?: string | null;
 };
 
@@ -229,12 +240,13 @@ async function fetchFinanceSvc<TRaw, TOut>(
 //   /v1/journal-entries     | /v1/journals          | bare array   | fixed
 //   /v1/reconciliations     | /v1/statement-lines   | bare array   | fixed
 //   /v1/close-periods       | /v1/close/periods     | bare array   | fixed
-//   /v1/cash-positions      | treasury-svc, unknown | unverified   | STILL WRONG
+//   /v1/cash-positions      | /v1/treasury/positions| bare array*  | fixed
 //
-// treasury-svc is the one left: it is not one of the gap-closed services, it has
-// never run on this machine, and nothing in this repo says what it serves. Rather
-// than guess a path, the call is left as it is and its failure is now reported as
-// unavailable rather than folded into a zero — see FinanceSummaryStats.
+// treasury-svc's route was verified against its RegisterRoutes and
+// GetCashPositions handler (zoiko-suite-backend). It requires legal_entity_id
+// and X-Principal-Id and checks TREASURY_POSITIONS_VIEW, so it is refused here
+// when the session has neither. *It answers JSON null when no account has a
+// recorded balance, which is normalised to [].
 //
 // This layer also duplicates apiGet: its own URL helpers bypass the DEFAULTS
 // registry in config.ts, and its own fetchFinanceSvc drops structured error
@@ -282,17 +294,30 @@ export async function listARInvoices(identity?: Identity): Promise<ApiResult<ARI
   );
 }
 
+/**
+ * Latest cash position per bank account for one legal entity.
+ */
 export async function listCashPositions(identity?: Identity): Promise<ApiResult<CashPosition[]>> {
   const base = treasuryUrl();
+  if (!identity?.legalEntityId || !identity.principalId) {
+    return {
+      ok: false,
+      error: {
+        kind: "malformed",
+        message: "treasury-svc needs a legal entity and a principal, and the session is missing one",
+      },
+    };
+  }
+  const q = new URLSearchParams({ legal_entity_id: identity.legalEntityId });
   return fetchFinanceSvc<unknown, CashPosition[]>(
-    `${base}/v1/cash-positions`,
+    `${base}/v1/treasury/positions?${q}`,
     base,
     "treasury-svc",
     identity,
     (d: unknown) => {
+      if (d === null) return [];
       if (Array.isArray(d)) return d as CashPosition[];
-      const rec = d as { cash_positions?: CashPosition[] } | null | undefined;
-      return rec?.cash_positions ?? [];
+      throw new Error("treasury-svc returned a non-array position list");
     },
   );
 }
@@ -360,7 +385,7 @@ export async function getFinanceSummaryStats(identity?: Identity): Promise<ApiRe
   ]);
 
   const cashTotal = treasuryRes.ok
-    ? treasuryRes.data.reduce((sum, p) => sum + (p.available_balance ?? p.balance ?? 0), 0)
+    ? treasuryRes.data.reduce((sum, p) => sum + p.available_balance, 0)
     : null;
 
   // Everything not yet paid. This filtered on `OUTSTANDING || OVERDUE`, and

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ShieldCheck, FileCheck, ShieldAlert, AlertTriangle } from "lucide-react";
+import { ShieldCheck, FileCheck, AlertTriangle } from "lucide-react";
+import { fetchPanelListOrNull } from "@/lib/panel-fetch";
 
 type Kpi = {
   icon: React.ElementType;
@@ -20,68 +21,43 @@ function useLiveComplianceKpis(): { kpis: Kpi[]; loading: boolean } {
     let cancelled = false;
     async function fetch_() {
       try {
-        const [reqsRes, evalsRes, excRes] = await Promise.allSettled([
-          fetch("/api/v1/filing-tracker/requirements", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/compliance-status", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/exception-escalation/exceptions", { signal: AbortSignal.timeout(5000) }),
+        // null = could not be read, shown as "Unavailable" rather than 0.
+        const [requirements, evaluations, exceptions] = await Promise.all([
+          fetchPanelListOrNull<{ status?: string }>("/api/v1/filing-tracker/requirements", "requirements"),
+          fetchPanelListOrNull<{ status?: string }>("/api/v1/compliance-status", "evaluations"),
+          fetchPanelListOrNull<{ case_status?: string }>("/api/v1/exception-escalation/exceptions", "exceptions"),
         ]);
         if (cancelled) return;
+        const value = (rows: unknown[] | null) => (rows ? String(rows.length) : "Unavailable");
+        // exception-escalation-svc's field is case_status; RESOLVED and CLOSED are not open.
+        const open = exceptions?.filter((e) => e.case_status !== "RESOLVED" && e.case_status !== "CLOSED").length ?? null;
 
-        const reqsJson = reqsRes.status === "fulfilled" && reqsRes.value.ok
-          ? await reqsRes.value.json().catch(() => ({ requirements: [] }))
-          : { requirements: [] };
-        const evalsJson = evalsRes.status === "fulfilled" && evalsRes.value.ok
-          ? await evalsRes.value.json().catch(() => ({ evaluations: [] }))
-          : { evaluations: [] };
-        const excJson = excRes.status === "fulfilled" && excRes.value.ok
-          ? await excRes.value.json().catch(() => ({ exceptions: [] }))
-          : { exceptions: [] };
-
-        const requirements: Array<{ status?: string }> = reqsJson.requirements ?? [];
-        const evaluations: Array<{ status?: string; compliance_score?: number }> = evalsJson.evaluations ?? [];
-        const exceptions: Array<{ status?: string }> = excJson.exceptions ?? [];
-        const openExceptions = exceptions.filter((e) => !e.status || e.status === "OPEN" || e.status === "ESCALATED").length;
-        const totalReqs = requirements.length;
-        const totalEvals = evaluations.length;
-
-        if (!cancelled) {
-          setKpis([
-            {
-              icon: ShieldCheck,
-              label: "Compliance Evaluations",
-              value: String(totalEvals),
-              sub: `${totalReqs} filing requirements tracked`,
-              accent: "text-emerald-600 dark:text-emerald-400",
-              bg: "bg-emerald-100 dark:bg-emerald-500/20",
-            },
-            {
-              icon: FileCheck,
-              label: "Filing Requirements",
-              value: String(totalReqs),
-              sub: "From filing-tracker-svc",
-              accent: "text-blue-600 dark:text-blue-400",
-              bg: "bg-blue-100 dark:bg-blue-500/20",
-            },
-            {
-              icon: ShieldAlert,
-              label: "Evidence Manifests",
-              value: String(totalEvals),
-              sub: "Verified compliance evaluations",
-              accent: "text-purple-600 dark:text-purple-400",
-              bg: "bg-purple-100 dark:bg-purple-500/20",
-            },
-            {
-              icon: AlertTriangle,
-              label: "Escalated Exceptions",
-              value: String(openExceptions),
-              sub: `${exceptions.length} total exceptions`,
-              accent: openExceptions > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
-              bg: openExceptions > 0 ? "bg-amber-100 dark:bg-amber-500/20" : "bg-emerald-100 dark:bg-emerald-500/20",
-            },
-          ]);
-        }
-      } catch {
-        if (!cancelled) setLoading(false);
+        setKpis([
+          {
+            icon: ShieldCheck,
+            label: "Compliance Evaluations",
+            value: value(evaluations),
+            sub: evaluations ? "From compliance-status-svc" : "compliance-status-svc could not be read",
+            accent: "text-emerald-600 dark:text-emerald-400",
+            bg: "bg-emerald-100 dark:bg-emerald-500/20",
+          },
+          {
+            icon: FileCheck,
+            label: "Filing Requirements",
+            value: value(requirements),
+            sub: requirements ? "From filing-tracker-svc" : "filing-tracker-svc could not be read",
+            accent: "text-blue-600 dark:text-blue-400",
+            bg: "bg-blue-100 dark:bg-blue-500/20",
+          },
+          {
+            icon: AlertTriangle,
+            label: "Open Exceptions",
+            value: open === null ? "Unavailable" : String(open),
+            sub: exceptions ? `${exceptions.length} exceptions recorded` : "exception-escalation-svc could not be read",
+            accent: open ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
+            bg: open ? "bg-amber-100 dark:bg-amber-500/20" : "bg-emerald-100 dark:bg-emerald-500/20",
+          },
+        ]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -99,8 +75,8 @@ export function ComplianceSummaryBar() {
 
   if (loading && kpis.length === 0) {
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 animate-pulse h-32" />
         ))}
       </div>
@@ -108,7 +84,7 @@ export function ComplianceSummaryBar() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Compliance KPI summary">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Compliance KPI summary">
       {kpis.map((kpi) => (
         <div
           key={kpi.label}

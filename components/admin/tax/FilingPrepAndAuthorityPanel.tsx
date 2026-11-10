@@ -3,27 +3,63 @@ import { CloudOff, FileCheck, ShieldAlert, AlertTriangle, CheckCircle2, Clock } 
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listFilingDrafts, listTaxAuthorityInterfaces, type FilingDraft, type TaxAuthorityInterface } from "@/lib/api/tax";
-import { TestConnectionButton } from "./TestConnectionButton";
+import { SubmissionHealthButton } from "./TestConnectionButton";
+import { refresh } from "next/cache";
+import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordForm";
+import type { CreateState, FieldSpec } from "@/components/admin/intelligence/create-state";
+import { sessionIdentity, expired, missing, text, toState, show } from "@/app/admin/intelligence/create-support";
+import { registerAuthorityInterface } from "@/lib/api/tax-authority";
 
+// ── Authority interface registration ──
+// Records the interface in tax-authority-interface-svc for the session's legal
+// entity. It does not connect to the authority: submissions stay PENDING while
+// the authority adapter is off.
+
+const AUTHORITY_FIELDS: FieldSpec[] = [
+  { name: "jurisdiction", label: "Jurisdiction", kind: "text", required: true, hint: "e.g. GB" },
+  { name: "authority_name", label: "Authority name", kind: "text", required: true },
+  { name: "protocol", label: "Protocol", kind: "text" },
+  { name: "provider_key", label: "Provider key", kind: "text", hint: "Only an approved connector's key; the service refuses any other. Blank: no adapter is bound." },
+];
+
+async function registerAuthorityInterfaceAction(previous: CreateState, fd: FormData): Promise<CreateState> {
+  "use server";
+  const identity = await sessionIdentity();
+  if (!identity) return expired(previous, fd);
+  const refusal = missing(previous, fd, [["jurisdiction", "Jurisdiction"], ["authority_name", "Authority name"]]);
+  if (refusal) return refusal;
+  const res = await registerAuthorityInterface(identity, {
+    jurisdiction: text(fd, "jurisdiction"),
+    authority_name: text(fd, "authority_name"),
+    protocol: text(fd, "protocol") || undefined,
+    provider_key: text(fd, "provider_key") || undefined,
+  });
+  if (res.ok) refresh();
+  return toState(previous, fd, res, "tax-authority-interface-svc", (i) => [
+    ["Interface ID", show(i.interface_id)],
+    ["Status", show(i.status)],
+    ["Authority", `${show(i.authority_name)} (${show(i.jurisdiction)})`],
+    ["Adapter", show(i.provider_key) || "none bound"],
+  ]);
+}
+
+// filing-preparation-svc's states: DRAFT → VALIDATING → PREPARED (or BLOCKED),
+// then finalize → READY_FOR_SUBMISSION. "FINALIZED" and "UNVALIDATED" were
+// never states of the service.
 const VALIDATION_STATUS_CONFIG: Record<
   string,
   { bar: string; pct: number; label: string; badge: string }
 > = {
-  UNVALIDATED: { bar: "bg-slate-300",  pct: 0,   label: "Not started",  badge: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400" },
-  PREPARED:    { bar: "bg-blue-500",   pct: 50,  label: "Half-way",     badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
-  FINALIZED:   { bar: "bg-emerald-500",pct: 100, label: "Ready to file",badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" },
-  BLOCKED:     { bar: "bg-red-500",    pct: 0,   label: "Blocked",      badge: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300" },
+  DRAFT:                { bar: "bg-slate-300",   pct: 0,   label: "Not validated", badge: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400" },
+  VALIDATING:           { bar: "bg-blue-400",    pct: 25,  label: "Validating",    badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
+  PREPARED:             { bar: "bg-blue-500",    pct: 50,  label: "Validated",     badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
+  READY_FOR_SUBMISSION: { bar: "bg-emerald-500", pct: 100, label: "Ready to file", badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" },
+  BLOCKED:              { bar: "bg-red-500",     pct: 0,   label: "Blocked",       badge: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300" },
 };
 
 const AUTHORITY_STATUS_COLORS: Record<string, string> = {
   ACTIVE:   "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
   INACTIVE: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400",
-};
-
-const AUTH_TYPE_COLORS: Record<string, string> = {
-  "OAuth2":           "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
-  "mTLS + SAML2":     "bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300",
-  "Singpass / Corppass OIDC": "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300",
 };
 
 function DueDateCountdown({ dueDate }: { dueDate?: string }) {
@@ -75,7 +111,7 @@ function DueDateCountdown({ dueDate }: { dueDate?: string }) {
 }
 
 function ReadinessBar({ status }: { status: string }) {
-  const cfg = VALIDATION_STATUS_CONFIG[status] ?? VALIDATION_STATUS_CONFIG.UNVALIDATED;
+  const cfg = VALIDATION_STATUS_CONFIG[status] ?? VALIDATION_STATUS_CONFIG.DRAFT;
   const isBlocked = status === "BLOCKED";
 
   return (
@@ -89,15 +125,6 @@ function ReadinessBar({ status }: { status: string }) {
       </div>
       <p className="text-[10px] text-slate-500 dark:text-slate-400">{cfg.label}</p>
     </div>
-  );
-}
-
-function AuthTypeBadge({ authType }: { authType: string }) {
-  const cls = AUTH_TYPE_COLORS[authType] ?? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>
-      {authType}
-    </span>
   );
 }
 
@@ -127,17 +154,8 @@ export async function FilingPrepAndAuthorityPanel() {
     listTaxAuthorityInterfaces(identity),
   ]);
 
-  if (!draftsRes.ok && draftsRes.error.kind === "unreachable") {
-    return (
-      <PanelEmptyState
-        icon={CloudOff}
-        tone="warning"
-        label="filing-preparation-svc unavailable"
-        hint={draftsRes.error.message}
-      />
-    );
-  }
-
+  // Each section reports its own failed read. Only "unreachable" used to be
+  // shown; a 401, 403 or 5xx rendered as "No filing drafts".
   const drafts: FilingDraft[] = draftsRes.ok ? draftsRes.data : [];
   const interfaces: TaxAuthorityInterface[] = authorityRes.ok ? authorityRes.data : [];
 
@@ -148,7 +166,14 @@ export async function FilingPrepAndAuthorityPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Filing Preparation Drafts ({drafts.length})
         </h3>
-        {drafts.length === 0 ? (
+        {!draftsRes.ok ? (
+          <PanelEmptyState
+            icon={CloudOff}
+            tone="warning"
+            label="filing-preparation-svc could not be read"
+            hint={draftsRes.error.message}
+          />
+        ) : drafts.length === 0 ? (
           <PanelEmptyState
             icon={FileCheck}
             label="No filing drafts"
@@ -200,7 +225,7 @@ export async function FilingPrepAndAuthorityPanel() {
                           "bg-slate-100 text-slate-600"
                         }`}
                       >
-                        {d.validation_status === "FINALIZED" && (
+                        {d.validation_status === "READY_FOR_SUBMISSION" && (
                           <CheckCircle2 className="h-3 w-3 mr-1" />
                         )}
                         {d.validation_status}
@@ -227,7 +252,23 @@ export async function FilingPrepAndAuthorityPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Tax Authority Connections ({interfaces.length})
         </h3>
-        {interfaces.length === 0 ? (
+        <div className="mb-3">
+          <CreateRecordForm
+            title="Register authority interface"
+            description="tax-authority-interface-svc records the interface. Nothing is sent to the authority: submissions stay PENDING while its adapter is off."
+            fields={AUTHORITY_FIELDS}
+            action={registerAuthorityInterfaceAction}
+            submitLabel="Register interface"
+          />
+        </div>
+        {!authorityRes.ok ? (
+          <PanelEmptyState
+            icon={CloudOff}
+            tone="warning"
+            label="tax-authority-interface-svc could not be read"
+            hint={authorityRes.error.message}
+          />
+        ) : interfaces.length === 0 ? (
           <PanelEmptyState
             icon={FileCheck}
             label="No authority connections registered"
@@ -239,13 +280,12 @@ export async function FilingPrepAndAuthorityPanel() {
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
                   {[
-                    "Authority Code",
-                    "Authority Name",
+                    "Authority",
+                    "Jurisdiction",
                     "Protocol",
-                    "Auth Type",
-                    "Endpoint",
+                    "Adapter",
                     "Status",
-                    "Action",
+                    "Submissions",
                   ].map((h) => (
                     <th
                       key={h}
@@ -262,20 +302,18 @@ export async function FilingPrepAndAuthorityPanel() {
                     key={iface.interface_id}
                     className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                   >
-                    <td className="px-4 py-3 font-mono text-xs font-medium text-slate-700 dark:text-slate-300">
-                      {iface.authority_code}
-                    </td>
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
                       {iface.authority_name}
+                      <p className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{iface.interface_id}</p>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-300">
+                      {iface.jurisdiction}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                      {iface.protocol}
+                      {iface.protocol || "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      <AuthTypeBadge authType={iface.auth_type} />
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400 max-w-[180px] truncate">
-                      {iface.api_endpoint}
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">
+                      {iface.provider_key || "None bound"}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -290,10 +328,7 @@ export async function FilingPrepAndAuthorityPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <TestConnectionButton
-                        interfaceId={iface.interface_id}
-                        authorityCode={iface.authority_code}
-                      />
+                      <SubmissionHealthButton providerKey={iface.provider_key} />
                     </td>
                   </tr>
                 ))}

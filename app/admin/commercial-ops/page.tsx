@@ -103,13 +103,11 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
-  ports,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle: string;
-  ports: string;
   children: React.ReactNode;
 }) {
   return (
@@ -124,9 +122,6 @@ function SectionCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          :{ports}
-        </span>
       </div>
       <div className="p-5">{children}</div>
     </section>
@@ -732,7 +727,6 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
           icon={ShoppingCart}
           title="Procurement & Spend Controls"
           subtitle="purchase-order-svc & spend-controls-svc — purchase order management and departmental spend limits"
-          ports="8129, 8131"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <PurchaseOrdersAndSpendPanel />
@@ -745,7 +739,6 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
           icon={GitBranch}
           title="Procurement Cases"
           subtitle="procurement-workflow-svc — spend-checked cases, approval, and purchase-order issue"
-          ports="8134"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ProcurementWorkflowPanel />
