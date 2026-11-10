@@ -22,7 +22,7 @@
   --za-unread-dot: 10px;               /* proposed: deliberate replies only (Doc01) */
 
   /* Desktop panel (>= 768 px, W01) */
-  --za-panel-width: 400px;             /* panel width matching test spec (Doc01 W01) */
+  --za-panel-width: 480px;             /* proposed default (fits the wordmark, title and MENU label) */
   --za-panel-width-min: 360px;         /* proposed */
   --za-panel-width-max: 500px;         /* proposed */
   --za-panel-width-expanded: 560px;    /* proposed: expand/minimize (Doc01 header) */
@@ -336,7 +336,7 @@
   overflow: hidden;
   white-space: nowrap;
   color: var(--za-accent-text);
-  font-size: var(--za-font-title);
+  font-size: 1.0625rem;
   font-weight: 700;
   line-height: 1.375rem;
 }
@@ -344,12 +344,12 @@
 .za-title:focus-visible { outline: 2px solid var(--za-focus); outline-offset: 2px; }
 /* AI disclosure as the Kairos-style pill under the title. */
 .za-subtitle {
-  grid-column: 2 / -1;
+  grid-column: 2 / span 2;
   justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: none;
+  max-width: 100%;
   margin: 4px 0 0;
   padding: 1px 10px;
   border: 1px solid var(--za-option-border);
@@ -359,7 +359,7 @@
   white-space: nowrap;
   font-size: var(--za-font-meta);
   font-weight: 600;
-  line-height: 1.25rem;
+  line-height: 1rem;
 }
 .za-subtitle-icon { flex: none; }
 .za-subtitle-short { display: none; }
@@ -376,11 +376,11 @@
 }
 /* Title stays on one line: on narrow panels the wordmark shrinks, and on
    the narrowest it is dropped (it is decorative; the title names the panel). */
-@container za-panel (max-width: 360px) {
+@container za-panel (max-width: 410px) {
   .za-header-tile { height: 28px !important; padding: 0 6px !important; }
   .za-header-tile img { height: 20px !important; width: auto !important; }
 }
-@container za-panel (max-width: 330px) {
+@container za-panel (max-width: 380px) {
   .za-header-tile { display: none !important; }
 }
 .za-controls { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: var(--za-control-gap); }

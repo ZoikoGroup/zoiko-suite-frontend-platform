@@ -97,7 +97,7 @@ import { useLauncherOffset } from "./useLauncherOffset";
 import { FullLogo, ZTile } from "./ZTile";
 
 type Feedback = { rating?: "useful" | "not_useful"; reason?: FeedbackReason; sent?: boolean };
-type FailKind = "network" | "rate_limited" | "busy" | "timeout" | "unavailable";
+type FailKind = "network" | "rate_limited" | "busy" | "timeout";
 
 type VisitorMessage = {
   id: string; // stable bubble id
@@ -318,7 +318,7 @@ function isUnverified(turn: TurnEnvelope): boolean {
 // Unverified replies a retry can change: the answer failed validation (a new
 // attempt is generated). Expired, revoked, conflicting or missing evidence is
 // release state, so a retry would repeat the same reply.
-const RETRYABLE_REASONS = new Set(["VALIDATION_FAILED", "NO_EVIDENCE"]);
+const RETRYABLE_REASONS = new Set(["VALIDATION_FAILED"]);
 
 /** Doc01 §10 S05 Uncertain offers "Retry, open source, handoff": retry only
  * where it can give a different answer; otherwise the service's next steps. */
@@ -374,8 +374,6 @@ export function isPlaceholderUrl(url: string): boolean {
 function failKind(e: PublicAIError): FailKind {
   if (e.kind === "http" && e.status === 429) return "rate_limited";
   if (e.kind === "http" && e.status === 409) return "busy";
-  if (e.kind === "http" && (e.status === 503 || e.status === 502 || e.status === 504)) return "unavailable";
-  if (e.kind === "unreachable") return "unavailable";
   if (e.kind === "timeout") return "timeout";
   return "network";
 }
@@ -489,7 +487,6 @@ function TopicMenu(props: {
                 type="button"
                 className="za-chip za-option"
                 disabled={props.disabled}
-                aria-label={tp.label}
                 onClick={() => (tp.send ? props.onPick(tp.send) : props.onView({ kind: "topic", key: tp.key }))}
               >
                 <span aria-hidden="true" className="za-option-icon">
@@ -516,7 +513,7 @@ function TopicMenu(props: {
       <ul className="za-grid" aria-label={`${topic.label} questions`}>
         {topic.questions.map((q) => (
           <li key={q.message}>
-            <button type="button" className="za-chip za-option" aria-label={q.label} disabled={props.disabled} onClick={() => props.onPick(q.message)}>
+            <button type="button" className="za-chip za-option" disabled={props.disabled} onClick={() => props.onPick(q.message)}>
               <span className="za-option-label">{q.label}</span>
             </button>
           </li>
@@ -574,7 +571,7 @@ export function AssistantWidget({
   const [sessionEnded, setSessionEnded] = useState(false);
   const [announce, setAnnounce] = useState("");
   const [endRating, setEndRating] = useState<Feedback>({});
-  const [theme, setTheme] = useState<Theme>("light");
+  const [theme, setTheme] = useState<Theme>("dark");
   // History lists this session's questions only; nothing outlives Clear chat.
   const [showHistory, setShowHistory] = useState(false);
   const [menuView, setMenuView] = useState<MenuView | null>(null);
@@ -628,9 +625,8 @@ export function AssistantWidget({
   }, [open]);
 
   // Theme: the visitor's saved choice, else the site's dark class or the OS
-  // preference. Runs on mount (so the launcher border colour is correct before
-  // the panel is first opened) and again on each open so it follows any
-  // page-theme change that happened while the panel was closed.
+  // preference, read on mount (so the closed launcher's edge matches the page,
+  // Doc01 K10) and again on each open/close so it follows the page.
   useEffect(() => {
     const init = () => {
       let saved: string | null = null;
@@ -907,7 +903,7 @@ export function AssistantWidget({
     if (!msg || inFlight.current) return;
     const turnId = fresh ? crypto.randomUUID() : msg.turnId;
     inFlight.current = turnId;
-    setVisitor(visitorId, { turnId, state: "sending" });
+    setVisitor(visitorId, { turnId, state: "sending", fail: undefined });
     dispatch({ type: "SEND" });
     setAnnounce(t("ui.loading") || t("ui.thinking"));
     const stillWanted = () => inFlight.current === turnId;
@@ -965,7 +961,7 @@ export function AssistantWidget({
       shownSeq.current = { session: s?.id ?? "", seq: turn.turn_sequence };
       // Doc 01 §16 / Doc 06 §20: input the service classed as sensitive is
       // never re-displayed; the bubble keeps a neutral notice instead.
-      setVisitor(visitorId, turn.reason === "SENSITIVE_INPUT" ? { state: "sent", text: SENSITIVE_REMOVED, fail: undefined } : { state: "sent", fail: undefined });
+      setVisitor(visitorId, turn.reason === "SENSITIVE_INPUT" ? { state: "sent", text: SENSITIVE_REMOVED } : { state: "sent" });
       update((all) => {
         const reply: Message = { id: turn.turn_id, role: "assistant", turn, feedback: {}, replyTo: visitorId };
         const i = all.findIndex((m) => m.role === "assistant" && m.replyTo === visitorId);
@@ -1222,9 +1218,8 @@ export function AssistantWidget({
         text = t("ui.error.busy");
         break;
       case "timeout":
-        return t("ui.error.timeout");
-      case "unavailable":
-        return t("ui.unavailable");
+        text = t("ui.error.timeout");
+        break;
       default:
         // Doc 02 §21 ui.error; the reference line is added only when one exists.
         text = t("ui.error");
@@ -1742,20 +1737,14 @@ export function AssistantWidget({
                       {expanded ? <Minimize2 size={18} aria-hidden /> : <Maximize2 size={18} aria-hidden />}
                       {expanded ? "Minimize chat" : "Expand chat"}
                     </button>
-                    </div>
+                    <button type="button" role="menuitem" className="za-wide-only" onClick={close}>
+                      <X size={18} aria-hidden />
+                      {t("ui.launcher.close")}
+                    </button>
+                  </div>
                 )}
               </span>
-              <button
-                type="button"
-                className="za-control za-wide-only"
-                aria-label={expanded ? "Minimize chat" : "Expand chat"}
-                title={expanded ? "Minimize chat" : "Expand chat"}
-                aria-pressed={expanded}
-                onClick={() => setExpanded((v) => !v)}
-              >
-                {expanded ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}
-              </button>
-              <button type="button" onClick={close} className="za-control" aria-label={t("ui.launcher.close")} title={t("ui.launcher.close")}>
+              <button type="button" onClick={close} className="za-control za-narrow-only" aria-label={t("ui.launcher.close")} title={t("ui.launcher.close")}>
                 <X aria-hidden />
               </button>
             </div>
@@ -1934,7 +1923,7 @@ export function AssistantWidget({
                         <span className="za-sr-only">You said: </span>
                         {m.text}
                       </p>
-                      {m.fail && (
+                      {m.state === "failed" && m.fail && (
                         <div style={{ alignSelf: "stretch", marginTop: 8 }}>
                           <ErrorPanel
                             text={failText(m.fail.kind, m.fail.status)}

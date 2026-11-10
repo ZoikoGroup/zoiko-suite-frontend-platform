@@ -408,12 +408,17 @@ test.describe("scrolling", () => {
     const convo = dialog.getByTestId("assistant-conversation");
     await ask(page, "Give me the long version");
     const answer = dialog.getByTestId("assistant-answer").last();
+    // Answers over 120 words open clamped with "Show more" (Doc 01 default
+    // length); the full text is one click away.
+    await expect(answer).toContainText("Line 1 of");
     const a = (await answer.boundingBox())!;
     const c = (await convo.boundingBox())!;
     expect(a.y).toBeGreaterThanOrEqual(c.y - 1); // the START of the answer is visible
     expect(a.y).toBeLessThan(c.y + 80);
-    const more = answer.getByRole("button", { name: /Show more/ });
-    if (await more.isVisible()) await more.click();
+    await expect(answer).not.toContainText("Line 28");
+    const more = answer.getByRole("button", { name: "Show more" });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await more.click();
     await expect(answer).toContainText("Line 28");
 
     await ask(page, "and the long one again");
