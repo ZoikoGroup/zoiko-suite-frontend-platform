@@ -13,11 +13,11 @@ type Fixtures = {
 };
 
 export const test = base.extend<Fixtures>({
-  consoleUrl: async ({}, use) => {
-    await use("http://127.0.0.1:3100");
+  consoleUrl: async ({}, provide) => {
+    await provide("http://127.0.0.1:3100");
   },
 
-  authedPage: async ({ page, consoleUrl }, use) => {
+  authedPage: async ({ page, consoleUrl }, provide) => {
     // Sign in as demo admin
     await page.goto(`${consoleUrl}/login`);
     await page.fill('input[name="email"]', "admin@zoikosuite.com");
@@ -27,10 +27,10 @@ export const test = base.extend<Fixtures>({
     // Wait for redirect to dashboard
     await page.waitForURL(`${consoleUrl}/admin/**`, { timeout: 30000 });
     
-    await use(page);
+    await provide(page);
   },
 
-  session: async ({ authedPage }, use) => {
+  session: async ({ authedPage }, provide) => {
     // Extract session from the page's auth cookie / local storage
     const session = await authedPage.evaluate(() => {
       const cookie = document.cookie.split('; ').find(c => c.startsWith('zoiko_session='));
@@ -43,7 +43,7 @@ export const test = base.extend<Fixtures>({
       }
       return null;
     });
-    await use(session || { principalId: "33333333-3333-3333-3333-333333333333", tenantId: "11111111-1111-1111-1111-111111111111", legalEntityId: "22222222-2222-2222-2222-222222222222" });
+    await provide(session || { principalId: "33333333-3333-3333-3333-333333333333", tenantId: "11111111-1111-1111-1111-111111111111", legalEntityId: "22222222-2222-2222-2222-222222222222" });
   },
 });
 
