@@ -20,4 +20,5 @@ export { ResultBanner, type BannerTone } from "./ResultBanner";
 export { IllustrativeNotice } from "./IllustrativeNotice";
 export { LookupById } from "./LookupById";
 export { Pagination } from "./Pagination";
+export { CursorPagination } from "./CursorPagination";
 export { IDLE_LOOKUP, type LookupState } from "./lookup";

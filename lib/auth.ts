@@ -160,6 +160,21 @@ export type SessionPayload = {
 
   /** Unix seconds at which envelopeJwt expires. Short — minutes, not hours. */
   envelopeExpiresAt?: number;
+
+  /**
+   * The OAuth refresh token from an authorization-code sign-in (lib/oidc.ts).
+   *
+   * The envelope lives ENVELOPE_JWT_TTL_SECONDS (300 s) and this cookie eight
+   * hours; proxy.ts uses this token to renew the envelope before it expires.
+   * A session without one (password login) cannot renew, and ends when its
+   * envelope does instead of failing every call with 401.
+   *
+   * It is single-use and rotates on every renewal: presenting a used one is
+   * treated by identity-context-svc as theft and ends the login session. It is
+   * also bound to the console's confidential client, so it is worthless
+   * without IDENTITY_CONSOLE_CLIENT_SECRET.
+   */
+  refreshToken?: string;
 } & SessionIdentity;
 
 export function findUserByCredentials(email: string, password: string): GovernedUserAccount | null {
@@ -200,6 +215,48 @@ export function verifyCredentials(email: string, password: string): boolean {
   return findUserByCredentials(email, password) !== null;
 }
 
+/**
+ * The console's display details for an account identity-context-svc has
+ * already authenticated (OIDC sign-in), looked up by email alone. Never use
+ * this to authenticate anyone — it checks no password.
+ */
+export function findAccountByEmail(email: string | undefined): Omit<GovernedUserAccount, "password"> | null {
+  if (!email) return null;
+  const normalized = email.trim().toLowerCase();
+  const found = GOVERNED_USER_ACCOUNTS.find((u) => u.email.toLowerCase() === normalized);
+  if (!found) return null;
+  return {
+    email: found.email,
+    name: found.name,
+    role: found.role,
+    domain: found.domain,
+    principalId: found.principalId,
+    tenantId: found.tenantId,
+    legalEntityId: found.legalEntityId,
+  };
+}
+
+/** Attributes for the session cookie, wherever it is (re)issued. */
+export function sessionCookieOptions(maxAge: number = SESSION_MAX_AGE_SECONDS) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    maxAge,
+    path: "/",
+  };
+}
+
+/**
+ * Seconds left before a session reaches SESSION_MAX_AGE_SECONDS from sign-in.
+ * A renewed cookie keeps the original deadline: renewal refreshes the
+ * envelope, it does not extend the session.
+ */
+export function remainingSessionSeconds(session: Pick<SessionPayload, "iat">, now: number = Date.now()): number {
+  const iatMs = session.iat < 1e11 ? session.iat * 1000 : session.iat;
+  return Math.max(0, Math.floor((iatMs + SESSION_MAX_AGE_SECONDS * 1000 - now) / 1000));
+}
+
 import crypto from "crypto";
 
 export function getSessionSecret(): string {
@@ -226,32 +283,52 @@ export function signSessionPayload(payloadBase64: string): string {
     .digest("base64url");
 }
 
+/**
+ * Separates the claims from the raw envelope inside the signed part of the
+ * cookie. Legal in a cookie value and absent from both base64url and a JWT.
+ */
+const ENVELOPE_SEPARATOR = "~";
+
+/**
+ * Cookie value: `<claims>[~<envelopeJwt>].<signature>`, the HMAC covering
+ * everything before the last dot.
+ *
+ * The envelope rides outside the base64url claims on purpose. It is already
+ * base64url, and encoding it a second time inside the JSON grew a ~2.7 KB admin
+ * envelope to a 4.1 KB cookie — over the 4096-byte limit at which browsers drop
+ * a cookie without telling anyone. The login then "succeeded", /admin arrived
+ * without a session, and proxy.ts bounced back to /login: a reload loop.
+ */
 export function encodeSession(payload: SessionPayload): string {
-  const safePayload: SessionPayload = {
-    ...payload,
+  const { envelopeJwt, ...claims } = payload;
+  const safeClaims = {
+    ...claims,
     iat: payload.iat || Date.now(),
   };
-  const payloadBase64 = Buffer.from(JSON.stringify(safePayload), "utf-8").toString("base64url");
-  const signature = signSessionPayload(payloadBase64);
-  return `${payloadBase64}.${signature}`;
+  const claimsBase64 = Buffer.from(JSON.stringify(safeClaims), "utf-8").toString("base64url");
+  const signed = envelopeJwt ? `${claimsBase64}${ENVELOPE_SEPARATOR}${envelopeJwt}` : claimsBase64;
+  const signature = signSessionPayload(signed);
+  return `${signed}.${signature}`;
 }
 
 export function decodeSession(value: string | undefined | null): SessionPayload | null {
   if (!value || typeof value !== "string") return null;
 
-  const parts = value.split(".");
-  // Unsigned, legacy, or malformed cookies lack the HMAC signature part
-  if (parts.length !== 2) {
+  // The envelope itself contains dots, so the signature is whatever follows the
+  // last one. Unsigned or malformed cookies have no signature part.
+  const sigAt = value.lastIndexOf(".");
+  if (sigAt <= 0) {
     return null;
   }
 
-  const [payloadBase64, signature] = parts;
-  if (!payloadBase64 || !signature) {
+  const signed = value.slice(0, sigAt);
+  const signature = value.slice(sigAt + 1);
+  if (!signature) {
     return null;
   }
 
   // Cryptographically verify signature using constant-time comparison
-  const expectedSignature = signSessionPayload(payloadBase64);
+  const expectedSignature = signSessionPayload(signed);
   const sigBuffer = Buffer.from(signature);
   const expBuffer = Buffer.from(expectedSignature);
 
@@ -259,9 +336,20 @@ export function decodeSession(value: string | undefined | null): SessionPayload 
     return null; // Tampered, forged, or invalid signature
   }
 
+  const sepAt = signed.indexOf(ENVELOPE_SEPARATOR);
+  const payloadBase64 = sepAt === -1 ? signed : signed.slice(0, sepAt);
+  const envelopeJwt = sepAt === -1 ? undefined : signed.slice(sepAt + 1);
+  if (!payloadBase64 || envelopeJwt === "") {
+    return null;
+  }
+
   try {
     const json = Buffer.from(payloadBase64, "base64url").toString("utf-8");
     const parsed = JSON.parse(json) as Partial<SessionPayload>;
+    // Cookies minted before the split carry the envelope inside the claims.
+    if (envelopeJwt) {
+      parsed.envelopeJwt = envelopeJwt;
+    }
 
     // Validate required claims
     if (

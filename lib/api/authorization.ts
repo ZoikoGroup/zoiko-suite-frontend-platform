@@ -62,6 +62,12 @@ export type RoleAssignment = {
   last_granted_at?: string | null;
   /** The holder's standing, projected from identity-context-svc. */
   principal_status?: string | null;
+  /**
+   * API-3 version (000038). Approve, reject and revoke send it back as
+   * expected_version: authorization-svc requires it since AZ-1 (428 without,
+   * 412 when stale).
+   */
+  version?: number;
 };
 
 /**
@@ -1752,6 +1758,8 @@ export type WorkloadBinding = {
   allowed_actions: string[];
   active_flag: boolean;
   created_at: string;
+  /** API-3 version (000039); deactivate / reactivate send it back (required since AZ-1). */
+  version?: number;
 };
 
 export async function listWorkloadBindings(

@@ -17,7 +17,7 @@ function clock(epochSeconds: number) {
  * with two-step (high-risk approvals go straight through), or plainly signed in.
  */
 export function SessionChip({ session, now }: { session: SessionPayload; now: number }) {
-  const trust = sessionTrust(session);
+  const trust = sessionTrust(session, now);
   const seconds = now / 1000;
   const expired = trust.signed && !!trust.expiresAt && trust.expiresAt < seconds;
   const fresh = trust.mfa && !!trust.authTime && seconds - trust.authTime < STEP_UP_WINDOW;

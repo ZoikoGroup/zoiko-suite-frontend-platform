@@ -126,13 +126,23 @@ function Kpis({ health, trust, now }: { health: GatewayHealth; trust: SessionTru
       ? { value: "0", tone: "red", status: "None published", helper: "every envelope fails as invalid_token" }
       : { value: String(jwks.keys.length), tone: "green", status: "Published", helper: "by identity-context-svc" };
 
-  const expired = trust.signed && !!trust.expiresAt && trust.expiresAt < seconds;
+  // The envelope's own lifetime (minutes), not the session's: a session signed
+  // in through the identity service renews it before it lapses (proxy.ts).
+  const envelopeExp = trust.envelopeExpiresAt;
+  const expired = trust.signed && !trust.renews && !!envelopeExp && envelopeExp < seconds;
   const envelope: { value: string; tone: KpiTone; status: string; helper?: string } = !trust.signed
     ? { value: "None", tone: "amber", status: "No envelope", helper: "the gateway refuses this session as no_token" }
     : expired
       ? { value: "Expired", tone: "red", status: "Sign in again", helper: "the gateway answers invalid_token" }
-      : trust.expiresAt
-        ? { value: minutes(trust.expiresAt - seconds), tone: "green", status: "Valid", helper: `until ${formatDateTime(new Date(trust.expiresAt * 1000).toISOString())}` }
+      : envelopeExp
+        ? {
+            value: minutes(Math.max(0, envelopeExp - seconds)),
+            tone: "green",
+            status: trust.renews ? "Valid · renews automatically" : "Valid",
+            helper: trust.renews && trust.expiresAt
+              ? `renewed until the session ends at ${formatDateTime(new Date(trust.expiresAt * 1000).toISOString())}`
+              : `until ${formatDateTime(new Date(envelopeExp * 1000).toISOString())}`,
+          }
         : { value: "Present", tone: "green", status: "Valid", helper: "no expiry claim" };
 
   const assurance: { value: string; tone: KpiTone; status: string; helper?: string } = !trust.signed
@@ -383,7 +393,7 @@ export default async function GatewayPage({
 
   const now = requestTime();
   const health = await readGatewayHealth();
-  const trust = sessionTrust(current.session);
+  const trust = sessionTrust(current.session, now);
 
   return (
     <div className="space-y-5">

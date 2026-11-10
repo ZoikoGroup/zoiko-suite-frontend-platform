@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { CloudOff, FilterX, ScrollText } from "lucide-react";
-import { PanelEmptyState, Pagination } from "@/components/admin/shared";
+import { PanelEmptyState } from "@/components/admin/shared";
+import { CursorPagination } from "@/components/admin/shared";
 import {
   listDecisionRecords,
   explainDecisionError,
@@ -27,17 +28,13 @@ export async function DecisionLogPanel({
   params: Record<string, string | string[] | undefined>;
 }) {
   const limit = filters.limit ?? 50;
-  const offset = filters.offset ?? 0;
-  // One row past the page: this route returns a bare array with no total, so the
-  // probe row is the only way to know a next page exists. Before this, the panel
-  // guessed — "this is a full page, so there are probably more" — and offered no
-  // way to reach them, because nothing wired up the offset the service accepts.
+  const cursor = filters.cursor;
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
   const result = await listDecisionRecords({
     ...filters,
-    limit: limit + 1,
-    offset,
+    limit,
+    cursor,
     identity: {
       principalId: session?.principalId,
       tenantId: session?.tenantId,
@@ -65,20 +62,21 @@ export async function DecisionLogPanel({
     );
   }
 
-  const hasMore = result.data.length > limit;
-  const decisions = hasMore ? result.data.slice(0, limit) : result.data;
+  const { records, nextCursor } = result.data;
+  const hasMore = !!nextCursor;
+  const count = records.length;
 
-  if (decisions.length === 0 && offset > 0) {
+  if (count === 0 && cursor) {
     return (
       <PanelEmptyState
         icon={ScrollText}
         label="Nothing on this page"
-        hint={`Fewer than ${offset + 1} decisions match these filters — go back a page.`}
+        hint={`This cursor returned no results — go back to the first page.`}
       />
     );
   }
 
-  if (decisions.length === 0) {
+  if (count === 0) {
     // Name the filters that are actually applied. Every one of them is an exact
     // equality AND-ed with the rest, so four plausible-looking values can match
     // nothing — and "no results" on its own gives the reader no way to see which
@@ -131,18 +129,17 @@ export async function DecisionLogPanel({
 
   return (
     <div className="space-y-3">
-      <Pagination
+      <CursorPagination
         basePath="/admin/governance"
         params={params}
-        offsetParam="offset"
-        offset={offset}
-        limit={limit}
-        count={decisions.length}
+        cursorParam="cursor"
+        cursor={cursor}
+        count={count}
         hasMore={hasMore}
         noun="record"
         plural="records"
       />
-      <DecisionTable decisions={decisions} />
+      <DecisionTable decisions={records} />
     </div>
   );
 }

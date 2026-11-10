@@ -48,6 +48,8 @@ export type ListDecisionsParams = {
   actor?: string;
   action?: string;
   limit?: number;
+  /** Cursor-based pagination (API-4). If provided, offset is ignored. */
+  cursor?: string;
   /** Required in practice. governance-decision-log-svc reads the tenant from
    *  X-Tenant-Id and answers 400 `missing_tenant_id` without it — every read in
    *  this client used to omit it, so the decision log rendered as "those
@@ -70,6 +72,7 @@ export async function listDecisions(
       actor: params.actor,
       action: params.action,
       limit: params.limit ?? 8,
+      cursor: params.cursor,
     },
   });
 
@@ -269,7 +272,99 @@ function formatTimeAgo(isoTimestamp: string): string {
   return "just now";
 }
 
-// ─── The rest of the service's surface ───────────────────────────────────────
+/** Verify the hash chain integrity for the caller's tenant.
+ *  Returns 200 with {valid: true, checked: N, last_decision_id: "..."}
+ *  or 503 if store unavailable. */
+export async function verifyChain(
+  identity: Identity,
+): Promise<ApiResult<{ valid: boolean; checked: number; last_decision_id: string }>> {
+  return apiGet<{ valid: boolean; checked: number; last_decision_id: string }>(
+    "governance",
+    "/v1/evidence/chain/verify",
+    { identity },
+  );
+}
+
+/** Export the hash chain for the caller's tenant as a JSON stream.
+ *  Each line is a decision with its prev_hash and curr_hash. */
+export type ChainExportEntry = {
+  decision_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  actor_id: string;
+  action_type: string;
+  outcome: string;
+  rule_basis: string;
+  evaluation_context?: unknown;
+  correlation_id: string;
+  workflow_instance_id?: string | null;
+  causation_id?: string | null;
+  decided_at: string;
+  prev_hash: string;
+  curr_hash: string;
+};
+
+export async function exportChain(
+  identity: Identity,
+): Promise<ApiResult<ChainExportEntry[]>> {
+  const result = await apiGet<ChainExportEntry[] | string>("governance", "/v1/evidence/chain/export", {
+    identity,
+  });
+  if (!result.ok) return result;
+  // The backend streams JSON lines; we need to parse each line
+  if (typeof result.data === "string") {
+    return { ok: true, data: result.data.trim().split("\n").map((line) => JSON.parse(line)) };
+  }
+  return { ok: true, data: result.data };
+}
+
+export type EvidencePackage = {
+  package_id: string;
+  tenant_id: string;
+  principal_id: string;
+  last_decision_id: string;
+  decision_count: number;
+  merkle_root: string;
+  sealed_at: string;
+};
+
+export type SealPackageInput = {
+  packageId: string;
+  lastDecisionId: string;
+};
+
+/** Seal a package of decisions up to the given decision ID.
+ *  Returns 201 with {package_id, sealed_at, decision_count, merkle_root}
+ *  or 404 if last_decision_id not found, 503 if store unavailable. */
+export async function sealPackage(
+  identity: Identity,
+  input: SealPackageInput,
+): Promise<ApiResult<EvidencePackage>> {
+  return apiPost<EvidencePackage>(
+    "governance",
+    "/v1/evidence/packages/seal",
+    {
+      package_id: input.packageId,
+      last_decision_id: input.lastDecisionId,
+    },
+    { identity },
+  );
+}
+
+/** Retrieve a sealed evidence package by ID.
+ *  Returns 200 with the package or 404 if not found. */
+export async function getPackage(
+  identity: Identity,
+  packageId: string,
+): Promise<ApiResult<EvidencePackage>> {
+  return apiGet<EvidencePackage>(
+    "governance",
+    `/v1/evidence/packages/${encodeURIComponent(packageId)}`,
+    { identity },
+  );
+}
+
+// --- The rest of the service's surface ---------------------------------------
 //
 // Everything above serves the Overview page, which wants the log pre-digested
 // into feed entries and chart series. The Governance page wants the opposite:
@@ -299,8 +394,17 @@ export type DecisionFilters = {
   to?: string;
   /** Service caps at 200 and defaults to 50. */
   limit?: number;
+  /** Cursor-based pagination (API-4). If provided, offset is ignored. */
+  cursor?: string;
   offset?: number;
   identity?: Identity;
+};
+
+/** Response shape from GET /v1/decisions with cursor paging (API-4). */
+export type ListDecisionsResponse = {
+  records: GovernanceDecision[];
+  next_cursor: string;
+  total_count: number;
 };
 
 /**
@@ -309,11 +413,14 @@ export type DecisionFilters = {
  * Separate from listDecisions() above, which flattens each record into a feed
  * entry and drops evaluation_context. An evidence log read for audit purposes
  * needs the record as stored, including the context blob.
+ *
+ * Supports cursor-based pagination (API-4) via the `cursor` parameter.
+ * Returns the records plus the next_cursor for the following page.
  */
 export async function listDecisionRecords(
   filters: DecisionFilters = {},
-): Promise<ApiResult<GovernanceDecision[]>> {
-  const result = await apiGet<GovernanceDecision[]>("governance", "/v1/decisions", {
+): Promise<ApiResult<{ records: GovernanceDecision[]; nextCursor: string }>> {
+  const result = await apiGet<ListDecisionsResponse>("governance", "/v1/decisions", {
     identity: filters.identity,
     query: {
       actor: filters.actor,
@@ -323,12 +430,12 @@ export async function listDecisionRecords(
       from: filters.from,
       to: filters.to,
       limit: filters.limit ?? 50,
-      offset: filters.offset,
+      cursor: filters.cursor,
     },
   });
 
   if (!result.ok) return result;
-  if (!Array.isArray(result.data)) {
+  if (!result.data?.records || !Array.isArray(result.data.records)) {
     return {
       ok: false,
       error: {
@@ -337,7 +444,7 @@ export async function listDecisionRecords(
       },
     };
   }
-  return { ok: true, data: result.data };
+  return { ok: true, data: { records: result.data.records, nextCursor: result.data.next_cursor } };
 }
 
 /**
@@ -417,7 +524,7 @@ export async function recordDecision(
     {
       correlationId: input.correlationId,
       identity: input.identity,
-      // governance-decision-log-svc enforces §4 purpose_context — "required for
+      // governance-decision-log-svc enforces section4 purpose_context — "required for
       // governed sensitive access" — and refuses the write with 400
       // envelope_incomplete without it. The envelope builder has always
       // supported the field; nothing passed one, so every append from the
@@ -443,7 +550,7 @@ export function bucketOutcome(raw: string): { outcome: DecisionOutcome; unmapped
   return normaliseOutcome(raw);
 }
 
-// ─── Reading a decision without reading the schema ───────────────────────────
+// --- Reading a decision without reading the schema ---------------------------
 //
 // The records this service returns are evidence about whether something was
 // allowed to happen. The people who need that answer — a finance lead checking a
@@ -575,3 +682,5 @@ export function explainDecisionError(message: string): string {
   }
   return message;
 }
+
+// EOF

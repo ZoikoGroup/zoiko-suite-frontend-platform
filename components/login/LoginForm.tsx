@@ -54,30 +54,71 @@ const SSO_PROVIDERS = [
   { label: "Continue with Google", Logo: GoogleLogo },
 ];
 
-export function LoginForm({ redirectTo = "/admin" }: { redirectTo?: string }) {
+type LoginFormProps = {
+  redirectTo?: string;
+  /** Why the reader is here (session ended, sign-in failed, fallback). */
+  notice?: string;
+};
+
+type LoginResponse = {
+  success?: boolean;
+  error?: string;
+  /** "code": the account has two-step; ask for the authenticator code next. */
+  step?: "code";
+  /** The sign-in state expired; go back to email and password. */
+  restart?: boolean;
+  /** The account needs the identity service's own page (passkey, SSO). */
+  identityPage?: string;
+};
+
+// One page for the reader: the server signs in at identity-context-svc with
+// what is typed here (app/api/auth/login), so the session carries the refresh
+// token that keeps it alive for its full eight hours.
+export function LoginForm({ redirectTo = "/admin", notice }: LoginFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [step, setStep] = useState<"credentials" | "code">("credentials");
+  const [identityPage, setIdentityPage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+  const askingCode = step === "code";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setError(null);
+    setIdentityPage(null);
 
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(askingCode ? { code } : { email, password }),
       });
 
-      const data = await res.json().catch(() => null);
+      const data = (await res.json().catch(() => null)) as LoginResponse | null;
+
+      if (data?.step === "code") {
+        setStep("code");
+        setCode("");
+        setLoading(false);
+        return;
+      }
 
       if (!res.ok || !data?.success) {
+        if (data?.restart) {
+          setStep("credentials");
+          setCode("");
+        }
+        if (data?.identityPage) {
+          const params = new URLSearchParams({ redirect: redirectTo });
+          if (email.trim()) params.set("login_hint", email.trim());
+          setIdentityPage(`${data.identityPage.split("?")[0]}?${params.toString()}`);
+        }
         setError(data?.error ?? "Unable to sign in. Please try again.");
         setShake(true);
         setTimeout(() => setShake(false), 400);
@@ -122,13 +163,56 @@ export function LoginForm({ redirectTo = "/admin" }: { redirectTo?: string }) {
       <div className="mx-2 mt-2 rounded-xl px-6 pb-5 pt-5 shadow-[0_2px_16px_rgba(15,23,42,0.06)] sm:mx-4 sm:px-8">
         <div className="animate-fade-up">
           <h2 className="text-3xl font-bold tracking-tight text-navy-900">Welcome back!</h2>
-          <p className="mt-1 text-sm text-slate-500">Sign in to your Zoiko Suite account.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {askingCode
+              ? "Enter the 6-digit code from your authenticator app."
+              : "Sign in to your Zoiko Suite account."}
+          </p>
         </div>
+
+        {notice && (
+          <div className="mt-4 flex items-start gap-2 rounded-md bg-amber-50 px-3.5 py-2.5 text-sm text-amber-800 ring-1 ring-amber-200 animate-fade-in">
+            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{notice}</span>
+          </div>
+        )}
 
         <form
           onSubmit={handleSubmit}
           className={cn("mt-5 space-y-3", shake && "animate-[shake_0.4s_ease-in-out]")}
         >
+          {askingCode && (
+            <div className="animate-fade-up">
+              <label htmlFor="code" className="text-sm font-medium text-slate-800">
+                Authenticator code
+              </label>
+              <input
+                id="code"
+                inputMode="numeric"
+                pattern="[0-9 ]{6,8}"
+                required
+                autoFocus
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="123456"
+                className={cn(inputClass, "mt-1 tracking-widest")}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("credentials");
+                  setCode("");
+                  setError(null);
+                }}
+                className="mt-2 text-xs font-medium text-gold-500 transition-colors hover:text-gold-600"
+              >
+                Use a different account
+              </button>
+            </div>
+          )}
+
+          {!askingCode && (
           <div className="animate-fade-up" style={{ animationDelay: "60ms" }}>
             <label htmlFor="email" className="text-sm font-medium text-slate-800">
               Email address
@@ -144,7 +228,9 @@ export function LoginForm({ redirectTo = "/admin" }: { redirectTo?: string }) {
               className={cn(inputClass, "mt-1")}
             />
           </div>
+          )}
 
+          {!askingCode && (
           <div className="animate-fade-up" style={{ animationDelay: "120ms" }}>
             <label htmlFor="password" className="text-sm font-medium text-slate-800">
               Password
@@ -171,6 +257,7 @@ export function LoginForm({ redirectTo = "/admin" }: { redirectTo?: string }) {
               </button>
             </div>
           </div>
+          )}
 
           <div
             className="flex items-center justify-between text-xs animate-fade-up"
@@ -191,13 +278,23 @@ export function LoginForm({ redirectTo = "/admin" }: { redirectTo?: string }) {
           {error && (
             <div className="flex items-start gap-2 rounded-md bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700 ring-1 ring-rose-200 animate-fade-in">
               <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{error}</span>
+              <span>
+                {error}
+                {identityPage && (
+                  <>
+                    {" "}
+                    <a href={identityPage} className="font-semibold underline">
+                      Continue on the identity sign-in page
+                    </a>
+                  </>
+                )}
+              </span>
             </div>
           )}
 
           <div className="animate-fade-up" style={{ animationDelay: "240ms" }}>
             <Button type="submit" variant="accent" loading={loading} className="h-10 w-full rounded-md">
-              Log In
+              {askingCode ? "Verify" : "Log In"}
             </Button>
           </div>
         </form>

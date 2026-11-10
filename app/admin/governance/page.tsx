@@ -14,8 +14,12 @@ import {
   DecisionLogPanel,
   DecisionLookup,
   RecordDecisionForm,
+  VerifyChainButton,
+  SealPackageForm,
 } from "@/components/admin/governance";
 import type { DecisionFilters } from "@/lib/api/governance";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 
 export const metadata: Metadata = { title: "Governance Log" };
 
@@ -36,11 +40,23 @@ function LogSkeleton() {
   );
 }
 
+async function getIdentity() {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.tenantId) return null;
+  return {
+    principalId: session.principalId,
+    tenantId: session.tenantId,
+    legalEntityId: session.legalEntityId,
+  };
+}
+
 export default async function GovernancePage({ searchParams }: PageProps) {
   const params = await searchParams;
+  const identity = await getIdentity();
 
   const limitRaw = Number(one(params.limit));
-  const offsetRaw = Number(one(params.offset));
+  const cursor = one(params.cursor);
   const filters: DecisionFilters = {
     actor: one(params.actor),
     entity: one(params.entity),
@@ -52,7 +68,7 @@ export default async function GovernancePage({ searchParams }: PageProps) {
     // `limit + 1` rows to detect a next page, and a request for 201 would be
     // silently capped at 200 — making a full page look like the last one.
     limit: Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 199) : 50,
-    offset: Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : undefined,
+    cursor,
   };
 
   // The panel re-reads whenever the filters change, and Suspense keys off them
@@ -108,6 +124,26 @@ export default async function GovernancePage({ searchParams }: PageProps) {
           </div>
         </CardContent>
       </Card>
+
+      {identity && (
+        <Card className="mb-6">
+          <CardHeader>
+            <div>
+              <CardTitle>Evidence ledger (G-07)</CardTitle>
+              <CardDescription>
+                Tamper-evident hash chain over every decision in this tenant. Verify integrity,
+                export the full chain, or seal a snapshot as a Merkle-rooted package.
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <VerifyChainButton identity={identity} />
+            <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
+              <SealPackageForm identity={identity} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="mb-6">
         <CardHeader>

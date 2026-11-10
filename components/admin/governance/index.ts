@@ -7,3 +7,6 @@ export { DecisionTable } from "./DecisionTable";
 export { DecisionSummary } from "./DecisionSummary";
 export { DecisionLookup } from "./DecisionLookup";
 export { RecordDecisionForm } from "./RecordDecisionForm";
+// G-07 Evidence ledger client components
+export { VerifyChainButton } from "./VerifyChainButton";
+export { SealPackageForm } from "./SealPackageForm";

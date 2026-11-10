@@ -7,7 +7,14 @@
 
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, decodeSession, toIdentity, type SessionIdentity, type SessionPayload } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  decodeSession,
+  remainingSessionSeconds,
+  toIdentity,
+  type SessionIdentity,
+  type SessionPayload,
+} from "@/lib/auth";
 import {
   isAssignmentActive,
   listABACRules,
@@ -67,8 +74,16 @@ export type ApprovalItem = {
 export type SessionTrust = {
   signed: boolean;
   mfa: boolean;
-  /** When the signed session ends (seconds since epoch). */
+  /**
+   * When the signed session ends (seconds since epoch). For a session that
+   * renews its envelope (OIDC sign-in with a refresh token) that is the
+   * session cookie's deadline, not the envelope's own five-minute exp.
+   */
   expiresAt?: number;
+  /** When the current envelope itself expires (seconds since epoch). */
+  envelopeExpiresAt?: number;
+  /** proxy.ts renews the envelope before it expires (lib/oidc.ts). */
+  renews: boolean;
   /** When the person last proved who they are (seconds since epoch). */
   authTime?: number;
 };
@@ -81,17 +96,26 @@ export const currentSession = cache(async (): Promise<{ session: SessionPayload;
 });
 
 /** What the session's envelope says, for display only — the services verify it. */
-export function sessionTrust(session: SessionPayload): SessionTrust {
-  if (!session.envelopeJwt) return { signed: false, mfa: false };
+export function sessionTrust(session: SessionPayload, now: number = Date.now()): SessionTrust {
+  if (!session.envelopeJwt) return { signed: false, mfa: false, renews: false };
   try {
     const c = JSON.parse(Buffer.from(session.envelopeJwt.split(".")[1] ?? "", "base64url").toString("utf-8")) as {
       exp?: number;
       auth_time?: number;
       session_trust_posture?: { mfa_verified?: boolean };
     };
-    return { signed: true, mfa: !!c.session_trust_posture?.mfa_verified, expiresAt: c.exp, authTime: c.auth_time };
+    const renews = !!session.refreshToken;
+    const sessionEnd = Math.floor(now / 1000) + remainingSessionSeconds(session, now);
+    return {
+      signed: true,
+      mfa: !!c.session_trust_posture?.mfa_verified,
+      expiresAt: renews ? sessionEnd : c.exp,
+      envelopeExpiresAt: c.exp,
+      renews,
+      authTime: c.auth_time,
+    };
   } catch {
-    return { signed: false, mfa: false };
+    return { signed: false, mfa: false, renews: false };
   }
 }
 
@@ -153,7 +177,7 @@ export function approvalItems(r: Registers, me: string): ApprovalItem[] {
       title: `${roleName.get(a.role_id) ?? "A role"} for ${person(a.principal_id).name}`,
       detail: a.legal_entity_id ? "One legal entity" : "Whole organisation",
       requestedBy: a.assigned_by, subject: a.principal_id, requestedAt: a.created_at, expiresAt: a.approval_expires_at ?? null,
-      approve: "assignment.approve", reject: "assignment.reject", stepUp: false, notYours: notYours(a.assigned_by, a.principal_id),
+      approve: "assignment.approve", reject: "assignment.reject", stepUp: false, notYours: notYours(a.assigned_by, a.principal_id), version: a.version,
     });
   }
   for (const s of r.jit) {
