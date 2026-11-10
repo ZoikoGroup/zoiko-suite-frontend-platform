@@ -69,12 +69,14 @@ export async function startAssistant(): Promise<void> {
   proc.on("error", (err) => serverLogs.push(`[proc error: ${err.message}]`));
   proc.on("exit", (code) => serverLogs.push(`[proc exited with code ${code}]`));
 
+  const started = proc;
   for (let i = 0; i < 100; i++) {
     if (await healthy()) return;
     if (started.exitCode !== null) {
       // e.g. the port is still held: say why instead of timing out.
       proc = null;
-      throw new Error(`public-ai-svc exited with code ${started.exitCode}: ${stderr.trim().split("\n").slice(-3).join(" | ")}`);
+      const tail = serverLogs.join("").trim().split("\n").slice(-3).join(" | ");
+      throw new Error(`public-ai-svc exited with code ${started.exitCode}: ${tail}`);
     }
     await new Promise((r) => setTimeout(r, 200));
   }
