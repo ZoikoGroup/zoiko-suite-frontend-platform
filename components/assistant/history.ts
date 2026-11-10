@@ -1,20 +1,20 @@
 // Conversation history kept in the visitor's own browser, never sent to the
 // service (Doc 02 §10, Doc 06 §11 and §17).
 //
-// By default history lives in sessionStorage: this tab only, gone when it
-// closes, because a long-lived browser transcript is not allowed by default.
-// The visitor may opt in to "Remember my chats on this device": history then
-// lives in localStorage for at most DEVICE_TTL_MS (24 hours, the service's
-// own retention default). Opting out deletes it.
-// Questions are stored masked (maskForHistory), so the browser never keeps
-// more than the service does.
+// History is kept on this device (localStorage) by default and never expires:
+// like a desktop chat app, earlier conversations stay until the visitor
+// deletes them (a conversation, or all of them) or turns "Remember my chats
+// on this device" off, which deletes the device copy and keeps history for
+// this tab only (sessionStorage). Product decision of 2026-11-07, replacing
+// the 24-hour device expiry; the privacy notice must say so.
+// Questions are stored masked (maskForHistory), so the browser keeps no
+// contact details or secrets.
 
 export const SESSION_KEY = "zoiko-assistant-conversations";
 export const DEVICE_KEY = "zoiko-assistant-history-v1";
-export const REMEMBER_KEY = "zoiko-assistant-remember";
-export const DEVICE_TTL_MS = 24 * 60 * 60 * 1000;
+export const REMEMBER_KEY = "zoiko-assistant-remember"; // "0" = opted out
 export const SESSION_MAX = 10;
-export const DEVICE_MAX = 50;
+export const DEVICE_MAX = 200;
 
 export type SavedConversation = {
   id: string;
@@ -31,21 +31,21 @@ function store(remember: boolean): Storage | null {
   }
 }
 
-/** Whether the visitor opted in to keeping history on this device. */
+/** Whether history is kept on this device: yes unless the visitor opted out. */
 export function rememberOn(): boolean {
   try {
-    return window.localStorage.getItem(REMEMBER_KEY) === "1";
+    return window.localStorage.getItem(REMEMBER_KEY) !== "0";
   } catch {
-    return false;
+    return false; // storage blocked: nothing can be kept
   }
 }
 
 /** Records the choice. Turning it off deletes the device history. */
 export function setRemember(on: boolean) {
   try {
-    if (on) window.localStorage.setItem(REMEMBER_KEY, "1");
+    if (on) window.localStorage.removeItem(REMEMBER_KEY);
     else {
-      window.localStorage.removeItem(REMEMBER_KEY);
+      window.localStorage.setItem(REMEMBER_KEY, "0");
       window.localStorage.removeItem(DEVICE_KEY);
     }
   } catch {
@@ -53,12 +53,8 @@ export function setRemember(on: boolean) {
   }
 }
 
-function fresh(c: SavedConversation, now: number): boolean {
-  return now - (c.updatedAt ?? c.startedAt) < DEVICE_TTL_MS;
-}
-
-/** Saved conversations, newest first; expired device entries are dropped. */
-export function readHistory(remember: boolean, now = Date.now()): SavedConversation[] {
+/** Saved conversations, newest first. */
+export function readHistory(remember: boolean): SavedConversation[] {
   const s = store(remember);
   if (!s) return [];
   try {
@@ -66,17 +62,17 @@ export function readHistory(remember: boolean, now = Date.now()): SavedConversat
     const list: unknown = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(list)) return [];
     const valid = (list as SavedConversation[]).filter((c) => c && typeof c.id === "string" && Array.isArray(c.turns));
-    return remember ? valid.filter((c) => fresh(c, now)) : valid;
+    return valid;
   } catch {
     return [];
   }
 }
 
-export function writeHistory(list: SavedConversation[], remember: boolean, now = Date.now()) {
+export function writeHistory(list: SavedConversation[], remember: boolean) {
   const s = store(remember);
   if (!s) return;
   const key = remember ? DEVICE_KEY : SESSION_KEY;
-  const kept = (remember ? list.filter((c) => fresh(c, now)) : list).slice(0, remember ? DEVICE_MAX : SESSION_MAX);
+  const kept = list.slice(0, remember ? DEVICE_MAX : SESSION_MAX);
   try {
     if (kept.length) s.setItem(key, JSON.stringify(kept));
     else s.removeItem(key);

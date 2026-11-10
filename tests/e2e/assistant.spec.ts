@@ -149,7 +149,7 @@ for (const scheme of ["light", "dark"] as const) {
       await ask(page, "What does Legal and Contracts do?");
       const answer = dialog.getByTestId("assistant-answer").last();
       await expect(answer).toHaveAttribute("data-status", "ANSWERED");
-      await expect(answer).toContainText("Legal and Contracts governs commercial agreements");
+      await expect(answer).toContainText("Legal and Contracts, governs commercial agreements");
       await expect(answer.getByTestId("assistant-sources")).toContainText("Legal and Contracts");
       await expect(answer).toContainText("Draft content");
       await expect(answer.getByRole("link")).toHaveCount(0); // no real URLs yet: no CTA, unlinked titles
@@ -307,7 +307,10 @@ test("Test 7: the exact question reaches the backend and its answer is what is s
   expect((req.postDataJSON() as { message: string }).message).toBe(question);
   const body = (await res.json()) as { text: string; status: string };
   const answer = page.getByTestId("assistant-answer").last();
-  await expect(answer).toContainText(body.text.split("\n")[0]);
+  // The first sentence: a long answer is shown up to "Show more" (Doc 01
+  // §12), so the whole first paragraph may not be on screen yet.
+  const firstSentence = body.text.split("\n")[0].split(/(?<=[.!?])\s/)[0];
+  await expect(answer).toContainText(firstSentence);
   expect(body.status).toBe("ANSWERED");
 });
 

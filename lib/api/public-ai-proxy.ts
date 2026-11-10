@@ -23,6 +23,7 @@ const ALLOWED = [
   /^turns$/,
   /^turns\/[A-Za-z0-9_-]{1,128}\/feedback$/,
   /^handoffs$/,
+  /^analytics$/,
 ];
 
 export function allowedPath(segments: string[]): string | null {

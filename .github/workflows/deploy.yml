@@ -30,7 +30,7 @@ jobs:
 
       - name: Deploy over SSH
         id: deploy_ssh
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
         continue-on-error: true
         with:
           host: ${{ secrets.GCP_SSH_HOST }}

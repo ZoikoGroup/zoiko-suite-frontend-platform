@@ -363,10 +363,16 @@
 }
 .za-subtitle-icon { flex: none; }
 .za-subtitle-short { display: none; }
-/* The disclosure never clips: shorter approved copy when the panel is narrow. */
-@container za-panel (max-width: 420px) {
+/* The disclosure never clips: shorter approved copy when the panel is narrow.
+   Measured in em (the panel's 15 px body text, 420 px = 28em), so enlarged
+   text (WCAG 1.4.4 text-only zoom) switches to the short copy too, and at
+   very large text sizes the pill may wrap instead of overflowing. */
+@container za-panel (max-width: 28em) {
   .za-subtitle-full { display: none; }
   .za-subtitle-short { display: inline; }
+}
+@container za-panel (max-width: 17em) {
+  .za-subtitle { white-space: normal; border-radius: 12px; }
 }
 /* Title stays on one line: on narrow panels the wordmark shrinks, and on
    the narrowest it is dropped (it is decorative; the title names the panel). */
@@ -512,8 +518,10 @@
 }
 .za-avatar { flex: none; margin-top: 2px; }
 .za-md p { margin: 0; }
-.za-md p + p, .za-md ul + p, .za-md p + ul { margin-top: var(--za-space-2); }
+.za-md p + p, .za-md ul + p, .za-md p + ul, .za-md ol + p, .za-md p + ol { margin-top: var(--za-space-2); }
 .za-md ul { margin: 0; padding-left: 1.1rem; list-style: disc; }
+.za-md ol { margin: 0; padding-left: 1.4rem; list-style: decimal; }
+.za-md ol > li + li { margin-top: 2px; }
 .za-md code { padding: 0 4px; border-radius: 4px; background: var(--za-border); font-size: 0.85em; }
 .za-meta { font-size: var(--za-font-meta); line-height: 1rem; color: var(--za-text-muted); }
 [data-tone="warn"] .za-meta, [data-tone="error"] .za-meta { color: inherit; }
@@ -915,7 +923,8 @@ html[data-za-lock="true"], html[data-za-lock="true"] body { overflow: hidden; }
    word. Never runs under reduced motion (the reveal itself is skipped). */
 .za-bubble[data-typing] { cursor: pointer; }
 .za-bubble[data-typing] .za-md > p:last-child::after,
-.za-bubble[data-typing] .za-md > ul:last-child > li:last-child::after {
+.za-bubble[data-typing] .za-md > ul:last-child > li:last-child::after,
+.za-bubble[data-typing] .za-md > ol:last-child > li:last-child::after {
   content: "";
   display: inline-block;
   width: 0.45em;
