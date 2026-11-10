@@ -39,6 +39,9 @@ import {
   ListChecks,
   TriangleAlert,
   UserCheck,
+  History,
+  FileText,
+  Banknote,
 } from "lucide-react";
 
 export type DomainKey =
@@ -253,8 +256,12 @@ export const BUSINESS_DOMAINS: BusinessDomain[] = [
     description:
       "Audit event store, document vault, evidence manifests, workflow history, schema and retention registries, source authority and kill switches.",
     icon: FileArchive,
-    destinations: [{ label: "Source Authority", href: "/admin/source-authority" }],
-    gap: "Audit events, documents, schemas and retention have no page.",
+    destinations: [
+      { label: "Source Authority", href: "/admin/source-authority" },
+      { label: "Audit Events", href: "/admin/audit-events" },
+      { label: "Document Vault", href: "/admin/documents" },
+    ],
+    gap: "Schemas and retention have no page.",
   },
   {
     section: "3.4",
@@ -272,8 +279,10 @@ export const BUSINESS_DOMAINS: BusinessDomain[] = [
     description:
       "Employee master, employment contracts, payroll runs, compensation, benefits, payroll tax, leave, org structure and workforce compliance.",
     icon: Users,
-    destinations: [],
-    gap: "HR and payroll pages were removed; only their server actions remain.",
+    destinations: [
+      { label: "HR & Workforce", href: "/admin/hr" },
+      { label: "Payroll", href: "/admin/payroll" },
+    ],
   },
   {
     section: "3.6",
@@ -389,8 +398,7 @@ const DOMAIN_2_GOVERNANCE: typeof SECONDARY_NAV = [
  * collapsed rail shows for the whole group.
  */
 export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECONDARY_NAV }[] = [
-  // Overview and My Work pages are "Coming soon" shells. The live Overview
-  // dashboard stays at /admin, reached from the logo.
+  // The live Overview dashboard stays at /admin, reached from the logo.
   {
     title: "Overview",
     icon: House,
@@ -411,10 +419,26 @@ export const NAV_SECTIONS: { title: string; icon: LucideIcon; items: typeof SECO
   { title: "Identity, Scope & Foundation", icon: Fingerprint, items: DOMAIN_1_IDENTITY },
   { title: "Governance Platform", icon: Landmark, items: DOMAIN_2_GOVERNANCE },
   {
+    title: "Evidence & Audit",
+    icon: FileArchive,
+    items: [
+      { label: "Audit Events", href: "/admin/audit-events", icon: History },
+      { label: "Document Vault", href: "/admin/documents", icon: FileText },
+    ],
+  },
+  {
     title: "Finance & Treasury",
     icon: Wallet,
     items: [
       { label: "Finance & Payments", href: "/admin/finance", icon: CircleDollarSign },
+    ],
+  },
+  {
+    title: "Payroll & Workforce",
+    icon: Users,
+    items: [
+      { label: "HR & Workforce", href: "/admin/hr", icon: Users },
+      { label: "Payroll", href: "/admin/payroll", icon: Banknote },
     ],
   },
   {

@@ -13,7 +13,7 @@ import { serviceUrl, type ServiceName } from "./config";
  * Each entry names its registry key, so the probe resolves through serviceUrl()
  * (env overrides and gateway mode) instead of a port that can drift from it.
  */
-const DOMAIN_SERVICES: Record<DomainKey, { name: string; key: ServiceName }[]> = {
+export const DOMAIN_SERVICES: Record<DomainKey, { name: string; key: ServiceName }[]> = {
   legal: [
     { name: "contract-lifecycle-svc",    key: "contracts" },
     { name: "clause-template-svc",       key: "clauseTemplate" },
