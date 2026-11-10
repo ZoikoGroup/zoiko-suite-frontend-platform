@@ -90,6 +90,15 @@ function reply(message: string): Env | "abort" {
       actions: [{ type: "OPEN_OFFICIAL_ROUTE", route_key: "pricing" }],
     });
   }
+  if (m.includes("uptime")) {
+    return env({
+      status: "ABSTAIN",
+      intent_id: "I12",
+      text: "I couldn't verify that from approved ZoikoSuite sources, so I won't guess.",
+      answer_class: "HANDOFF_UNKNOWN",
+      reason: "VALIDATION_FAILED",
+    });
+  }
   if (m.includes("invoices")) {
     return env({
       status: "REFUSED_ACTION",
@@ -222,12 +231,26 @@ for (const vp of VIEWPORTS) {
       expect(s.sw).toBeLessThanOrEqual(s.cw);
 
       const vh = vp.height;
-      for (const loc of [dialog.getByRole("button", { name: "Close chat" }), dialog.getByRole("textbox", { name: "Message" }), dialog.getByRole("button", { name: "Send message" })]) {
+      // Below 768 px the header has its own "Close chat" (X). From 768 px the
+      // open launcher is the close button (a full-size X beside the panel) and
+      // MENU carries a "Close chat" item, so the in-header X is narrow-only by design.
+      const wide = vp.width >= 768;
+      const closeControl = wide ? launcher : dialog.getByRole("button", { name: "Close chat" });
+      await expect(closeControl).toHaveAccessibleName("Close chat");
+      for (const loc of [closeControl, dialog.getByRole("button", { name: "Menu", exact: true }), dialog.getByRole("textbox", { name: "Message" }), dialog.getByRole("button", { name: "Send message" })]) {
         await expect(loc).toBeVisible();
         const b = (await loc.boundingBox())!;
         expect(b.y).toBeGreaterThanOrEqual(0);
         expect(b.y + b.height).toBeLessThanOrEqual(vh + 1);
         expect(b.x + b.width).toBeLessThanOrEqual(vp.width + 1);
+      }
+      // Close target: 44 px on touch and for the launcher, never below WCAG 2.2's 24 px.
+      const cb = (await closeControl.boundingBox())!;
+      expect(Math.min(cb.width, cb.height)).toBeGreaterThanOrEqual(vp.touch || wide ? 44 : 24);
+      if (wide) {
+        await dialog.getByRole("button", { name: "Menu", exact: true }).click();
+        await expect(dialog.getByRole("menuitem", { name: "Close chat" })).toBeVisible();
+        await page.keyboard.press("Escape");
       }
       await page.screenshot({ path: `${shotDir}/viewport-${vp.width}x${vp.height}.png` });
     });
@@ -262,9 +285,11 @@ test.describe("target sizes on a pointer desktop (1280x800)", () => {
     const launcher = (await page.getByTestId("assistant-launcher").boundingBox())!;
     for (const c of await size(page, ".za-header .za-control")) expect(Math.min(c.w, c.h), c.name ?? "").toBeGreaterThanOrEqual(32);
     const chips = await size(page, "[data-testid=assistant-welcome] .za-chip");
-    expect(chips.map((c) => c.name)).toEqual(["Pricing and trial", "Explore modules", "Book a demo", "Security and trust"]);
+    // The leading icon is decorative (aria-hidden); compare the label text.
+    expect(chips.map((c) => (c.name ?? "").replace(/^[^\p{L}]+/u, ""))).toEqual(["Explore platform", "Compare plans", "Book demo", "Security & trust"]);
     for (const c of chips) expect(c.h).toBeGreaterThanOrEqual(40);
-    await expect(dialog.getByRole("button", { name: "More topics" })).toBeVisible();
+    // Doc 02 T01: exactly four quick actions, so nothing is hidden behind "More topics".
+    await expect(dialog.getByRole("button", { name: "More topics" })).toHaveCount(0);
     await ask(page, "What does Legal and Contracts do?");
     expect((await dialog.locator(".za-cta").boundingBox())!.height).toBeGreaterThanOrEqual(44);
     const send = (await dialog.getByRole("button", { name: "Send message" }).boundingBox())!;
@@ -273,8 +298,12 @@ test.describe("target sizes on a pointer desktop (1280x800)", () => {
     // Panel and launcher both visible, not overlapping (W01).
     const panel = (await dialog.boundingBox())!;
     expect(overlaps(panel, launcher)).toBe(false);
-    expect(Math.round(panel.width)).toBe(400);
-    await dialog.getByRole("button", { name: "Expand chat" }).click();
+    // 480 px by design (--za-panel-width in assistant.css): fits the wordmark,
+    // title and MENU label on one line. Expand now lives in MENU.
+    expect(Math.round(panel.width)).toBe(480);
+    await dialog.getByRole("button", { name: "Menu", exact: true }).click();
+    for (const item of await size(page, ".za-menu [role=menuitem]")) expect(item.h, item.name ?? "").toBeGreaterThanOrEqual(32);
+    await dialog.getByRole("menuitem", { name: "Expand chat" }).click();
     await expect.poll(async () => Math.round((await dialog.boundingBox())!.width)).toBe(560);
   });
 });
@@ -379,11 +408,18 @@ test.describe("scrolling", () => {
     const convo = dialog.getByTestId("assistant-conversation");
     await ask(page, "Give me the long version");
     const answer = dialog.getByTestId("assistant-answer").last();
-    await expect(answer).toContainText("Line 28");
+    // Answers over 120 words open clamped with "Show more" (Doc 01 default
+    // length); the full text is one click away.
+    await expect(answer).toContainText("Line 1 of");
     const a = (await answer.boundingBox())!;
     const c = (await convo.boundingBox())!;
     expect(a.y).toBeGreaterThanOrEqual(c.y - 1); // the START of the answer is visible
     expect(a.y).toBeLessThan(c.y + 80);
+    await expect(answer).not.toContainText("Line 28");
+    const more = answer.getByRole("button", { name: "Show more" });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await more.click();
+    await expect(answer).toContainText("Line 28");
 
     await ask(page, "and the long one again");
     await expect(dialog.getByTestId("assistant-answer")).toHaveCount(2);
@@ -422,7 +458,11 @@ test.describe("scrolling", () => {
     await dialog.getByRole("button", { name: "Try again" }).click();
     await expect(dialog.getByTestId("assistant-answer")).toBeVisible();
     await expect(dialog.getByTestId("visitor-bubble")).toHaveCount(1);
-    await expect(dialog).toHaveScreenshot("retry-single-bubble.png", { animations: "disabled" });
+    // Pixel baselines exist for Windows only (fonts render differently on
+    // Linux CI); the no-duplicate assertions above run everywhere.
+    if (process.platform === "win32") {
+      await expect(dialog).toHaveScreenshot("retry-single-bubble.png", { animations: "disabled" });
+    }
   });
 });
 
@@ -462,7 +502,7 @@ test.describe("states S00-S09 and reduced motion", () => {
     await expect(s3.locator(".za-source")).toHaveCount(2);
     await expect(s3.locator(".za-source").first()).not.toContainText("zoikosuite.com"); // no raw domain
     await expect(s3.locator(".za-cta")).toHaveCount(1);
-    await expect(s3.getByRole("button", { name: "Yes, this was helpful" })).toBeVisible();
+    await expect(s3.getByRole("button", { name: "This was helpful" })).toBeVisible();
 
     await ask(page, "What plans are available?"); // S04
     await expect(dialog.getByRole("list", { name: "Choose an answer" }).getByRole("button")).toHaveText(["United States", "United Kingdom", "Other", "Show general overview"]);
@@ -471,7 +511,14 @@ test.describe("states S00-S09 and reduced motion", () => {
     const s5 = dialog.getByTestId("assistant-answer").last();
     await expect(s5).toContainText("I couldn't verify that");
     await expect(s5.locator(".za-badge[data-tone=warn]")).toContainText("Unverified");
-    await expect(s5.getByRole("button", { name: "Try again" })).toBeVisible();
+    // Missing evidence is release state: a retry would repeat the reply, so S05
+    // offers the official route instead (canRetry in AssistantWidget.tsx).
+    await expect(s5.getByRole("button", { name: "Try again" })).toHaveCount(0);
+    await expect(s5.locator(".za-cta")).toHaveCount(1);
+    await ask(page, "What is your uptime guarantee?"); // S05, retryable (validation failed)
+    const s5b = dialog.getByTestId("assistant-answer").last();
+    await expect(s5b.locator(".za-badge[data-tone=warn]")).toContainText("Unverified");
+    await expect(s5b.getByRole("button", { name: "Try again" })).toBeVisible();
 
     await ask(page, "Show my overdue invoices"); // S06
     const s6 = dialog.getByTestId("assistant-answer").last();
@@ -493,7 +540,7 @@ test.describe("states S00-S09 and reduced motion", () => {
     fail = false;
     await s8.getByRole("button", { name: "Try again" }).click();
     await expect(dialog.getByTestId("assistant-unavailable")).toHaveCount(0);
-    await expect(dialog.getByTestId("visitor-bubble")).toHaveCount(6); // the retry reused its bubble
+    await expect(dialog.getByTestId("visitor-bubble")).toHaveCount(7); // the retry reused its bubble
 
     await context.setOffline(true);
     await expect(dialog.getByTestId("assistant-offline")).toBeVisible();
@@ -589,6 +636,9 @@ for (const scheme of ["light", "dark"] as const) {
     });
 
     test(`visual snapshots (${scheme})`, async ({ page }) => {
+      // Screenshot-only test: baselines are Windows (*-win32.png). Generate
+      // Linux baselines in the Playwright Linux image to run it in CI too.
+      test.skip(process.platform !== "win32", "screenshot baselines are Windows-only");
       // Reduced motion: the expand applies instantly, so text is not caught mid-reflow.
       await page.emulateMedia({ reducedMotion: "reduce" });
       await mockApi(page);
@@ -616,7 +666,8 @@ for (const scheme of ["light", "dark"] as const) {
       await dialog.getByTestId("assistant-end").getByRole("button", { name: "Retention notice" }).click();
       await expect(dialog.getByRole("region", { name: "Privacy and AI notice" })).toBeVisible();
       await expect(dialog).toHaveScreenshot(`privacy-${scheme}.png`, { animations: "disabled", mask: [dialog.getByTestId("assistant-reference")] });
-      await dialog.getByRole("button", { name: "Expand chat" }).click();
+      await dialog.getByRole("button", { name: "Menu", exact: true }).click();
+      await dialog.getByRole("menuitem", { name: "Expand chat" }).click();
       await expect.poll(async () => Math.round((await dialog.boundingBox())!.width)).toBe(560);
       await page.mouse.move(5, 5); // no hover style under the pointer after the panel grows
       await dialog.getByTestId("assistant-conversation").evaluate((el) => {
@@ -678,3 +729,33 @@ for (const width of [1280, 768, 375]) {
     });
   }
 }
+
+// WCAG 1.4.4 / Doc 07 §15 (QA-T051/T052): text-only zoom to 200 %. The widget
+// sizes text in rem, so doubling the root font size doubles every text size
+// without changing the viewport; nothing may be clipped or scroll sideways.
+test.describe("text-only zoom 200%", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("text doubles; no horizontal scroll; composer, send and answer stay reachable", async ({ page }) => {
+    await mockApi(page);
+    await page.goto("/assistant");
+    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+    await page.getByTestId("assistant-launcher").click();
+    const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
+    await expect(dialog.getByTestId("assistant-welcome")).toBeVisible();
+    await ask(page, "What does Legal and Contracts do?");
+    const answer = dialog.getByTestId("assistant-answer").last();
+    await expect(answer).toBeVisible();
+    const px = await answer.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(px).toBeGreaterThanOrEqual(29); // 15 px body text at 200 %
+
+    const doc = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+    expect(doc.sw).toBeLessThanOrEqual(doc.cw);
+    const panel = await dialog.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+    expect(panel.sw).toBeLessThanOrEqual(panel.cw);
+    for (const name of ["Message", "Send message"]) {
+      const el = name === "Message" ? dialog.getByRole("textbox", { name }) : dialog.getByRole("button", { name });
+      await expect(el).toBeInViewport();
+    }
+  });
+});

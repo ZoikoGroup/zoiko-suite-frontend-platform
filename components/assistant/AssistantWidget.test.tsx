@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   loadAssistantConfig: vi.fn(),
   loadAssistantMenu: vi.fn(),
   rateAssistantAnswer: vi.fn(),
+  recordAssistantEvent: vi.fn(),
   recordAssistantHandoff: vi.fn(),
   startAssistantSession: vi.fn(),
 }));
@@ -57,6 +58,10 @@ const ok = <T,>(data: T) => ({ ok: true as const, data });
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
+  // Chats are saved as they go, so each test starts with empty history.
+  window.sessionStorage.clear();
+  window.localStorage.removeItem("zoiko-assistant-history-v1");
+  window.localStorage.removeItem("zoiko-assistant-remember");
   Element.prototype.scrollIntoView = vi.fn();
   api.loadAssistantConfig.mockResolvedValue(ok(config));
   // Structured responses off by default: /menu is 404 and the starter chips stay.
@@ -100,16 +105,16 @@ describe("K10 Z-tile branding", () => {
     expect(tileSize(img)).toEqual({ w: "56px", h: "56px", r: "16px" });
     expect(img.className).toContain("object-contain");
     expect(img.className).not.toMatch(/rounded-full|filter|grayscale|invert/);
-    expect(within(launcher).queryByTestId("launcher-close-badge")).toBeNull();
+    expect(within(launcher).queryByTestId("launcher-close")).toBeNull();
   });
 
-  it("open, the launcher keeps the tile and adds the close badge", async () => {
+  it("open, the whole launcher becomes the close (X) button", async () => {
     await openWidget();
     const launcher = screen.getByTestId("assistant-launcher");
     expect(launcher.getAttribute("aria-expanded")).toBe("true");
     expect(launcher.getAttribute("aria-label")).toBe("Close chat");
-    expect(within(launcher).getByTestId("ztile").getAttribute("src")).toBe("/logo-z.png");
-    expect(within(launcher).getByTestId("launcher-close-badge").className).toContain("za-close-badge"); // 18 px token
+    expect(within(launcher).getByTestId("launcher-close").className).toContain("za-launcher-close");
+    expect(within(launcher).queryByTestId("ztile")).toBeNull(); // no logo behind a small badge
   });
 
   it("welcome card has the 48 px tile, title, greeting and topic menu; header shows the full wordmark", async () => {
@@ -120,13 +125,11 @@ describe("K10 Z-tile branding", () => {
     expect(welcome.textContent).toContain("Hi, I can explain ZoikoSuite plans, modules, trust and integrations. I can't see or change any account.");
     // Doc01: at most four quick-action prompts; the rest behind "More topics".
     expect(within(within(welcome).getByRole("list", { name: "Suggested questions" })).getAllByRole("button").map((b) => b.querySelector(".za-option-label")!.textContent)).toEqual([
-      "Pricing and trial", "Explore modules", "Book a demo", "Security and trust",
+      "Explore platform", "Compare plans", "Book demo", "Security & trust",
     ]);
     expect(welcome.textContent).toContain("AI assistant. Answers use public ZoikoSuite information only.");
-    await act(async () => {
-      fireEvent.click(within(welcome).getByRole("button", { name: "More topics" }));
-    });
-    expect(within(welcome).getByRole("button", { name: /Get support/ })).toBeTruthy();
+    // Doc 02 T01: exactly the four quick actions; nothing hidden behind them.
+    expect(within(welcome).queryByRole("button", { name: /Get support/ })).toBeNull();
     const header = dialog.querySelector("header")!;
     expect(within(header).queryByTestId("ztile")).toBeNull(); // the Z tile stays on the launcher only
     expect(within(header).getByTestId("full-logo").querySelector("img")!.getAttribute("src")).toBe("/logo.png");
@@ -158,7 +161,8 @@ describe("K10 Z-tile branding", () => {
     const notice = within(dialog).getByRole("region", { name: "Privacy and AI notice" });
     const wordmark = notice.querySelector('img[src="/logo.png"]')!;
     expect(wordmark.parentElement!.className).toContain("bg-white");
-    expect(notice.textContent).toContain("[period from signed policy]");
+    // Doc 02 §17: no unresolved placeholder in the notice.
+    expect(notice.textContent).not.toMatch(/\[[^\]]+\]/);
   });
 
   it("shows a 24 px avatar and the speaker label beside each assistant answer", async () => {
@@ -400,7 +404,7 @@ describe("Kairos-style menu, history and theme", () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
     const dialog = await openWidget();
     await act(async () => {
-      fireEvent.click(within(within(dialog).getByTestId("assistant-welcome")).getByRole("button", { name: /Book a demo/ }));
+      fireEvent.click(within(within(dialog).getByTestId("assistant-welcome")).getByRole("button", { name: /Book demo/ }));
     });
     expect(api.askAssistant.mock.calls[0][3]).toBe("I'd like to book a demo");
   });
@@ -483,7 +487,9 @@ describe("Kairos-style menu, history and theme", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
     });
     const history = within(dialog).getByRole("region", { name: "Chat history" });
-    expect(within(history).getByRole("button", { name: "What plans are available?" })).toBeTruthy();
+    // Kairos-style list: the chat on screen is listed and marked current.
+    const row = within(history).getByRole("button", { name: /^What plans are available\?/ });
+    expect(row.getAttribute("aria-current")).toBe("true");
     await act(async () => {
       fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
     });
@@ -527,6 +533,37 @@ describe("answer format (Doc 01 §12, Doc 02 §16)", () => {
     expect(clampWords("short answer", 120)).toEqual({ text: "short answer", clamped: false });
     const long = Array.from({ length: 130 }, (_, i) => `w${i}`).join(" ");
     expect(clampWords(long, 120).text.split(" ")).toHaveLength(120);
+  });
+
+  it("renders how-to steps as a numbered list with the intro on its own line", async () => {
+    const { Markdown } = await import("./markdown");
+    const { container } = render(
+      <Markdown
+        text={[
+          "Register a jurisdiction adds a jurisdiction to the register.",
+          "To register a jurisdiction:",
+          "1. Sign in to your ZoikoSuite account.",
+          "2. In the left menu, open **Governance Platform**.",
+          "3. Select **Register jurisdiction**.",
+          "Submitting the same details again changes nothing.",
+        ].join("\n")}
+      />,
+    );
+    const html = container.innerHTML;
+    expect(html).toContain("<p>Register a jurisdiction adds a jurisdiction to the register.</p><p>To register a jurisdiction:</p><ol>");
+    expect(html.match(/<li>/g)).toHaveLength(3);
+    expect(html).toContain("<strong>Governance Platform</strong>");
+    expect(html).not.toContain("<ul>");
+  });
+
+  it("clampWords never cuts a numbered list of steps part-way", async () => {
+    const { clampWords } = await import("./markdown");
+    const words = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(" ");
+    const steps = Array.from({ length: 7 }, (_, i) => `${i + 1}. ${words(18, `s${i}x`)}`);
+    const text = [words(20, "lead"), ...steps, words(30, "note")].join("\n");
+    const out = clampWords(text, 120);
+    expect(out.clamped).toBe(true);
+    expect(out.text).toBe([words(20, "lead"), ...steps].join("\n"));
   });
 
   it("shows a long answer's first 120 words with Show more / Show less", async () => {
@@ -672,7 +709,7 @@ describe("expired market claims (Doc 02 T06)", () => {
   });
 });
 
-describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
+describe("New conversation and saved history (Doc 02 §10, §27)", () => {
   beforeEach(() => window.sessionStorage.clear());
 
   async function openMenu(dialog: HTMLElement) {
@@ -687,7 +724,7 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     expect((within(dialog).getByRole("menuitem", { name: "New conversation" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("starts fresh, ends the old session and keeps its questions and answers in this tab's history", async () => {
+  it("starts fresh, ends the old session and keeps its questions and answers in the saved history", async () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
     const dialog = await openWidget();
     await ask("What plans are available?");
@@ -698,9 +735,9 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     expect(screen.queryByTestId("visitor-bubble")).toBeNull(); // fresh conversation
     expect(within(dialog).getByTestId("assistant-welcome")).toBeTruthy();
     expect(api.endAssistantSession).toHaveBeenCalled();
-    const stored = JSON.parse(window.sessionStorage.getItem("zoiko-assistant-conversations")!);
+    // Saved on this device by default, until the visitor deletes it.
+    const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1")!);
     expect(stored[0].turns).toEqual([{ q: "What plans are available?", a: "Starter, Growth and Enterprise plans are available." }]);
-    expect(window.localStorage.getItem("zoiko-assistant-conversations")).toBeNull(); // never beyond the tab
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
@@ -708,13 +745,13 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
     const archive = within(dialog).getByTestId("assistant-archive");
     expect(archive.textContent).toContain("What plans are available?");
     expect(archive.textContent).toContain("Starter, Growth and Enterprise plans are available.");
-    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Kept in this browser tab only");
+    expect(within(dialog).getByRole("region", { name: "Chat history" }).textContent).toContain("Chats are saved in this browser until you delete them");
 
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Clear history" }));
     });
     expect(within(dialog).queryByTestId("assistant-archive")).toBeNull();
-    expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).toBeNull();
+    expect(window.localStorage.getItem("zoiko-assistant-history-v1")).toBeNull();
   });
 
   it("Clear chat erases the conversation without keeping it in history", async () => {
@@ -728,5 +765,299 @@ describe("New conversation and tab-only history (Doc 02 §10, §27)", () => {
       fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
     });
     expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).toBeNull();
+  });
+});
+
+describe("kill switch (Doc 08 §10)", () => {
+  it("with chat_enabled false, the official routes show first and the composer is disabled", async () => {
+    api.loadAssistantConfig.mockResolvedValue(ok({ ...config, capabilities: { chat_enabled: false } }));
+    const dialog = await openWidget();
+    const welcome = within(dialog).getByTestId("assistant-welcome");
+    expect(within(welcome).getByTestId("assistant-unavailable")).toBeTruthy();
+    expect((within(dialog).getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    // Doc 02 §21 ui.error: no trace id here, so no empty "Reference:" line.
+    expect(within(welcome).queryByTestId("assistant-reference")).toBeNull();
+    expect(api.askAssistant).not.toHaveBeenCalled();
+  });
+});
+
+describe("closing and device history", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+
+  it("a press outside the panel closes it; a press inside does not", async () => {
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.pointerDown(dialog);
+    });
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    await act(async () => {
+      fireEvent.pointerDown(document.body);
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("by default the conversation is saved on the device as it goes, masked", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
+    await openWidget();
+    await ask("Email me at jane@example.org: what plans are available?");
+    const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1")!);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].turns[0].q).not.toContain("jane@example.org");
+    expect(stored[0].turns[0].a).toBe("Starter, Growth and Enterprise plans are available.");
+  });
+
+  it("with Remember turned off nothing is written to device storage", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByTestId("assistant-remember"));
+    });
+    await ask("What plans are available?");
+    expect(window.localStorage.getItem("zoiko-assistant-history-v1")).toBeNull();
+    expect(window.sessionStorage.getItem("zoiko-assistant-conversations")).not.toBeNull();
+  });
+});
+
+describe("Kairos-style history list", () => {
+  it("reopens an earlier chat from the list; Clear chat removes its entry", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Starter, Growth and Enterprise plans are available." })));
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: "Data is encrypted in transit and at rest." })));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    // Start a second chat; the first stays in the list.
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: /Start a new conversation/ }));
+    });
+    await ask("How is data secured?");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Chat history" }));
+    });
+    const history = within(dialog).getByRole("region", { name: "Chat history" });
+    expect(within(history).getAllByRole("button", { name: /^(What plans|How is data)/ })).toHaveLength(2);
+
+    // Reopen the first chat: its question and answer are back, with a note.
+    await act(async () => {
+      fireEvent.click(within(history).getByRole("button", { name: /^What plans are available\?/ }));
+    });
+    expect(dialog.textContent).toContain("Starter, Growth and Enterprise plans are available.");
+    expect(dialog.textContent).toContain("Earlier conversation");
+    expect(dialog.textContent).not.toContain("Data is encrypted in transit");
+
+    // Clear chat deletes this entry from history.
+    await act(async () => {
+      fireEvent.click(within(dialog.querySelector("form")!).getByRole("button", { name: "Clear chat" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("assistant-end")).getByRole("button", { name: "Clear chat" }));
+    });
+    const stored = JSON.parse(window.localStorage.getItem("zoiko-assistant-history-v1") ?? "[]");
+    expect(stored.map((c: { turns: { q: string }[] }) => c.turns[0].q)).toEqual(["How is data secured?"]);
+  });
+});
+
+describe("MENU dropdown", () => {
+  it("closes on a press anywhere else in the chatbot; the chatbot stays open", async () => {
+    const dialog = await openWidget();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Menu" }));
+    });
+    expect(within(dialog).getByRole("menu")).toBeTruthy();
+    // A press inside the menu keeps it open.
+    await act(async () => {
+      fireEvent.pointerDown(within(dialog).getByRole("menu"));
+    });
+    expect(within(dialog).queryByRole("menu")).not.toBeNull();
+    // A press elsewhere in the chatbot closes it.
+    await act(async () => {
+      fireEvent.pointerDown(within(dialog).getByTestId("assistant-welcome"));
+    });
+    expect(within(dialog).queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+});
+
+describe("Doc 02 §21-22 copy and page chips", () => {
+  it("feedback buttons use the §21 strings; sources say View source", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ citations: [{ source_version_id: "s1", claim_ids: [], url_key: "x", title: "Plans", url: "https://www.zoikosuite.com/pricing" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).getByRole("button", { name: "This was helpful" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "This did not answer my question" })).toBeTruthy();
+    expect(within(dialog).getByRole("link", { name: /View source:\s*Plans/ })).toBeTruthy();
+  });
+
+  it("a 429 with Retry-After says when to try again and holds the retry until then", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.askAssistant.mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 429, retryAfterSeconds: 2 } });
+      await openWidget();
+      await ask("What plans are available?");
+      const panel = screen.getByTestId("assistant-unavailable");
+      expect(within(panel).getByTestId("assistant-retry-after").textContent).toBe("You can try again in 2 s.");
+      expect((within(panel).getByRole("button", { name: /Try again/ }) as HTMLButtonElement).disabled).toBe(true);
+      for (let i = 0; i < 3; i++) {
+        await act(async () => {
+          vi.advanceTimersByTime(1000);
+        });
+      }
+      expect(within(panel).queryByTestId("assistant-retry-after")).toBeNull();
+      expect((within(panel).getByRole("button", { name: /Try again/ }) as HTMLButtonElement).disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a page with its own §22 starter set opens with those chips", async () => {
+    api.loadAssistantConfig.mockResolvedValue(
+      ok({
+        ...config,
+        chips: {
+          other: [{ label: "Explore platform", message: "What can ZoikoSuite do?" }],
+          pricing: [
+            { label: "Plan differences", message: "What is the difference between the plans?" },
+            { label: "Trial terms", message: "What are the trial terms?" },
+          ],
+        },
+      }),
+    );
+    render(<AssistantWidget logos={LOGOS} pageContext="pricing" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Chat with ZoikoSuite" }));
+    });
+    const welcome = screen.getByTestId("assistant-welcome");
+    expect(within(welcome).getByText("Plan differences")).toBeTruthy();
+    expect(within(welcome).queryByText("Explore platform")).toBeNull();
+  });
+
+  it("a support handoff says the visitor is leaving for secure support", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ status: "HANDOFF", intent_id: "I21", answer_class: "HANDOFF_UNKNOWN", text: "Please use secure support.", citations: [], actions: [{ type: "OPEN_OFFICIAL_ROUTE", route_key: "support" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("I need help with my account");
+    expect(within(dialog).getByTestId("assistant-channel").textContent).toBe("You are leaving the assistant for secure support.");
+  });
+
+  it("Report an accessibility issue sends the request to the assistant when no approved link exists", async () => {
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ status: "HANDOFF", intent_id: "I27", citations: [] })));
+    await openWidget();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Menu" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("assistant-accessibility"));
+    });
+    expect(api.askAssistant.mock.calls[0][3]).toBe("I'd like to report an accessibility issue.");
+  });
+});
+
+describe("source review date (Doc 01 FR-03, AT-01)", () => {
+  it("shows an unambiguous review date under a cited source", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ citations: [{ source_version_id: "s1", claim_ids: [], url_key: "pricing", title: "Plans", reviewed_at: "2026-10-12" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).getByTestId("assistant-source-date").textContent?.trim()).toBe("Reviewed October 12, 2026");
+  });
+
+  it("ignores a missing or malformed date", async () => {
+    const { reviewedOn } = await import("./AssistantWidget");
+    expect(reviewedOn(undefined)).toBe("");
+    expect(reviewedOn("12/10/2026")).toBe("");
+    expect(reviewedOn("2026-02-30")).not.toBe("2026-02-30");
+  });
+});
+
+describe("Doc 02 §27 browser analytics", () => {
+  it("opening the chat records chat_opened with the page enum only", async () => {
+    render(<AssistantWidget logos={LOGOS} pageContext="pricing" />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Chat with ZoikoSuite" }));
+    });
+    expect(api.recordAssistantEvent).toHaveBeenCalledWith({ event: "chat_opened", page_context: "pricing", locale: "en-US" });
+  });
+
+  it("opening a source records source_opened with its link id and intent, never the URL", async () => {
+    api.askAssistant.mockResolvedValueOnce(
+      ok(envelope({ intent_id: "I05", citations: [{ source_version_id: "s1", claim_ids: [], url_key: "pricing", title: "Plans", url: "https://www.zoikosuite.com/pricing" }] })),
+    );
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("link", { name: /View source/ }));
+    });
+    const call = api.recordAssistantEvent.mock.calls.find((c) => c[0].event === "source_opened");
+    expect(call?.[0]).toEqual({ event: "source_opened", link_id: "pricing", intent_id: "I05" });
+    expect(JSON.stringify(call)).not.toContain("https://");
+  });
+});
+
+describe("negative paths (Doc 06 SEC-T004, SEC-T024)", () => {
+  it("a 401 mid-chat starts a new session and retries once with a new turn id, in the same bubble", async () => {
+    api.askAssistant
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } })
+      .mockResolvedValueOnce(ok(envelope({ text: "Recovered answer." })));
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "grant-1", expires_at: "" }))
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_2", session_grant: "grant-2", expires_at: "" }));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(api.startAssistantSession).toHaveBeenCalledTimes(2);
+    expect(api.askAssistant).toHaveBeenCalledTimes(2);
+    const [first, second] = api.askAssistant.mock.calls;
+    expect(second[0]).toBe("grant-2");
+    expect(second[2]).not.toBe(first[2]); // a new client_turn_id for the new session
+    expect(within(dialog).getAllByTestId("visitor-bubble")).toHaveLength(1);
+    expect(within(dialog).getByTestId("assistant-answer").textContent).toContain("Recovered answer.");
+  });
+
+  it("markup in an answer is shown as text, never run (XSS)", async () => {
+    const payload = `<img src=x onerror="window.__xss=1"><script>window.__xss=2</script><a href="javascript:alert(1)">click</a>`;
+    api.askAssistant.mockResolvedValueOnce(ok(envelope({ text: `Plans: ${payload}` })));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    const answer = within(dialog).getByTestId("assistant-answer");
+    expect(answer.querySelector("img, script, iframe")).toBeNull();
+    expect(answer.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect((window as unknown as { __xss?: number }).__xss).toBeUndefined();
+    expect(answer.textContent).toContain("<script>");
+  });
+});
+
+describe("expired session (Doc 02 §21 ui.timeout)", () => {
+  it("when a new session takes over, no 'session ended' banner stays on screen", async () => {
+    api.askAssistant
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } })
+      .mockResolvedValueOnce(ok(envelope({ text: "Answer in the new session." })));
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "g1", expires_at: "" }))
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_2", session_grant: "g2", expires_at: "" }));
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).queryByTestId("assistant-session-ended")).toBeNull();
+    expect(within(dialog).getByTestId("assistant-answer").textContent).toContain("Answer in the new session.");
+  });
+
+  it("when no new session can start, the banner tells the visitor", async () => {
+    api.askAssistant.mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 401 } });
+    api.startAssistantSession
+      .mockResolvedValueOnce(ok({ session_id: "pub_s_1", session_grant: "g1", expires_at: "" }))
+      .mockResolvedValueOnce({ ok: false, error: { kind: "http", status: 503 } });
+    const dialog = await openWidget();
+    await ask("What plans are available?");
+    expect(within(dialog).getByTestId("assistant-session-ended").textContent).toContain("Your public chat session has ended");
   });
 });

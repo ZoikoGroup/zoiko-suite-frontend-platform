@@ -23,6 +23,7 @@ const ALLOWED = [
   /^turns$/,
   /^turns\/[A-Za-z0-9_-]{1,128}\/feedback$/,
   /^handoffs$/,
+  /^analytics$/,
 ];
 
 export function allowedPath(segments: string[]): string | null {
@@ -86,5 +87,24 @@ export function crossSite(incoming: Headers, url: string): boolean {
     return origin !== new URL(url).origin;
   } catch {
     return true;
+  }
+}
+
+/**
+ * Doc 05 CT-004: a state-changing call (POST, DELETE) must prove it comes
+ * from this app: an Origin equal to the request's own origin, or
+ * Sec-Fetch-Site: same-origin. A request with neither is refused, so the
+ * console's approved Origin (added by forwardHeaders) is never lent to a
+ * caller that did not show one. GET stays open to header-less callers.
+ */
+export function writeAllowed(method: string, incoming: Headers, url: string): boolean {
+  if (method !== "POST" && method !== "DELETE") return true;
+  if (incoming.get("sec-fetch-site") === "same-origin") return true;
+  const origin = incoming.get("origin");
+  if (!origin) return false;
+  try {
+    return origin === new URL(url).origin;
+  } catch {
+    return false;
   }
 }

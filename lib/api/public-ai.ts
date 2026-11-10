@@ -19,7 +19,16 @@ export type PublicAISession = {
 };
 
 /** title, route_key and url are resolved by the service when structured responses are on (ADR-008). */
-export type Citation = { source_version_id: string; claim_ids: string[]; url_key: string; title?: string; route_key?: string; url?: string };
+export type Citation = {
+  source_version_id: string;
+  claim_ids: string[];
+  url_key: string;
+  title?: string;
+  route_key?: string;
+  url?: string;
+  /** YYYY-MM-DD the source was last approved (Doc 01 FR-03, AT-01). */
+  reviewed_at?: string;
+};
 export type RouteAction = { type: "OPEN_OFFICIAL_ROUTE"; route_key: string };
 export type Chip = { label: string; message: string };
 /** An approved question from the service's Doc 02 menu and follow-up map; message is what it sends. */
@@ -41,7 +50,9 @@ export type TurnEnvelope = {
   knowledge_release_id: string;
   flags?: { requires_human?: boolean };
   /** How much of the answer is a governed fact (never set by the model). */
-  answer_class: "VERIFIED_FACT" | "STATUS_QUALIFIED" | "PROCESS_EXPLANATION" | "HANDOFF_UNKNOWN";
+  answer_class: "VERIFIED_FACT" | "STATUS_QUALIFIED" | "PROCESS_EXPLANATION" | "HANDOFF_UNKNOWN" | "SAFE_REFUSAL";
+  /** Doc 02 §15: what the UI may offer next (no CTA or tool button beyond it). */
+  safety_disposition?: "ALLOW" | "CLARIFY" | "DENY" | "ESCALATE" | "RETRY";
   /** Governed status from the signed claim registry only (VERIFIED, Available, Unverified, ...). */
   status_label?: string;
   /** The market a qualified answer is scoped to. */
@@ -77,6 +88,8 @@ export type PublicAIConfig = {
   microcopy?: Record<string, string>;
   /** Starter questions keyed by page_context. */
   chips?: Record<string, Chip[]>;
+  /** chat_enabled is false while the kill switch is on (Doc 08 §10). */
+  capabilities?: { chat_enabled?: boolean };
 };
 
 /** A refusal or failure, safe to show. Problem codes come from Doc 05 §13. */
@@ -144,6 +157,7 @@ async function call<T>(
     });
   } catch (err) {
     const timeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    console.error(`[assistant] ${method} ${BASE}${path} failed (${timeout ? "timeout" : "network"})`, err);
     return { ok: false, error: { kind: timeout ? "timeout" : "unreachable" } };
   }
 
@@ -153,11 +167,17 @@ async function call<T>(
   try {
     body = await response.json();
   } catch {
+    console.error(`[assistant] ${method} ${BASE}${path} returned HTTP ${response.status} with a non-JSON body`, { requestId });
     return { ok: false, error: { kind: response.status >= 500 ? "unreachable" : "malformed", status: response.status, requestId } };
   }
   if (!response.ok) {
-    const problem = body as { code?: string; request_id?: string };
+    const problem = body as { code?: string; request_id?: string; title?: string };
     const retry = Number(response.headers.get("Retry-After"));
+    // An expected reply the widget handles itself (expired session -> new
+    // session and resend, busy, slow down) is a warning; a server fault is an
+    // error. In dev, Next.js turns every console.error into an overlay.
+    const log = response.status >= 500 ? console.error : console.warn;
+    log(`[assistant] ${method} ${BASE}${path} returned HTTP ${response.status}`, { requestId, code: problem?.code, title: problem?.title });
     return {
       ok: false,
       error: {
@@ -236,6 +256,20 @@ export function rateAssistantAnswer(grant: string, sessionId: string, turnId: st
 }
 
 /** Doc 05 §21: record that an official route was opened (route-only; creates nothing). */
+/**
+ * Doc 02 §27 events only the browser observes. Enums and ids only: never the
+ * question, a URL or anything the visitor typed. Best effort.
+ */
+export function recordAssistantEvent(
+  event: { event: "chat_opened"; page_context: string; locale: string } | { event: "source_opened"; link_id: string; intent_id?: string },
+  session?: { grant: string; id: string },
+) {
+  return call<void>("POST", "/analytics", {
+    body: { schema_version: "1.0", ...event, ...(session ? { session_id: session.id } : {}) },
+    grant: session?.grant,
+  });
+}
+
 export function recordAssistantHandoff(grant: string, sessionId: string, routeKey: string) {
   return call<{ route_key: string; url: string }>("POST", "/handoffs", {
     body: { schema_version: "1.0", session_id: sessionId, route_key: routeKey },

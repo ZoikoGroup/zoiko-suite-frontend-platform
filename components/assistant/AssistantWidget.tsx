@@ -23,6 +23,7 @@
 import "./assistant.css";
 import { useCallback, useEffect, useId, useLayoutEffect, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
+  Accessibility,
   ArrowDown,
   CircleCheck,
   CircleHelp,
@@ -37,7 +38,9 @@ import {
   History,
   Info,
   LayoutGrid,
+  MessageSquare,
   MessageSquarePlus,
+  Plus,
   Maximize2,
   Menu,
   Minimize2,
@@ -66,6 +69,7 @@ import {
   loadAssistantConfig,
   loadAssistantMenu,
   rateAssistantAnswer,
+  recordAssistantEvent,
   recordAssistantHandoff,
   startAssistantSession,
   type AssistantMenu,
@@ -79,7 +83,16 @@ import {
 import { ASSISTANT_LABEL, ASSISTANT_SUBTITLE, ASSISTANT_TITLE, LOGO_FULL_URL, LOGO_MARK_URL, type AssistantLogos } from "./branding";
 import { Markdown, clampWords, countWords, revealWords } from "./markdown";
 import { answerTitle, menuFromChips, menuFromServer, type MenuTopic } from "./menu";
-import { looksSensitive, reduce } from "./state";
+import { looksSensitive, maskForHistory, reduce } from "./state";
+import {
+  type SavedConversation,
+  clearAllHistory,
+  readHistory,
+  rememberOn,
+  setRemember as storeRemember,
+  upsert,
+  writeHistory,
+} from "./history";
 import { useLauncherOffset } from "./useLauncherOffset";
 import { FullLogo, ZTile } from "./ZTile";
 
@@ -93,11 +106,11 @@ type VisitorMessage = {
   market?: string;
   turnId: string; // client_turn_id = Idempotency-Key of the current attempt
   state: "sending" | "failed" | "sent" | "stopped";
-  fail?: { kind: FailKind; reference: string; retryAfter?: number };
+  fail?: { kind: FailKind; reference: string; retryAfter?: number; status?: number };
 };
 type Message =
   | VisitorMessage
-  | { id: string; role: "assistant"; turn: TurnEnvelope; feedback: Feedback; replyTo: string }
+  | { id: string; role: "assistant"; turn: TurnEnvelope; feedback: Feedback; replyTo: string; restored?: boolean }
   | { id: string; role: "notice"; text: string };
 
 type Session = { id: string; grant: string };
@@ -113,36 +126,14 @@ const ANSWER_WORDS = 120;
 // state). Doc 05 §14 forbids streaming raw model tokens, so nothing is shown
 // before the service has validated the whole answer; this only paces it.
 // Never longer than TYPE_MAX_MS, and off under prefers-reduced-motion.
-// Earlier conversations of this visit, kept in sessionStorage: this browser
-// tab only, gone when it closes. Doc 02 §10 allows no persistent visitor
-// profile by default and §27 puts stored transcripts behind a Doc 07 DPIA,
-// so nothing is kept across browser sessions or sent to the service.
-const ARCHIVE_KEY = "zoiko-assistant-conversations";
-const ARCHIVE_MAX = 10;
-type SavedConversation = { id: string; startedAt: number; turns: { q: string; a: string }[] };
-
-function readArchive(): SavedConversation[] {
-  try {
-    const raw = window.sessionStorage.getItem(ARCHIVE_KEY);
-    const list: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? (list as SavedConversation[]).filter((c) => c && Array.isArray(c.turns)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeArchive(list: SavedConversation[]) {
-  try {
-    if (list.length) window.sessionStorage.setItem(ARCHIVE_KEY, JSON.stringify(list));
-    else window.sessionStorage.removeItem(ARCHIVE_KEY);
-  } catch {
-    // storage blocked: history lasts for this page view only
-  }
-}
-
-/** A finished conversation for the archive, stamped now. */
-function archiveEntry(turns: SavedConversation["turns"]): SavedConversation {
-  return { id: crypto.randomUUID(), startedAt: Date.now(), turns };
+/** One-line plain-text preview of an answer for the history list. */
+function previewText(markdown: string): string {
+  return markdown
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`#>]+/g, "")
+    .replace(/^\s*[-+]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const TYPE_TICK_MS = 40;
@@ -154,13 +145,12 @@ type Theme = "light" | "dark";
 type MenuView = { kind: "main" } | { kind: "topic"; key: string };
 
 // Fallback copy for when /config has not loaded; the service's copy wins.
+// Doc 02 T01 quick actions.
 const STARTERS: Chip[] = [
-  { label: "Pricing and trial", message: "What plans are available, and is there a free trial?" },
-  { label: "Explore modules", message: "What modules does ZoikoSuite include?" },
-  { label: "Book a demo", message: "I'd like to book a demo" },
-  { label: "Security and trust", message: "How is data secured?" },
-  { label: "Integrations", message: "Which integrations does ZoikoSuite support?" },
-  { label: "Get support", message: "I need help from support" },
+  { label: "Explore platform", message: "What can ZoikoSuite do?" },
+  { label: "Compare plans", message: "What do the plans cost?" },
+  { label: "Book demo", message: "I'd like to book a demo" },
+  { label: "Security & trust", message: "How is data secured?" },
 ];
 
 const COPY: Record<string, string> = {
@@ -172,7 +162,7 @@ const COPY: Record<string, string> = {
   "ui.welcome.greeting": "Hi, I can explain ZoikoSuite plans, modules, trust and integrations. I can't see or change any account.",
   "ui.welcome.disclosure": "AI assistant. Answers use public ZoikoSuite information only.",
   "ui.more_topics": "More topics",
-  "ui.privacy": "Don't share passwords, payment, tax or account details.",
+  "ui.privacy": "Please don't share passwords, payment details, or private financial records.",
   "ui.privacy.link": "Privacy and AI notice",
   "ui.placeholder": "Ask about ZoikoSuite",
   "ui.loading": "Looking for verified information…", // Doc 02 §21
@@ -207,12 +197,18 @@ const COPY: Record<string, string> = {
   "ui.answer.more": "Show more",
   "ui.answer.less": "Show less",
   "ui.history": "Chat history",
-  "ui.history.current": "This conversation",
   "ui.history.earlier": "Earlier conversations",
-  "ui.history.none": "No earlier conversations in this tab yet.",
-  "ui.history.note": "Kept in this browser tab only and removed when you close it. Nothing is saved to your account.",
+  "ui.history.none": "No earlier conversations yet.",
+  "ui.history.note": "Chats stay in this browser tab until you close it. Nothing is saved to your account.",
+  "ui.history.current": "Current",
+  "ui.history.restored": "Earlier conversation. Answers reflect what was known then; ask again for the latest.",
+  "ui.history.note.device":
+    "Chats are saved in this browser until you delete them. Contact details and secrets are masked; nothing is saved to your account.",
+  "ui.history.remember": "Remember my chats on this device",
+  "ui.history.delete": "Delete this conversation",
   "ui.history.clear": "Clear history",
   "ui.new_conversation": "New conversation",
+  "ui.reset": "Start a new conversation", // Doc 02 §21
   "ui.new_conversation.started": "New conversation started.",
   "ui.history.empty": "Questions you ask in this chat appear here. They're cleared when you clear the chat.",
   "ui.theme.light": "Switch to light theme",
@@ -221,22 +217,52 @@ const COPY: Record<string, string> = {
   "ui.retention.link": "Retention notice",
   "ui.privacy.title": "Privacy and AI notice",
   "ui.privacy.body":
-    "This assistant uses AI to answer from approved, public ZoikoSuite information. It can't see or change any account. Your messages are processed to answer you and to keep the service safe. Please don't share personal, payment, tax or account details.",
-  "ui.privacy.retention": "Chat records are kept for [period from signed policy], then deleted.",
+    "This assistant uses AI to answer from approved, public ZoikoSuite information. It can't see or change any account. Your messages are processed to answer you and to keep the service safe. Your chats are saved in this browser until you delete them or turn off \"Remember my chats on this device\". Please don't share personal, payment, tax or account details.",
+  // Empty until the signed retention policy sets the period (DEC-06).
+  "ui.privacy.retention": "",
   "ui.draft": "Draft content",
   "ui.status.VERIFIED": "Verified",
   "ui.status.Partner-Supported": "Partner-supported",
   "ui.status.Not Available": "Not available",
   "ui.status.MARKET_DEPENDENT": "Depends on your country",
+  // Doc 02 §21 registry keys the widget renders.
+  "ui.disclosure": "AI assistant. Product information only.",
+  "ui.source": "View source",
+  "ui.sources": "Sources",
+  "ui.feedback.yes": "This was helpful",
+  "ui.feedback.no": "This did not answer my question",
+  "ui.feedback.reason": "What was wrong?",
+  "ui.feedback.reason.incorrect": "Incorrect",
+  "ui.feedback.reason.incomplete": "Incomplete",
+  "ui.feedback.reason.not_relevant": "Not relevant",
+  "ui.feedback.reason.unclear": "Unclear",
+  "ui.end.yes": "Yes, this chat was helpful",
+  "ui.end.no": "No, this chat wasn't helpful",
+  "ui.error": "I couldn't connect. Please try again or open support.",
+  "ui.reference": "Reference:",
+  "ui.accessibility": "Report an accessibility issue",
+  "ui.accessibility.message": "I'd like to report an accessibility issue.",
+  "ui.refused": "Not something I can do here",
+  "ui.stopped": "Stopped. Ask again whenever you're ready.",
+  "ui.stopped.short": "Stopped.",
+  "ui.cleared": "Chat cleared.",
+  "ui.choose": "Choose an answer",
+  "ui.suggested": "Suggested questions",
+  "ui.link.official": "(official ZoikoSuite page, opens in a new tab)",
+  "ui.link.new_tab": "(opens in a new tab)",
+  "ui.route.default": "Open official page",
+  "ui.retry_after": "You can try again in {seconds} s.",
+  "ui.source.reviewed": "Reviewed {date}",
 };
 
 const ROUTE_LABELS: Record<string, string> = {
   pricing: "Compare plans",
   demo: "Book a demo",
-  support: "Open support",
+  support: "Open secure support", // Doc 09 §11 OFFERED
   core_modules: "Explore modules",
   trust: "Open Trust Center",
   signup_or_trial: "Start a trial",
+  "sign-in": "Sign in securely", // Doc 02 T17/T21
 };
 
 /** Shown in place of a message the service classed as sensitive (X03). */
@@ -246,7 +272,9 @@ export const SENSITIVE_REMOVED = "Sensitive details removed from this message.";
 const CHANNELS: Record<string, string> = {
   // Doc 10 §08 "Enquiry route only" copy: no follow-up is implied.
   demo: "Open our secure demo form to send your request.",
-  support: "This opens the official support page.",
+  // Doc 09 §11: visible before the visitor leaves for the secure destination.
+  support: "You are leaving the assistant for secure support.",
+  "sign-in": "You are leaving the assistant for the secure sign-in page.",
   trust: "This opens the official trust and security page.",
   pricing: "This opens the official pricing page.",
 };
@@ -298,12 +326,28 @@ function canRetry(turn: TurnEnvelope): boolean {
   return isUnverified(turn) && (!turn.reason || RETRYABLE_REASONS.has(turn.reason));
 }
 
+// Route labels, channel notes and fallback page names as i18n keys
+// (ui.route.<key>, ui.channel.<key>, ui.fallback.<key>; Doc 02 §23).
+const KEYED_COPY: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(ROUTE_LABELS).map(([k, v]) => [`ui.route.${k}`, v])),
+  ...Object.fromEntries(Object.entries(CHANNELS).map(([k, v]) => [`ui.channel.${k}`, v])),
+  ...Object.fromEntries(FALLBACK_ROUTES.map((r) => [`ui.fallback.${r.key}`, r.label])),
+};
+
 const REASONS: { value: FeedbackReason; label: string }[] = [
   { value: "incorrect", label: "Incorrect" },
   { value: "incomplete", label: "Incomplete" },
   { value: "not_relevant", label: "Not relevant" },
   { value: "unclear", label: "Unclear" },
 ];
+
+/** Doc 02 §23: an unambiguous date ("October 12, 2026"), never 10/12/2026. */
+export function reviewedOn(iso?: string): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(d);
+}
 
 function regionName(code: string): string {
   try {
@@ -317,7 +361,10 @@ function regionName(code: string): string {
 export function isPlaceholderUrl(url: string): boolean {
   let host: string;
   try {
-    host = new URL(url).hostname.toLowerCase();
+    const u = new URL(url);
+    // Only https pages are linked (Doc 06 §11): no http, data: or javascript:.
+    if (u.protocol !== "https:") return true;
+    host = u.hostname.toLowerCase();
   } catch {
     return true;
   }
@@ -359,24 +406,40 @@ function ErrorPanel(props: {
   retryLabel: string;
   disabled: boolean;
   reference: string;
+  referenceLabel: string;
+  /** Doc 01 §14: seconds from Retry-After; the retry waits until they pass. */
+  retryAfter?: number;
+  retryAfterText?: string;
   onRetry: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [wait, setWait] = useState(Math.max(0, Math.ceil(props.retryAfter ?? 0)));
+  useEffect(() => {
+    if (wait <= 0) return;
+    const id = window.setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => window.clearTimeout(id);
+  }, [wait]);
   return (
     <div data-testid="assistant-unavailable" className="za-bubble za-bubble-assistant" data-tone="error" role="group" aria-label="Assistant unavailable">
       <p style={{ display: "flex", gap: 6, margin: 0 }}>
         <TriangleAlert size={18} aria-hidden style={{ flex: "none", marginTop: 2 }} />
         {props.text}
       </p>
+      {wait > 0 && props.retryAfterText && (
+        <p className="za-meta" data-testid="assistant-retry-after" style={{ margin: "6px 0 0" }}>
+          {props.retryAfterText.replace("{seconds}", String(wait))}
+        </p>
+      )}
       {props.links.length > 0 && <div className="za-chips" style={{ marginTop: 8 }}>{props.links}</div>}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 8 }}>
-        <button type="button" className="za-chip" disabled={props.disabled} onClick={props.onRetry}>
+        <button type="button" className="za-chip" disabled={props.disabled || wait > 0} onClick={props.onRetry}>
           <RotateCcw size={16} aria-hidden style={{ display: "inline", marginRight: 6, verticalAlign: "-3px" }} />
           {props.retryLabel}
         </button>
       </div>
-      <p className="za-meta" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }} data-testid="assistant-reference">
-        <span style={{ whiteSpace: "nowrap" }}>Reference:</span>
+      {/* Doc 02 §21 ui.error / T24: the reference is shown only when one exists. */}
+      {props.reference && <p className="za-meta" style={{ marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }} data-testid="assistant-reference">
+        <span style={{ whiteSpace: "nowrap" }}>{props.referenceLabel}</span>
         <code style={{ minWidth: 0, overflowWrap: "anywhere" }}>{props.reference}</code>
         <button
           type="button"
@@ -392,7 +455,7 @@ function ErrorPanel(props: {
           <Copy size={14} aria-hidden />
         </button>
         {copied && <span role="status">Copied</span>}
-      </p>
+      </p>}
     </div>
   );
 }
@@ -485,6 +548,18 @@ export function AssistantWidget({
   const [emptyHint, setEmptyHint] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // The MENU button and its dropdown: a press anywhere else closes the menu.
+  const moreRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (target && moreRef.current?.contains(target)) return;
+      setMoreOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [moreOpen]);
   const [moreTopics, setMoreTopics] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -505,6 +580,11 @@ export function AssistantWidget({
   // The answer being revealed: words shown so far of its total.
   const [typing, setTyping] = useState<{ id: string; shown: number; total: number; step: number } | null>(null);
   const [archive, setArchive] = useState<SavedConversation[]>([]);
+  // Opt-in device history (Doc 06 §11: no long-lived transcript by default).
+  const [remember, setRememberState] = useState(false);
+  // The conversation on screen, so autosave updates one entry, not many.
+  const currentConvo = useRef<{ id: string; startedAt: number }>({ id: "", startedAt: 0 });
+  const [currentId, setCurrentId] = useState("");
   const session = useRef<Session | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const inFlight = useRef<string | null>(null); // turnId of the attempt awaiting a reply
@@ -528,12 +608,16 @@ export function AssistantWidget({
 
   const open = ui !== "S00_CLOSED";
   const sending = ui === "S03_WAITING";
-  const t = (key: string) => config?.microcopy?.[key] ?? COPY[key] ?? "";
+  const t = (key: string) => config?.microcopy?.[key] ?? COPY[key] ?? KEYED_COPY[key] ?? "";
   const title = t("ui.header.title") || ASSISTANT_TITLE;
   const allStarters = (config?.chips?.[pageContext] ?? config?.chips?.other ?? STARTERS).slice(0, 6);
   const visibleCount = isMobile ? MOBILE_STARTERS : MAX_STARTERS;
   const menu = serverMenu ? menuFromServer(serverMenu) : menuFromChips(allStarters);
-  const visibleTopics = moreTopics ? menu : menu.slice(0, visibleCount);
+  // Doc 02 §22: a page with its own starter set (pricing, platform, trust,
+  // support, demo) opens with those chips; the full guided menu stays one
+  // tap away ("More topics"). Home and unknown pages use the general menu.
+  const pageChips = pageContext !== "other" && pageContext !== "home" ? config?.chips?.[pageContext] : undefined;
+  const visibleTopics = moreTopics ? menu : pageChips?.length ? menuFromChips(pageChips.slice(0, visibleCount)) : menu.slice(0, visibleCount);
   const sensitive = looksSensitive(draft);
 
   useEffect(() => {
@@ -541,9 +625,9 @@ export function AssistantWidget({
   }, [open]);
 
   // Theme: the visitor's saved choice, else the site's dark class or the OS
-  // preference, read again on each open so it follows the page.
+  // preference, read on mount (so the closed launcher's edge matches the page,
+  // Doc01 K10) and again on each open/close so it follows the page.
   useEffect(() => {
-    if (!open) return;
     const init = () => {
       let saved: string | null = null;
       try {
@@ -558,9 +642,32 @@ export function AssistantWidget({
   }, [open]);
 
   useEffect(() => {
-    const load = () => setArchive(readArchive());
+    const load = () => {
+      const on = rememberOn();
+      setRememberState(on);
+      setArchive(readHistory(on));
+    };
     load();
   }, []);
+
+  // The conversation on screen is saved as it goes (like a chat app): in this
+  // tab, or on the device when the visitor opted in.
+  useEffect(() => {
+    const turns = currentTurns();
+    if (!turns.length) return;
+    if (!currentConvo.current.id) {
+      currentConvo.current = { id: crypto.randomUUID(), startedAt: Date.now() };
+      setCurrentId(currentConvo.current.id);
+    }
+    const entry: SavedConversation = { ...currentConvo.current, updatedAt: Date.now(), turns };
+    setArchive((prev) => {
+      const next = upsert(prev, entry);
+      writeHistory(next, remember);
+      return next;
+    });
+    // currentTurns reads messagesRef; messages is the change signal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, remember]);
 
   function toggleTheme() {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -685,8 +792,24 @@ export function AssistantWidget({
 
   function openPanel() {
     setUnread(false);
+    // Doc 02 §27 chat_opened: the page enum and locale only.
+    void Promise.resolve(recordAssistantEvent({ event: "chat_opened", page_context: pageContext, locale: "en-US" })).catch(() => undefined);
     dispatch({ type: "OPEN", hasMessages: messagesRef.current.length > 0, waiting: inFlight.current !== null });
   }
+
+  // A press outside the panel (and outside the launcher, which toggles on
+  // its own) closes it, like Escape. The conversation is kept.
+  useEffect(() => {
+    if (!open || closing) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target || !target.isConnected) return;
+      if (panel.current?.contains(target) || launcher.current?.contains(target)) return;
+      close();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [open, closing, close]);
 
   // W02: on small screens the device back button closes the sheet first.
   useEffect(() => {
@@ -767,8 +890,8 @@ export function AssistantWidget({
     inFlight.current = null;
     dispatch({ type: "CANCEL" });
     if (stopped) setVisitor(stopped.id, { state: "stopped" });
-    update((m) => [...m, { id: crypto.randomUUID(), role: "notice", text: "Stopped. Ask again whenever you're ready." }]);
-    setAnnounce("Stopped.");
+    update((m) => [...m, { id: crypto.randomUUID(), role: "notice", text: t("ui.stopped") }]);
+    setAnnounce(t("ui.stopped.short"));
     composer.current?.focus();
   }
 
@@ -786,9 +909,19 @@ export function AssistantWidget({
     const stillWanted = () => inFlight.current === turnId;
     const failed = (e: PublicAIError) => {
       if (!stillWanted()) return;
+      // Rate limits and "still busy" are expected and shown to the visitor;
+      // only faults (network, timeout, server) are logged as errors.
+      const expected = e.kind === "http" && e.status !== undefined && e.status < 500;
+      (expected ? console.warn : console.error)("[assistant] request failed", {
+        kind: e.kind,
+        status: e.status,
+        code: e.code,
+        requestId: e.requestId,
+        reference: e.requestId ?? turnId,
+      });
       // Doc01 §10 S08: a correlation id. The server's request id when there
       // is one, otherwise the client_turn_id this attempt was sent with.
-      setVisitor(visitorId, { state: "failed", fail: { kind: failKind(e), reference: e.requestId ?? turnId, retryAfter: e.retryAfterSeconds } });
+      setVisitor(visitorId, { state: "failed", fail: { kind: failKind(e), reference: e.requestId ?? turnId, retryAfter: e.retryAfterSeconds, status: e.status } });
       dispatch({ type: "FAIL" });
       setAnnounce(failText(failKind(e)));
     };
@@ -799,9 +932,14 @@ export function AssistantWidget({
       let r: PublicAIResult<TurnEnvelope> = await askAssistant(s.grant, s.id, turnId, msg.text, msg.market, pageContext, abortTurn.current.signal);
       if (!r.ok && r.error.kind === "http" && r.error.status === 401) {
         // Session expired: a new session needs a new turn id; same bubble.
+        // Doc 02 §21 ui.timeout: the visitor is told only when the
+        // conversation cannot continue. When a new session takes over,
+        // the question is simply re-sent and nothing stays on screen.
         s = await ensureSession(true);
-        setSessionEnded(true);
-        setAnnounce(t("ui.timeout"));
+        if (!s) {
+          setSessionEnded(true);
+          setAnnounce(t("ui.timeout"));
+        }
         if (s) {
           const renewed = crypto.randomUUID();
           inFlight.current = renewed;
@@ -816,6 +954,7 @@ export function AssistantWidget({
       // Doc 05 §10: an unsupported schema version or unknown status is never shown.
       if (!validEnvelope(r.data)) return failed({ kind: "malformed" });
       const turn = r.data;
+      setSessionEnded(false); // a reply arrived: the conversation is live again
       // CT-014: a reply older than one already shown is out of order; never
       // render it over newer state (the server keeps the canonical order).
       if (shownSeq.current.session === s?.id && turn.turn_sequence < shownSeq.current.seq) return failed({ kind: "malformed" });
@@ -878,7 +1017,7 @@ export function AssistantWidget({
       if (m.role !== "visitor") return [];
       const reply = all.find((x): x is Extract<Message, { role: "assistant" }> => x.role === "assistant" && x.replyTo === m.id);
       if (!reply) return [];
-      return [{ q: m.text, a: reply.turn.status === "UNAVAILABLE" ? t("ui.unavailable") : reply.turn.text }];
+      return [{ q: maskForHistory(m.text), a: reply.turn.status === "UNAVAILABLE" ? t("ui.unavailable") : reply.turn.text }];
     });
   }
 
@@ -886,10 +1025,13 @@ export function AssistantWidget({
     setMoreOpen(false);
     const turns = currentTurns();
     if (turns.length) {
-      const next = [archiveEntry(turns), ...archive].slice(0, ARCHIVE_MAX);
+      const base = currentConvo.current.id ? currentConvo.current : { id: crypto.randomUUID(), startedAt: Date.now() };
+      const next = upsert(archive, { ...base, updatedAt: Date.now(), turns });
       setArchive(next);
-      writeArchive(next);
+      writeHistory(next, remember);
     }
+    currentConvo.current = { id: "", startedAt: 0 };
+    setCurrentId("");
     await confirmClear();
     setAnnounce(t("ui.new_conversation.started"));
     composer.current?.focus();
@@ -897,7 +1039,57 @@ export function AssistantWidget({
 
   function clearArchive() {
     setArchive([]);
-    writeArchive([]);
+    clearAllHistory();
+  }
+
+  // Reopens a saved conversation in the main view. The service keeps no
+  // context for it (its session ended), so the answers are shown as they were
+  // and a new question starts a fresh session that continues this entry.
+  async function openConversation(c: SavedConversation) {
+    setShowHistory(false);
+    if (c.id === currentConvo.current.id) return;
+    await confirmClear();
+    currentConvo.current = { id: c.id, startedAt: c.startedAt };
+    setCurrentId(c.id);
+    const restored: Message[] = [{ id: crypto.randomUUID(), role: "notice", text: t("ui.history.restored") }];
+    for (const turn of c.turns) {
+      const q: VisitorMessage = { id: crypto.randomUUID(), role: "visitor", text: turn.q, turnId: crypto.randomUUID(), state: "sent" };
+      const envelope: TurnEnvelope = {
+        turn_id: crypto.randomUUID(), request_id: "", turn_sequence: 0, status: "ANSWERED", intent_id: "", text: turn.a,
+        citations: [], actions: [], knowledge_release_id: "", answer_class: "PROCESS_EXPLANATION",
+      };
+      restored.push(q, { id: crypto.randomUUID(), role: "assistant", turn: envelope, feedback: {}, replyTo: q.id, restored: true });
+    }
+    update(() => restored);
+    dispatch({ type: "OPEN", hasMessages: true, waiting: false });
+    setAnnounce(t("ui.history.restored"));
+  }
+
+  function deleteConversation(id: string) {
+    if (id === currentConvo.current.id) {
+      // Deleting the chat on screen also starts a new one.
+      currentConvo.current = { id: "", startedAt: 0 };
+      setCurrentId("");
+    }
+    const next = archive.filter((c) => c.id !== id);
+    setArchive(next);
+    writeHistory(next, remember);
+  }
+
+  // Opting in moves this tab's history to the device; opting out deletes the
+  // device copy and keeps the list for this tab only.
+  function toggleRemember(on: boolean) {
+    storeRemember(on);
+    setRememberState(on);
+    writeHistory(archive, on);
+    if (on) writeHistory([], false);
+  }
+
+  // "Clear chat" erases the conversation, including its history entry;
+  // "New conversation" and reopening a chat keep it.
+  async function clearChat() {
+    if (currentConvo.current.id) deleteConversation(currentConvo.current.id);
+    await confirmClear();
   }
 
   async function confirmClear() {
@@ -905,6 +1097,9 @@ export function AssistantWidget({
     session.current = null;
     inFlight.current = null;
     update(() => []);
+    // What comes next is a new conversation in the history.
+    currentConvo.current = { id: "", startedAt: 0 };
+    setCurrentId("");
     setDraft("");
     setMoreTopics(false);
     setMenuView(null);
@@ -1004,24 +1199,36 @@ export function AssistantWidget({
       >
         {label}
         <ExternalLink size={16} aria-hidden />
-        <span className="za-sr-only">(official ZoikoSuite page, opens in a new tab)</span>
+        <span className="za-sr-only">{t("ui.link.official")}</span>
       </a>
     );
   }
 
-  const fallbackLinks = FALLBACK_ROUTES.map((r) => routeLink(r.key, r.label, false)).filter(Boolean);
+  const fallbackLinks = FALLBACK_ROUTES.map((r) => routeLink(r.key, t(`ui.fallback.${r.key}`), false)).filter(Boolean);
+  // Kill switch on (Doc 08 §10): show the official routes and accept no input.
+  const chatOff = config?.capabilities?.chat_enabled === false;
 
-  function failText(kind: FailKind): string {
+  function failText(kind: FailKind, status?: number): string {
+    let text: string;
     switch (kind) {
       case "rate_limited":
-        return t("ui.error.rate_limited");
+        text = t("ui.error.rate_limited");
+        break;
       case "busy":
-        return t("ui.error.busy");
+        text = t("ui.error.busy");
+        break;
       case "timeout":
-        return t("ui.error.timeout");
+        text = t("ui.error.timeout");
+        break;
       default:
-        return t("ui.error.unreachable");
+        // Doc 02 §21 ui.error; the reference line is added only when one exists.
+        text = t("ui.error");
     }
+    const backendDown = kind === "network" && (status === undefined || status >= 500);
+    if (process.env.NODE_ENV === "development" && backendDown) {
+      text += " Dev: the assistant service (public-ai-svc) is not reachable at ZOIKO_PUBLIC_AI_URL (default http://127.0.0.1:8001). Start it from zoiko-suite-backend/services/public-ai-svc with PUBLIC_AI_ENABLED=true PUBLIC_AI_ENVIRONMENT=dev go run ./cmd/server.";
+    }
+    return text;
   }
 
   function qualifier(turn: TurnEnvelope) {
@@ -1063,6 +1270,7 @@ export function AssistantWidget({
   }
 
   function feedbackRow(m: Extract<Message, { role: "assistant" }>) {
+    if (m.restored) return null;
     if (m.feedback.sent) {
       return (
         <p className="za-meta" role="status">
@@ -1079,7 +1287,7 @@ export function AssistantWidget({
           type="button"
           className="za-thumb"
           aria-pressed={m.feedback.rating === "useful"}
-          aria-label="Yes, this was helpful"
+          aria-label={t("ui.feedback.yes")}
           onClick={() => void rate(m.turn.turn_id, "useful")}
         >
           <ThumbsUp size={16} aria-hidden />
@@ -1088,15 +1296,15 @@ export function AssistantWidget({
           type="button"
           className="za-thumb"
           aria-pressed={m.feedback.rating === "not_useful"}
-          aria-label="No, this wasn't helpful"
+          aria-label={t("ui.feedback.no")}
           onClick={() => setFeedback(m.turn.turn_id, { rating: "not_useful" })}
         >
           <ThumbsDown size={16} aria-hidden />
         </button>
         {m.feedback.rating === "not_useful" &&
           chipList(
-            "What was wrong?",
-            REASONS.map((r) => ({ label: r.label, onClick: () => void rate(m.turn.turn_id, "not_useful", r.value) })),
+            t("ui.feedback.reason"),
+            REASONS.map((r) => ({ label: t(`ui.feedback.reason.${r.value}`) || r.label, onClick: () => void rate(m.turn.turn_id, "not_useful", r.value) })),
           )}
       </div>
     );
@@ -1110,7 +1318,7 @@ export function AssistantWidget({
     const primary = turn.cta?.primary;
     const cta = primary
       ? routeLink(primary.route_key, primary.label, true, primary.url)
-      : turn.actions[0] && routeLink(turn.actions[0].route_key, ROUTE_LABELS[turn.actions[0].route_key] ?? "Open official page", true);
+      : turn.actions[0] && routeLink(turn.actions[0].route_key, t(`ui.route.${turn.actions[0].route_key}`) || t("ui.route.default"), true);
     const secondary = turn.cta?.secondary && routeLink(turn.cta.secondary.route_key, turn.cta.secondary.label, false, turn.cta.secondary.url);
     const asked = messages.find((x) => x.role === "visitor" && x.id === m.replyTo);
     const clamp = clampWords(turn.text, ANSWER_WORDS);
@@ -1142,7 +1350,7 @@ export function AssistantWidget({
           {turn.status === "REFUSED_ACTION" && (
             <p className="za-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 4px", fontWeight: 600 }}>
               <ShieldAlert size={14} aria-hidden />
-              Not something I can do here
+              {t("ui.refused")}
             </p>
           )}
           {isUnverified(turn) && (
@@ -1178,7 +1386,7 @@ export function AssistantWidget({
             turn.clarification &&
             m.id === lastAssistant &&
             chipList(
-              "Choose an answer",
+              t("ui.choose"),
               turn.clarification.options.map((opt) => {
                 const label = opt === OVERVIEW_OPTION ? t("ui.clarify.overview") : opt === OTHER_OPTION ? t("ui.clarify.other") : regionName(opt);
                 const market = opt === OVERVIEW_OPTION || opt === OTHER_OPTION ? undefined : opt;
@@ -1190,14 +1398,14 @@ export function AssistantWidget({
             turn.suggestions.length > 0 &&
             m.id === lastAssistant &&
             chipList(
-              "Suggested questions",
+              t("ui.suggested"),
               turn.suggestions.map((s) => ({ label: s.label, onClick: () => send(s.message) })),
             )}
 
           {sources.length > 0 && (
             <div className="za-section">
               <p className="za-meta" style={{ margin: 0 }}>
-                Sources
+                {t("ui.sources")}
               </p>
               <ul className="za-sources" data-testid="assistant-sources">
                 {sources.map((c) => {
@@ -1209,13 +1417,33 @@ export function AssistantWidget({
                   return (
                     <li key={c.url_key}>
                       {url ? (
-                        <a className="za-source" href={url} target="_blank" rel="noopener noreferrer">
+                        <a
+                          className="za-source"
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={t("ui.source")}
+                          onClick={() => {
+                            // Doc 02 §27 source_opened: the approved link id and intent only.
+                            const s = session.current;
+                            void Promise.resolve(
+                              recordAssistantEvent({ event: "source_opened", link_id: c.url_key, intent_id: turn.intent_id }, s ? { grant: s.grant, id: s.id } : undefined),
+                            ).catch(() => undefined);
+                          }}
+                        >
+                          <span className="za-sr-only">{t("ui.source")}: </span>
                           <span>{name}</span>
                           <ExternalLink size={14} aria-hidden />
-                          <span className="za-sr-only">(opens in a new tab)</span>
+                          <span className="za-sr-only">{t("ui.link.new_tab")}</span>
                         </a>
                       ) : (
                         <span className="za-source">{name}</span>
+                      )}
+                      {reviewedOn(c.reviewed_at) && (
+                        <span className="za-meta za-source-date" data-testid="assistant-source-date">
+                          {" "}
+                          {t("ui.source.reviewed").replace("{date}", reviewedOn(c.reviewed_at))}
+                        </span>
                       )}
                     </li>
                   );
@@ -1228,8 +1456,8 @@ export function AssistantWidget({
           {cta}
           {secondary && <div style={{ marginTop: 8 }}>{secondary}</div>}
 
-          {turn.status === "HANDOFF" && turn.actions[0] && CHANNELS[turn.actions[0].route_key] && (
-            <p className="za-meta za-channel">{CHANNELS[turn.actions[0].route_key]}</p>
+          {turn.status === "HANDOFF" && turn.actions[0] && t(`ui.channel.${turn.actions[0].route_key}`) && (
+            <p className="za-meta za-channel" data-testid="assistant-channel">{t(`ui.channel.${turn.actions[0].route_key}`)}</p>
           )}
 
           {canRetry(turn) && m.id === lastAssistant && (
@@ -1257,7 +1485,7 @@ export function AssistantWidget({
         all={menu}
         view={view}
         disabled={sending}
-        showMore={messages.length === 0 && !moreTopics && menu.length > visibleCount}
+        showMore={messages.length === 0 && !moreTopics && (pageChips?.length ? serverMenu !== null : menu.length > visibleCount)}
         copy={{ main: t("ui.menu.main"), back: t("ui.menu.back"), more: t("ui.more_topics") }}
         onView={setMenuView}
         onMore={() => setMoreTopics(true)}
@@ -1269,6 +1497,7 @@ export function AssistantWidget({
   // After the latest answer: the service's approved follow-ups (never
   // chosen here), minus questions already asked, and the way back to the menu.
   function followUpBlock(m: Extract<Message, { role: "assistant" }>) {
+    if (m.restored) return null;
     if (m.id !== lastAssistant || sending || menuView || ui === "S09_END") return null;
     if (typing?.id === m.id && typing.shown < typing.total) return null; // after the text is complete
     if (m.turn.status === "CLARIFY" || m.turn.status === "UNAVAILABLE") return null;
@@ -1307,22 +1536,22 @@ export function AssistantWidget({
           <span className="za-meta" style={{ marginRight: 4 }}>
             {t("ui.end.prompt")}
           </span>
-          <button type="button" className="za-thumb" aria-pressed={endRating.rating === "useful"} aria-label="Yes, this chat was helpful" onClick={() => void rateEnd("useful")}>
+          <button type="button" className="za-thumb" aria-pressed={endRating.rating === "useful"} aria-label={t("ui.end.yes")} onClick={() => void rateEnd("useful")}>
             <ThumbsUp size={16} aria-hidden />
           </button>
           <button
             type="button"
             className="za-thumb"
             aria-pressed={endRating.rating === "not_useful"}
-            aria-label="No, this chat wasn't helpful"
+            aria-label={t("ui.end.no")}
             onClick={() => setEndRating({ rating: "not_useful" })}
           >
             <ThumbsDown size={16} aria-hidden />
           </button>
           {endRating.rating === "not_useful" &&
             chipList(
-              "What was wrong?",
-              REASONS.map((r) => ({ label: r.label, onClick: () => void rateEnd("not_useful", r.value) })),
+              t("ui.feedback.reason"),
+              REASONS.map((r) => ({ label: t(`ui.feedback.reason.${r.value}`) || r.label, onClick: () => void rateEnd("not_useful", r.value) })),
             )}
         </div>
       )}
@@ -1333,7 +1562,7 @@ export function AssistantWidget({
         </button>
       </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-        <button type="button" className="za-chip" onClick={() => void confirmClear()}>
+        <button type="button" className="za-chip" onClick={() => void clearChat()}>
           {t("ui.clear")}
         </button>
         <button type="button" className="za-linkbutton" onClick={() => dispatch({ type: "TYPE" })}>
@@ -1361,11 +1590,14 @@ export function AssistantWidget({
         className="za-launcher"
         style={{ ["--za-launcher-offset" as string]: `${offset}px` }}
       >
-        <ZTile src={logos.mark} size={56} radius={16} />
-        {open && (
-          <span data-testid="launcher-close-badge" aria-hidden="true" className="za-close-badge">
-            <X size={12} strokeWidth={3} />
+        {open ? (
+          // Open: the whole launcher becomes the close button (a full-size X,
+          // as in Kairos), not the logo with a small corner badge.
+          <span data-testid="launcher-close" aria-hidden="true" className="za-launcher-close">
+            <X strokeWidth={2.5} />
           </span>
+        ) : (
+          <ZTile src={logos.mark} size={56} radius={16} />
         )}
         {!open && unread && <span data-testid="launcher-unread" aria-hidden="true" className="za-unread" />}
         {!open && unread && <span className="za-sr-only">New reply</span>}
@@ -1415,7 +1647,7 @@ export function AssistantWidget({
               >
                 {theme === "dark" ? <Sun aria-hidden /> : <Moon aria-hidden />}
               </button>
-              <span className="za-more">
+              <span className="za-more" ref={moreRef}>
                 <button
                   type="button"
                   className="za-control za-menu-button"
@@ -1473,6 +1705,21 @@ export function AssistantWidget({
                     >
                       <Info size={18} aria-hidden />
                       {t("ui.privacy.title")}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="assistant-accessibility"
+                      disabled={sending || chatOff}
+                      onClick={() => {
+                        setMoreOpen(false);
+                        const url = routeUrl("accessibility");
+                        if (url) window.open(url, "_blank", "noopener,noreferrer");
+                        else send(t("ui.accessibility.message"));
+                      }}
+                    >
+                      <Accessibility size={18} aria-hidden />
+                      {t("ui.accessibility")}
                     </button>
                     <button type="button" role="menuitem" disabled={messages.length === 0} onClick={startEnd}>
                       <Trash2 size={18} aria-hidden />
@@ -1537,7 +1784,10 @@ export function AssistantWidget({
                 </button>
               </div>
               <p style={{ margin: "8px 0 0" }}>{t("ui.privacy.body")}</p>
-              <p style={{ margin: "8px 0 0" }}>{t("ui.privacy.retention")}</p>
+              {/* Doc 02 §17: no line until the signed policy sets the period; never a "[…]" placeholder. */}
+              {t("ui.privacy.retention") && !t("ui.privacy.retention").includes("[") && (
+                <p style={{ margin: "8px 0 0" }}>{t("ui.privacy.retention")}</p>
+              )}
               <p className="za-meta" style={{ margin: "8px 0 0" }}>
                 {t("ui.clear.notice")}
               </p>
@@ -1545,80 +1795,78 @@ export function AssistantWidget({
           )}
 
           {showHistory && (
-            <div id={`${panelId}-history`} role="region" aria-label={t("ui.history")} className="za-banner za-history" data-testid="assistant-history">
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <History size={18} aria-hidden />
-                <h3 style={{ flex: 1, margin: 0, fontSize: "var(--za-font-title)", fontWeight: 600 }}>{t("ui.history")}</h3>
+            <div id={`${panelId}-history`} role="region" aria-label={t("ui.history")} className="za-history-card" data-testid="assistant-history">
+              <div className="za-history-head">
+                <h3 className="za-history-title">{t("ui.history")}</h3>
                 <button type="button" onClick={() => setShowHistory(false)} className="za-control" aria-label="Hide chat history">
                   <X aria-hidden />
                 </button>
               </div>
-              <h4 className="za-history-heading">{t("ui.history.current")}</h4>
-              {messages.some((m) => m.role === "visitor") ? (
-                <ol className="za-history-list">
-                  {messages.map((m) =>
-                    m.role === "visitor" ? (
-                      <li key={m.id}>
+              <div className="za-history-new">
+                <button
+                  type="button"
+                  className="za-history-newbtn"
+                  disabled={messages.length === 0 || sending}
+                  onClick={() => {
+                    setShowHistory(false);
+                    void newConversation();
+                  }}
+                >
+                  <Plus size={18} aria-hidden /> {t("ui.reset")}
+                </button>
+              </div>
+              {archive.length === 0 ? (
+                <p className="za-meta za-history-empty">{t("ui.history.none")}</p>
+              ) : (
+                <ol className="za-history-items" data-testid="assistant-archive">
+                  {archive.map((c) => {
+                    const current = c.id === currentId;
+                    return (
+                      <li key={c.id} className="za-history-item" data-current={current || undefined}>
+                        <button type="button" className="za-history-open" aria-current={current ? "true" : undefined} onClick={() => void openConversation(c)}>
+                          <MessageSquare size={18} aria-hidden className="za-history-icon" />
+                          <span className="za-history-text">
+                            <span className="za-history-q">{c.turns[0]?.q}</span>
+                            <span className="za-history-a">{previewText(c.turns[0]?.a ?? "")}</span>
+                            <span className="za-history-time">
+                              {new Date(c.updatedAt ?? c.startedAt).toLocaleString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                              {current && ` · ${t("ui.history.current")}`}
+                            </span>
+                          </span>
+                        </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            setShowHistory(false);
-                            const el = convo.current;
-                            const li = el?.querySelector<HTMLElement>(`[data-msg="${CSS.escape(m.id)}"]`);
-                            if (el && li) el.scrollTop = Math.max(0, li.offsetTop - 8);
-                          }}
+                          className="za-control za-history-del"
+                          onClick={() => deleteConversation(c.id)}
+                          aria-label={`${t("ui.history.delete")}: ${c.turns[0]?.q ?? ""}`}
+                          title={t("ui.history.delete")}
                         >
-                          {m.text}
+                          <Trash2 size={16} aria-hidden />
                         </button>
                       </li>
-                    ) : null,
+                    );
+                  })}
+                </ol>
+              )}
+              <div className="za-history-foot">
+                <label className="za-history-remember">
+                  <input type="checkbox" checked={remember} onChange={(e) => toggleRemember(e.target.checked)} data-testid="assistant-remember" />
+                  {t("ui.history.remember")}
+                </label>
+                <p>
+                  {t(remember ? "ui.history.note.device" : "ui.history.note")}{" "}
+                  {archive.length > 0 && (
+                    <button type="button" className="za-linkbutton" style={{ minHeight: 24, padding: 0, fontSize: "inherit" }} onClick={clearArchive}>
+                      {t("ui.history.clear")}
+                    </button>
                   )}
-                </ol>
-              ) : (
-                <p className="za-meta" style={{ margin: "4px 0 0" }}>
-                  {t("ui.history.empty")}
                 </p>
-              )}
-              <h4 className="za-history-heading">{t("ui.history.earlier")}</h4>
-              {archive.length === 0 ? (
-                <p className="za-meta" style={{ margin: "4px 0 0" }}>
-                  {t("ui.history.none")}
-                </p>
-              ) : (
-                <ol className="za-archive" data-testid="assistant-archive">
-                  {archive.map((c) => (
-                    <li key={c.id}>
-                      <details>
-                        <summary>
-                          <span className="za-archive-title">{c.turns[0]?.q}</span>
-                          <span className="za-meta">
-                            {new Date(c.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {c.turns.length}{" "}
-                            {c.turns.length === 1 ? "question" : "questions"}
-                          </span>
-                        </summary>
-                        <dl className="za-archive-turns">
-                          {c.turns.map((turn, n) => (
-                            <div key={n}>
-                              <dt>{turn.q}</dt>
-                              <dd>
-                                <Markdown text={turn.a} />
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      </details>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <p className="za-meta" style={{ margin: "8px 0 0" }}>
-                {t("ui.history.note")}{" "}
-                {archive.length > 0 && (
-                  <button type="button" className="za-linkbutton" style={{ minHeight: 24, padding: 0, fontSize: "inherit" }} onClick={clearArchive}>
-                    {t("ui.history.clear")}
-                  </button>
-                )}
-              </p>
+              </div>
             </div>
           )}
 
@@ -1635,8 +1883,25 @@ export function AssistantWidget({
               <div data-testid="assistant-welcome" className="za-welcome">
                 {ui === "S09_END" && (
                   <p className="za-meta" role="status" style={{ marginBottom: 12 }}>
-                    Chat cleared.
+                    {t("ui.cleared")}
                   </p>
+                )}
+                {chatOff && (
+                  // Doc 08 §10: with the kill switch on, the official routes
+                  // come first; nothing is sent to the assistant.
+                  <div style={{ marginBottom: 12 }}>
+                    <ErrorPanel
+                      text={t("ui.unavailable")}
+                      links={fallbackLinks}
+                      retryLabel={t("ui.retry")}
+                      referenceLabel={t("ui.reference")}
+                      disabled={false}
+                      reference=""
+                      onRetry={() => {
+                        void loadAssistantConfig().then((r) => r.ok && setConfig(r.data));
+                      }}
+                    />
+                  </div>
                 )}
                 <ZTile src={logos.mark} size={48} radius={12} />
                 <p className="za-welcome-title">{title}</p>
@@ -1661,9 +1926,12 @@ export function AssistantWidget({
                       {m.state === "failed" && m.fail && (
                         <div style={{ alignSelf: "stretch", marginTop: 8 }}>
                           <ErrorPanel
-                            text={failText(m.fail.kind)}
+                            text={failText(m.fail.kind, m.fail.status)}
                             links={fallbackLinks}
                             retryLabel={t("ui.retry")}
+                            referenceLabel={t("ui.reference")}
+                            retryAfter={m.fail.kind === "rate_limited" ? m.fail.retryAfter : undefined}
+                            retryAfterText={t("ui.retry_after")}
                             disabled={sending}
                             reference={m.fail.reference}
                             onRetry={() => void attempt(m.id)}
@@ -1678,6 +1946,7 @@ export function AssistantWidget({
                       text={t("ui.unavailable")}
                       links={fallbackLinks}
                       retryLabel={t("ui.retry")}
+                      referenceLabel={t("ui.reference")}
                       disabled={sending}
                       reference={m.turn.request_id}
                       onRetry={() => void attempt(m.replyTo, true)}
@@ -1756,6 +2025,7 @@ export function AssistantWidget({
                   dispatch({ type: "TYPE" });
                 }}
                 onKeyDown={onComposerKey}
+                disabled={chatOff}
                 maxLength={MAX_MESSAGE}
                 placeholder={t("ui.placeholder")}
                 aria-invalid={sensitive || emptyHint}
