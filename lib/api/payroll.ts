@@ -6,25 +6,31 @@
 // - payroll-exceptions-svc (8114)
 
 import { type ApiResult, type Identity } from "./client";
+import { serviceUrl } from "./config";
 
+// Resolved through serviceUrl() so the gateway setting and the
+// ZOIKO_<SERVICE>_URL overrides apply here as they do to every other client.
+// These used to read the overrides directly and fall back to localhost ports,
+// so with ZOIKO_USE_GATEWAY=true every payroll read went around the gateway and
+// failed as "unreachable" while the service was up.
 function payrollRunUrl(): string {
-  return (process.env.ZOIKO_PAYROLL_RUN_URL ?? "http://localhost:8110").replace(/\/$/, "");
+  return serviceUrl("payrollRun");
 }
 
 function compensationUrl(): string {
-  return (process.env.ZOIKO_COMPENSATION_URL ?? "http://localhost:8111").replace(/\/$/, "");
+  return serviceUrl("compensation");
 }
 
 function benefitsUrl(): string {
-  return (process.env.ZOIKO_BENEFITS_URL ?? "http://localhost:8112").replace(/\/$/, "");
+  return serviceUrl("benefits");
 }
 
 function payrollTaxUrl(): string {
-  return (process.env.ZOIKO_PAYROLL_TAX_URL ?? "http://localhost:8113").replace(/\/$/, "");
+  return serviceUrl("payrollTax");
 }
 
 function payrollExceptionsUrl(): string {
-  return (process.env.ZOIKO_PAYROLL_EXCEPTIONS_URL ?? "http://localhost:8114").replace(/\/$/, "");
+  return serviceUrl("payrollExceptions");
 }
 
 // ─── 1. Payroll Runs ─────────────────────────────────────────────────────────
@@ -49,17 +55,66 @@ export type PayrollRun = {
   updated_at: string;
 };
 
-type PayrollRunsResponse = { payroll_runs: PayrollRun[]; total: number };
+/** domain.PayrollRun as payroll-run-svc sends it (GET /v1/payroll/runs). */
+type PayrollRunWire = {
+  run_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  run_number: string;
+  pay_period_start: string;
+  pay_period_end: string;
+  pay_date: string;
+  status: PayrollRunStatus;
+  total_gross_pay: number;
+  total_net_pay: number;
+  total_tax_deductions: number;
+  employee_count: number;
+  created_at: string;
+  updated_at: string;
+};
 
+function fromWire(r: PayrollRunWire): PayrollRun {
+  return {
+    payroll_run_id: r.run_id,
+    tenant_id: r.tenant_id,
+    legal_entity_id: r.legal_entity_id,
+    pay_period_code: r.run_number,
+    period_start_date: r.pay_period_start,
+    period_end_date: r.pay_period_end,
+    payment_date: r.pay_date,
+    status: r.status,
+    total_gross_pay: r.total_gross_pay,
+    total_net_pay: r.total_net_pay,
+    total_tax_deductions: r.total_tax_deductions,
+    total_employee_count: r.employee_count,
+    // The service does not record a creator on the run.
+    created_by: "",
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+/**
+ * List payroll runs for the caller's legal entity.
+ *
+ * The route is /v1/payroll/runs and the body is a bare array of
+ * domain.PayrollRun. This used to call /v1/payroll-runs (404) and read a
+ * {payroll_runs} wrapper the service never sends. legal_entity_id is passed so
+ * the service checks the caller's run-view grant on that entity.
+ */
 export async function listPayrollRuns(identity?: Identity): Promise<ApiResult<PayrollRun[]>> {
   const base = payrollRunUrl();
-  const url = `${base}/v1/payroll-runs`;
-  return fetchDomainService<PayrollRunsResponse, PayrollRun[]>(
+  const query = identity?.legalEntityId ? `?legal_entity_id=${encodeURIComponent(identity.legalEntityId)}` : "";
+  const url = `${base}/v1/payroll/runs${query}`;
+  return fetchDomainService<PayrollRunWire[], PayrollRun[]>(
     url,
     base,
     "payroll-run-svc",
     identity,
-    (d) => d.payroll_runs ?? [],
+    (d) => {
+      if (!Array.isArray(d)) throw new Error("payroll-run-svc returned a non-array run list");
+      return d.map(fromWire);
+    },
   );
 }
 
