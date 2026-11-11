@@ -12,8 +12,10 @@ import {
   FinanceProcessTimeline,
   FinancialClosePanel,
   GeneralLedgerPanel,
+  IntercompanyPanel,
   IssueInvoiceForm,
   IngestStatementLineForm,
+  PayeeBankingIdentityWorkbench,
   RecordInvoiceForm,
   RecordJournalForm,
   RegisterPeriodForm,
@@ -65,6 +67,11 @@ const WIRED_SERVICES = new Set([
   // old view claimed "Live Local Backend (Port 8101)" from a /healthz probe while
   // displaying mock rows, which is exactly the vouching this set exists to avoid.
   "Accounts Receivable Service",
+  // Both built and exported from components/admin/finance since before this
+  // page existed in its current form, but never imported here — the panels
+  // existed with nothing rendering them. Added once actually wired below.
+  "Intercompany Accounting Service",
+  "Payee Banking Identity Service",
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -163,6 +170,8 @@ export default async function FinancePage({ searchParams }: PageProps) {
       "Accounts Payable Service",
       "Bank Reconciliation Service",
       "Financial Close Service",
+      "Intercompany Accounting Service",
+      "Payee Banking Identity Service",
     ],
   };
   const params = await searchParams;
@@ -798,6 +807,22 @@ export default async function FinancePage({ searchParams }: PageProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── intercompany-accounting-svc (:8105) ───────────────────────────────
+          Live and writable. Records reciprocal transactions between legal
+          entities, matches each one against its counterparty posting in the
+          journal register above, and manages disputes and mismatch
+          resolutions. Renders its own cards for each step rather than a
+          single form + register pair, so it is not nested inside another
+          Card here. */}
+      <IntercompanyPanel />
+
+      {/* ── payee-banking-identity-svc (:8166) ────────────────────────────────
+          Live and writable. Authoritative beneficiary banking identity
+          master: SHA-256 fingerprint duplicate detection, maker-checker SoD
+          approval, and PII masking. Also renders its own cards per workflow
+          step, so it is not nested inside another Card here. */}
+      <PayeeBankingIdentityWorkbench />
     </div>
   );
 }
