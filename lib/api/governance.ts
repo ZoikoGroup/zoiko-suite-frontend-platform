@@ -1,16 +1,29 @@
-// governance-decision-log-svc (:8083) — the append-only governance evidence log.
+// governance-decision-log-svc (:8083) — the append-only governance evidence
+// ledger: every governed decision, its replays, and the G-07 hash chain that
+// makes the record tamper-evident.
 //
-// Contract: GET /v1/decisions returns a JSON array (never null), newest first.
-// Optional filters: actor, entity, action, rule_basis, from, to, limit, offset.
-//
-// Append-only in the strict sense: there is no UPDATE and no DELETE route, and
-// POST is idempotent on a caller-supplied decision_id, so a retry cannot inflate
-// the record. Recording is the only write.
+// Every read carries X-Purpose-Context (the service requires a purpose on
+// reads, decision D-06) and the caller's identity; every write carries an
+// Idempotency-Key (envelope.ts). Nothing here edits or deletes a decision —
+// the service has no such route. A correction or a resolution is a NEW
+// decision naming the earlier one as its causation (a follow-up).
 
+import { REQUEST_TIMEOUT_MS, serviceLabel, serviceUrl } from "./config";
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
+import { envelopeHeaders } from "./envelope";
 import { humanizeCode } from "../humanize";
 
-/** Wire shape from the backend. Field names match the Go json tags exactly. */
+/** Why the console reads the ledger: governance review and audit. */
+export const READ_PURPOSE = "GOVERNANCE_AUDIT";
+
+// ── wire types (field names match the Go json tags) ─────────────────────────
+
+export type StatusCategory = "APPROVED" | "PENDING" | "ESCALATED" | "DENIED" | "OTHER";
+export type Priority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export const PRIORITIES: Priority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+export const STATUS_CATEGORIES: Exclude<StatusCategory, "OTHER">[] = ["APPROVED", "PENDING", "ESCALATED", "DENIED"];
+
 export type GovernanceDecision = {
   decision_id: string;
   tenant_id: string;
@@ -19,18 +32,423 @@ export type GovernanceDecision = {
   action_type: string;
   outcome: string;
   rule_basis: string;
+  jurisdiction_context?: string | null;
+  policy_version_id?: string | null;
   evaluation_context?: unknown;
   correlation_id: string;
-  /** Null when the decision was not made inside a workflow instance. Promoted to
-   *  a first-class column in migration 000004 — "every decision made during
-   *  workflow instance X" is a real query on this log. */
   workflow_instance_id?: string | null;
-  /** Null when the causing event or decision is not known. */
   causation_id?: string | null;
+  action_subject_type?: string | null;
+  action_subject_id?: string | null;
   decided_at: string;
+  recorded_at: string;
+  title?: string | null;
+  summary?: string | null;
+  domain: string;
+  priority?: Priority | null;
+  tags?: string[] | null;
+  related_obligation_id?: string | null;
+  chain_seq: number;
+  prev_hash: string;
+  curr_hash: string;
+  status_category: StatusCategory;
+  display_ref: string;
+  follow_up_count: number;
 };
 
-/** UI-facing outcome buckets. The backend column is free-text, so we normalise. */
+export type DecisionPage = {
+  records: GovernanceDecision[];
+  total_count: number;
+  next_cursor: string;
+  limit: number;
+  offset: number;
+};
+
+export type CategoryCounts = {
+  total: number;
+  approved: number;
+  pending: number;
+  escalated: number;
+  denied: number;
+  other: number;
+};
+
+export type NamedCount = { key: string; label?: string; count: number };
+
+export type DecisionSummary = {
+  from: string;
+  to: string;
+  previous_from: string;
+  totals: CategoryCounts;
+  previous_totals: CategoryCounts;
+  open_pending: number;
+  open_escalated: number;
+  by_domain: NamedCount[];
+  by_jurisdiction: NamedCount[];
+  by_priority: NamedCount[];
+  top_sources: NamedCount[];
+  trend: (CategoryCounts & { date: string })[];
+  replays: { total: number; mismatches: number };
+  chain: { length: number; head_hash?: string; packages: number; sealed_through: number; last_sealed_at?: string | null };
+  outbox: { pending: number; published: number; oldest_pending_seconds: number };
+  facets: {
+    domains: { code: string; label: string }[];
+    jurisdictions: string[];
+    priorities: string[];
+    categories: string[];
+  };
+};
+
+export type ReplayManifest = {
+  replay_manifest_id: string;
+  decision_id: string;
+  policy_version_id: string;
+  replayed_outcome: string;
+  original_outcome: string;
+  outcomes_match: boolean;
+  replay_notes?: string | null;
+  replayed_at: string;
+  replayed_by_principal_id: string;
+  tenant_id: string;
+  decision_display_ref?: string;
+  decision_title?: string | null;
+  decision_action_type?: string;
+};
+
+export type EvidencePackage = {
+  package_id: string;
+  tenant_id: string;
+  package_seq: number;
+  to_seq: number;
+  leaf_count: number;
+  merkle_root: string;
+  head_hash: string;
+  head_decision_id: string;
+  prev_package_hash: string;
+  package_hash: string;
+  label?: string | null;
+  reason?: string | null;
+  sealed_by: string;
+  sealed_at: string;
+};
+
+export type PackageCheck = {
+  package_id: string;
+  package_seq: number;
+  to_seq: number;
+  valid: boolean;
+  reason?: string;
+  recomputed_root?: string;
+};
+
+export type ChainVerification = {
+  valid: boolean;
+  decisions_checked: number;
+  head_seq: number;
+  head_hash?: string;
+  head_decision_id?: string;
+  first_break?: { chain_seq: number; decision_id: string; reason: string } | null;
+  packages_checked: number;
+  packages: PackageCheck[];
+  verified_at: string;
+};
+
+export type OutboxEvent = {
+  event_type: string;
+  created_at: string;
+  published_at?: string | null;
+  attempts: number;
+  last_error?: string | null;
+};
+
+export type DecisionEvidence = {
+  decision_id: string;
+  display_ref: string;
+  chain_seq: number;
+  prev_hash: string;
+  curr_hash: string;
+  hash_valid: boolean;
+  prev_link_valid: boolean;
+  package?: EvidencePackage | null;
+  events: OutboxEvent[];
+  events_note: string;
+};
+
+// ── reads ────────────────────────────────────────────────────────────────────
+
+/** Every filter GET /v1/decisions accepts. All optional, AND-composed. */
+export type DecisionFilters = {
+  q?: string;
+  domain?: string;
+  status?: string;
+  priority?: string;
+  jurisdiction?: string;
+  actor?: string;
+  /** legal_entity_id — the read is then authorized on that entity. */
+  entity?: string;
+  action?: string;
+  ruleBasis?: string;
+  /** RFC3339. */
+  from?: string;
+  to?: string;
+  causation?: string;
+  workflow?: string;
+  limit?: number;
+  offset?: number;
+  cursor?: string;
+};
+
+function read<T>(path: string, identity: Identity | undefined, query?: Record<string, string | number | undefined>) {
+  return apiGet<T>("governance", path, { identity, query, purposeContext: READ_PURPOSE });
+}
+
+export async function listDecisionRecords(filters: DecisionFilters, identity?: Identity): Promise<ApiResult<DecisionPage>> {
+  const result = await read<DecisionPage>("/v1/decisions", identity, {
+    q: filters.q,
+    domain: filters.domain,
+    status: filters.status,
+    priority: filters.priority,
+    jurisdiction: filters.jurisdiction,
+    actor: filters.actor,
+    entity: filters.entity,
+    action: filters.action,
+    rule_basis: filters.ruleBasis,
+    from: filters.from,
+    to: filters.to,
+    causation: filters.causation,
+    workflow: filters.workflow,
+    limit: filters.limit,
+    offset: filters.offset,
+    cursor: filters.cursor,
+  });
+  if (!result.ok) return result;
+  if (!Array.isArray(result.data?.records)) {
+    return { ok: false, error: { kind: "malformed", message: "governance-decision-log-svc returned no records array" } };
+  }
+  return result;
+}
+
+export function getDecision(decisionId: string, identity?: Identity): Promise<ApiResult<GovernanceDecision>> {
+  return read<GovernanceDecision>(`/v1/decisions/${encodeURIComponent(decisionId)}`, identity);
+}
+
+export function getDecisionSummary(
+  window: { days?: number; from?: string; to?: string; entity?: string },
+  identity?: Identity,
+): Promise<ApiResult<DecisionSummary>> {
+  return read<DecisionSummary>("/v1/decisions/summary", identity, {
+    days: window.from ? undefined : window.days,
+    from: window.from,
+    to: window.to,
+    entity: window.entity,
+  });
+}
+
+export function getDecisionEvidence(decisionId: string, identity?: Identity): Promise<ApiResult<DecisionEvidence>> {
+  return read<DecisionEvidence>(`/v1/decisions/${encodeURIComponent(decisionId)}/evidence`, identity);
+}
+
+export function listReplayManifests(decisionId: string, identity?: Identity): Promise<ApiResult<ReplayManifest[]>> {
+  return read<ReplayManifest[]>(`/v1/decisions/${encodeURIComponent(decisionId)}/replay-manifests`, identity);
+}
+
+export function listAllReplays(
+  params: { limit?: number; offset?: number; mismatches?: boolean },
+  identity?: Identity,
+): Promise<ApiResult<{ records: ReplayManifest[]; total_count: number }>> {
+  return read("/v1/replay-manifests", identity, {
+    limit: params.limit,
+    offset: params.offset,
+    mismatches: params.mismatches ? "true" : undefined,
+  });
+}
+
+export function verifyChain(identity?: Identity): Promise<ApiResult<ChainVerification>> {
+  return read<ChainVerification>("/v1/evidence/chain/verify", identity);
+}
+
+export function listPackages(identity?: Identity): Promise<ApiResult<{ records: EvidencePackage[]; total_count: number }>> {
+  return read("/v1/evidence/packages", identity);
+}
+
+export function getPackage(packageId: string, identity?: Identity): Promise<ApiResult<EvidencePackage>> {
+  return read<EvidencePackage>(`/v1/evidence/packages/${encodeURIComponent(packageId)}`, identity);
+}
+
+export function verifyPackage(packageId: string, identity?: Identity): Promise<ApiResult<PackageCheck>> {
+  return read<PackageCheck>(`/v1/evidence/packages/${encodeURIComponent(packageId)}/verify`, identity);
+}
+
+/**
+ * The tenant's evidence bundle, as the raw JSON document the service built
+ * (so the download is byte-for-byte what was exported), with its file name.
+ */
+export async function exportEvidenceBundle(
+  identity: Identity,
+): Promise<{ ok: true; body: string; filename: string } | { ok: false; status?: number; message: string }> {
+  let response: Response;
+  try {
+    response = await fetch(serviceUrl("governance") + "/v1/evidence/chain/export", {
+      headers: {
+        Accept: "application/json",
+        ...envelopeHeaders({ identity, purposeContext: READ_PURPOSE, materialWrite: false }),
+      },
+      signal: AbortSignal.timeout(Math.max(REQUEST_TIMEOUT_MS, 30_000)),
+    });
+  } catch {
+    return { ok: false, message: `${serviceLabel("governance")} did not answer the export` };
+  }
+  if (!response.ok) {
+    return { ok: false, status: response.status, message: `${serviceLabel("governance")} refused the export (${response.status})` };
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "governance-evidence.json";
+  return { ok: true, body: await response.text(), filename };
+}
+
+// ── writes ───────────────────────────────────────────────────────────────────
+
+export type RecordDecisionInput = {
+  actionType: string;
+  outcome: string;
+  ruleBasis: string;
+  legalEntityId: string;
+  title?: string;
+  summary?: string;
+  domain?: string;
+  priority?: string;
+  tags?: string[];
+  jurisdiction?: string;
+  relatedObligationId?: string;
+  subjectType?: string;
+  subjectId?: string;
+  /** The decision this one follows up (resolves, overrides, corrects). */
+  causationId?: string;
+  evaluationContext?: unknown;
+  /** RFC3339 — when the decision was made, not when it is logged. */
+  decidedAt?: string;
+};
+
+/**
+ * Append one decision. decision_id and the correlation id are generated here:
+ * decision_id is the service's dedup key, and a human-chosen one would collide.
+ * 201 = recorded; 200 = an identical decision was already recorded.
+ */
+export function recordDecision(input: RecordDecisionInput, identity: Identity): Promise<ApiWriteResult<GovernanceDecision>> {
+  const correlationId = crypto.randomUUID();
+  const body: Record<string, unknown> = {
+    decision_id: crypto.randomUUID(),
+    legal_entity_id: input.legalEntityId,
+    action_type: input.actionType,
+    outcome: input.outcome,
+    rule_basis: input.ruleBasis,
+    correlation_id: correlationId,
+    decided_at: input.decidedAt ?? new Date().toISOString(),
+  };
+  const optional: [string, unknown][] = [
+    ["title", input.title],
+    ["summary", input.summary],
+    ["domain", input.domain],
+    ["priority", input.priority],
+    ["tags", input.tags?.length ? input.tags : undefined],
+    ["jurisdiction_context", input.jurisdiction],
+    ["related_obligation_id", input.relatedObligationId],
+    ["action_subject_type", input.subjectType],
+    ["action_subject_id", input.subjectId],
+    ["causation_id", input.causationId],
+    ["evaluation_context", input.evaluationContext],
+  ];
+  for (const [k, v] of optional) if (v !== undefined && v !== "") body[k] = v;
+  return apiPost<GovernanceDecision>("governance", "/v1/decisions", body, {
+    identity: { ...identity, legalEntityId: input.legalEntityId },
+    correlationId,
+    causationId: input.causationId,
+  });
+}
+
+export function replayDecision(decisionId: string, identity: Identity): Promise<ApiWriteResult<ReplayManifest>> {
+  return apiPost<ReplayManifest>("governance", `/v1/decisions/${encodeURIComponent(decisionId)}/replay`, {}, { identity });
+}
+
+export function sealPackage(
+  input: { throughDecisionId?: string; label?: string; reason?: string },
+  identity: Identity,
+): Promise<ApiWriteResult<EvidencePackage>> {
+  const body: Record<string, string> = {};
+  if (input.throughDecisionId) body.through_decision_id = input.throughDecisionId;
+  if (input.label) body.label = input.label;
+  if (input.reason) body.reason = input.reason;
+  return apiPost<EvidencePackage>("governance", "/v1/evidence/packages/seal", body, { identity });
+}
+
+// ── presentation helpers ─────────────────────────────────────────────────────
+
+/** Badge label and tone for a decision's status. */
+export function statusView(d: Pick<GovernanceDecision, "status_category" | "outcome">): {
+  label: string;
+  tone: "success" | "warning" | "danger" | "neutral" | "info";
+} {
+  const outcome = d.outcome?.trim().toUpperCase();
+  switch (d.status_category) {
+    case "APPROVED":
+      return { label: "Approved", tone: "success" };
+    case "PENDING":
+      return outcome === "IN_PROGRESS" ? { label: "In Progress", tone: "info" } : { label: "Pending", tone: "warning" };
+    case "ESCALATED":
+      return { label: "Escalated", tone: "danger" };
+    case "DENIED":
+      return { label: "Denied", tone: "neutral" };
+    default:
+      return { label: humanizeCode(d.outcome) || "Unknown", tone: "neutral" };
+  }
+}
+
+/** A decision's name: its title, else its action type in words. */
+export function decisionTitle(d: Pick<GovernanceDecision, "title" | "action_type">): string {
+  return d.title?.trim() || humanizeCode(d.action_type) || d.action_type;
+}
+
+/** Split "RULE-CODE:reference" into its parts; a value with no colon is whole. */
+export function splitRuleBasis(raw: string): { rule: string; reference?: string } {
+  const trimmed = raw?.trim() ?? "";
+  const colon = trimmed.indexOf(":");
+  if (colon <= 0 || colon === trimmed.length - 1) return { rule: trimmed };
+  return { rule: trimmed.slice(0, colon), reference: trimmed.slice(colon + 1) };
+}
+
+/** Turn a service refusal into a sentence an operator can act on. */
+export function explainDecisionError(error: { status?: number; message: string; body?: unknown }): string {
+  const code = (error.body as { code?: string } | undefined)?.code ?? "";
+  const detail = (error.body as { detail?: string } | undefined)?.detail;
+  switch (code) {
+    case "AUTHORIZATION_DENIED":
+      return "You do not hold the permission for this on the governance ledger. Ask an administrator for the governance role.";
+    case "AUTHZ_UNAVAILABLE":
+      return "authorization-svc could not be reached, so nothing was decided or written. Try again shortly.";
+    case "UNKNOWN_DOMAIN":
+      return "That domain is not one the ledger knows.";
+    case "NOTHING_TO_SEAL":
+      return "Every decision up to that point is already sealed. Record more decisions, then seal again.";
+    case "CHAIN_BROKEN":
+      return "The evidence chain does not verify, so it cannot be sealed. Run Verify chain to find the broken link.";
+    case "IDEMPOTENCY_MISMATCH":
+    case "DECISION_ID_CONFLICT":
+      return "A different request already used this key. Submit again.";
+    case "NOT_IMPLEMENTED":
+      return detail ?? "Replay is implemented only for APPROVAL_THRESHOLD decisions.";
+    case "SERVICE_UNAVAILABLE":
+      return detail === "Policy service unavailable"
+        ? "policy-svc could not be reached to fetch the policy version, so nothing was replayed."
+        : "The governance ledger could not reach its database. Nothing was written.";
+  }
+  if (error.status === 404) return detail ?? "Not found.";
+  return detail ?? error.message;
+}
+
+// ── Overview page (Executive dashboard) ──────────────────────────────────────
+// The overview panels want the ledger pre-digested into a feed and two
+// charts. They read the same live service, through the summary endpoint.
+
 export type DecisionOutcome = "authorized" | "escalated" | "denied";
 
 export type DecisionLogEntry = {
@@ -43,54 +461,50 @@ export type DecisionLogEntry = {
   timeAgo: string;
 };
 
-export type ListDecisionsParams = {
-  entity?: string;
-  actor?: string;
-  action?: string;
-  limit?: number;
-  /** Cursor-based pagination (API-4). If provided, offset is ignored. */
-  cursor?: string;
-  /** Required in practice. governance-decision-log-svc reads the tenant from
-   *  X-Tenant-Id and answers 400 `missing_tenant_id` without it — every read in
-   *  this client used to omit it, so the decision log rendered as "those
-   *  filters were rejected" on a request that carried no filters at all. */
-  identity?: Identity;
-};
+function outcomeBucket(category: StatusCategory): DecisionOutcome {
+  if (category === "APPROVED") return "authorized";
+  if (category === "DENIED") return "denied";
+  return "escalated";
+}
 
-/**
- * Fetch the most recent governance decisions, already mapped for the UI.
- *
- * The backend caps limit at 200 and defaults to 50.
- */
-export async function listDecisions(
-  params: ListDecisionsParams = {},
-): Promise<ApiResult<DecisionLogEntry[]>> {
-  const result = await apiGet<GovernanceDecision[]>("governance", "/v1/decisions", {
-    identity: params.identity,
-    query: {
-      entity: params.entity,
-      actor: params.actor,
-      action: params.action,
-      limit: params.limit ?? 8,
-      cursor: params.cursor,
-    },
-  });
+const RELATIVE = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 365 * 24 * 60 * 60 * 1000],
+  ["month", 30 * 24 * 60 * 60 * 1000],
+  ["day", 24 * 60 * 60 * 1000],
+  ["hour", 60 * 60 * 1000],
+  ["minute", 60 * 1000],
+];
 
-  if (!result.ok) return result;
-
-  // Defensive: a proxy or misconfigured route could return a JSON object.
-  if (!Array.isArray(result.data)) {
-    return {
-      ok: false,
-      error: { kind: "malformed", message: "governance returned a non-array decision list" },
-    };
+export function formatTimeAgo(isoTimestamp: string): string {
+  const then = new Date(isoTimestamp).getTime();
+  if (Number.isNaN(then)) return "unknown";
+  const elapsed = Date.now() - then;
+  for (const [unit, ms] of UNITS) {
+    if (Math.abs(elapsed) >= ms) return RELATIVE.format(-Math.round(elapsed / ms), unit);
   }
+  return "just now";
+}
 
-  return { ok: true, data: result.data.map(toLogEntry) };
+/** The most recent decisions, as feed entries. */
+export async function listDecisions(params: { limit?: number; identity?: Identity } = {}): Promise<ApiResult<DecisionLogEntry[]>> {
+  const result = await listDecisionRecords({ limit: params.limit ?? 8 }, params.identity);
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    data: result.data.records.map((d) => ({
+      id: d.display_ref || d.decision_id,
+      actor: d.actor_id,
+      action: decisionTitle(d),
+      entity: d.legal_entity_id,
+      outcome: outcomeBucket(d.status_category),
+      note: d.status_category === "OTHER" ? `Unrecognised outcome "${d.outcome}" — basis: ${d.rule_basis}` : d.rule_basis || undefined,
+      timeAgo: formatTimeAgo(d.decided_at),
+    })),
+  };
 }
 
 export type OutcomeSplit = { name: string; value: number; color: string }[];
-
 export type TrendPoint = { day: string; authorized: number; escalated: number };
 
 export type DecisionStats = {
@@ -98,53 +512,25 @@ export type DecisionStats = {
   authorized: number;
   escalated: number;
   denied: number;
-  /** DENIED + ESCALATED — decisions that did not cleanly pass governance. */
   exceptions: number;
   outcomeSplit: OutcomeSplit;
   trend: TrendPoint[];
-  /** Exceptions in the last 7 days minus the 7 days before that. */
   exceptionDelta: number;
 };
 
-/**
- * Aggregate the decision log into the numbers the Overview page shows.
- *
- * Everything here is computed from a single /v1/decisions read — the service has
- * no aggregate or group-by endpoint, so the roll-up happens client-side. The 200
- * row cap is the backend's maximum page size; beyond that these counts would
- * need real server-side aggregation.
- */
-export async function getDecisionStats(
-  trendDays = 14,
-  identity?: Identity,
-): Promise<ApiResult<DecisionStats>> {
-  const result = await apiGet<GovernanceDecision[]>("governance", "/v1/decisions", {
-    identity,
-    query: { limit: 200 },
-  });
-
+/** Window totals and a daily series, from GET /v1/decisions/summary. */
+export async function getDecisionStats(trendDays = 14, identity?: Identity): Promise<ApiResult<DecisionStats>> {
+  const result = await getDecisionSummary({ days: trendDays }, identity);
   if (!result.ok) return result;
-  if (!Array.isArray(result.data)) {
-    return {
-      ok: false,
-      error: { kind: "malformed", message: "governance returned a non-array decision list" },
-    };
-  }
-
-  const decisions = result.data;
-  const bucketed = decisions.map((d) => ({
-    outcome: normaliseOutcome(d.outcome).outcome,
-    at: new Date(d.decided_at),
-  }));
-
-  const authorized = bucketed.filter((d) => d.outcome === "authorized").length;
-  const escalated = bucketed.filter((d) => d.outcome === "escalated").length;
-  const denied = bucketed.filter((d) => d.outcome === "denied").length;
-
+  const s = result.data;
+  const authorized = s.totals.approved;
+  const escalated = s.totals.escalated + s.totals.pending + s.totals.other;
+  const denied = s.totals.denied;
+  const prevExceptions = s.previous_totals.total - s.previous_totals.approved;
   return {
     ok: true,
     data: {
-      total: decisions.length,
+      total: s.totals.total,
       authorized,
       escalated,
       denied,
@@ -154,533 +540,12 @@ export async function getDecisionStats(
         { name: "Escalated", value: escalated, color: "var(--color-gold-400)" },
         { name: "Denied", value: denied, color: "#c2483d" },
       ],
-      trend: buildTrend(bucketed, trendDays),
-      exceptionDelta: exceptionDelta(bucketed),
+      trend: s.trend.map((p) => ({
+        day: new Date(p.date + "T00:00:00Z").toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }),
+        authorized: p.approved,
+        escalated: p.total - p.approved,
+      })),
+      exceptionDelta: escalated + denied - prevExceptions,
     },
   };
 }
-
-type Bucketed = { outcome: DecisionOutcome; at: Date };
-
-/** Dense day-by-day series: days with no decisions render as zero, not a gap. */
-function buildTrend(decisions: Bucketed[], days: number): TrendPoint[] {
-  const series: TrendPoint[] = [];
-  const today = new Date();
-
-  for (let offset = days - 1; offset >= 0; offset--) {
-    const day = new Date(today);
-    day.setDate(day.getDate() - offset);
-    const key = day.toDateString();
-
-    const onDay = decisions.filter((d) => d.at.toDateString() === key);
-    series.push({
-      day: day.toLocaleDateString("en", { month: "short", day: "numeric" }),
-      authorized: onDay.filter((d) => d.outcome === "authorized").length,
-      escalated: onDay.filter((d) => d.outcome !== "authorized").length,
-    });
-  }
-
-  return series;
-}
-
-/**
- * Trailing-7-day exception count minus the 7 days before it.
- *
- * A real comparison, not a decorative one — if there is no prior-week data the
- * delta is simply the current week's count.
- */
-function exceptionDelta(decisions: Bucketed[]): number {
-  const dayMs = 24 * 60 * 60 * 1000;
-  const now = Date.now();
-
-  const inWindow = (from: number, to: number) =>
-    decisions.filter(
-      (d) => d.outcome !== "authorized" && d.at.getTime() > from && d.at.getTime() <= to,
-    ).length;
-
-  return inWindow(now - 7 * dayMs, now) - inWindow(now - 14 * dayMs, now - 7 * dayMs);
-}
-
-function toLogEntry(decision: GovernanceDecision): DecisionLogEntry {
-  const { outcome, unmapped } = normaliseOutcome(decision.outcome);
-
-  // rule_basis is the governance justification for the decision — the most
-  // useful thing to surface as the entry's note. If the backend hands us an
-  // outcome we don't recognise we say so rather than silently mislabelling it.
-  const note = unmapped
-    ? `Unrecognised outcome "${decision.outcome}" — basis: ${decision.rule_basis}`
-    : decision.rule_basis || undefined;
-
-  return {
-    id: decision.decision_id,
-    actor: decision.actor_id,
-    action: decision.action_type,
-    entity: decision.legal_entity_id,
-    outcome,
-    note,
-    timeAgo: formatTimeAgo(decision.decided_at),
-  };
-}
-
-/**
- * Map the backend's data-driven outcome onto the three UI buckets.
- *
- * The outcome column is VARCHAR(32) with no CHECK constraint, so values outside
- * the documented GRANTED / DENIED / ESCALATED set are possible. Those land in
- * "escalated" (the review bucket) and are flagged in the note — never presented
- * as if they were an authorized outcome.
- */
-function normaliseOutcome(raw: string): { outcome: DecisionOutcome; unmapped: boolean } {
-  switch (raw?.trim().toUpperCase()) {
-    case "GRANTED":
-    case "AUTHORIZED":
-    case "APPROVED":
-    case "PERMIT":
-      return { outcome: "authorized", unmapped: false };
-    case "DENIED":
-    case "REJECTED":
-    case "BLOCKED":
-      return { outcome: "denied", unmapped: false };
-    case "ESCALATED":
-    case "PENDING":
-      return { outcome: "escalated", unmapped: false };
-    default:
-      return { outcome: "escalated", unmapped: true };
-  }
-}
-
-const RELATIVE = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ["year", 365 * 24 * 60 * 60 * 1000],
-  ["month", 30 * 24 * 60 * 60 * 1000],
-  ["day", 24 * 60 * 60 * 1000],
-  ["hour", 60 * 60 * 1000],
-  ["minute", 60 * 1000],
-];
-
-function formatTimeAgo(isoTimestamp: string): string {
-  const then = new Date(isoTimestamp).getTime();
-  if (Number.isNaN(then)) return "unknown";
-
-  const elapsed = Date.now() - then;
-  for (const [unit, ms] of UNITS) {
-    if (Math.abs(elapsed) >= ms) {
-      return RELATIVE.format(-Math.round(elapsed / ms), unit);
-    }
-  }
-  return "just now";
-}
-
-/** Verify the hash chain integrity for the caller's tenant.
- *  Returns 200 with {valid: true, checked: N, last_decision_id: "..."}
- *  or 503 if store unavailable. */
-export async function verifyChain(
-  identity: Identity,
-): Promise<ApiResult<{ valid: boolean; checked: number; last_decision_id: string }>> {
-  return apiGet<{ valid: boolean; checked: number; last_decision_id: string }>(
-    "governance",
-    "/v1/evidence/chain/verify",
-    { identity },
-  );
-}
-
-/** Export the hash chain for the caller's tenant as a JSON stream.
- *  Each line is a decision with its prev_hash and curr_hash. */
-export type ChainExportEntry = {
-  decision_id: string;
-  tenant_id: string;
-  legal_entity_id: string;
-  actor_id: string;
-  action_type: string;
-  outcome: string;
-  rule_basis: string;
-  evaluation_context?: unknown;
-  correlation_id: string;
-  workflow_instance_id?: string | null;
-  causation_id?: string | null;
-  decided_at: string;
-  prev_hash: string;
-  curr_hash: string;
-};
-
-export async function exportChain(
-  identity: Identity,
-): Promise<ApiResult<ChainExportEntry[]>> {
-  const result = await apiGet<ChainExportEntry[] | string>("governance", "/v1/evidence/chain/export", {
-    identity,
-  });
-  if (!result.ok) return result;
-  // The backend streams JSON lines; we need to parse each line
-  if (typeof result.data === "string") {
-    return { ok: true, data: result.data.trim().split("\n").map((line) => JSON.parse(line)) };
-  }
-  return { ok: true, data: result.data };
-}
-
-export type EvidencePackage = {
-  package_id: string;
-  tenant_id: string;
-  principal_id: string;
-  last_decision_id: string;
-  decision_count: number;
-  merkle_root: string;
-  sealed_at: string;
-};
-
-export type SealPackageInput = {
-  packageId: string;
-  lastDecisionId: string;
-};
-
-/** Seal a package of decisions up to the given decision ID.
- *  Returns 201 with {package_id, sealed_at, decision_count, merkle_root}
- *  or 404 if last_decision_id not found, 503 if store unavailable. */
-export async function sealPackage(
-  identity: Identity,
-  input: SealPackageInput,
-): Promise<ApiResult<EvidencePackage>> {
-  return apiPost<EvidencePackage>(
-    "governance",
-    "/v1/evidence/packages/seal",
-    {
-      package_id: input.packageId,
-      last_decision_id: input.lastDecisionId,
-    },
-    { identity },
-  );
-}
-
-/** Retrieve a sealed evidence package by ID.
- *  Returns 200 with the package or 404 if not found. */
-export async function getPackage(
-  identity: Identity,
-  packageId: string,
-): Promise<ApiResult<EvidencePackage>> {
-  return apiGet<EvidencePackage>(
-    "governance",
-    `/v1/evidence/packages/${encodeURIComponent(packageId)}`,
-    { identity },
-  );
-}
-
-// --- The rest of the service's surface ---------------------------------------
-//
-// Everything above serves the Overview page, which wants the log pre-digested
-// into feed entries and chart series. The Governance page wants the opposite:
-// the raw records, every filter the service accepts, and the ability to write
-// one. Both live here rather than in two modules, because they are one service.
-//
-// This service IS tenant-scoped, contrary to what this comment used to say.
-// Verified against the running service: GET /v1/decisions requires X-Tenant-Id
-// (400 `missing_tenant_id` without it), returns an empty list when given another
-// tenant's id, and row-level security is forced in the database (migrations
-// 000002 and 000006). A lookup by id behaves the same way, answering 404 for a
-// decision belonging to another tenant.
-//
-// So every read below takes an identity, and passing one is not optional — the
-// entity filter narrows a read within the tenant, it does not establish the
-// tenant boundary.
-
-/** Every filter GET /v1/decisions accepts. All optional, AND-composed. */
-export type DecisionFilters = {
-  actor?: string;
-  /** Matches legal_entity_id, not tenant_id — the service has no tenant filter. */
-  entity?: string;
-  action?: string;
-  ruleBasis?: string;
-  /** RFC3339. The service answers 400 `invalid_from` on anything else. */
-  from?: string;
-  to?: string;
-  /** Service caps at 200 and defaults to 50. */
-  limit?: number;
-  /** Cursor-based pagination (API-4). If provided, offset is ignored. */
-  cursor?: string;
-  offset?: number;
-  identity?: Identity;
-};
-
-/** Response shape from GET /v1/decisions with cursor paging (API-4). */
-export type ListDecisionsResponse = {
-  records: GovernanceDecision[];
-  next_cursor: string;
-  total_count: number;
-};
-
-/**
- * List raw decision records with the service's full filter set.
- *
- * Separate from listDecisions() above, which flattens each record into a feed
- * entry and drops evaluation_context. An evidence log read for audit purposes
- * needs the record as stored, including the context blob.
- *
- * Supports cursor-based pagination (API-4) via the `cursor` parameter.
- * Returns the records plus the next_cursor for the following page.
- */
-export async function listDecisionRecords(
-  filters: DecisionFilters = {},
-): Promise<ApiResult<{ records: GovernanceDecision[]; nextCursor: string }>> {
-  const result = await apiGet<ListDecisionsResponse>("governance", "/v1/decisions", {
-    identity: filters.identity,
-    query: {
-      actor: filters.actor,
-      entity: filters.entity,
-      action: filters.action,
-      rule_basis: filters.ruleBasis,
-      from: filters.from,
-      to: filters.to,
-      limit: filters.limit ?? 50,
-      cursor: filters.cursor,
-    },
-  });
-
-  if (!result.ok) return result;
-  if (!result.data?.records || !Array.isArray(result.data.records)) {
-    return {
-      ok: false,
-      error: {
-        kind: "malformed",
-        message: "governance-decision-log-svc returned a non-array decision list",
-      },
-    };
-  }
-  return { ok: true, data: { records: result.data.records, nextCursor: result.data.next_cursor } };
-}
-
-/**
- * Fetch one decision by its id.
- *
- * `identity` is required in practice. Without X-Tenant-Id the service refuses
- * the read with 400 `missing_tenant_id`, and 404 means "not visible to this
- * tenant" rather than "absent from the store" — the caller cannot tell a
- * decision that does not exist from one belonging to another tenant.
- */
-export async function getDecision(
-  decisionId: string,
-  identity?: Identity,
-): Promise<ApiResult<GovernanceDecision>> {
-  return apiGet<GovernanceDecision>(
-    "governance",
-    `/v1/decisions/${encodeURIComponent(decisionId)}`,
-    { identity },
-  );
-}
-
-export type RecordDecisionInput = {
-  /** Caller-supplied. This is the idempotency key: a second POST with the same
-   *  id returns 200 and writes nothing, rather than duplicating the evidence. */
-  decisionId: string;
-  tenantId: string;
-  legalEntityId: string;
-  actorId: string;
-  actionType: string;
-  outcome: string;
-  /** The rule that produced the outcome. Required — doctrine here is that an
-   *  outcome without its basis is not evidence. */
-  ruleBasis: string;
-  correlationId: string;
-  /** Arbitrary JSON. Anything without a first-class column goes here. */
-  evaluationContext?: unknown;
-  /** RFC3339. When the decision was made UPSTREAM, which is not the same as
-   *  when it was logged. Omitted means the service stamps receipt time, which
-   *  silently conflates the two — so the console always sends it. */
-  decidedAt?: string;
-  /** Caller identity, forwarded as X-Principal-Id / X-Tenant-Id /
-   *  X-Legal-Entity-Id. Required for the write: the service answers 401
-   *  missing_principal without X-Principal-Id, before any authz check. */
-  identity: Identity;
-};
-
-/**
- * Append a decision to the evidence log.
- *
- * 201 means a new record was written. 200 means this decision_id was already
- * recorded and nothing changed — reported distinctly, because a log that
- * silently accepts a replay as a fresh fact is not an evidence log.
- *
- * Every field except evaluation_context and decided_at is required; the service
- * answers 400 with the name of the first missing one.
- */
-export async function recordDecision(
-  input: RecordDecisionInput,
-): Promise<ApiWriteResult<GovernanceDecision>> {
-  return apiPost<GovernanceDecision>(
-    "governance",
-    "/v1/decisions",
-    {
-      decision_id: input.decisionId,
-      tenant_id: input.tenantId,
-      legal_entity_id: input.legalEntityId,
-      actor_id: input.actorId,
-      action_type: input.actionType,
-      outcome: input.outcome,
-      rule_basis: input.ruleBasis,
-      correlation_id: input.correlationId,
-      ...(input.evaluationContext === undefined
-        ? {}
-        : { evaluation_context: input.evaluationContext }),
-      ...(input.decidedAt ? { decided_at: input.decidedAt } : {}),
-    },
-    {
-      correlationId: input.correlationId,
-      identity: input.identity,
-      // governance-decision-log-svc enforces section4 purpose_context — "required for
-      // governed sensitive access" — and refuses the write with 400
-      // envelope_incomplete without it. The envelope builder has always
-      // supported the field; nothing passed one, so every append from the
-      // console was refused before it reached the service.
-      //
-      // The value states why the decision register is being written to, which
-      // is what the contract asks for: this endpoint records a governance
-      // decision, and that is the purpose.
-      purposeContext: "GOVERNANCE_DECISION_RECORD",
-    },
-  );
-}
-
-/** Outcomes the console offers when recording by hand. The column is free-text
- *  with no constraint, so this narrows the console's own form — it is not a
- *  statement about what the service accepts. */
-export const DECISION_OUTCOMES = ["GRANTED", "DENIED", "ESCALATED"] as const;
-
-/** Map a raw record onto the UI's three buckets, for callers that hold records
- *  rather than feed entries. Re-exported so the Governance page badges match the
- *  Overview page exactly. */
-export function bucketOutcome(raw: string): { outcome: DecisionOutcome; unmapped: boolean } {
-  return normaliseOutcome(raw);
-}
-
-// --- Reading a decision without reading the schema ---------------------------
-//
-// The records this service returns are evidence about whether something was
-// allowed to happen. The people who need that answer — a finance lead checking a
-// payment run, an auditor following a trail — are not the people who wrote the
-// service, and `{"outcome":"GRANTED","rule_basis":"SPEND-LIMIT-V3:pv-8f2c1a"}`
-// does not answer it for them. These helpers say what a record means in prose.
-// They never alter a stored value; the code stays visible next to the plain text.
-
-export type DecisionExplanation = {
-  /** One sentence: what happened to the action. */
-  headline: string;
-  /** What that means, for a reader who does not know the outcome vocabulary. */
-  meaning: string;
-  /** Short label for a badge — "Allowed", "Refused", "Needs review". */
-  shortLabel: string;
-  outcome: DecisionOutcome;
-  /** The outcome exactly as stored. */
-  raw: string;
-  unmapped: boolean;
-};
-
-/** Badge text per bucket. Plain verbs, not the storage vocabulary. */
-const OUTCOME_LABEL: Record<DecisionOutcome, string> = {
-  authorized: "Allowed",
-  denied: "Refused",
-  escalated: "Needs review",
-};
-
-/**
- * Explain one decision in prose.
- *
- * `actionType` is folded into the headline because "Allowed" on its own is not a
- * fact anyone can act on — what was allowed is the point. An outcome the service
- * stored but this console does not recognise gets a headline that says exactly
- * that, and is never described as an approval.
- */
-export function explainDecision(outcomeRaw: string, actionType: string): DecisionExplanation {
-  const { outcome, unmapped } = normaliseOutcome(outcomeRaw);
-  const action = humanizeCode(actionType) || "This action";
-  const stored = outcomeRaw?.trim() || "(empty)";
-
-  if (unmapped) {
-    return {
-      headline: `${action}: the recorded outcome is not one this console recognises`,
-      meaning:
-        `The log stored the outcome "${stored}", which is not one of the values this ` +
-        "console knows how to read. It is shown as needing review, and is deliberately " +
-        "not treated as an approval — check with whoever operates the service that " +
-        "recorded it before relying on this record.",
-      shortLabel: "Needs review",
-      outcome,
-      raw: stored,
-      unmapped,
-    };
-  }
-
-  const MEANING: Record<DecisionOutcome, { headline: string; meaning: string }> = {
-    authorized: {
-      headline: `${action} was allowed`,
-      meaning:
-        "The governance rules were checked and this action was permitted to go ahead. " +
-        "The rule that permitted it is recorded below as the basis for the decision.",
-    },
-    denied: {
-      headline: `${action} was refused`,
-      meaning:
-        "The governance rules were checked and this action was blocked, so it did not " +
-        "go ahead. The rule that blocked it is recorded below as the basis for the decision.",
-    },
-    escalated: {
-      headline: `${action} was sent for review`,
-      meaning:
-        "The governance rules could not settle this action automatically, so it was " +
-        "passed to a person to approve or refuse. This record is the referral itself — " +
-        "it does not say what was decided afterwards.",
-    },
-  };
-
-  return {
-    ...MEANING[outcome],
-    shortLabel: OUTCOME_LABEL[outcome],
-    outcome,
-    raw: stored,
-    unmapped,
-  };
-}
-
-/**
- * Split a rule basis into the rule and the reference after the colon.
- *
- * Callers write this field as `RULE-NAME:reference` — the placeholder in the
- * console's own form is `SPEND-LIMIT-V3:pv-8f2c1a`. That is a convention rather
- * than a contract (the column is a plain VARCHAR(256) with no format enforced),
- * so a value with no colon comes back whole and unsplit rather than being forced
- * into a shape it does not have.
- */
-export function splitRuleBasis(raw: string): { rule: string; reference?: string } {
-  const trimmed = raw?.trim() ?? "";
-  const colon = trimmed.indexOf(":");
-  if (colon <= 0 || colon === trimmed.length - 1) return { rule: trimmed };
-
-  return {
-    rule: trimmed.slice(0, colon),
-    reference: trimmed.slice(colon + 1),
-  };
-}
-
-/**
- * Turn a backend failure into something an operator can act on.
- *
- * This service answers in machine codes rather than prose, so matching is on
- * those codes.
- */
-export function explainDecisionError(message: string): string {
-  if (message.includes("missing_field")) {
-    return `The service rejected the record as incomplete: ${message.split("missing_field").pop()?.trim() || "a required field was empty"}. Every field but evaluation_context and decided_at is mandatory.`;
-  }
-  if (message.includes("invalid_from") || message.includes("invalid_to")) {
-    return "The date range was not valid RFC3339. Use a full timestamp, e.g. 2026-07-30T00:00:00Z.";
-  }
-  if (message.includes("invalid_json")) {
-    return "The evaluation context was not valid JSON, so the service could not parse the request.";
-  }
-  if (message.includes("store_unavailable")) {
-    return "governance-decision-log-svc could not reach its database. Nothing was written.";
-  }
-  if (message.includes("404")) {
-    return "No decision with that id exists in the log.";
-  }
-  return message;
-}
-
-// EOF

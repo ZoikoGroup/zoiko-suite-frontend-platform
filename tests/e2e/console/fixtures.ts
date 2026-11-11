@@ -13,19 +13,26 @@ type Fixtures = {
 };
 
 export const test = base.extend<Fixtures>({
-  consoleUrl: async ({}, provide) => {
-    await provide("http://127.0.0.1:3100");
+  // The console under test: the configured baseURL (the suite's own
+  // `next start` on 3100 by default).
+  consoleUrl: async ({ baseURL }, provide) => {
+    await provide(baseURL ?? "http://localhost:3100");
   },
 
   authedPage: async ({ page, consoleUrl }, provide) => {
     // Sign in as demo admin
     await page.goto(`${consoleUrl}/login`);
-    await page.fill('input[name="email"]', "admin@zoikosuite.com");
-    await page.fill('input[name="password"]', "Zoiko@Governance1");
+    // Wait for hydration: on a cold dev server a click before it submits the
+    // form natively (GET /login?) and never signs in.
+    await page.waitForLoadState("networkidle");
+    await page.fill('#email', "admin@zoikosuite.com");
+    await page.fill('#password', "Zoiko@Governance1");
     await page.click('button[type="submit"]');
     
     // Wait for redirect to dashboard
-    await page.waitForURL(`${consoleUrl}/admin/**`, { timeout: 30000 });
+    // A regex, not "/admin/**": the landing page is /admin itself, which that
+    // glob never matched, so every console spec timed out at sign-in.
+    await page.waitForURL(/\/admin(\/|\?|$)/, { timeout: 60000, waitUntil: "commit" });
     
     await provide(page);
   },

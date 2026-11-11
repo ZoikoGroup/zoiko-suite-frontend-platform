@@ -1,227 +1,93 @@
-import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 
-const SHOT_DIR = "test-results/console/governance";
+// Governance Log console (/admin/governance) against the live local stack:
+// governance-decision-log-svc, authorization-svc, identity-context-svc,
+// tenant-entity-registry-svc (and policy-svc for the replay row). Run
+// deployments/scripts/seed-demo-rbac.ps1 first so the demo admin holds
+// GOVERNANCE_DECISION_RECORD / _READ / _REPLAY and GOVERNANCE_EVIDENCE_SEAL.
+// The ledger is append-only: what these tests record stays, by design.
 
-test.describe.configure({ retries: 0 });
+test.describe.configure({ mode: "serial", retries: 0 });
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-async function screenshot(page: Page, name: string) {
-  await page.screenshot({ path: `${SHOT_DIR}/${name}.png`, fullPage: true });
-}
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
-
-test.describe("Governance Decision Log console (/admin/governance)", () => {
-  test.beforeEach(async ({ authedPage }) => {
-    await authedPage.goto("/admin/governance");
-    await authedPage.waitForLoadState("networkidle");
-  });
-
-  test("loads and shows all major sections", async ({ authedPage }) => {
-    // Page header
-    await expect(authedPage.locator("h1:has-text('Governance Log')")).toBeVisible();
-    
-    // What you are looking at card
-    await expect(authedPage.locator("text=What you are looking at")).toBeVisible();
-    
-    // Decision log card with filters
-    await expect(authedPage.locator("text=Decision log")).toBeVisible();
-    await expect(authedPage.locator("text=Newest first")).toBeVisible();
-    
-    // Filter bar fields
-    await expect(authedPage.locator('label:has-text("Action type")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Actor")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Legal entity")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Rule basis")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("From")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("To")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Per page")')).toBeVisible();
-    
-    // Apply filters button
-    await expect(authedPage.locator('button:has-text("Apply filters")')).toBeVisible();
-    
-    // Look up a decision card
-    await expect(authedPage.locator("text=Look up a decision")).toBeVisible();
-    await expect(authedPage.locator('input[placeholder*="4f8c2a91"]')).toBeVisible();
-    
-    // Record a decision card
-    await expect(authedPage.locator("text=Record a decision")).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Action type")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Outcome")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Rule basis")')).toBeVisible();
-    
-    await screenshot(authedPage, "governance-page-full");
-  });
-
-  test("decision log table renders with columns", async ({ authedPage }) => {
-    // Wait for the decision log panel to load
-    await authedPage.waitForLoadState("networkidle");
-    
-    // Table should be present (or empty state)
-    const table = authedPage.locator("table").first();
-    const emptyState = authedPage.locator("text=No decisions recorded yet");
-    
-    await expect(table.or(emptyState)).toBeVisible();
-    
-    // If table exists, check columns
-    if (await table.isVisible()) {
-      await expect(authedPage.locator("th:has-text('What was decided')")).toBeVisible();
-      await expect(authedPage.locator("th:has-text('Outcome')")).toBeVisible();
-      await expect(authedPage.locator("th:has-text('Why')")).toBeVisible();
-      await expect(authedPage.locator("th:has-text('Triggered by')")).toBeVisible();
-      await expect(authedPage.locator("th:has-text('Legal entity')")).toBeVisible();
-      await expect(authedPage.locator("th:has-text('Decided')")).toBeVisible();
+test.describe("Governance Log console", () => {
+  test("KPIs, the three panels and the register render from live data", async ({ authedPage: page }) => {
+    await page.goto("/admin/governance");
+    await expect(page.locator("h1", { hasText: "Governance Log" })).toBeVisible();
+    for (const label of ["Total Decisions", "Approved", "Pending", "Escalated", "Denied"]) {
+      await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
     }
-    
-    await screenshot(authedPage, "governance-decision-log");
-  });
-
-  test("filter bar submits and updates URL", async ({ authedPage }) => {
-    // Fill in a filter
-    await authedPage.fill('input[name="action"]', "PAYROLL_RELEASE");
-    await authedPage.click('button:has-text("Apply filters")');
-    await authedPage.waitForLoadState("networkidle");
-    
-    // URL should contain the filter
-    await expect(authedPage).toHaveURL(/action=PAYROLL_RELEASE/);
-    
-    await screenshot(authedPage, "governance-filter-applied");
-  });
-
-  test("clear filters link works", async ({ authedPage }) => {
-    // First apply a filter
-    await authedPage.fill('input[name="action"]', "PAYROLL_RELEASE");
-    await authedPage.click('button:has-text("Apply filters")');
-    await authedPage.waitForLoadState("networkidle");
-    
-    // Click clear
-    await authedPage.click('a:has-text("Clear")');
-    await authedPage.waitForLoadState("networkidle");
-    
-    // URL should not have the filter
-    await expect(authedPage).not.toHaveURL(/action=PAYROLL_RELEASE/);
-  });
-
-  test("cursor pagination works when next page exists", async ({ authedPage }) => {
-    // Set a small page size to increase chance of pagination
-    await authedPage.fill('input[name="limit"]', "5");
-    await authedPage.click('button:has-text("Apply filters")');
-    await authedPage.waitForLoadState("networkidle");
-    
-    // Check for pagination controls
-    const nextButton = authedPage.locator('a:has-text("Next")').or(authedPage.locator('button:has-text("Next")'));
-    const hasNext = await nextButton.isVisible();
-    
-    if (hasNext) {
-      // Click next page
-      await nextButton.click();
-      await authedPage.waitForLoadState("networkidle");
-      
-      // URL should have cursor parameter
-      await expect(authedPage).toHaveURL(/cursor=/);
-      
-      await screenshot(authedPage, "governance-page-2");
+    for (const title of ["Decisions by Status", "Decisions by Domain", "Trend Over Time"]) {
+      await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    }
+    for (const col of ["ID", "Decision / Title", "Domain", "Entity", "Status", "Priority", "Date & Time", "Jurisdiction", "User"]) {
+      await expect(page.locator("th", { hasText: col }).first()).toBeVisible();
     }
   });
 
-  test("decision lookup by ID", async ({ authedPage }) => {
-    // Look for a decision ID in the table
-    const firstRow = authedPage.locator("table tbody tr").first();
-    let decisionId = "";
-    
-    if (await firstRow.isVisible()) {
-      // Extract decision ID from the row
-      const idCell = firstRow.locator("td").first();
-      const codeText = await idCell.locator("code").first().textContent();
-      if (codeText) {
-        decisionId = codeText.trim();
-      }
-    }
-    
-    if (decisionId) {
-      // Paste into lookup
-      await authedPage.fill('input[name="decision_id"]', decisionId);
-      await authedPage.click('button:has-text("Look up")');
-      await authedPage.waitForLoadState("networkidle");
-      
-      // Should show decision summary
-      await expect(authedPage.locator("text=Decision details")).toBeVisible();
-      await screenshot(authedPage, "governance-lookup-result");
-    } else {
-      // No decisions in log, test with a fake ID
-      await authedPage.fill('input[name="decision_id"]', "00000000-0000-0000-0000-000000000000");
-      await authedPage.click('button:has-text("Look up")');
-      await authedPage.waitForLoadState("networkidle");
-      
-      // Should show not found message
-      await expect(authedPage.locator("text=No decision with that id is visible")).toBeVisible();
-      await screenshot(authedPage, "governance-lookup-not-found");
-    }
+  test("New Decision records an immutable decision and the register shows it", async ({ authedPage: page }) => {
+    const title = `UI e2e decision ${Date.now()}`;
+    await page.goto("/admin/governance");
+    await page.getByRole("button", { name: "New Decision" }).click();
+    const dialog = page.locator("dialog[open]");
+    await dialog.locator("input[name='title']").fill(title);
+    await dialog.locator("input[name='action_type']").fill("PROCUREMENT_LIMIT_INCREASE");
+    await dialog.locator("select[name='outcome']").selectOption("PENDING");
+    await dialog.locator("select[name='priority']").selectOption("HIGH");
+    await dialog.locator("input[name='rule_basis']").fill("PROCUREMENT-POLICY:v2");
+    await dialog.locator("button[type='submit']").click();
+    await expect(dialog.getByText(/Decision recorded as GD-/)).toBeVisible({ timeout: 60_000 });
+    await page.keyboard.press("Escape");
+
+    await page.goto(`/admin/governance?q=${encodeURIComponent(title)}`);
+    await expect(page.locator("table tbody tr")).toHaveCount(1);
+    await expect(page.locator("table tbody tr").first()).toContainText("Procurement & Commercial");
+    await expect(page.locator("table tbody tr").first()).toContainText("Pending");
   });
 
-  test("record a decision form validation", async ({ authedPage }) => {
-    // Try to submit empty form
-    await authedPage.click('button:has-text("Record decision")');
-    await authedPage.waitForLoadState("networkidle");
-    
-    // Should show validation errors
-    await expect(authedPage.locator("text=An action type is required")).toBeVisible();
-    await expect(authedPage.locator("text=An outcome is required")).toBeVisible();
-    await expect(authedPage.locator("text=A rule basis is required")).toBeVisible();
-    
-    await screenshot(authedPage, "governance-record-validation");
+  test("the drawer resolves a pending decision with a follow-up, linked both ways", async ({ authedPage: page }) => {
+    await page.goto("/admin/governance?status=PENDING");
+    await page.locator("table tbody tr td:first-child a").first().click();
+    await expect(page.getByText("Decision Details")).toBeVisible();
+    await page.locator("aside").getByRole("button", { name: /Record Outcome|Record Follow-up/ }).click();
+    const dialog = page.locator("dialog[open]");
+    await dialog.locator("select[name='outcome']").selectOption("APPROVED");
+    await dialog.locator("button[type='submit']").click();
+    await expect(dialog.getByText(/Follow-up recorded as GD-/)).toBeVisible({ timeout: 60_000 });
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await page.locator('nav[aria-label="Detail sections"] a', { hasText: "Approvals" }).click();
+    await expect(page.locator("aside").getByText("Follow-ups")).toBeVisible();
+    await expect(page.locator("aside a", { hasText: "Resolve:" }).first()).toBeVisible();
   });
 
-  test("evidence ledger section renders (G-07)", async ({ authedPage }) => {
-    // Evidence ledger card should be present
-    await expect(authedPage.locator("text=Evidence ledger (G-07)")).toBeVisible();
-    
-    // Verify chain button
-    await expect(authedPage.locator('button:has-text("Verify Chain")')).toBeVisible();
-    
-    // Export chain button
-    await expect(authedPage.locator('button:has-text("Export Chain")')).toBeVisible();
-    
-    // Seal package form
-    await expect(authedPage.locator("text=Seal Package")).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Last Decision ID")')).toBeVisible();
-    await expect(authedPage.locator('label:has-text("Package ID")')).toBeVisible();
-    await expect(authedPage.locator('button:has-text("Seal Package")')).toBeVisible();
-    await expect(authedPage.locator('button:has-text("Get Package")')).toBeVisible();
-    
-    await screenshot(authedPage, "governance-evidence-ledger");
+  test("evidence: the record re-computes, the chain verifies, a package seals and verifies", async ({ authedPage: page }) => {
+    await page.goto("/admin/governance");
+    await page.locator("table tbody tr td:first-child a").first().click();
+    await page.locator('nav[aria-label="Detail sections"] a', { hasText: "Evidence" }).click();
+    await expect(page.locator("aside").getByText("Re-computes")).toBeVisible();
+
+    await page.goto("/admin/governance?tab=evidence");
+    await page.getByRole("button", { name: "Verify Chain" }).click();
+    await page.locator("dialog[open] button[type='submit']").click();
+    await expect(page.locator("dialog[open]").getByText(/The ledger is intact/)).toBeVisible({ timeout: 60_000 });
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Seal Package" }).click();
+    await page.locator("dialog[open] button[type='submit']").click();
+    await expect(page.locator("dialog[open]").getByText(/sealed decisions 1–|already sealed/)).toBeVisible({ timeout: 60_000 });
+    await page.keyboard.press("Escape");
+
+    const download = page.waitForEvent("download");
+    await page.getByRole("link", { name: "Export Evidence" }).click();
+    expect((await download).suggestedFilename()).toMatch(/governance-evidence-.*\.json/);
   });
 
-  test("verify chain button works", async ({ authedPage }) => {
-    // Click verify chain
-    await authedPage.click('button:has-text("Verify Chain")');
-    await authedPage.waitForLoadState("networkidle");
-    
-    // Should show result (either success or error)
-    const success = authedPage.locator("text=Valid:");
-    const error = authedPage.locator("text=Failed to verify");
-    
-    await expect(success.or(error)).toBeVisible({ timeout: 15000 });
-    
-    await screenshot(authedPage, "governance-verify-chain");
-  });
-
-  test("seal package validation", async ({ authedPage }) => {
-    // Try to seal without last decision ID
-    await authedPage.click('button:has-text("Seal Package")');
-    await authedPage.waitForLoadState("networkidle");
-    
-    // Should show validation error
-    await expect(authedPage.locator("text=Last decision ID is required")).toBeVisible();
-    
-    await screenshot(authedPage, "governance-seal-validation");
-  });
-
-  test.afterEach(async ({ authedPage: _authedPage }, testInfo) => {
-    if (testInfo.status !== testInfo.expectedStatus) {
-      await screenshot(_authedPage, `failed-${testInfo.title.replace(/\s+/g, "-")}`);
-    }
+  test("replays tab and the register CSV export", async ({ authedPage: page }) => {
+    await page.goto("/admin/governance?tab=replays");
+    await expect(page.getByRole("link", { name: /Show mismatches only|show all/ })).toBeVisible();
+    await page.goto("/admin/governance");
+    const download = page.waitForEvent("download");
+    await page.getByRole("link", { name: "Export", exact: true }).click();
+    expect((await download).suggestedFilename()).toMatch(/governance-log-.*\.csv/);
   });
 });
