@@ -26,8 +26,17 @@ export function menuFromServer(menu: AssistantMenu): MenuTopic[] {
   return menu.categories.map((c) => ({ key: c.id, label: c.label, icon: ICONS[c.id] ?? DEFAULT_ICON, questions: c.items }));
 }
 
+// The fallback chips carry the same icons as the service's categories, so
+// the welcome looks the same before and after /menu loads.
+const CHIP_TOPICS: Record<string, string> = {
+  "Explore platform": "platform",
+  "Compare plans": "pricing",
+  "Book demo": "demo",
+  "Security & trust": "trust",
+};
+
 export function menuFromChips(chips: Chip[]): MenuTopic[] {
-  return chips.map((c) => ({ key: `chip:${c.label}`, label: c.label, icon: DEFAULT_ICON, questions: [], send: c.message }));
+  return chips.map((c) => ({ key: `chip:${c.label}`, label: c.label, icon: ICONS[CHIP_TOPICS[c.label]] ?? DEFAULT_ICON, questions: [], send: c.message }));
 }
 
 /**

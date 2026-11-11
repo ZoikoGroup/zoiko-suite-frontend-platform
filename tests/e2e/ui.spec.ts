@@ -759,3 +759,216 @@ test.describe("text-only zoom 200%", () => {
     }
   });
 });
+
+// ---- Doc 07 §15 automated accessibility checks (QA-T050, T051, T053, T056) ----
+
+/** Never leave the test machine: official links open on a stub page. */
+async function stubExternal(page: Page) {
+  await page.context().route(/^https:\/\/(?!localhost)/, (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<title>stub</title>" }));
+}
+
+/** Shift+Tab from the current focus until a focused element matches `selector` (or focus leaves the dialog). */
+async function shiftTabTo(page: Page, selector: string, max = 80): Promise<boolean> {
+  for (let i = 0; i < max; i++) {
+    await page.keyboard.press("Shift+Tab");
+    const state = await page.evaluate((sel) => {
+      const el = document.activeElement;
+      const inDialog = !!el?.closest('[role="dialog"]');
+      return { inDialog, hit: !!el && inDialog && el.matches(sel) };
+    }, selector);
+    if (state.hit) return true;
+    if (!state.inDialog) return false;
+  }
+  return false;
+}
+
+type Focused = { name: string; w: number; h: number; obscured: string; inline: boolean; outside: boolean };
+
+/** Every control reachable by Shift+Tab from the composer, measured as it takes focus. */
+async function walkFocus(page: Page): Promise<Focused[]> {
+  const seen: Focused[] = [];
+  await page.getByRole("textbox", { name: "Message" }).focus();
+  for (let i = 0; i < 120; i++) {
+    await page.keyboard.press("Shift+Tab");
+    const s = await page.evaluate((): Focused | null => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || !el.closest('[role="dialog"]') || el.getAttribute("aria-label") === "Message") return null;
+      const r = el.getBoundingClientRect();
+      // WCAG 2.4.11: the focused control is not hidden by the sticky header,
+      // composer or a banner. Hit-test its centre.
+      const cx = Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1);
+      const cy = Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1);
+      const top = document.elementFromPoint(cx, cy);
+      const covered = !!top && top !== el && !el.contains(top) && !top.contains(el);
+      return {
+        name: (el.getAttribute("aria-label") || el.textContent || el.tagName).trim().slice(0, 40),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+        obscured: covered ? String(top!.className || top!.tagName).slice(0, 40) : "",
+        // WCAG 2.5.8 exception: a link inside a sentence.
+        inline: el.tagName === "A" && !!el.closest("p, li") && !el.matches(".za-source, .za-cta, .za-chip"),
+        outside: r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth,
+      };
+    });
+    if (!s) break;
+    seen.push(s);
+  }
+  return seen;
+}
+
+test.describe("keyboard reaches sources and official routes (QA-T050)", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("a source link and the official route open with Enter and are recorded", async ({ page }) => {
+    await stubExternal(page);
+    await mockApi(page);
+    const recorded: string[] = [];
+    page.on("request", (r) => {
+      const p = new URL(r.url()).pathname;
+      if (p.endsWith("/analytics") || p.endsWith("/handoffs")) recorded.push(`${p.split("/").pop()}:${r.postData() ?? ""}`);
+    });
+    await page.goto("/assistant");
+    await page.getByTestId("assistant-launcher").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeFocused();
+    await page.keyboard.type("What does Legal and Contracts do?");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "ZoikoSuite Assistant" });
+    await expect(dialog.getByTestId("assistant-answer").last().locator("a.za-cta")).toBeVisible();
+
+    await page.getByRole("textbox", { name: "Message" }).focus();
+    expect(await shiftTabTo(page, "a.za-source")).toBe(true);
+    const [source] = await Promise.all([page.waitForEvent("popup"), page.keyboard.press("Enter")]);
+    await source.close();
+    await expect.poll(() => recorded.some((r) => r.startsWith("analytics:") && r.includes("source_opened"))).toBe(true);
+
+    await page.getByRole("textbox", { name: "Message" }).focus();
+    expect(await shiftTabTo(page, "a.za-cta")).toBe(true);
+    const [route] = await Promise.all([page.waitForEvent("popup"), page.keyboard.press("Enter")]);
+    await route.close();
+    await expect.poll(() => recorded.some((r) => r.startsWith("handoffs:"))).toBe(true);
+    // Focus stays in the assistant after the new tab opens; Esc still closes it.
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("assistant-launcher")).toBeFocused();
+  });
+});
+
+test.describe("screen-reader announcements (QA-T051)", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("the live region says busy, then the whole answer once, then a failure; the log itself is silent", async ({ page }) => {
+    let fail = false;
+    await mockApi(page, { delayMs: 600, failTurns: () => fail });
+    const dialog = await open(page);
+    const announcer = page.getByTestId("assistant-announcer");
+    await expect(announcer).toHaveAttribute("aria-live", "polite");
+    await expect(dialog.getByRole("log")).toHaveAttribute("aria-live", "off"); // no double reading
+    await ask(page, "What does Legal and Contracts do?");
+    await expect(announcer).toContainText("Looking for verified information");
+    const answer = dialog.getByTestId("assistant-answer").last();
+    await expect(answer).toBeVisible();
+    await expect(announcer).toContainText("Assistant said:");
+    const first = ((await answer.locator("p").first().textContent()) ?? "").trim().slice(0, 30);
+    expect(first.length).toBeGreaterThan(5);
+    await expect(announcer).toContainText(first);
+    fail = true;
+    await ask(page, "Tell me about Tax");
+    await expect(dialog.getByTestId("assistant-unavailable")).toBeVisible();
+    await expect(announcer).not.toContainText("Assistant said:");
+    await expect(announcer).not.toHaveText("");
+  });
+});
+
+for (const vp of [
+  { name: "desktop 1280x800", width: 1280, height: 800, touch: false },
+  { name: "mobile 375x812", width: 375, height: 812, touch: true },
+]) {
+  test.describe(`focus not obscured and target size, ${vp.name} (QA-T053)`, () => {
+    test.use({ viewport: { width: vp.width, height: vp.height }, hasTouch: vp.touch, isMobile: vp.touch });
+
+    test("every focusable control is visible when focused and at least 24x24 px", async ({ page }) => {
+      await mockApi(page);
+      const dialog = await open(page);
+      const qs = ["What does Legal and Contracts do?", "What plans are available?", "Are you SOC 2 certified?", "I'd like a demo"];
+      for (const [i, q] of qs.entries()) {
+        await ask(page, q);
+        await expect(dialog.getByTestId("assistant-answer")).toHaveCount(i + 1);
+      }
+      const seen = await walkFocus(page);
+      expect(seen.length, "focusable controls walked").toBeGreaterThan(10);
+      for (const s of seen) {
+        expect(s.outside, `${s.name}: scrolled into view when focused`).toBe(false);
+        expect(s.obscured, `${s.name}: covered by ${s.obscured}`).toBe("");
+        if (!s.inline) expect(Math.min(s.w, s.h), `${s.name}: ${s.w}x${s.h}`).toBeGreaterThanOrEqual(24);
+      }
+    });
+  });
+}
+
+// QA-T056: translations run 30-50 % longer than English. Every text node in
+// the assistant is padded by half its length as it renders; at 320 px and on
+// desktop nothing may scroll sideways or push the composer, send button or
+// header controls out of the panel.
+test.describe("long translated strings (QA-T056)", () => {
+  for (const vp of [
+    { width: 320, height: 640 },
+    { width: 1280, height: 800 },
+  ]) {
+    test(`pseudo-localised +50% at ${vp.width}px: no clipping or sideways scroll`, async ({ page }) => {
+      await page.setViewportSize(vp);
+      await page.addInitScript(() => {
+        const done = new WeakSet<Node>();
+        const pad = (n: Node) => {
+          if (n.nodeType !== Node.TEXT_NODE || done.has(n)) return;
+          const t = n.textContent ?? "";
+          if (t.trim().length < 2 || !n.parentElement?.closest('[role="dialog"], [data-testid="assistant-launcher"]')) return;
+          done.add(n);
+          // Translated words, not one unbroken run: "xxxxxxx xxxxxxx …".
+          const extra = Math.ceil(t.trim().length / 2);
+          n.textContent = `${t} ${Array.from({ length: Math.ceil(extra / 8) }, () => "xxxxxxx").join(" ")}`;
+        };
+        const walk = (root: Node) => {
+          if (root.nodeType === Node.TEXT_NODE) return pad(root);
+          const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          for (let n = w.nextNode(); n; n = w.nextNode()) pad(n);
+        };
+        new MutationObserver((ms) => {
+          for (const m of ms) {
+            m.addedNodes.forEach(walk);
+            if (m.type === "characterData") pad(m.target);
+          }
+        }).observe(document, { subtree: true, childList: true, characterData: true });
+      });
+      await mockApi(page);
+      await page.goto("/assistant");
+      await page.getByTestId("assistant-launcher").click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByTestId("assistant-welcome")).toBeVisible();
+      await ask(page, "What does Legal and Contracts do?");
+      await expect(dialog.getByTestId("assistant-answer").last()).toContainText("xxxx");
+      // A long compound word (German-style) in the visitor's own message must wrap too.
+      await ask(page, "Datenschutzgrundverordnungsanforderungsdokumentation?");
+      await expect(dialog.getByTestId("visitor-bubble").last()).toContainText("Datenschutz");
+      const doc = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+      expect(doc.sw).toBeLessThanOrEqual(doc.cw);
+      // Name what sticks out, so a failure says which element does not wrap.
+      const offenders = await dialog.evaluate((d) => {
+        const right = d.getBoundingClientRect().right + 1;
+        return Array.from(d.querySelectorAll<HTMLElement>("*"))
+          .filter((e) => e.getBoundingClientRect().right > right && e.getClientRects().length > 0)
+          .filter((e) => !e.parentElement || e.parentElement.getBoundingClientRect().right <= right)
+          .map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(" ")[0]} "${(e.textContent ?? "").trim().slice(0, 30)}"`);
+      });
+      expect(offenders, "elements wider than the panel").toEqual([]);
+      const panel = await dialog.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+      expect(panel.sw).toBeLessThanOrEqual(panel.cw);
+      const box = (await dialog.boundingBox())!;
+      const controls =[dialog.getByRole("textbox"), dialog.getByRole("button", { name: /Send message/ }), ...(await dialog.locator(".za-header .za-control").filter({ visible: true }).all())];
+      for (const loc of controls) {
+        const r = (await loc.boundingBox())!;
+        expect(r.x >= box.x - 1 && r.x + r.width <= box.x + box.width + 1, "control stays inside the panel").toBe(true);
+        await expect(loc).toBeInViewport();
+      }
+    });
+  }
+});

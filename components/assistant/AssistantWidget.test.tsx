@@ -400,6 +400,45 @@ const serverMenu = {
 };
 
 describe("Kairos-style menu, history and theme", () => {
+  // Doc 02 §05 C01 and §22 Homepage: the welcome shows exactly four chips, in
+  // the order Explore platform, Compare plans, Book demo, Security & trust,
+  // with the same icons before and after the service's /menu loads; topics
+  // past those four stay in the header's Browse topics, not "More topics".
+  it("the welcome is the same four Doc 02 chips with /menu off and with the service's full menu", async () => {
+    const labels = (welcome: HTMLElement) =>
+      within(within(welcome).getByRole("list", { name: "Suggested questions" }))
+        .getAllByRole("button")
+        .map((b) => `${b.querySelector(".za-option-icon, [aria-hidden]")?.textContent ?? ""}|${b.querySelector(".za-option-label")!.textContent}`);
+    const fallback = labels(within(await openWidget()).getByTestId("assistant-welcome"));
+    cleanup();
+    const cat = (id: string, label: string) => ({ id, label, items: [{ id: `${id}.q`, label: "Q", intent_id: "I01", message: "What is ZoikoSuite?" }] });
+    api.loadAssistantMenu.mockResolvedValue(
+      ok({
+        schema_version: "1.0",
+        categories: [
+          cat("platform", "Explore platform"),
+          cat("pricing", "Compare plans"),
+          cat("demo", "Book demo"),
+          cat("trust", "Security & trust"),
+          cat("support", "Support Center"),
+        ],
+      }),
+    );
+    const dialog = await openWidget();
+    const welcome = within(dialog).getByTestId("assistant-welcome");
+    const served = labels(welcome);
+    expect(served).toEqual(fallback);
+    expect(served.map((l) => l.split("|")[1])).toEqual(["Explore platform", "Compare plans", "Book demo", "Security & trust"]);
+    expect(within(welcome).queryByRole("button", { name: "More topics" })).toBeNull();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Menu" }));
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("menuitem", { name: /Browse topics/ }));
+    });
+    expect(within(dialog).getByRole("button", { name: /Support Center/ })).toBeTruthy();
+  });
+
   it("with /menu off, a starter chip sends its own message directly", async () => {
     api.askAssistant.mockResolvedValueOnce(ok(envelope({})));
     const dialog = await openWidget();
