@@ -353,7 +353,9 @@
   margin: 4px 0 0;
   padding: 1px 10px;
   border: 1px solid var(--za-option-border);
-  border-radius: 999px;
+  /* 12 px reads as a pill on one line (the pill is ~20 px tall) and as a
+     rounded box if a longer translation wraps. */
+  border-radius: 12px;
   background: var(--za-accent-soft);
   color: var(--za-accent-text);
   white-space: nowrap;
@@ -362,12 +364,17 @@
   line-height: 1rem;
 }
 .za-subtitle-icon { flex: none; }
+/* QA-T056: the approved English copy fits on one line, but a longer
+   translation must wrap inside the panel rather than run off its edge. */
+.za-subtitle-full,
+.za-subtitle-short { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .za-subtitle-short { display: none; }
 /* The disclosure never clips: shorter approved copy when the panel is narrow.
-   Measured in em (the panel's 15 px body text, 420 px = 28em), so enlarged
+   Measured in em (the panel's 15 px body text, 29.5em = ~442 px), so enlarged
    text (WCAG 1.4.4 text-only zoom) switches to the short copy too, and at
-   very large text sizes the pill may wrap instead of overflowing. */
-@container za-panel (max-width: 28em) {
+   very large text sizes the pill may wrap instead of overflowing. At 28em a
+   430 px panel needed 276 px for the full copy in a 273 px cell (clipped). */
+@container za-panel (max-width: 29.5em) {
   .za-subtitle-full { display: none; }
   .za-subtitle-short { display: inline; }
 }
