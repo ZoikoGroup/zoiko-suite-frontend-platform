@@ -87,6 +87,12 @@ type GetOptions = EnvelopeOptions & {
   /** Query parameters. Undefined and empty values are dropped. */
   query?: Record<string, string | number | undefined>;
   identity?: Identity;
+  /**
+   * Called with the response headers of a successful read. API-3 services
+   * answer a record's version as its ETag; a console that sends If-Match on
+   * the next command reads it here (see lib/api/jurisdictions/core.ts).
+   */
+  onHeaders?: (headers: Headers) => void;
 };
 
 type WriteOptions = EnvelopeOptions & { identity?: Identity };
@@ -155,6 +161,7 @@ export async function apiGet<T>(
     };
   }
 
+  options.onHeaders?.(response.headers);
   try {
     return { ok: true, data: (await response.json()) as T };
   } catch {
