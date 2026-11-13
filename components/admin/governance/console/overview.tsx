@@ -4,7 +4,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, Clock3, FileText, MinusCircle } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, Clock3, FileText, FileX2 } from "lucide-react";
 import { Card } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { DecisionSummary } from "@/lib/api/governance";
@@ -29,24 +29,54 @@ function delta(now: number, before: number): number | null {
   return Math.round(((now - before) / before) * 100);
 }
 
+/** Trailing mean over `n` days: daily counts of a few decisions swing 0 → 3 → 0,
+ *  which draws a comb, not a trend. The card shows the trend; the chart below
+ *  keeps the exact daily figures. */
+function smooth(values: number[], n: number): number[] {
+  if (values.length < n * 2) return values;
+  // Full windows only: a part-window at the start draws a false spike.
+  return values.slice(n - 1).map((_, i) => values.slice(i, i + n).reduce((a, b) => a + b, 0) / n);
+}
+
+/** A curve through the points: each segment bends through the midpoint. */
+function curve(pts: [number, number][]): string {
+  if (pts.length === 0) return "";
+  let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1];
+    const [x1, y1] = pts[i];
+    const mx = (x0 + x1) / 2;
+    d += ` C${mx.toFixed(1)},${y0.toFixed(1)} ${mx.toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+  }
+  return d;
+}
+
 /** The card's trend: a filled area that fades downward, as in the v2.0 mock. */
 function Sparkline({ id, values, color, dash }: { id: string; values: number[]; color: string; dash?: string }) {
   const w = 120;
-  const h = 44;
-  const max = Math.max(1, ...values);
-  const step = values.length > 1 ? w / (values.length - 1) : w;
-  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 8)).toFixed(1)}`).join(" ");
+  const h = 36;
+  const series = smooth(values, 7);
+  const max = Math.max(1, ...series);
+  // The floor sits at most half-way up, so a wobble of 1.4 → 2.0 decisions a
+  // day reads as a wobble, not as a swing across the whole card.
+  const min = Math.min(...series, max * 0.5);
+  const span = Math.max(1, max - min);
+  const step = series.length > 1 ? w / (series.length - 1) : w;
+  const pts = series.map((v, i) => [i * step, h - 3 - ((v - min) / span) * (h - 10)] as [number, number]);
+  const line = curve(pts);
   const fill = `gd-spark-${id}`;
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-11 w-full overflow-visible" aria-hidden>
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-9 w-full overflow-visible" aria-hidden>
       <defs>
         <linearGradient id={fill} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.28} />
+          <stop offset="0%" stopColor={color} stopOpacity={0.22} />
           <stop offset="100%" stopColor={color} stopOpacity={0} />
         </linearGradient>
       </defs>
-      <polygon points={`0,${h} ${pts} ${w},${h}`} fill={`url(#${fill})`} stroke="none" />
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.75} strokeDasharray={dash} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      {line && <path d={`${line} L${w},${h} L0,${h} Z`} fill={`url(#${fill})`} stroke="none" />}
+      {line && (
+        <path d={line} fill="none" stroke={color} strokeWidth={1.75} strokeDasharray={dash} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      )}
     </svg>
   );
 }
@@ -58,6 +88,7 @@ function Kpi({
   tile,
   change,
   helper,
+  hint,
   spark,
   link,
 }: {
@@ -67,24 +98,28 @@ function Kpi({
   tile: string;
   change: number | null;
   helper: string;
+  /** More context, on hover: the helper line stays one short line. */
+  hint?: string;
   spark?: ReactNode;
   link: string;
 }) {
   const up = change !== null && change > 0;
   const down = change !== null && change < 0;
   return (
-    <Link href={link} scroll={false} className="group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500">
+    <Link href={link} scroll={false} title={hint} className="group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-500">
       {/* v2.0 mock: icon tile; label, figure, change and helper stacked in
-          one column; the trend area fills the card's lower right. */}
-      <Card className="relative h-full overflow-hidden p-4 group-hover:border-navy-200 dark:group-hover:border-navy-500/40">
-        <div className="relative z-10 flex items-start gap-3">
-          <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", tile)}>{icon}</span>
+          one column; the trend area sits on the right, level with the
+          figure only, so it never runs through the change or helper line. */}
+      <Card className="relative h-full overflow-hidden p-3.5 group-hover:border-navy-200 2xl:p-4 dark:group-hover:border-navy-500/40">
+        {spark && <div className="pointer-events-none absolute right-3 top-9 w-[36%] max-w-36 xl:hidden 2xl:block">{spark}</div>}
+        <div className="relative flex items-start gap-2.5 2xl:gap-3">
+          <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl xl:h-9 xl:w-9 2xl:h-11 2xl:w-11", tile)}>{icon}</span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-medium text-navy-950 dark:text-slate-100">{label}</p>
             <p className="mt-1 text-[28px] font-bold leading-none tracking-tight text-navy-950 tabular-nums dark:text-white">{value}</p>
             <p
               className={cn(
-                "mt-2 flex items-center gap-1 text-[12px] font-semibold tabular-nums",
+                "mt-2.5 flex items-center gap-1 text-[12px] font-semibold tabular-nums",
                 up ? "text-emerald-700 dark:text-emerald-400" : down ? "text-rose-700 dark:text-rose-400" : "text-slate-500 dark:text-slate-400",
               )}
             >
@@ -92,10 +127,9 @@ function Kpi({
               {down && <ArrowDown className="h-3.5 w-3.5" aria-label="down" />}
               {change === null ? "New this period" : `${change > 0 ? "+" : ""}${change}%`}
             </p>
-            <p className="max-w-[62%] text-[11.5px] leading-snug text-slate-500 dark:text-slate-400">{helper}</p>
+            <p className="mt-0.5 text-[11.5px] leading-snug text-slate-500 dark:text-slate-400">{helper}</p>
           </div>
         </div>
-        {spark && <div className="pointer-events-none absolute bottom-3 right-3 w-[46%]">{spark}</div>}
       </Card>
     </Link>
   );
@@ -114,7 +148,7 @@ export function GovernanceKpis({ summary, days, query }: { summary: DecisionSumm
         icon={<FileText className="h-5 w-5" />}
         tile="bg-navy-50 text-navy-600 dark:bg-navy-500/15 dark:text-navy-300"
         change={delta(t.total, p.total)}
-        helper={`vs. previous ${days} days`}
+        helper={days === 365 ? "vs. previous 12 months" : `vs. previous ${days} days`}
         spark={<Sparkline id="total" values={series("total")} color="var(--color-navy-600)" />}
         link={to()}
       />
@@ -134,7 +168,8 @@ export function GovernanceKpis({ summary, days, query }: { summary: DecisionSumm
         icon={<Clock3 className="h-5 w-5" />}
         tile="bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300"
         change={delta(t.pending, p.pending)}
-        helper={`${pct(t.pending, t.total)}% of total · ${summary.open_pending} open`}
+        helper={`${pct(t.pending, t.total)}% of total`}
+        hint={`${summary.open_pending} pending decision(s) still open`}
         spark={<Sparkline id="pending" values={series("pending")} color={STATUS_COLOR.pending} dash={STATUS_DASH.pending} />}
         link={to("PENDING")}
       />
@@ -144,14 +179,15 @@ export function GovernanceKpis({ summary, days, query }: { summary: DecisionSumm
         icon={<AlertTriangle className="h-5 w-5" />}
         tile="bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300"
         change={delta(t.escalated, p.escalated)}
-        helper={`${pct(t.escalated, t.total)}% of total · ${summary.open_escalated} open`}
+        helper={`${pct(t.escalated, t.total)}% of total`}
+        hint={`${summary.open_escalated} escalation(s) still open`}
         spark={<Sparkline id="escalated" values={series("escalated")} color={STATUS_COLOR.escalated} />}
         link={to("ESCALATED")}
       />
       <Kpi
         label="Denied"
         value={t.denied.toLocaleString()}
-        icon={<MinusCircle className="h-5 w-5" />}
+        icon={<FileX2 className="h-5 w-5" />}
         tile="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
         change={delta(t.denied, p.denied)}
         helper={`${pct(t.denied, t.total)}% of total`}
@@ -192,7 +228,7 @@ function StatusDonut({ summary, query }: { summary: DecisionSummary; query: Quer
   const arcs = STATUS_ORDER.map((k, i) => ({ k, len: lens[i], offset: lens.slice(0, i).reduce((a, b) => a + b, 0) }));
   return (
     <div className="flex flex-col items-center gap-5 sm:flex-row">
-      <svg viewBox="0 0 140 140" className="h-36 w-36 shrink-0 -rotate-90" role="img" aria-label="Decisions by status">
+      <svg viewBox="0 0 140 140" className="h-40 w-40 shrink-0 -rotate-90" role="img" aria-label="Decisions by status">
         <circle cx="70" cy="70" r={r} fill="none" strokeWidth="18" className="stroke-slate-100 dark:stroke-slate-800" />
         {arcs.map((a) =>
           a.len > 0 ? (
@@ -306,12 +342,12 @@ export function GovernancePanels({
       </Panel>
       <Panel title="Trend Over Time" action={periodControl} className="lg:col-span-2 2xl:col-span-1">
         <TrendChart data={trendRows(summary)} />
-        <ul className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[12px] text-slate-600 dark:text-slate-300">
+        {/* One swatch per series: its colour and its dash, as drawn. */}
+        <ul className="mt-3 flex flex-wrap items-center justify-center gap-x-3.5 gap-y-1 text-[11.5px] text-slate-600 dark:text-slate-300">
           {STATUS_ORDER.map((k) => (
             <li key={k} className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_COLOR[k] }} aria-hidden />
-              <svg width="14" height="6" aria-hidden>
-                <line x1="1" y1="3" x2="13" y2="3" stroke={STATUS_COLOR[k]} strokeWidth="2" strokeDasharray={STATUS_DASH[k]} strokeLinecap="round" />
+              <svg width="16" height="8" aria-hidden>
+                <line x1="1.5" y1="4" x2="14.5" y2="4" stroke={STATUS_COLOR[k]} strokeWidth="2.5" strokeDasharray={STATUS_DASH[k]} strokeLinecap="round" />
               </svg>
               {STATUS_LABEL[k]}
             </li>

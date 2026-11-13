@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Form from "next/form";
-import { CalendarDays, Download } from "lucide-react";
+import { CalendarDays, Upload } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/admin/shared";
 import { ControlsFooter, RegisterBody, RegisterCard } from "@/components/admin/console";
 import { FilterSelect } from "@/components/admin/console/FilterSelect";
@@ -13,6 +14,8 @@ import {
   TABS,
   daysOf,
   href,
+  isFiltered,
+  loadDetail,
   loadGovernance,
   pageOf,
   tabOf,
@@ -39,8 +42,15 @@ function PeriodSelect({ query, compact = false }: { query: Query; compact?: bool
   return (
     <Form action={BASE} scroll={false} className="inline-flex items-center gap-2">
       {Object.entries(query).map(([k, v]) => (k !== "days" && k !== "page" && v ? <input key={k} type="hidden" name={k} value={v} /> : null))}
-      {!compact && <CalendarDays className="h-4 w-4 text-slate-500" aria-hidden />}
-      <FilterSelect name="days" aria-label="Period" defaultValue={String(daysOf(query))} options={PERIODS} className={compact ? "min-w-32" : "min-w-36"} />
+      <FilterSelect
+        name="days"
+        aria-label="Period"
+        defaultValue={String(daysOf(query))}
+        options={PERIODS}
+        icon={compact ? undefined : <CalendarDays className="h-4 w-4" />}
+        className={compact ? "min-w-32" : "min-w-44"}
+        selectClassName={compact ? undefined : "h-10 border-slate-300 text-sm text-navy-900 dark:border-slate-700"}
+      />
     </Form>
   );
 }
@@ -68,9 +78,19 @@ export default async function GovernancePage({
   const days = daysOf(query);
   const { page, size } = pageOf(query);
   const data = await loadGovernance(identity, query);
+
+  // The v2.0 mock opens with the first row in the drawer. A reader who
+  // closed it (?drawer=closed) keeps it closed until they pick a row.
+  const firstRow = data.decisions?.data?.records[0];
+  if (tab === "decisions" && !query.id && query.drawer !== "closed" && firstRow) {
+    data.detail = await loadDetail(firstRow.decision_id, identity);
+  }
+  const selectedId = query.id ?? (data.detail ? firstRow?.decision_id : undefined);
   const summary = data.summary.data;
   const entityList = [...data.entities.values()];
   const domains = new Map((summary?.facets.domains ?? []).map((d) => [d.code, d.label] as const));
+  const drawer =
+    tab === "decisions" && data.detail ? <DecisionDrawer detail={data.detail} query={query} entities={data.entities} domains={domains} /> : null;
   const packages = data.packages.data?.records ?? [];
   const selectedPackage = tab === "evidence" && query.pkg ? packages.find((p) => p.package_id === query.pkg) : undefined;
 
@@ -97,7 +117,7 @@ export default async function GovernancePage({
               href={`${BASE}/export?${exportParams.toString()}`}
               className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-navy-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
-              <Download className="h-4 w-4" />
+              <Upload className="h-4 w-4" />
               Export
             </a>
             <NewDecisionDialog entities={entityList} domains={summary?.facets.domains ?? []} defaultEntity={identity.legalEntityId} />
@@ -114,6 +134,11 @@ export default async function GovernancePage({
         </>
       ) : null}
 
+      {/* v2.0 mock: the register card on the left, the selected decision's
+          drawer as its own card on the right. Side by side only from 2xl
+          (the mock's 1536px): narrower, the nine columns no longer fit
+          beside it, so the drawer drops below the table instead. */}
+      <div className={cn("grid min-w-0 grid-cols-1 items-start gap-4", drawer && "2xl:grid-cols-[minmax(0,1fr)_19rem]")}>
       <RegisterCard
         active={tab}
         tabs={TABS.map((t) => ({
@@ -123,33 +148,24 @@ export default async function GovernancePage({
           href: href({ days: query.days }, { tab: t.key === "decisions" ? undefined : t.key }),
         }))}
       >
-        {/* The filter row spans the card, above the table and the drawer, so
-            the drawer never squeezes it (v2.0 mock). */}
         {tab === "decisions" && <DecisionToolbar query={query} summary={summary} entities={entityList} />}
-        {tab === "decisions" && (
-          <RegisterBody
-            drawer={
-              data.detail ? <DecisionDrawer detail={data.detail} query={query} entities={data.entities} domains={domains} /> : undefined
-            }
-          >
-            {data.decisions?.error ? (
-              <div className="p-5">
-                <Unavailable what="The decision register" message={explainDecisionError(data.decisions.error)} />
-              </div>
-            ) : data.decisions?.data && data.decisions.data.records.length > 0 ? (
-              <>
-                <DecisionTable rows={data.decisions.data.records} query={query} domains={domains} entities={data.entities} />
-                <Pager query={query} page={page} size={size} total={data.decisions.data.total_count} noun="decisions" />
-              </>
-            ) : (
-              <div className="px-5 py-14 text-center text-[13px] text-slate-500 dark:text-slate-400">
-                {Object.keys(query).some((k) => ["q", "domain", "status", "priority", "jurisdiction", "actor", "entity", "action", "rule_basis", "from", "to"].includes(k) && query[k])
-                  ? "No decision matches these filters."
-                  : "No governance decision has been recorded yet. Services record their decisions here automatically; record one by hand with New Decision."}
-              </div>
-            )}
-          </RegisterBody>
-        )}
+        {tab === "decisions" &&
+          (data.decisions?.error ? (
+            <div className="p-5">
+              <Unavailable what="The decision register" message={explainDecisionError(data.decisions.error)} />
+            </div>
+          ) : data.decisions?.data && data.decisions.data.records.length > 0 ? (
+            <>
+              <DecisionTable rows={data.decisions.data.records} query={query} domains={domains} entities={data.entities} selectedId={selectedId} />
+              <Pager query={query} page={page} size={size} total={data.decisions.data.total_count} noun="decisions" />
+            </>
+          ) : (
+            <div className="px-5 py-14 text-center text-[13px] text-slate-500 dark:text-slate-400">
+              {isFiltered(query)
+                ? "No decision matches these filters."
+                : "No governance decision has been recorded yet. Services record their decisions here automatically; record one by hand with New Decision."}
+            </div>
+          ))}
 
         {tab === "replays" &&
           (data.replays?.error ? (
@@ -172,6 +188,8 @@ export default async function GovernancePage({
           </RegisterBody>
         )}
       </RegisterCard>
+      {drawer}
+      </div>
 
       <ControlsFooter right="governance-decision-log-svc · live data">
         Required controls: decisions are immutable · reads are authorized · every decision is hash-chained · every replay records a

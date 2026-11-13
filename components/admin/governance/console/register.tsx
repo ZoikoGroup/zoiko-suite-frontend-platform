@@ -30,9 +30,11 @@ export function DecisionToolbar({
   const jurisdictions = summary?.facets.jurisdictions ?? [];
   const more = ["actor", "entity", "action", "rule_basis", "from", "to"].filter((k) => query[k]).length;
   return (
-    <Form action={BASE} scroll={false} className="border-b border-slate-100 px-5 py-3.5 dark:border-slate-800">
+    <Form action={BASE} scroll={false} className="border-b border-slate-100 px-4 py-3.5 dark:border-slate-800">
       {(["tab", "days", "size"] as const).map((k) => (query[k] ? <input key={k} type="hidden" name={k} value={query[k]} /> : null))}
-      <div className="flex flex-wrap items-center gap-2 lg:grid lg:grid-cols-[minmax(11rem,2.2fr)_repeat(4,minmax(6.5rem,1fr))_auto]">
+      {/* One row: each select as wide as its "All …" label needs, so none is
+          cut off beside the drawer; the search takes the rest. */}
+      <div className="flex flex-wrap items-center gap-2 lg:grid lg:grid-cols-[minmax(9rem,1fr)_7.5rem_7.5rem_7.5rem_9rem_auto]">
         <label className="relative min-w-56 flex-1 lg:min-w-0">
           <span className="sr-only">Search decisions</span>
           <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -41,18 +43,19 @@ export function DecisionToolbar({
             name="q"
             defaultValue={query.q ?? ""}
             maxLength={200}
-            placeholder="Search decisions, references, entities, or users…"
+            placeholder="Search decisions…"
+            title="Search decisions, references, entities, or users"
             autoComplete="off"
             className={cn(INPUT, "pl-9")}
           />
         </label>
-        <FilterSelect name="domain" aria-label="Domain" defaultValue={query.domain ?? ""} className="min-w-40 lg:min-w-0"
+        <FilterSelect name="domain" aria-label="Domain" defaultValue={query.domain ?? ""} className="min-w-40 lg:min-w-0" selectClassName="pr-7"
           options={[["", "All Domains"], ...domains.map((d) => [d.code, d.label] as const)]} />
-        <FilterSelect name="status" aria-label="Status" defaultValue={query.status ?? ""} className="min-w-36 lg:min-w-0"
+        <FilterSelect name="status" aria-label="Status" defaultValue={query.status ?? ""} className="min-w-36 lg:min-w-0" selectClassName="pr-7"
           options={[["", "All Statuses"], ["APPROVED", "Approved"], ["PENDING", "Pending"], ["ESCALATED", "Escalated"], ["DENIED", "Denied"], ["OTHER", "Other outcome"]]} />
-        <FilterSelect name="priority" aria-label="Priority" defaultValue={query.priority ?? ""} className="min-w-36 lg:min-w-0"
+        <FilterSelect name="priority" aria-label="Priority" defaultValue={query.priority ?? ""} className="min-w-36 lg:min-w-0" selectClassName="pr-7"
           options={[["", "All Priorities"], ["CRITICAL", "Critical"], ["HIGH", "High"], ["MEDIUM", "Medium"], ["LOW", "Low"], ["UNSET", "Not set"]]} />
-        <FilterSelect name="jurisdiction" aria-label="Jurisdiction" defaultValue={query.jurisdiction ?? ""} className="min-w-40 lg:min-w-0"
+        <FilterSelect name="jurisdiction" aria-label="Jurisdiction" defaultValue={query.jurisdiction ?? ""} className="min-w-40 lg:min-w-0" selectClassName="pr-7"
           options={[["", "All Jurisdictions"], ...jurisdictions.map((j) => [j, j] as const)]} />
         <details className="group relative">
           <summary className="inline-flex h-9 cursor-pointer list-none items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] font-medium text-slate-700 hover:bg-slate-50 group-open:border-navy-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 [&::-webkit-details-marker]:hidden">
@@ -146,74 +149,84 @@ export function StatusBadge({ decision }: { decision: Pick<GovernanceDecision, "
   );
 }
 
+/** "Lingaraj (Super Admin)" → "Lingaraj": the role is noise in a narrow column. */
+function shortName(name: string): string {
+  return name.replace(/\s*\(.*?\)\s*/g, " ").trim();
+}
+
 export function DecisionTable({
   rows,
   query,
   domains,
   entities,
+  selectedId,
 }: {
   rows: GovernanceDecision[];
   query: Query;
   domains: Map<string, string>;
   entities: Map<string, LegalEntity>;
+  /** The row the drawer shows (the first row when the URL names none). */
+  selectedId?: string;
 }) {
   const head = ["ID", "Decision / Title", "Domain", "Entity", "Status", "Priority", "Date & Time", "Jurisdiction", "User"];
   return (
     <div className="overflow-x-auto scrollbar-thin">
-      <table className="min-w-full text-[12px]">
+      {/* Dense, as in the v2.0 mock: every column fits beside the drawer at
+          a 1536px window; titles and domains wrap rather than truncate. */}
+      <table className="min-w-full text-[11.5px]">
         <thead>
-          <tr className="border-b border-slate-100 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-800/30">
+          <tr className="border-b border-slate-100 dark:border-slate-800">
             {head.map((h) => (
-              <th key={h} scope="col" className="whitespace-nowrap px-2.5 py-2.5 text-left text-[11.5px] font-semibold text-slate-500 first:pl-5 dark:text-slate-400">
+              <th key={h} scope="col" className="whitespace-nowrap px-1.5 py-3 text-left text-[11px] font-semibold text-navy-950 first:pl-4 dark:text-slate-300">
                 {h}
               </th>
             ))}
-            <th scope="col" className="w-10 pr-5">
+            <th scope="col" className="w-8 pr-2">
               <span className="sr-only">Open</span>
             </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
           {rows.map((d) => {
-            const open = href(query, { id: d.decision_id, pane: undefined });
-            const selected = query.id === d.decision_id;
+            const open = href(query, { id: d.decision_id, pane: undefined, drawer: undefined });
+            const selected = selectedId === d.decision_id;
             const who = person(d.actor_id);
             return (
               <tr key={d.decision_id} data-selected={selected || undefined}
                 className={cn("align-middle transition-colors", selected ? "bg-navy-50/60 dark:bg-navy-500/10" : "hover:bg-slate-50/70 dark:hover:bg-slate-800/30")}>
-                <td className="whitespace-nowrap px-2.5 py-2.5 pl-5">
-                  <Link href={open} scroll={false} title={d.decision_id} className="font-mono text-[12px] font-semibold text-navy-600 hover:text-navy-800 hover:underline dark:text-navy-300">
+                <td className="whitespace-nowrap px-1.5 py-2.5 pl-4">
+                  <Link href={open} scroll={false} title={d.decision_id} className="font-medium tabular-nums text-navy-600 hover:text-navy-800 hover:underline dark:text-navy-300">
                     {d.display_ref}
                   </Link>
                 </td>
-                <td className="max-w-52 px-2.5 py-2.5">
-                  <span className="block truncate font-medium text-navy-950 dark:text-slate-100" title={decisionTitle(d)}>
+                <td className="min-w-32 max-w-44 px-1.5 py-2.5">
+                  <span className="line-clamp-2 leading-snug text-navy-950 dark:text-slate-100" title={decisionTitle(d)}>
                     {decisionTitle(d)}
                   </span>
                   {d.follow_up_count > 0 && (
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="text-[10.5px] text-slate-500 dark:text-slate-400">
                       {d.follow_up_count} follow-up{d.follow_up_count > 1 ? "s" : ""}
                     </span>
                   )}
                 </td>
-                <td className="w-32 min-w-32 px-2.5 py-2.5 text-[11.5px] leading-tight text-slate-600 dark:text-slate-300">{domains.get(d.domain) ?? d.domain}</td>
-                <td className="whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-slate-300" title={d.legal_entity_id}>
+                <td className="w-28 min-w-24 px-1.5 py-2.5 leading-tight text-slate-600 dark:text-slate-300">{domains.get(d.domain) ?? d.domain}</td>
+                <td className="whitespace-nowrap px-1.5 py-2.5 text-slate-600 dark:text-slate-300" title={d.legal_entity_id}>
                   {entityName(entities, d.legal_entity_id)}
                 </td>
-                <td className="px-2.5 py-2.5">
+                <td className="whitespace-nowrap px-1.5 py-2.5">
                   <StatusBadge decision={d} />
                 </td>
-                <td className="whitespace-nowrap px-2.5 py-2.5">
+                <td className="whitespace-nowrap px-1.5 py-2.5">
                   <PriorityMark priority={d.priority} />
                 </td>
-                <td className="whitespace-nowrap px-2.5 py-2.5 tabular-nums text-slate-600 dark:text-slate-300" title={formatDateTime(d.decided_at)}>
+                <td className="whitespace-nowrap px-1.5 py-2.5 tabular-nums text-slate-600 dark:text-slate-300" title={formatDateTime(d.decided_at)}>
                   {formatDate(d.decided_at)}
                 </td>
-                <td className="whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-slate-300">{d.jurisdiction_context || "—"}</td>
-                <td className="max-w-28 truncate whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-slate-300" title={d.actor_id}>
-                  {who.known ? who.name : who.name === "System" ? d.actor_id : who.name}
+                <td className="whitespace-nowrap px-1.5 py-2.5 text-slate-600 dark:text-slate-300">{d.jurisdiction_context || "—"}</td>
+                <td className="max-w-24 truncate whitespace-nowrap px-1.5 py-2.5 text-slate-600 dark:text-slate-300" title={who.known ? who.name : d.actor_id}>
+                  {who.known ? shortName(who.name) : who.name === "System" ? d.actor_id : who.name}
                 </td>
-                <td className="pr-5 text-right">
+                <td className="pr-2 text-right">
                   <Link href={open} scroll={false} aria-label={`Open ${d.display_ref}`}
                     className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-navy-700 dark:hover:bg-slate-800">
                     <MoreHorizontal className="h-4 w-4" />
@@ -228,8 +241,12 @@ export function DecisionTable({
   );
 }
 
+/** Five consecutive pages around the current one, plus the first and last:
+ *  "1 2 3 4 5 … 25" on page 1, as in the v2.0 mock. */
 function pageList(page: number, pages: number): (number | "gap")[] {
-  const wanted = new Set([1, 2, pages - 1, pages, page - 1, page, page + 1].filter((p) => p >= 1 && p <= pages));
+  const start = Math.max(1, Math.min(page - 2, pages - 4));
+  const run = Array.from({ length: 5 }, (_, i) => start + i);
+  const wanted = new Set([1, pages, ...run].filter((p) => p >= 1 && p <= pages));
   const sorted = [...wanted].sort((a, b) => a - b);
   const out: (number | "gap")[] = [];
   sorted.forEach((p, i) => {
@@ -250,7 +267,7 @@ export function Pager({ query, page, size, total, noun }: { query: Query; page: 
   const to = Math.min(total, page * size);
   const at = (p: number) => href(query, { page: String(p), id: undefined, pane: undefined });
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3.5 text-[12px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3.5 text-[12px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
       <p>
         Showing {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()} {noun}
       </p>
