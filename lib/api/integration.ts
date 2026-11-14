@@ -2,7 +2,29 @@
 // Server-side typed API client for Group 10: Integration & Extensibility services.
 // All functions return ApiResult<T> — never throw — ensuring modular resilience.
 
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, type ApiResult, type Identity } from "./client";
+
+// List reads go to the route each service actually serves (verified on the zv
+// stack), with the caller's identity. The services answer in different envelopes
+// ({ data }, { items }, or a named list); readList takes the named array and the
+// wrapper keeps the shape the console already uses.
+async function readList<T>(
+  service: Parameters<typeof apiGet>[0],
+  path: string,
+  key: string,
+  identity: Identity | undefined,
+  query: Record<string, string | undefined> = {},
+): Promise<ApiResult<T[]>> {
+  const res = await apiGet<Record<string, unknown>>(service, path, { identity, query });
+  if (!res.ok) return res;
+  const list = res.data?.[key];
+  if (list === null || list === undefined) return { ok: true, data: [] };
+  if (!Array.isArray(list)) {
+    return { ok: false, error: { kind: "malformed", message: `${path} did not return a "${key}" list` } };
+  }
+  return { ok: true, data: list as T[] };
+}
+
 
 // ── Connectivity API Bridge ──────────────────────────────────────────────────
 
@@ -22,12 +44,10 @@ export type BridgeConnectionListResponse = {
   total: number;
 };
 
-export async function listBridgeConnections(tenantId: string) {
-  return apiGet<BridgeConnectionListResponse>(
-    "connectivityApiBridge",
-    "/api/v1/connections",
-    { query: { tenant_id: tenantId } }
-  );
+export async function listBridgeConnections(tenantId: string, identity?: Identity): Promise<ApiResult<BridgeConnectionListResponse>> {
+  const res = await readList<BridgeConnectionListResponse["connections"][number]>("connectivityApiBridge", "/v1/api-bridge/connections", "connections", identity, { tenant_id: tenantId });
+  if (!res.ok) return res;
+  return { ok: true, data: { connections: res.data, total: res.data.length } as BridgeConnectionListResponse };
 }
 
 export async function createBridgeConnection(
@@ -67,12 +87,10 @@ export type BankConnectionListResponse = {
   total: number;
 };
 
-export async function listBankConnections(tenantId: string) {
-  return apiGet<BankConnectionListResponse>(
-    "bankingConnector",
-    "/api/v1/connections",
-    { query: { tenant_id: tenantId } }
-  );
+export async function listBankConnections(tenantId: string, identity?: Identity): Promise<ApiResult<BankConnectionListResponse>> {
+  const res = await readList<BankConnectionListResponse["connections"][number]>("bankingConnector", "/v1/banking/connections", "connections", identity, { tenant_id: tenantId });
+  if (!res.ok) return res;
+  return { ok: true, data: { connections: res.data, total: res.data.length } as BankConnectionListResponse };
 }
 
 export async function triggerBankSync(
@@ -105,12 +123,10 @@ export type HrisConnectionListResponse = {
   total: number;
 };
 
-export async function listHrisConnections(tenantId: string) {
-  return apiGet<HrisConnectionListResponse>(
-    "hrisConnector",
-    "/api/v1/connections",
-    { query: { tenant_id: tenantId } }
-  );
+export async function listHrisConnections(tenantId: string, identity?: Identity): Promise<ApiResult<HrisConnectionListResponse>> {
+  const res = await readList<HrisConnectionListResponse["connections"][number]>("hrisConnector", "/v1/hris/integrations", "integrations", identity, { tenant_id: tenantId });
+  if (!res.ok) return res;
+  return { ok: true, data: { connections: res.data, total: res.data.length } as HrisConnectionListResponse };
 }
 
 export async function triggerHrisSync(
@@ -151,12 +167,10 @@ export type EsignatureEnvelopeListResponse = {
   total: number;
 };
 
-export async function listEsignatureEnvelopes(tenantId: string) {
-  return apiGet<EsignatureEnvelopeListResponse>(
-    "esignatureIntegration",
-    "/api/v1/envelopes",
-    { query: { tenant_id: tenantId } }
-  );
+export async function listEsignatureEnvelopes(tenantId: string, identity?: Identity): Promise<ApiResult<EsignatureEnvelopeListResponse>> {
+  const res = await readList<EsignatureEnvelopeListResponse["envelopes"][number]>("esignatureIntegration", "/v1/esignature/envelopes", "envelopes", identity, { tenant_id: tenantId });
+  if (!res.ok) return res;
+  return { ok: true, data: { envelopes: res.data, total: res.data.length } as EsignatureEnvelopeListResponse };
 }
 
 export async function sendEsignatureEnvelope(
@@ -195,12 +209,10 @@ export type ExternalDataFeedListResponse = {
   total: number;
 };
 
-export async function listExternalDataFeeds(tenantId: string) {
-  return apiGet<ExternalDataFeedListResponse>(
-    "externalDataFeed",
-    "/api/v1/subscriptions",
-    { query: { tenant_id: tenantId } }
-  );
+export async function listExternalDataFeeds(tenantId: string, identity?: Identity): Promise<ApiResult<ExternalDataFeedListResponse>> {
+  const res = await readList<ExternalDataFeedListResponse["subscriptions"][number]>("externalDataFeed", "/v1/external-data-feeds/subscriptions", "subscriptions", identity, { tenant_id: tenantId });
+  if (!res.ok) return res;
+  return { ok: true, data: { subscriptions: res.data, total: res.data.length } as ExternalDataFeedListResponse };
 }
 
 export async function createDataFeedSubscription(

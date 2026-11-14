@@ -31,6 +31,7 @@ export function AnomalyDetectionPanel() {
     try {
       const res = await fetch("/api/v1/intelligence/anomalies", { signal: AbortSignal.timeout(5000) });
       const json = await res.json().catch(() => ({ anomalies: [] }));
+      if (!res.ok) setError(json?.message ?? `The service could not be read (HTTP ${res.status}).`);
       setAnomalies(json.anomalies ?? []);
     } catch {
       setError("anomaly-detection-svc (:8160) could not be reached — data is unavailable.");

@@ -37,6 +37,8 @@ function NewRuleModal({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       const ruleCode = `${form.jurisdiction}-${form.category}-${form.effectiveFrom.replace(/-/g, "")}`;
+      // A blank or invalid rate is refused, never replaced with an example rate.
+      if (!Number.isFinite(parseFloat(form.rate))) throw new Error("Enter the tax rate.");
       const res = await fetch("/api/v1/tax-rules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -45,7 +47,7 @@ function NewRuleModal({ onClose }: { onClose: () => void }) {
           rule_code: ruleCode,
           name: `${form.category} Rule — ${form.jurisdiction} (${form.rate}%)`,
           category: form.category,
-          tax_rate_percentage: parseFloat(form.rate) || 20,
+          tax_rate_percentage: parseFloat(form.rate),
           effective_from: form.effectiveFrom,
         }),
       });

@@ -109,6 +109,13 @@ async function resolveIdentity(req: NextRequest): Promise<Required<CallerIdentit
   } as Required<CallerIdentity>;
 }
 
+// A failed read is answered as a failure with the service's own status, never as
+// an empty list: an empty list tells the page there is nothing, when the truth is
+// that the console could not look.
+function readFailed(error: { kind: string; status?: number; message: string }) {
+  return NextResponse.json({ error: error.kind, message: error.message }, { status: error.status ?? 502 });
+}
+
 const UNAUTHENTICATED = () =>
   NextResponse.json({ error: "unauthenticated", message: "Sign in to use this API." }, { status: 401 });
 
@@ -121,31 +128,38 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   // ── Tax Domain ─────────────────────────────────────────────────────────────
   if (endpoint === "tax-rules") {
     const res = await listTaxRules(identity);
-    return NextResponse.json({ tax_rules: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ tax_rules: res.data });
   }
   if (endpoint === "tax-determinations") {
     const res = await listTaxDeterminations(identity);
-    return NextResponse.json({ determinations: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ determinations: res.data });
   }
   if (endpoint === "vat-returns") {
     const res = await listVATReturns(identity);
-    return NextResponse.json({ vat_returns: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ vat_returns: res.data });
   }
   if (endpoint === "corporate-tax-returns") {
     const res = await listCorporateTaxReturns(identity);
-    return NextResponse.json({ corporate_tax_returns: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ corporate_tax_returns: res.data });
   }
   if (endpoint === "withholding-tax") {
     const res = await listWithholdingObligations(identity);
-    return NextResponse.json({ withholding_obligations: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ withholding_obligations: res.data });
   }
   if (endpoint === "filing-preparation/drafts") {
     const res = await listFilingDrafts(identity);
-    return NextResponse.json({ filing_drafts: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ filing_drafts: res.data });
   }
   if (endpoint === "tax-authority/interfaces") {
     const res = await listTaxAuthorityInterfaces(identity);
-    return NextResponse.json({ tax_authority_interfaces: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ tax_authority_interfaces: res.data });
   }
   if (endpoint === "tax/summary") {
     const res = await getTaxSummaryStats(identity);
@@ -153,99 +167,118 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   }
   if (endpoint === "tax/deadlines") {
     const res = await listUpcomingTaxDeadlines(identity);
-    return NextResponse.json({ deadlines: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ deadlines: res.data });
   }
 
   // ── Legal Domain ───────────────────────────────────────────────────────────
   if (endpoint === "contracts") {
     const res = await listContracts(identity);
-    return NextResponse.json({ contracts: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ contracts: res.data });
   }
   if (endpoint === "clauses") {
     const res = await listClauses(identity);
-    return NextResponse.json({ clauses: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ clauses: res.data });
   }
   if (endpoint === "obligations") {
     const res = await listObligations(identity);
-    return NextResponse.json({ obligations: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ obligations: res.data });
   }
   if (endpoint === "meetings") {
     const res = await listBoardMeetings(identity);
-    return NextResponse.json({ meetings: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ meetings: res.data });
   }
   if (endpoint === "corporate-actions") {
     const res = await listCorporateActions(identity);
-    return NextResponse.json({ corporate_actions: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ corporate_actions: res.data });
   }
   if (endpoint === "counterparties") {
     const res = await listCounterparties(identity);
-    return NextResponse.json({ counterparties: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ counterparties: res.data });
   }
 
   // ── Commercial Ops Domain ──────────────────────────────────────────────────
   if (endpoint === "purchase-orders") {
     const res = await listPurchaseOrders(identity);
-    return NextResponse.json({ purchase_orders: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ purchase_orders: res.data });
   }
   if (endpoint === "purchase-requests") {
     const tenantId = identity.tenantId;
     const res = await listPurchaseRequests({ identity: { ...identity, tenantId } });
-    return NextResponse.json({ purchase_requests: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ purchase_requests: res.data });
   }
   if (endpoint === "spend-controls/limits") {
     const res = await listSpendLimits(identity);
-    return NextResponse.json({ spend_limits: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ spend_limits: res.data });
   }
   if (endpoint === "vendor-checks") {
     const tenantId = identity.tenantId;
     const res = await listVendorChecks({ identity: { ...identity, tenantId } });
-    return NextResponse.json({ vendor_checks: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ vendor_checks: res.data });
   }
 
   // ── Compliance Domain ──────────────────────────────────────────────────────
   if (endpoint === "filing-tracker/requirements") {
     const res = await listFilingRequirements(identity);
-    return NextResponse.json({ requirements: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ requirements: res.data });
   }
   if (endpoint === "compliance-status") {
     const res = await listComplianceEvaluations(identity);
-    return NextResponse.json({ evaluations: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ evaluations: res.data });
   }
   if (endpoint === "exception-escalation/exceptions") {
     const res = await listEscalatedExceptions(identity);
-    return NextResponse.json({ exceptions: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ exceptions: res.data });
   }
 
   // ── Evidence Domain ────────────────────────────────────────────────────────
   if (endpoint === "evidence/requirements") {
     const tenantId = identity.tenantId;
     const res = await listEvidenceRequirements({ tenantId }, { ...identity, tenantId });
-    return NextResponse.json({ requirements: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ requirements: res.data });
   }
 
   // ── Configuration / Service Inputs ─────────────────────────────────────────
   if (endpoint === "config/feature-flags") {
     const tenantId = identity.tenantId;
     const res = await listFeatureFlags(tenantId);
-    return NextResponse.json({ feature_flags: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ feature_flags: res.data });
   }
   if (endpoint === "config/entries") {
     const tenantId = identity.tenantId;
     const res = await listConfigEntries(tenantId);
-    return NextResponse.json({ config_entries: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ config_entries: res.data });
   }
 
   // ── Delegations ────────────────────────────────────────────────────────────
   if (endpoint === "delegations") {
     const res = await listDelegations({ identity });
-    return NextResponse.json({ delegations: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ delegations: res.data });
   }
 
   // ── Secret Vault ───────────────────────────────────────────────────────────
   if (endpoint === "secrets/leases") {
     const tenantId = identity.tenantId;
     const res = await listLeases(tenantId);
-    return NextResponse.json({ leases: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ leases: res.data });
   }
   if (endpoint === "secrets/policies") {
     const tenantId = identity.tenantId;
@@ -253,29 +286,34 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       secretClass: "DATABASE_CREDENTIAL",
       callerTenantId: tenantId,
     });
-    return NextResponse.json({ policies: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ policies: res.data });
   }
   if (endpoint === "secrets/audit") {
     const tenantId = identity.tenantId;
     const res = await listSecretAudit(tenantId);
-    return NextResponse.json({ audit_events: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ audit_events: res.data });
   }
 
   // ── Security & Trust Domain ───────────────────────────────────────────────
   if (endpoint === "security/certificates") {
     const tenantId = identity.tenantId;
     const res = await listMtlsCertificates(tenantId, identity);
-    return NextResponse.json({ certificates: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ certificates: res.data });
   }
   if (endpoint === "security/keys") {
     const tenantId = identity.tenantId;
     const res = await listKmsKeys(tenantId, identity);
-    return NextResponse.json({ keys: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ keys: res.data });
   }
   if (endpoint === "security/events") {
     const tenantId = identity.tenantId;
     const res = await listSiemEvents(tenantId, identity);
-    return NextResponse.json({ events: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ events: res.data });
   }
   // carta-svc is a zero-trust access-risk engine, not an equity/cap-table
   // service — this route returns risk assessments, not "equity grants".
@@ -308,65 +346,77 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   // ── Intelligence & Reporting Domain ───────────────────────────────────────
   if (endpoint === "intelligence/anomalies") {
     const tenantId = identity.tenantId;
-    const res = await listAnomalies(tenantId);
-    return NextResponse.json({ anomalies: res.ok ? res.data?.anomalies ?? [] : [] });
+    const res = await listAnomalies(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ anomalies: res.data?.anomalies ?? [] });
   }
   if (endpoint === "intelligence/forecasts") {
     const tenantId = identity.tenantId;
-    const res = await listForecasts(tenantId);
-    return NextResponse.json({ forecasts: res.ok ? res.data?.forecasts ?? [] : [] });
+    const res = await listForecasts(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ forecasts: res.data?.forecasts ?? [] });
   }
   if (endpoint === "intelligence/risk-scores") {
     const tenantId = identity.tenantId;
-    const res = await listRiskScores(tenantId);
-    return NextResponse.json({ scores: res.ok ? res.data?.scores ?? [] : [] });
+    const res = await listRiskScores(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ scores: res.data?.scores ?? [] });
   }
   if (endpoint === "intelligence/reconciliations") {
     const tenantId = identity.tenantId;
-    const res = await listReconciliations(tenantId);
-    return NextResponse.json({ reconciliations: res.ok ? res.data?.reconciliations ?? [] : [] });
+    const res = await listReconciliations(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ reconciliations: res.data?.reconciliations ?? [] });
   }
   if (endpoint === "intelligence/reports") {
     const tenantId = identity.tenantId;
-    const res = await listReports(tenantId);
-    return NextResponse.json({ reports: res.ok ? res.data?.reports ?? [] : [] });
+    const res = await listReports(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ reports: res.data?.reports ?? [] });
   }
   if (endpoint === "intelligence/recommendations") {
     const tenantId = identity.tenantId;
-    const res = await listRecommendations(tenantId);
-    return NextResponse.json({ recommendations: res.ok ? res.data?.recommendations ?? [] : [] });
+    const res = await listRecommendations(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ recommendations: res.data?.recommendations ?? [] });
   }
   if (endpoint === "intelligence/migrations") {
     const tenantId = identity.tenantId;
-    const res = await listIntelligenceMigrationJobs(tenantId);
-    return NextResponse.json({ jobs: res.ok ? res.data?.jobs ?? [] : [] });
+    const res = await listIntelligenceMigrationJobs(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ jobs: res.data?.jobs ?? [] });
   }
 
   // ── Integration & Extensibility Domain ────────────────────────────────────
   if (endpoint === "integration/connections") {
     const tenantId = identity.tenantId;
-    const res = await listBridgeConnections(tenantId);
-    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+    const res = await listBridgeConnections(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ connections: res.data?.connections ?? [] });
   }
   if (endpoint === "integration/banking") {
     const tenantId = identity.tenantId;
-    const res = await listBankConnections(tenantId);
-    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+    const res = await listBankConnections(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ connections: res.data?.connections ?? [] });
   }
   if (endpoint === "integration/hris") {
     const tenantId = identity.tenantId;
-    const res = await listHrisConnections(tenantId);
-    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+    const res = await listHrisConnections(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ connections: res.data?.connections ?? [] });
   }
   if (endpoint === "integration/envelopes") {
     const tenantId = identity.tenantId;
-    const res = await listEsignatureEnvelopes(tenantId);
-    return NextResponse.json({ envelopes: res.ok ? res.data?.envelopes ?? [] : [] });
+    const res = await listEsignatureEnvelopes(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ envelopes: res.data?.envelopes ?? [] });
   }
   if (endpoint === "integration/feeds") {
     const tenantId = identity.tenantId;
-    const res = await listExternalDataFeeds(tenantId);
-    return NextResponse.json({ subscriptions: res.ok ? res.data?.subscriptions ?? [] : [] });
+    const res = await listExternalDataFeeds(tenantId, identity);
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ subscriptions: res.data?.subscriptions ?? [] });
   }
 
   return NextResponse.json({ error: `Not found: ${endpoint}` }, { status: 404 });
@@ -388,7 +438,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   const endpoint = path.join("/");
   const identity = await resolveIdentity(req);
   if (!identity) return UNAUTHENTICATED();
-  const body = await req.json().catch(() => ({}));
+  const raw = await req.json().catch(() => ({}));
+  // Tenant and legal entity in a write are the session's. A page may send its own
+  // (several did, as fixed demo IDs); they are replaced here, never trusted.
+  const body = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
+  if ("tenant_id" in body) body.tenant_id = identity.tenantId;
+  if ("legal_entity_id" in body) body.legal_entity_id = identity.legalEntityId ?? null;
 
   // ── Tax Domain ─────────────────────────────────────────────────────────────
   if (endpoint === "tax-rules") {

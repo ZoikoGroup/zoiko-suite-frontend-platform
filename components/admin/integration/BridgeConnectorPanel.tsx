@@ -15,17 +15,22 @@ type BridgeConn = {
 export function BridgeConnectorPanel() {
   const [connections, setConnections] = useState<BridgeConn[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchConnections = async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/v1/integration/connections");
-      if (res.ok) {
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        setLoadError(j?.message ?? `The service could not be read (HTTP ${res.status}).`);
+      } else {
+        setLoadError(null);
         const data = await res.json();
         setConnections(data.connections ?? []);
       }
     } catch {
-      // fallback
+      setLoadError("The service could not be reached.");
     } finally {
       setLoading(false);
     }
@@ -57,6 +62,8 @@ export function BridgeConnectorPanel() {
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
           <div className="h-10 rounded-md bg-slate-100 dark:bg-slate-800" />
         </div>
+      ) : loadError ? (
+        <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">{loadError}</p>
       ) : connections.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center dark:border-slate-800">
           <Network className="mx-auto h-8 w-8 text-slate-400" />

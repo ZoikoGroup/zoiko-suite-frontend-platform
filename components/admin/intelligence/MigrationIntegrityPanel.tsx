@@ -33,6 +33,7 @@ export function MigrationIntegrityPanel() {
     try {
       const res = await fetch("/api/v1/intelligence/migrations", { signal: AbortSignal.timeout(5000) });
       const json = await res.json().catch(() => ({ jobs: [] }));
+      if (!res.ok) setError(json?.message ?? `The service could not be read (HTTP ${res.status}).`);
       setJobs(json.jobs ?? []);
     } catch {
       setError("migration-integrity-svc (:8166) could not be reached.");

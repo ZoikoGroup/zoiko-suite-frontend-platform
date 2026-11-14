@@ -65,7 +65,7 @@ export type CommunicationPolicy = {
 
 export async function listMtlsCertificates(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<MtlsCertificate>>("mtlsManagement", "/v1/mtls/certificates", {
-    query: { tenant_id: tenantId },
+    query: { tenant_id: tenantId, legal_entity_id: identity?.legalEntityId },
     identity,
   });
   if (!res.ok) return res;
@@ -91,7 +91,7 @@ export async function rotateMtlsCertificate(tenantId: string, certId: string, id
 
 export async function listMtlsPolicies(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<CommunicationPolicy>>("mtlsManagement", "/v1/mtls/policies", {
-    query: { tenant_id: tenantId },
+    query: { tenant_id: tenantId, legal_entity_id: identity?.legalEntityId },
     identity,
   });
   if (!res.ok) return res;
@@ -127,17 +127,26 @@ export type SiemEvent = {
 };
 
 export async function listSiemEvents(tenantId: string, identity?: Identity) {
-  const res = await apiGet<ListEnvelope<SiemEvent>>("siemIntegration", "/v1/siem/events", {
-    query: { tenant_id: tenantId },
-    identity,
-  });
-  if (!res.ok) return res;
-  return { ok: true as const, data: res.data.data };
+  // siem-integration-svc lists events per exporter (exporter_id is required), so
+  // the stream is read exporter by exporter. A failed exporter listing is the
+  // answer: it is returned as a failure, not as "no events".
+  const exporters = await listSiemExporters(tenantId, identity);
+  if (!exporters.ok) return exporters;
+  const events: SiemEvent[] = [];
+  for (const exporter of exporters.data) {
+    const res = await apiGet<ListEnvelope<SiemEvent>>("siemIntegration", "/v1/siem/events", {
+      query: { tenant_id: tenantId, exporter_id: exporter.id },
+      identity,
+    });
+    if (!res.ok) return res;
+    events.push(...res.data.data);
+  }
+  return { ok: true as const, data: events };
 }
 
 export async function listSiemExporters(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<SiemExporter>>("siemIntegration", "/v1/siem/exporters", {
-    query: { tenant_id: tenantId },
+    query: { tenant_id: tenantId, legal_entity_id: identity?.legalEntityId },
     identity,
   });
   if (!res.ok) return res;
@@ -179,7 +188,7 @@ export type CustomerKey = {
 
 export async function listKmsKeys(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<CustomerKey>>("keyManagement", "/v1/keys", {
-    query: { tenant_id: tenantId },
+    query: { tenant_id: tenantId, legal_entity_id: identity?.legalEntityId },
     identity,
   });
   if (!res.ok) return res;

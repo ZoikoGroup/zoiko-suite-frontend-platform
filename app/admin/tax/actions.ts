@@ -32,12 +32,46 @@ async function requireIdentity(): Promise<SessionIdentity> {
   };
 }
 
+/** A required form field left blank. Tax data is never filled in with example values. */
+class MissingField extends Error {}
+
+function req(formData: FormData, key: string): string {
+  const v = String(formData.get(key) ?? "").trim();
+  if (!v) throw new MissingField(key);
+  return v;
+}
+
+function reqNum(formData: FormData, key: string): number {
+  const n = Number(req(formData, key));
+  if (!Number.isFinite(n)) throw new MissingField(key);
+  return n;
+}
+
+/** The legal entity is the session's, never a form value. */
+function requireEntity(identity: SessionIdentity): string {
+  if (!identity.legalEntityId) throw new MissingField("legal entity (your session has none)");
+  return identity.legalEntityId;
+}
+
+async function guarded(run: () => Promise<TaxActionResult>): Promise<TaxActionResult> {
+  try {
+    return await run();
+  } catch (e) {
+    if (e instanceof MissingField) return { ok: false, error: `${e.message.replace(/_/g, " ")} is required` };
+    throw e;
+  }
+}
+
 export type TaxActionResult<T = unknown> =
   | { ok: true; data: T; message?: string }
   | { ok: false; error: string };
 
 /** Create a new statutory tax rule in tax-rules-svc (:8125). */
 export async function createTaxRuleAction(formData: FormData): Promise<TaxActionResult> {
+  return guarded(() => createTaxRuleActionImpl(formData));
+}
+
+async function createTaxRuleActionImpl(formData: FormData): Promise<TaxActionResult> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -45,9 +79,9 @@ export async function createTaxRuleAction(formData: FormData): Promise<TaxAction
     return { ok: false, error: "Your session has expired — sign in again." };
   }
 
-  const jurisdictionId = String(formData.get("jurisdiction_id") || "uk-gov-01");
+  const jurisdictionId = req(formData, "jurisdiction_id");
   const category = String(formData.get("category") || "VAT") as TaxCategory;
-  const rate = Number(formData.get("tax_rate_percentage") || 20);
+  const rate = reqNum(formData, "tax_rate_percentage");
   const effectiveFrom = String(formData.get("effective_from") || new Date().toISOString().split("T")[0]);
   const ruleCode = String(
     formData.get("rule_code") ||
@@ -98,6 +132,10 @@ export async function createTaxRuleAction(formData: FormData): Promise<TaxAction
 
 /** Evaluate tax determination for a transaction via tax-determination-svc (:8126). */
 export async function evaluateTaxDeterminationAction(formData: FormData): Promise<TaxActionResult> {
+  return guarded(() => evaluateTaxDeterminationActionImpl(formData));
+}
+
+async function evaluateTaxDeterminationActionImpl(formData: FormData): Promise<TaxActionResult> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -106,11 +144,11 @@ export async function evaluateTaxDeterminationAction(formData: FormData): Promis
   }
 
   const transactionId = String(formData.get("transaction_id") || `tx-${Date.now().toString(36)}`);
-  const legalEntityId = String(formData.get("legal_entity_id") || identity.legalEntityId);
-  const jurisdictionId = String(formData.get("jurisdiction_id") || "us-fed-01");
+  const legalEntityId = requireEntity(identity);
+  const jurisdictionId = req(formData, "jurisdiction_id");
   const taxCategory = String(formData.get("tax_category") || "CORPORATE_INCOME");
-  const grossAmount = Number(formData.get("gross_amount") || 100000);
-  const currency = String(formData.get("currency") || "USD");
+  const grossAmount = reqNum(formData, "gross_amount");
+  const currency = req(formData, "currency");
 
   const payload: EvaluateDeterminationInput = {
     transaction_id: transactionId,
@@ -156,6 +194,10 @@ export async function evaluateTaxDeterminationAction(formData: FormData): Promis
 
 /** Create and submit VAT/GST Return in vat-gst-svc (:8127). */
 export async function createVATReturnAction(formData: FormData): Promise<TaxActionResult> {
+  return guarded(() => createVATReturnActionImpl(formData));
+}
+
+async function createVATReturnActionImpl(formData: FormData): Promise<TaxActionResult> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -163,15 +205,15 @@ export async function createVATReturnAction(formData: FormData): Promise<TaxActi
     return { ok: false, error: "Your session has expired — sign in again." };
   }
 
-  const legalEntityId = String(formData.get("legal_entity_id") || identity.legalEntityId);
-  const jurisdictionId = String(formData.get("jurisdiction_id") || "uk-gov-01");
-  const taxRegNo = String(formData.get("tax_registration_number") || "GB-987654321");
-  const period = String(formData.get("tax_period") || "2026-Q2");
-  const totalSales = Number(formData.get("total_sales_amount") || 1850000);
-  const totalPurchases = Number(formData.get("total_purchase_amount") || 920000);
-  const outputTax = Number(formData.get("output_tax_amount") || 370000);
-  const inputTax = Number(formData.get("input_tax_amount") || 184000);
-  const currency = String(formData.get("currency") || "GBP");
+  const legalEntityId = requireEntity(identity);
+  const jurisdictionId = req(formData, "jurisdiction_id");
+  const taxRegNo = req(formData, "tax_registration_number");
+  const period = req(formData, "tax_period");
+  const totalSales = reqNum(formData, "total_sales_amount");
+  const totalPurchases = reqNum(formData, "total_purchase_amount");
+  const outputTax = reqNum(formData, "output_tax_amount");
+  const inputTax = reqNum(formData, "input_tax_amount");
+  const currency = req(formData, "currency");
 
   const payload: CreateVATReturnInput = {
     legal_entity_id: legalEntityId,
@@ -212,6 +254,10 @@ export async function createVATReturnAction(formData: FormData): Promise<TaxActi
 
 /** Create Corporate Income Tax Return in corporate-tax-svc (:8128). */
 export async function createCorporateTaxAction(formData: FormData): Promise<TaxActionResult> {
+  return guarded(() => createCorporateTaxActionImpl(formData));
+}
+
+async function createCorporateTaxActionImpl(formData: FormData): Promise<TaxActionResult> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -219,15 +265,15 @@ export async function createCorporateTaxAction(formData: FormData): Promise<TaxA
     return { ok: false, error: "Your session has expired — sign in again." };
   }
 
-  const legalEntityId = String(formData.get("legal_entity_id") || identity.legalEntityId);
-  const jurisdictionId = String(formData.get("jurisdiction_id") || "us-fed-01");
-  const taxRegNo = String(formData.get("tax_registration_number") || "US-EIN-12345678");
-  const fiscalYear = Number(formData.get("fiscal_year") || 2026);
-  const grossRevenue = Number(formData.get("gross_revenue") || 25000000);
-  const allowableDeductions = Number(formData.get("allowable_deductions") || 18000000);
-  const taxableIncome = Number(formData.get("taxable_income") || 7000000);
-  const taxRate = Number(formData.get("tax_rate_percent") || 21);
-  const currency = String(formData.get("currency") || "USD");
+  const legalEntityId = requireEntity(identity);
+  const jurisdictionId = req(formData, "jurisdiction_id");
+  const taxRegNo = req(formData, "tax_registration_number");
+  const fiscalYear = reqNum(formData, "fiscal_year");
+  const grossRevenue = reqNum(formData, "gross_revenue");
+  const allowableDeductions = reqNum(formData, "allowable_deductions");
+  const taxableIncome = reqNum(formData, "taxable_income");
+  const taxRate = reqNum(formData, "tax_rate_percent");
+  const currency = req(formData, "currency");
 
   const payload: CreateCorporateTaxInput = {
     legal_entity_id: legalEntityId,
@@ -270,6 +316,10 @@ export async function createCorporateTaxAction(formData: FormData): Promise<TaxA
 
 /** Record Withholding Tax Obligation in withholding-tax-svc (:8129). */
 export async function createWithholdingObligationAction(formData: FormData): Promise<TaxActionResult> {
+  return guarded(() => createWithholdingObligationActionImpl(formData));
+}
+
+async function createWithholdingObligationActionImpl(formData: FormData): Promise<TaxActionResult> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -277,15 +327,15 @@ export async function createWithholdingObligationAction(formData: FormData): Pro
     return { ok: false, error: "Your session has expired — sign in again." };
   }
 
-  const legalEntityId = String(formData.get("legal_entity_id") || identity.legalEntityId);
-  const jurisdictionId = String(formData.get("jurisdiction_id") || "de-bzst-01");
-  const counterpartyId = String(formData.get("counterparty_id") || "cp-vendor-901");
+  const legalEntityId = requireEntity(identity);
+  const jurisdictionId = req(formData, "jurisdiction_id");
+  const counterpartyId = req(formData, "counterparty_id");
   const paymentRef = String(formData.get("payment_reference") || `PAY-${Date.now().toString(36).toUpperCase()}`);
   const paymentType = String(formData.get("payment_type") || "ROYALTIES");
-  const grossAmount = Number(formData.get("gross_payment_amount") || 50000);
-  const rate = Number(formData.get("withholding_rate_percent") || 15);
+  const grossAmount = reqNum(formData, "gross_payment_amount");
+  const rate = reqNum(formData, "withholding_rate_percent");
   const withheldAmount = Math.round(grossAmount * (rate / 100));
-  const currency = String(formData.get("currency") || "EUR");
+  const currency = req(formData, "currency");
 
   const payload: CreateWithholdingInput = {
     legal_entity_id: legalEntityId,
@@ -327,6 +377,10 @@ export async function createWithholdingObligationAction(formData: FormData): Pro
 
 /** Assemble and finalize a statutory tax filing draft in filing-preparation-svc (:8130). */
 export async function assembleFilingDraftAction(formData: FormData): Promise<TaxActionResult> {
+  return guarded(() => assembleFilingDraftActionImpl(formData));
+}
+
+async function assembleFilingDraftActionImpl(formData: FormData): Promise<TaxActionResult> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -334,13 +388,13 @@ export async function assembleFilingDraftAction(formData: FormData): Promise<Tax
     return { ok: false, error: "Your session has expired — sign in again." };
   }
 
-  const legalEntityId = String(formData.get("legal_entity_id") || identity.legalEntityId);
-  const jurisdictionId = String(formData.get("jurisdiction_id") || "uk-gov-01");
+  const legalEntityId = requireEntity(identity);
+  const jurisdictionId = req(formData, "jurisdiction_id");
   const filingType = String(formData.get("filing_type") || "VAT100_MTD");
-  const periodKey = String(formData.get("period_key") || "2026-Q2");
-  const dueDate = String(formData.get("due_date") || "2026-08-07");
+  const periodKey = req(formData, "period_key");
+  const dueDate = req(formData, "due_date");
   const payloadData = String(
-    formData.get("payload_data") || JSON.stringify({ box1: 370000, box5: 186000 })
+    req(formData, "payload_data")
   );
 
   const payload: CreateFilingDraftInput = {
@@ -398,16 +452,7 @@ export async function testTaxAuthorityConnectionAction(interfaceId: string): Pro
   const res = await testTaxAuthorityConnection(interfaceId, identity);
 
   if (!res.ok) {
-    return {
-      ok: true,
-      data: {
-        interface_id: interfaceId,
-        status: "HEALTHY",
-        latency_ms: 42,
-        timestamp: new Date().toISOString(),
-      },
-      message: `Authority interface probe succeeded (simulated response).`,
-    };
+    return { ok: false, error: `Authority interface probe failed: ${res.error.message}` };
   }
 
   return {

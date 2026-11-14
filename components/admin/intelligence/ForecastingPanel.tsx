@@ -31,6 +31,7 @@ export function ForecastingPanel() {
     try {
       const res = await fetch("/api/v1/intelligence/forecasts", { signal: AbortSignal.timeout(5000) });
       const json = await res.json().catch(() => ({ forecasts: [] }));
+      if (!res.ok) setError(json?.message ?? `The service could not be read (HTTP ${res.status}).`);
       setForecasts(json.forecasts ?? []);
     } catch {
       setError("forecasting-svc (:8161) could not be reached.");

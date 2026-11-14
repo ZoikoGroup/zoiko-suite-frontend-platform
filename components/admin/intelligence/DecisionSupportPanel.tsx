@@ -30,6 +30,7 @@ export function DecisionSupportPanel() {
     try {
       const res = await fetch("/api/v1/intelligence/recommendations", { signal: AbortSignal.timeout(5000) });
       const json = await res.json().catch(() => ({ recommendations: [] }));
+      if (!res.ok) setError(json?.message ?? `The service could not be read (HTTP ${res.status}).`);
       setRecommendations(json.recommendations ?? []);
     } catch {
       setError("decision-support-svc (:8165) could not be reached.");

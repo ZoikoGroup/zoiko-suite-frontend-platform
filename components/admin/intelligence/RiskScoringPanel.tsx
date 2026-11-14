@@ -31,6 +31,7 @@ export function RiskScoringPanel() {
     try {
       const res = await fetch("/api/v1/intelligence/risk-scores", { signal: AbortSignal.timeout(5000) });
       const json = await res.json().catch(() => ({ scores: [] }));
+      if (!res.ok) setError(json?.message ?? `The service could not be read (HTTP ${res.status}).`);
       setScores(json.scores ?? []);
     } catch {
       setError("compliance-risk-scoring-svc (:8162) could not be reached.");

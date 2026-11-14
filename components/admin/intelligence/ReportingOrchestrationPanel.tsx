@@ -31,6 +31,7 @@ export function ReportingOrchestrationPanel() {
     try {
       const res = await fetch("/api/v1/intelligence/reports", { signal: AbortSignal.timeout(5000) });
       const json = await res.json().catch(() => ({ reports: [] }));
+      if (!res.ok) setError(json?.message ?? `The service could not be read (HTTP ${res.status}).`);
       setReports(json.reports ?? []);
     } catch {
       setError("reporting-orchestration-svc (:8164) could not be reached.");

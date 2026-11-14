@@ -49,51 +49,57 @@ export function IntegrationSummaryBar() {
 
     async function load() {
       try {
-        const [connRes, bankRes, hrisRes, esignRes] = await Promise.allSettled([
-          fetch("/api/v1/integration/connections").then((r) => r.json()),
-          fetch("/api/v1/integration/banking").then((r) => r.json()),
-          fetch("/api/v1/integration/hris").then((r) => r.json()),
-          fetch("/api/v1/integration/envelopes").then((r) => r.json()),
+        // Each figure is read from its owning service. A failed read shows "—" and
+        // says which service could not be read; it never shows an example count.
+        const read = async (url: string, key: string): Promise<{ status?: string }[] | null> => {
+          const r = await fetch(url);
+          if (!r.ok) return null;
+          const j = await r.json().catch(() => null);
+          return Array.isArray(j?.[key]) ? j[key] : null;
+        };
+        const [connections, banks, hris, envelopes] = await Promise.all([
+          read("/api/v1/integration/connections", "connections").catch(() => null),
+          read("/api/v1/integration/banking", "connections").catch(() => null),
+          read("/api/v1/integration/hris", "connections").catch(() => null),
+          read("/api/v1/integration/envelopes", "envelopes").catch(() => null),
         ]);
 
         if (cancelled) return;
 
-        const connections = connRes.status === "fulfilled" ? (connRes.value.connections ?? []) : [];
-        const banks = bankRes.status === "fulfilled" ? (bankRes.value.connections ?? []) : [];
-        const hris = hrisRes.status === "fulfilled" ? (hrisRes.value.connections ?? []) : [];
-        const envelopes = esignRes.status === "fulfilled" ? (esignRes.value.envelopes ?? []) : [];
-
-        const activeConn = connections.filter((c: { status?: string }) => c.status === "ACTIVE").length || connections.length;
-        const connectedBanks = banks.filter((b: { status?: string }) => b.status === "CONNECTED").length || banks.length;
-        const pendingEnvelopes = envelopes.filter((e: { status?: string }) => e.status === "SENT" || e.status === "DELIVERED").length;
+        const unread = (svc: string) => `${svc} could not be read`;
+        const count = (rows: { status?: string }[], ...states: string[]) => rows.filter((r) => states.includes(r.status ?? "")).length;
 
         setKpis([
           {
             icon: Network,
             label: "Bridge Connections",
-            value: activeConn || "6 Active",
-            sub: `${connections.length || 6} protocol adapters`,
+            value: connections ? `${count(connections, "ACTIVE")} Active` : "—",
+            sub: connections ? `${connections.length} registered` : unread("connectivity-api-bridge-svc"),
             tone: "neutral",
           },
           {
             icon: Building2,
             label: "Banking Feeds",
-            value: connectedBanks || "4 Connected",
-            sub: "Sync latency < 2 mins",
-            tone: "positive",
+            value: banks ? `${count(banks, "CONNECTED")} Connected` : "—",
+            sub: banks ? `${banks.length} registered` : unread("banking-connector-svc"),
+            tone: "neutral",
           },
           {
             icon: Users2,
-            label: "HRIS Synced",
-            value: hris.length || "3 Systems",
-            sub: "Full profile parity",
-            tone: "positive",
+            label: "HRIS Connections",
+            value: hris ? `${hris.length}` : "—",
+            sub: hris ? "Registered HRIS connections" : unread("hris-connector-svc"),
+            tone: "neutral",
           },
           {
             icon: FileSignature,
             label: "eSign Envelopes",
-            value: envelopes.length || "8 Envelopes",
-            sub: pendingEnvelopes > 0 ? `${pendingEnvelopes} pending signatures` : "All signed",
+            value: envelopes ? `${envelopes.length}` : "—",
+            sub: !envelopes
+              ? unread("esignature-integration-svc")
+              : count(envelopes, "SENT", "DELIVERED") > 0
+              ? `${count(envelopes, "SENT", "DELIVERED")} awaiting signature`
+              : "None awaiting signature",
             tone: "neutral",
           },
         ]);

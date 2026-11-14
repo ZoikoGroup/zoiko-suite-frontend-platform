@@ -31,6 +31,7 @@ export function ReconciliationIntelligencePanel() {
     try {
       const res = await fetch("/api/v1/intelligence/reconciliations", { signal: AbortSignal.timeout(5000) });
       const json = await res.json().catch(() => ({ reconciliations: [] }));
+      if (!res.ok) setError(json?.message ?? `The service could not be read (HTTP ${res.status}).`);
       setRecords(json.reconciliations ?? []);
     } catch {
       setError("reconciliation-intelligence-svc (:8163) could not be reached.");
