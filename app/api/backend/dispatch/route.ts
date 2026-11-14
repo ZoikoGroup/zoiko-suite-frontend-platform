@@ -1,9 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+
+// Identity headers a caller may not set: they are always taken from the session.
+const IDENTITY_HEADERS = ["x-tenant-id", "x-principal-id", "x-legal-entity-id"];
 
 export async function POST(req: NextRequest) {
+  // Signed-in callers only, and they act as themselves: the console used to forward
+  // whatever identity the page sent, which let any caller act as any principal.
+  const session = decodeSession(req.cookies.get(SESSION_COOKIE)?.value);
+  if (!session?.principalId || !session.tenantId) {
+    return NextResponse.json({ ok: false, status: 401, error: "Sign in to use the service console." }, { status: 401 });
+  }
+
   try {
     const payload = await req.json();
-    const { port, path = "/", method = "GET", headers = {}, body } = payload;
+    const { port, path = "/", method = "GET", headers: rawHeaders = {}, body: rawBody } = payload;
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries((rawHeaders ?? {}) as Record<string, unknown>)) {
+      if (!IDENTITY_HEADERS.includes(k.toLowerCase()) && typeof v === "string") headers[k] = v;
+    }
+    headers["X-Tenant-Id"] = session.tenantId;
+    headers["X-Principal-Id"] = session.principalId;
+    if (session.legalEntityId) headers["X-Legal-Entity-Id"] = session.legalEntityId;
+
+    // Tenant and legal entity in a body are the session's, never the page's.
+    let body = rawBody;
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const b = { ...(body as Record<string, unknown>) };
+      if ("tenant_id" in b) b.tenant_id = session.tenantId;
+      if ("legal_entity_id" in b) b.legal_entity_id = session.legalEntityId ?? null;
+      body = b;
+    }
 
     const portNum = parseInt(port, 10);
     if (isNaN(portNum) || portNum < 1000 || portNum > 65535) {

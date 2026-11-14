@@ -54,71 +54,73 @@ export function SecuritySummaryBar() {
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
+    // Each figure is read from its owning service. A failed read shows "—" and says
+    // so: it never falls back to an invented count.
+    async function read(url: string, key: string): Promise<unknown[] | null> {
       try {
-        const [certsRes, keysRes, siemRes, cartaRes, aiRunsRes] = await Promise.allSettled([
-          fetch("/api/v1/security/certificates").then((r) => (r.ok ? r.json() : null)),
-          fetch("/api/v1/security/keys").then((r) => (r.ok ? r.json() : null)),
-          fetch("/api/v1/security/events").then((r) => (r.ok ? r.json() : null)),
-          fetch("/api/v1/security/assessments").then((r) => (r.ok ? r.json() : null)),
-          fetch("/api/v1/ai-governance/runs").then((r) => (r.ok ? r.json() : null)),
-        ]);
-
-        if (cancelled) return;
-
-        const certs = certsRes.status === "fulfilled" && certsRes.value ? certsRes.value.certificates ?? [] : [];
-        const keys = keysRes.status === "fulfilled" && keysRes.value ? keysRes.value.keys ?? [] : [];
-        const siem = siemRes.status === "fulfilled" && siemRes.value ? siemRes.value.events ?? [] : [];
-        const assessments = cartaRes.status === "fulfilled" && cartaRes.value ? cartaRes.value.assessments ?? [] : [];
-        const aiRuns = aiRunsRes.status === "fulfilled" && aiRunsRes.value ? aiRunsRes.value.runs ?? [] : [];
-
-        const activeCerts = certs.filter((c: { status?: string }) => c.status === "ACTIVE").length || certs.length || 12;
-        const activeKeys = keys.filter((k: { status?: string }) => k.status === "ACTIVE").length || keys.length || 8;
-        const criticalSiem = siem.filter((e: { severity?: string }) => e.severity === "CRITICAL" || e.severity === "HIGH").length;
-        const allowedAssessments = assessments.filter((a: { decision?: string }) => a.decision === "ALLOW").length || assessments.length || 24;
-
-        setKpis([
-          {
-            icon: Shield,
-            label: "mTLS Certificates",
-            value: `${activeCerts} Active`,
-            sub: `${certs.length || 12} total managed certs (:8140)`,
-            tone: "neutral",
-          },
-          {
-            icon: AlertOctagon,
-            label: "SIEM Threat Feed",
-            value: siem.length ? `${siem.length} Events` : "Stream Active",
-            sub: criticalSiem > 0 ? `${criticalSiem} high/critical alerts` : "Nominal telemetry (:8141)",
-            tone: criticalSiem > 0 ? "critical" : "positive",
-          },
-          {
-            icon: ShieldCheck,
-            label: "CARTA Zero-Trust",
-            value: `${allowedAssessments} Verified`,
-            sub: "Adaptive risk scoring (:8142)",
-            tone: "positive",
-          },
-          {
-            icon: Key,
-            label: "KMS Cryptographic Keys",
-            value: `${activeKeys} Active`,
-            sub: "HSM envelope keys (:8143)",
-            tone: "positive",
-          },
-          {
-            icon: Bot,
-            label: "AI Governance",
-            value: aiRuns.length ? `${aiRuns.length} Runs` : "Active :8183",
-            sub: "Safety guardrails enforced",
-            tone: "positive",
-          },
-        ]);
+        const r = await fetch(url);
+        if (!r.ok) return null;
+        const data = await r.json();
+        return Array.isArray(data?.[key]) ? data[key] : null;
       } catch {
-        // preserve defaults
-      } finally {
-        if (!cancelled) setLoading(false);
+        return null;
       }
+    }
+
+    async function load() {
+      const [certs, siem, carta, keys, aiRisk] = await Promise.all([
+        read("/api/v1/security/certificates", "certificates"),
+        read("/api/v1/security/events", "events"),
+        read("/api/v1/security/assessments", "assessments"),
+        read("/api/v1/security/keys", "keys"),
+        read("/api/v1/ai-governance/risk-classifications", "classifications"),
+      ]);
+      if (cancelled) return;
+
+      const unread = (service: string) => `${service} could not be read`;
+      const status = (rows: unknown[], s: string) => rows.filter((x) => (x as { status?: string }).status === s).length;
+      const criticalSiem = siem
+        ? siem.filter((e) => ["CRITICAL", "HIGH"].includes((e as { severity?: string }).severity ?? "")).length
+        : 0;
+
+      setKpis([
+        {
+          icon: Shield,
+          label: "mTLS Certificates",
+          value: certs ? `${status(certs, "ACTIVE")} Active` : "—",
+          sub: certs ? `${certs.length} managed by mtls-management-svc` : unread("mtls-management-svc"),
+          tone: certs ? "neutral" : "warning",
+        },
+        {
+          icon: AlertOctagon,
+          label: "SIEM Security Events",
+          value: siem ? `${siem.length} Events` : "—",
+          sub: !siem ? unread("siem-integration-svc") : criticalSiem > 0 ? `${criticalSiem} high/critical` : "No high or critical event",
+          tone: !siem ? "warning" : criticalSiem > 0 ? "critical" : "neutral",
+        },
+        {
+          icon: ShieldCheck,
+          label: "CARTA Assessments",
+          value: carta ? `${carta.length}` : "—",
+          sub: carta ? `${carta.filter((a) => (a as { decision?: string }).decision === "ALLOW").length} allowed` : unread("carta-svc"),
+          tone: carta ? "neutral" : "warning",
+        },
+        {
+          icon: Key,
+          label: "Active KMS Keys",
+          value: keys ? `${status(keys, "ACTIVE")} Active` : "—",
+          sub: keys ? `${keys.length} managed by key-management-svc` : unread("key-management-svc"),
+          tone: keys ? "neutral" : "warning",
+        },
+        {
+          icon: Bot,
+          label: "AI Risk Classifications",
+          value: aiRisk ? `${aiRisk.length}` : "—",
+          sub: aiRisk ? "Action types classified" : unread("ai-governance-svc"),
+          tone: aiRisk ? "neutral" : "warning",
+        },
+      ]);
+      setLoading(false);
     }
 
     load();

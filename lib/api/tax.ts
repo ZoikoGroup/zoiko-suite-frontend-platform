@@ -399,7 +399,7 @@ export async function listWithholdingObligations(
       const raw = d.withholding_obligations ?? d.obligations ?? [];
       return raw.map((r) => ({
         obligation_id:           String(r.obligation_id ?? ""),
-        tenant_id:               String(r.tenant_id ?? "11111111-1111-1111-1111-111111111111"),
+        tenant_id:               String(r.tenant_id ?? ""),
         legal_entity_id:         String(r.legal_entity_id ?? ""),
         jurisdiction_id:         String(r.jurisdiction_id ?? ""),
         counterparty_id:         String(r.counterparty_id ?? ""),
@@ -470,7 +470,7 @@ function normaliseDraft(r: Record<string, unknown>): FilingDraft {
   const src = (r.data && typeof r.data === "object" ? r.data : r) as Record<string, unknown>;
   return {
     draft_id:              String(src.draft_id ?? ""),
-    tenant_id:             String(src.tenant_id ?? "11111111-1111-1111-1111-111111111111"),
+    tenant_id:             String(src.tenant_id ?? ""),
     legal_entity_id:       String(src.legal_entity_id ?? ""),
     jurisdiction_id:       String(src.jurisdiction_id ?? ""),
     filing_type:           String(src.filing_type ?? ""),
@@ -574,7 +574,7 @@ export async function listTaxAuthorityInterfaces(
 
         return {
           interface_id: ifaceId,
-          tenant_id: String(raw.tenant_id || "11111111-1111-1111-1111-111111111111"),
+          tenant_id: String(raw.tenant_id ?? ""),
           jurisdiction_id: String(raw.jurisdiction_id || "jur-uk-gb"),
           authority_code: authCode,
           authority_name: String(raw.authority_name || "Tax Authority"),
@@ -793,8 +793,8 @@ export async function createTaxRule(
     identity,
     {
       ...input,
-      tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
-      created_by: input.created_by ?? identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
+      tenant_id: identity?.tenantId,
+      created_by: input.created_by ?? identity?.principalId,
     },
     (d) => d
   );
@@ -828,7 +828,7 @@ export async function evaluateTaxDetermination(
       effective_from: new Date().toISOString().split("T")[0],
       evaluated_by: "tax-determination-engine",
       ...input,
-      tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
+      tenant_id: identity?.tenantId,
     },
     (d) => d
   );
@@ -859,8 +859,8 @@ export async function createVATReturn(
     identity,
     {
       ...input,
-      tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
-      created_by: identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
+      tenant_id: identity?.tenantId,
+      created_by: identity?.principalId,
     },
     // The mock service wraps the record: { vat_return: {...} }.
     // A real backend may return the flat object directly — fall back to the
@@ -932,8 +932,8 @@ export async function createCorporateTaxReturn(
     identity,
     {
       ...input,
-      tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
-      created_by: identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
+      tenant_id: identity?.tenantId,
+      created_by: identity?.principalId,
     },
     (d) => d
   );
@@ -966,8 +966,8 @@ export async function createWithholdingObligation(
     identity,
     {
       ...input,
-      tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
-      created_by: identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
+      tenant_id: identity?.tenantId,
+      created_by: identity?.principalId,
     },
     (d) => d
   );
@@ -998,8 +998,8 @@ export async function createFilingDraft(
       ...input,
       // Provide both field names so both mock and real service accept the body
       reporting_period: input.period_key,
-      tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
-      created_by: identity?.principalId ?? "33333333-3333-3333-3333-333333333333",
+      tenant_id: identity?.tenantId,
+      created_by: identity?.principalId,
     },
     // The mock returns { message, status, data: { draft: {...} } }; unwrap all layers
     (raw) => normaliseDraft(raw as Record<string, unknown>)
@@ -1043,7 +1043,7 @@ export async function registerTaxAuthorityInterface(
     identity,
     {
       ...input,
-      tenant_id: identity?.tenantId ?? "11111111-1111-1111-1111-111111111111",
+      tenant_id: identity?.tenantId,
     },
     (d) => d
   );
@@ -1224,515 +1224,6 @@ export async function patchTaxAuthorityInterface(interfaceId: string, body: Reco
 
 // ─── Shared Fetch Helper ──────────────────────────────────────────────────────
 
-const ENABLE_MOCK_FALLBACK = process.env.NEXT_PUBLIC_ENABLE_BACKEND_MOCK_FALLBACK !== "false";
-
-const FALLBACK_RULES: TaxRule[] = [
-  {
-    rule_id: "rule-uk-vat-standard",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-uk-gb",
-    rule_code: "UK-VAT-STD-2026",
-    name: "UK Standard Value Added Tax",
-    category: "VAT",
-    tax_rate_percentage: 20.0,
-    standard_deductions: 0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01T00:00:00Z",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-uk-vat-reduced",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-uk-gb",
-    rule_code: "UK-VAT-RED-2026",
-    name: "UK Reduced Rate VAT (Energy/Safety)",
-    category: "VAT",
-    tax_rate_percentage: 5.0,
-    standard_deductions: 0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01T00:00:00Z",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-us-cit-fed",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-us-fed",
-    rule_code: "US-CIT-FED-2026",
-    name: "US Federal Corporate Income Tax",
-    category: "CORPORATE_INCOME",
-    tax_rate_percentage: 21.0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01T00:00:00Z",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-sg-gst-standard",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-sg-01",
-    rule_code: "SG-GST-STD-2026",
-    name: "Singapore Goods & Services Tax",
-    category: "GST",
-    tax_rate_percentage: 9.0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01T00:00:00Z",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    rule_id: "rule-de-vat-standard",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-de-fed",
-    rule_code: "DE-VAT-STD-2026",
-    name: "Germany Umsatzsteuer (Standard VAT)",
-    category: "VAT",
-    tax_rate_percentage: 19.0,
-    status: "ACTIVE",
-    version: 1,
-    effective_from: "2026-01-01T00:00:00Z",
-    created_by: "system",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-];
-
-const FALLBACK_DETERMINATIONS: TaxDetermination[] = [
-  {
-    determination_id: "det-2026-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    transaction_id: "tx-inv-8910",
-    source_module: "ACCOUNTS_RECEIVABLE",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-uk-gb",
-    rule_id: "rule-uk-vat-standard",
-    tax_category: "VAT",
-    gross_amount: 120000.0,
-    taxable_amount: 100000.0,
-    tax_rate_percentage: 20.0,
-    calculated_tax_amount: 20000.0,
-    exempt_amount: 0,
-    currency: "GBP",
-    status: "CALCULATED",
-    effective_from: "2026-07-01T00:00:00Z",
-    evaluated_at: "2026-07-31T14:30:00Z",
-    evaluated_by: "tax-engine-daemon",
-    created_at: "2026-07-31T14:30:00Z",
-    updated_at: "2026-07-31T14:30:00Z",
-    // TAX-03 classification facts. The rate above says nothing about why it
-    // applies without them, and the table renders all three.
-    seller_party_id: "22222222-2222-2222-2222-222222222222",
-    buyer_party_id: "party-uk-northwind-ltd",
-    supply_jurisdiction_id: "jur-uk-gb",
-    // Only CALLER_ASSERTED occurs today: no jurisdiction pack carries
-    // place-of-supply rules, so nothing derives this.
-    place_of_supply_basis: "CALLER_ASSERTED",
-    product_classification: "PROFESSIONAL_SERVICES",
-    supply_kind: "SERVICES",
-    supply_type: "B2B",
-    supply_date: "2026-07-31",
-    // Charging 20% here requires a registration here; a row showing the rate
-    // with none would contradict itself.
-    seller_registration_id: "GB123456789",
-    seller_registration_status: "ACTIVE",
-  },
-  {
-    determination_id: "det-2026-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    transaction_id: "tx-po-4421",
-    source_module: "COMMERCIAL_OPS",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-us-fed",
-    rule_id: "rule-us-cit-fed",
-    tax_category: "CORPORATE_INCOME",
-    gross_amount: 450000.0,
-    taxable_amount: 450000.0,
-    tax_rate_percentage: 21.0,
-    calculated_tax_amount: 94500.0,
-    exempt_amount: 0,
-    currency: "USD",
-    status: "CALCULATED",
-    effective_from: "2026-06-01T00:00:00Z",
-    evaluated_at: "2026-06-30T10:00:00Z",
-    evaluated_by: "tax-engine-daemon",
-    created_at: "2026-06-30T10:00:00Z",
-    updated_at: "2026-06-30T10:00:00Z",
-    // Corporate income tax is not levied on a supply, so the supply facts do
-    // not apply here. UNSPECIFIED is the value the type defines for exactly
-    // this - inventing GOODS or B2B would assert something untrue.
-    seller_party_id: "22222222-2222-2222-2222-222222222222",
-    buyer_party_id: "22222222-2222-2222-2222-222222222222",
-    supply_jurisdiction_id: "jur-us-fed",
-    place_of_supply_basis: "CALLER_ASSERTED",
-    product_classification: "NOT_APPLICABLE",
-    supply_kind: "UNSPECIFIED",
-    supply_type: "UNSPECIFIED",
-  },
-  {
-    determination_id: "det-2026-003",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    transaction_id: "tx-inv-9932",
-    source_module: "ACCOUNTS_RECEIVABLE",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-sg-01",
-    rule_id: "rule-sg-gst-standard",
-    tax_category: "GST",
-    gross_amount: 85000.0,
-    taxable_amount: 85000.0,
-    tax_rate_percentage: 9.0,
-    calculated_tax_amount: 7650.0,
-    exempt_amount: 0,
-    currency: "SGD",
-    status: "APPLIED",
-    effective_from: "2026-07-15T00:00:00Z",
-    evaluated_at: "2026-07-31T15:00:00Z",
-    evaluated_by: "tax-engine-daemon",
-    created_at: "2026-07-31T15:00:00Z",
-    updated_at: "2026-07-31T15:00:00Z",
-    seller_party_id: "22222222-2222-2222-2222-222222222222",
-    buyer_party_id: "party-sg-consumer-4471",
-    supply_jurisdiction_id: "jur-sg-01",
-    place_of_supply_basis: "CALLER_ASSERTED",
-    product_classification: "DIGITAL_SUBSCRIPTION",
-    supply_kind: "DIGITAL_SERVICES",
-    supply_type: "B2C",
-    supply_date: "2026-07-15",
-    seller_registration_id: "M90312345X",
-    seller_registration_status: "ACTIVE",
-  },
-];
-
-const FALLBACK_VAT_RETURNS: VATReturn[] = [
-  {
-    return_id: "vat-ret-2026-q2",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-uk-gb",
-    tax_registration_number: "GB998877665",
-    tax_period: "2026-Q2",
-    total_sales_amount: 1450000.0,
-    total_purchase_amount: 620000.0,
-    output_tax_amount: 290000.0,
-    input_tax_amount: 124000.0,
-    net_tax_payable: 166000.0,
-    currency: "GBP",
-    status: "FILED",
-    filed_at: "2026-07-07T12:00:00Z",
-    filed_by: "system-auto-filing",
-    effective_from: "2026-04-01T00:00:00Z",
-    effective_to: "2026-06-30T23:59:59Z",
-    created_by: "tax-daemon",
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-07T12:00:00Z",
-  },
-  {
-    return_id: "vat-ret-2026-q3",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-uk-gb",
-    tax_registration_number: "GB998877665",
-    tax_period: "2026-Q3",
-    total_sales_amount: 980000.0,
-    total_purchase_amount: 410000.0,
-    output_tax_amount: 196000.0,
-    input_tax_amount: 82000.0,
-    net_tax_payable: 114000.0,
-    currency: "GBP",
-    status: "DRAFT",
-    effective_from: "2026-07-01T00:00:00Z",
-    effective_to: "2026-09-30T23:59:59Z",
-    created_by: "tax-daemon",
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-14T00:00:00Z",
-  },
-  {
-    return_id: "vat-ret-2026-sg-q2",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-sg-01",
-    tax_registration_number: "M90372819X",
-    tax_period: "2026-Q2",
-    total_sales_amount: 500000.0,
-    total_purchase_amount: 200000.0,
-    output_tax_amount: 45000.0,
-    input_tax_amount: 18000.0,
-    net_tax_payable: 27000.0,
-    currency: "SGD",
-    status: "ACCEPTED",
-    filed_at: "2026-07-15T09:30:00Z",
-    filed_by: "tax-officer-sg",
-    effective_from: "2026-04-01T00:00:00Z",
-    effective_to: "2026-06-30T23:59:59Z",
-    created_by: "tax-daemon",
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-15T09:30:00Z",
-  },
-];
-
-const FALLBACK_CORPORATE_RETURNS: CorporateTaxReturn[] = [
-  {
-    return_id: "corp-ret-2025",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-us-fed",
-    tax_registration_number: "US-EIN-12345678",
-    fiscal_year: 2025,
-    accounting_period_start: "2025-01-01",
-    accounting_period_end: "2025-12-31",
-    gross_revenue: 3200000.0,
-    allowable_deductions: 1800000.0,
-    taxable_income: 1400000.0,
-    tax_rate_percent: 21.0,
-    gross_tax_liability: 294000.0,
-    tax_credits: 50000.0,
-    net_tax_payable: 244000.0,
-    tax_already_paid: 200000.0,
-    balance_due: 44000.0,
-    currency: "USD",
-    status: "SUBMITTED",
-    submitted_at: "2026-03-15T10:00:00Z",
-    submitted_by: "corporate-tax-lead",
-    effective_from: "2025-01-01T00:00:00Z",
-    effective_to: "2025-12-31T23:59:59Z",
-    created_by: "tax-daemon",
-    created_at: "2026-03-01T00:00:00Z",
-    updated_at: "2026-03-15T10:00:00Z",
-  },
-  {
-    return_id: "corp-ret-2026-est",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-us-fed",
-    tax_registration_number: "US-EIN-12345678",
-    fiscal_year: 2026,
-    accounting_period_start: "2026-01-01",
-    accounting_period_end: "2026-12-31",
-    gross_revenue: 1850000.0,
-    allowable_deductions: 950000.0,
-    taxable_income: 900000.0,
-    tax_rate_percent: 21.0,
-    gross_tax_liability: 189000.0,
-    tax_credits: 0.0,
-    net_tax_payable: 189000.0,
-    tax_already_paid: 0.0,
-    balance_due: 189000.0,
-    currency: "USD",
-    status: "DRAFT",
-    effective_from: "2026-01-01T00:00:00Z",
-    effective_to: "2026-12-31T23:59:59Z",
-    created_by: "tax-daemon",
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-08-01T00:00:00Z",
-  },
-];
-
-const FALLBACK_WITHHOLDING: WithholdingTaxObligation[] = [
-  {
-    obligation_id: "wht-obl-2026-001",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-de-fed",
-    counterparty_id: "cp-de-bavaria-cloud",
-    payment_reference: "PAY-2026-0918",
-    payment_type: "DIVIDEND",
-    gross_payment_amount: 85000.0,
-    taxable_base_amount: 85000.0,
-    withholding_rate_percent: 15.0,
-    withheld_amount: 12750.0,
-    currency: "EUR",
-    tax_treaty_exemption: true,
-    status: "REMITTED",
-    remittance_reference: "REMIT-EUR-9921",
-    remitted_at: "2026-07-20T14:00:00Z",
-    effective_from: "2026-07-01T00:00:00Z",
-    effective_to: "2026-07-31T23:59:59Z",
-    created_by: "tax-daemon",
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-20T14:00:00Z",
-  },
-  {
-    obligation_id: "wht-obl-2026-002",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-us-fed",
-    counterparty_id: "cp-us-pacific-tech",
-    payment_reference: "PAY-2026-1044",
-    payment_type: "ROYALTY",
-    gross_payment_amount: 40000.0,
-    taxable_base_amount: 40000.0,
-    withholding_rate_percent: 30.0,
-    withheld_amount: 12000.0,
-    currency: "USD",
-    tax_treaty_exemption: false,
-    status: "CALCULATED",
-    effective_from: "2026-08-01T00:00:00Z",
-    effective_to: "2026-08-31T23:59:59Z",
-    created_by: "tax-daemon",
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-10T00:00:00Z",
-  },
-];
-
-const FALLBACK_DRAFTS: FilingDraft[] = [
-  {
-    draft_id: "draft-vat-2026-q2",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-uk-gb",
-    filing_type: "VAT100_MTD",
-    period_key: "2026-Q2",
-    due_date: "2026-08-07T00:00:00Z",
-    payload_data: JSON.stringify({ box1: 290000, box4: 124000, box5: 166000 }),
-    validation_status: "FINALIZED",
-    created_by: "system",
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-07-07T00:00:00Z",
-  },
-  {
-    draft_id: "draft-vat-2026-q3",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-uk-gb",
-    filing_type: "VAT100_MTD",
-    period_key: "2026-Q3",
-    due_date: "2026-11-07T00:00:00Z",
-    payload_data: JSON.stringify({ box1: 196000, box4: 82000, box5: 114000 }),
-    validation_status: "UNVALIDATED",
-    created_by: "system",
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-14T00:00:00Z",
-  },
-  {
-    draft_id: "draft-cit-1120-2025",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-us-fed",
-    filing_type: "US_FORM_1120",
-    period_key: "2025-FY",
-    due_date: "2026-10-15T00:00:00Z",
-    payload_data: JSON.stringify({ taxable_income: 1400000, net_tax: 244000 }),
-    validation_status: "PREPARED",
-    created_by: "system",
-    created_at: "2026-03-01T00:00:00Z",
-    updated_at: "2026-03-15T00:00:00Z",
-  },
-  {
-    draft_id: "draft-wht-1042s-2026",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    legal_entity_id: "22222222-2222-2222-2222-222222222222",
-    jurisdiction_id: "jur-us-fed",
-    filing_type: "US_FORM_1042S",
-    period_key: "2026-Q2",
-    due_date: "2026-09-15T00:00:00Z",
-    payload_data: JSON.stringify({ total_withheld: 12000, payee: "Pacific Tech IP" }),
-    validation_status: "PREPARED",
-    created_by: "system",
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-01T00:00:00Z",
-  },
-];
-
-const FALLBACK_INTERFACES: TaxAuthorityInterface[] = [
-  {
-    interface_id: "if-uk-hmrc-mtd",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-uk-gb",
-    authority_code: "HMRC_MTD",
-    authority_name: "HM Revenue & Customs (Making Tax Digital)",
-    api_endpoint: "https://api.service.hmrc.gov.uk/organisations/vat",
-    endpoint_url: "https://api.service.hmrc.gov.uk/organisations/vat",
-    auth_type: "OAuth2",
-    protocol: "REST_OAUTH2",
-    protocol_type: "REST_OAUTH2",
-    status: "ACTIVE",
-    health_status: "HEALTHY",
-    is_active: true,
-    error_count: 0,
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    interface_id: "if-us-irs-air",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-us-fed",
-    authority_code: "IRS_AIR",
-    authority_name: "US Internal Revenue Service (AIR System)",
-    api_endpoint: "https://la.alt.www4.irs.gov/airp/appe/services",
-    endpoint_url: "https://la.alt.www4.irs.gov/airp/appe/services",
-    auth_type: "mTLS + SAML2",
-    protocol: "SOAP_MTLS",
-    protocol_type: "SOAP_MTLS",
-    status: "ACTIVE",
-    health_status: "HEALTHY",
-    is_active: true,
-    error_count: 0,
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    interface_id: "if-sg-iras-myTax",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-sg-01",
-    authority_code: "IRAS_MYTAX",
-    authority_name: "Inland Revenue Authority of Singapore",
-    api_endpoint: "https://apis.iras.gov.sg/tax/v1/gst",
-    endpoint_url: "https://apis.iras.gov.sg/tax/v1/gst",
-    auth_type: "OAuth2",
-    protocol: "REST_OAUTH2",
-    protocol_type: "REST_OAUTH2",
-    status: "ACTIVE",
-    health_status: "HEALTHY",
-    is_active: true,
-    error_count: 0,
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    interface_id: "if-de-elster",
-    tenant_id: "11111111-1111-1111-1111-111111111111",
-    jurisdiction_id: "jur-de-fed",
-    authority_code: "ELSTER_DE",
-    authority_name: "Germany Federal Central Tax Office (ELSTER)",
-    api_endpoint: "https://www.elster.de/eportal/api/v2",
-    endpoint_url: "https://www.elster.de/eportal/api/v2",
-    auth_type: "X.509 Certificate",
-    protocol: "REST_CERT",
-    protocol_type: "REST_CERT",
-    status: "ACTIVE",
-    health_status: "HEALTHY",
-    is_active: true,
-    error_count: 0,
-    created_at: "2026-01-01T00:00:00Z",
-  },
-];
-
-function getFallbackForService(serviceName: string): unknown {
-  switch (serviceName) {
-    case "tax-rules-svc":
-      return FALLBACK_RULES;
-    case "tax-determination-svc":
-      return FALLBACK_DETERMINATIONS;
-    case "vat-gst-svc":
-      return FALLBACK_VAT_RETURNS;
-    case "corporate-tax-svc":
-      return FALLBACK_CORPORATE_RETURNS;
-    case "withholding-tax-svc":
-      return FALLBACK_WITHHOLDING;
-    case "filing-preparation-svc":
-      return FALLBACK_DRAFTS;
-    case "tax-authority-interface-svc":
-      return FALLBACK_INTERFACES;
-    default:
-      return [];
-  }
-}
-
 async function fetchDomainService<TRaw, TOut>(
   urlStr: string,
   base: string,
@@ -1757,30 +1248,18 @@ async function fetchDomainService<TRaw, TOut>(
     res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(15000) });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
-    if (ENABLE_MOCK_FALLBACK) {
-      const fallback = getFallbackForService(serviceName) as TOut;
-      if (fallback !== undefined) {
-        return { ok: true, data: fallback };
-      }
-    }
     return {
       ok: false,
       error: {
         kind: isTimeout ? "timeout" : "unreachable",
         message: isTimeout
-          ? `${serviceName} did not respond within 1500ms`
+          ? `${serviceName} did not respond within 15s`
           : `${serviceName} is unreachable at ${base}`,
       },
     };
   }
 
   if (!res.ok) {
-    if (ENABLE_MOCK_FALLBACK) {
-      const fallback = getFallbackForService(serviceName) as TOut;
-      if (fallback !== undefined) {
-        return { ok: true, data: fallback };
-      }
-    }
     return {
       ok: false,
       error: {
@@ -1795,12 +1274,6 @@ async function fetchDomainService<TRaw, TOut>(
     const parsed = (await res.json()) as TRaw;
     return { ok: true, data: transform(parsed) };
   } catch {
-    if (ENABLE_MOCK_FALLBACK) {
-      const fallback = getFallbackForService(serviceName) as TOut;
-      if (fallback !== undefined) {
-        return { ok: true, data: fallback };
-      }
-    }
     return {
       ok: false,
       error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },

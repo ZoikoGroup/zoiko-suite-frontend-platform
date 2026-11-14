@@ -16,7 +16,7 @@
 //    modeled equity grants and vesting schedules here — that was never a real
 //    endpoint on this service.
 
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, type Identity } from "./client";
 
 type ListEnvelope<T> = { data: T[]; count: number };
 
@@ -63,9 +63,10 @@ export type CommunicationPolicy = {
   created_at: string;
 };
 
-export async function listMtlsCertificates(tenantId: string) {
+export async function listMtlsCertificates(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<MtlsCertificate>>("mtlsManagement", "/v1/mtls/certificates", {
     query: { tenant_id: tenantId },
+    identity,
   });
   if (!res.ok) return res;
   return { ok: true as const, data: res.data.data };
@@ -73,23 +74,25 @@ export async function listMtlsCertificates(tenantId: string) {
 
 export async function provisionMtlsCertificate(
   tenantId: string,
-  body: { legal_entity_id: string; service_name: string; common_name: string; rotation_days?: number; auto_rotate?: boolean }
+  body: { legal_entity_id: string; service_name: string; common_name: string; rotation_days?: number; auto_rotate?: boolean },
+  identity?: Identity
 ) {
   return apiPost<ProvisionCertResult>("mtlsManagement", "/v1/mtls/certificates", {
     tenant_id: tenantId,
     ...body,
-  });
+  }, { identity });
 }
 
-export async function rotateMtlsCertificate(tenantId: string, certId: string) {
+export async function rotateMtlsCertificate(tenantId: string, certId: string, identity?: Identity) {
   return apiPost<ProvisionCertResult>("mtlsManagement", `/v1/mtls/certificates/${certId}/rotate`, {
     tenant_id: tenantId,
-  });
+  }, { identity });
 }
 
-export async function listMtlsPolicies(tenantId: string) {
+export async function listMtlsPolicies(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<CommunicationPolicy>>("mtlsManagement", "/v1/mtls/policies", {
     query: { tenant_id: tenantId },
+    identity,
   });
   if (!res.ok) return res;
   return { ok: true as const, data: res.data.data };
@@ -123,17 +126,19 @@ export type SiemEvent = {
   timestamp: string;
 };
 
-export async function listSiemEvents(tenantId: string) {
+export async function listSiemEvents(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<SiemEvent>>("siemIntegration", "/v1/siem/events", {
     query: { tenant_id: tenantId },
+    identity,
   });
   if (!res.ok) return res;
   return { ok: true as const, data: res.data.data };
 }
 
-export async function listSiemExporters(tenantId: string) {
+export async function listSiemExporters(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<SiemExporter>>("siemIntegration", "/v1/siem/exporters", {
     query: { tenant_id: tenantId },
+    identity,
   });
   if (!res.ok) return res;
   return { ok: true as const, data: res.data.data };
@@ -141,12 +146,13 @@ export async function listSiemExporters(tenantId: string) {
 
 export async function createSiemExporter(
   tenantId: string,
-  body: { legal_entity_id: string; name: string; platform: SiemPlatform; endpoint_url: string; auth_token?: string }
+  body: { legal_entity_id: string; name: string; platform: SiemPlatform; endpoint_url: string; auth_token?: string },
+  identity?: Identity
 ) {
   return apiPost<SiemExporter>("siemIntegration", "/v1/siem/exporters", {
     tenant_id: tenantId,
     ...body,
-  });
+  }, { identity });
 }
 
 // ── Key Management Service (KMS) ────────────────────────────────────────────
@@ -171,9 +177,10 @@ export type CustomerKey = {
   updated_at: string;
 };
 
-export async function listKmsKeys(tenantId: string) {
+export async function listKmsKeys(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<CustomerKey>>("keyManagement", "/v1/keys", {
     query: { tenant_id: tenantId },
+    identity,
   });
   if (!res.ok) return res;
   return { ok: true as const, data: res.data.data };
@@ -181,24 +188,25 @@ export async function listKmsKeys(tenantId: string) {
 
 export async function registerKmsKey(
   tenantId: string,
-  body: { legal_entity_id: string; key_alias: string; key_provider: KeyProvider; key_model?: KeyModel; external_key_arn?: string }
+  body: { legal_entity_id: string; key_alias: string; key_provider: KeyProvider; key_model?: KeyModel; external_key_arn?: string },
+  identity?: Identity
 ) {
   return apiPost<CustomerKey>("keyManagement", "/v1/keys", {
     tenant_id: tenantId,
     ...body,
-  });
+  }, { identity });
 }
 
-export async function rotateKmsKey(tenantId: string, keyId: string) {
+export async function rotateKmsKey(tenantId: string, keyId: string, identity?: Identity) {
   return apiPost<CustomerKey>("keyManagement", `/v1/keys/${keyId}/rotate`, {
     tenant_id: tenantId,
-  });
+  }, { identity });
 }
 
-export async function disableKmsKey(tenantId: string, keyId: string) {
+export async function disableKmsKey(tenantId: string, keyId: string, identity?: Identity) {
   return apiPost<{ message: string }>("keyManagement", `/v1/keys/${keyId}/disable`, {
     tenant_id: tenantId,
-  });
+  }, { identity });
 }
 
 // ── Carta (Continuous Adaptive Risk & Trust Assessment) ─────────────────────
@@ -236,17 +244,19 @@ export type CartaAssessment = {
 
 export async function evaluateCartaAccess(
   tenantId: string,
-  body: { legal_entity_id: string; context: AccessContext }
+  body: { legal_entity_id: string; context: AccessContext },
+  identity?: Identity
 ) {
   return apiPost<CartaAssessment>("carta", "/v1/carta/evaluate", {
     tenant_id: tenantId,
     ...body,
-  });
+  }, { identity });
 }
 
-export async function listCartaAssessments(tenantId: string) {
+export async function listCartaAssessments(tenantId: string, identity?: Identity) {
   const res = await apiGet<ListEnvelope<CartaAssessment>>("carta", "/v1/carta/assessments", {
-    query: { tenant_id: tenantId },
+    query: { tenant_id: tenantId, legal_entity_id: identity?.legalEntityId },
+    identity,
   });
   if (!res.ok) return res;
   return { ok: true as const, data: res.data.data };

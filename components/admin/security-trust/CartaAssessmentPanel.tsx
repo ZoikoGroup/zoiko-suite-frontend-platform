@@ -73,88 +73,29 @@ const RISK_BADGES: Record<CartaRiskLevel, string> = {
   CRITICAL: "text-rose-700 bg-rose-50 dark:bg-rose-900/30 dark:text-rose-400 border-rose-200",
 };
 
-const MOCK_ASSESSMENTS: CartaAssessment[] = [
-  {
-    id: "eval-001",
-    subject_id: "usr-sec-alice@zoiko.com",
-    context: {
-      subject_id: "usr-sec-alice@zoiko.com",
-      subject_type: "USER",
-      device_trust_level: 95,
-      ip_address: "192.168.1.45",
-      is_known_location: true,
-      resource_sensitivity: "HIGH",
-      action_requested: "hsm:key:export_public",
-      time_of_day_hour: 14,
-    },
-    trust_score: 92,
-    risk_level: "LOW",
-    decision: "ALLOW",
-    risk_factors: ["Managed enterprise device", "Known corporate VPN subnet"],
-    assessment_timestamp: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "eval-002",
-    subject_id: "svc-procurement-worker",
-    context: {
-      subject_id: "svc-procurement-worker",
-      subject_type: "SERVICE_ACCOUNT",
-      device_trust_level: 80,
-      ip_address: "10.0.4.12",
-      is_known_location: true,
-      resource_sensitivity: "RESTRICTED",
-      action_requested: "purchase_order:approve_bulk",
-      time_of_day_hour: 23,
-    },
-    trust_score: 64,
-    risk_level: "MEDIUM",
-    decision: "STEP_UP_MFA",
-    risk_factors: ["Off-hours restricted action", "Elevated approval threshold"],
-    assessment_timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "eval-003",
-    subject_id: "usr-contractor-guest",
-    context: {
-      subject_id: "usr-contractor-guest",
-      subject_type: "USER",
-      device_trust_level: 25,
-      ip_address: "198.51.100.89",
-      is_known_location: false,
-      resource_sensitivity: "RESTRICTED",
-      action_requested: "secrets:master_vault:read",
-      time_of_day_hour: 3,
-    },
-    trust_score: 18,
-    risk_level: "CRITICAL",
-    decision: "DENY",
-    risk_factors: ["Unrecognized IP geofence", "Untrusted device profile", "Restricted resource breach attempt"],
-    assessment_timestamp: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
-  },
-];
-
 export function CartaAssessmentPanel() {
   const [assessments, setAssessments] = useState<CartaAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [evaluating, setEvaluating] = useState(false);
   const [filterDecision, setFilterDecision] = useState<string>("ALL");
+  // Why the register or the last evaluation could not be read. Never replaced by sample data.
+  const [error, setError] = useState<string | null>(null);
 
   const fetchAssessments = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch("/api/v1/security/assessments");
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.assessments) && data.assessments.length > 0) {
-          setAssessments(data.assessments);
-        } else {
-          setAssessments(MOCK_ASSESSMENTS);
-        }
+      const data = await res.json().catch(() => null);
+      if (res.ok && Array.isArray(data?.assessments)) {
+        setAssessments(data.assessments);
       } else {
-        setAssessments(MOCK_ASSESSMENTS);
+        setAssessments([]);
+        setError(`carta-svc could not be read (HTTP ${res.status})${data?.message ? ": " + data.message : ""}`);
       }
     } catch {
-      setAssessments(MOCK_ASSESSMENTS);
+      setAssessments([]);
+      setError("carta-svc could not be reached");
     } finally {
       setLoading(false);
     }
@@ -181,32 +122,20 @@ export function CartaAssessmentPanel() {
       const res = await fetch("/api/v1/security/assessments/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          legal_entity_id: "22222222-2222-2222-2222-222222222222",
-          context: newContext,
-        }),
+        // The legal entity is taken from the session on the server, never from the page.
+        body: JSON.stringify({ context: newContext }),
       });
 
       if (res.ok) {
         const newRecord = await res.json();
+        setError(null);
         setAssessments((prev) => [newRecord, ...prev]);
       } else {
-        // Fallback live simulated zero-trust decision
-        const mockScore = Math.floor(Math.random() * 30 + 70);
-        const simAssessment: CartaAssessment = {
-          id: `eval-${Date.now().toString(36)}`,
-          subject_id: newContext.subject_id,
-          context: newContext,
-          trust_score: mockScore,
-          risk_level: mockScore > 80 ? "LOW" : "MEDIUM",
-          decision: mockScore > 80 ? "ALLOW" : "STEP_UP_MFA",
-          risk_factors: ["Dynamic telemetry verified", "Standard API gateway routing"],
-          assessment_timestamp: new Date().toISOString(),
-        };
-        setAssessments((prev) => [simAssessment, ...prev]);
+        const data = await res.json().catch(() => null);
+        setError(`carta-svc refused the evaluation (HTTP ${res.status})${data?.message ? ": " + data.message : ""}`);
       }
     } catch {
-      // ignore
+      setError("carta-svc could not be reached");
     } finally {
       setEvaluating(false);
     }
@@ -218,7 +147,7 @@ export function CartaAssessmentPanel() {
 
   const avgTrustScore = assessments.length
     ? Math.round(assessments.reduce((acc, a) => acc + (a.trust_score || 0), 0) / assessments.length)
-    : 85;
+    : null;
 
   return (
     <div className="space-y-4">
@@ -229,7 +158,7 @@ export function CartaAssessmentPanel() {
         </div>
         <div className="flex items-center gap-3">
           <span className="font-medium text-slate-700 dark:text-slate-300">
-            Avg Trust Score: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{avgTrustScore}/100</span>
+            Avg Trust Score: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{avgTrustScore === null ? "—" : `${avgTrustScore}/100`}</span>
           </span>
           <button
             type="button"
@@ -270,9 +199,15 @@ export function CartaAssessmentPanel() {
         </button>
       </div>
 
+      {error && (
+        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          {error}
+        </div>
+      )}
+
       {/* Assessment List */}
       <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
-        {filtered.length === 0 ? (
+        {error && assessments.length === 0 ? null : filtered.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-500 dark:border-slate-800">
             No access risk assessments found.
           </div>
