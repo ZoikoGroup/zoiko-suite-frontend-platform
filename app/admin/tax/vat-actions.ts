@@ -41,9 +41,11 @@ export async function createVatReturnAction(
     return { status: "error", message: "Session expired — please log in again." };
   }
 
-  const legalEntityId = String(formData.get("legal_entity_id") ?? identity.legalEntityId).trim();
+  // The legal entity is the session's, never a form value.
+  const legalEntityId = String(identity.legalEntityId ?? "").trim();
+  if (!legalEntityId) return { status: "error", message: "Your session has no legal entity." };
   const jurisdictionId = String(formData.get("jurisdiction_id") ?? "GB").trim();
-  const taxRegistrationNumber = String(formData.get("tax_registration_number") ?? "GB-987654321").trim();
+  const taxRegistrationNumber = String(formData.get("tax_registration_number") ?? "").trim();
   const taxPeriod = String(formData.get("tax_period") ?? "").trim();
   const totalSalesStr = String(formData.get("total_sales_amount") ?? "").trim();
   const totalPurchasesStr = String(formData.get("total_purchase_amount") ?? "").trim();
@@ -52,7 +54,7 @@ export async function createVatReturnAction(
   const currency = String(formData.get("currency") ?? "GBP").trim().toUpperCase();
   const effectiveFrom = String(formData.get("effective_from") ?? "").trim();
 
-  if (!taxPeriod || !totalSalesStr || !totalPurchasesStr || !outputTaxStr || !inputTaxStr || !effectiveFrom) {
+  if (!taxRegistrationNumber || !taxPeriod || !totalSalesStr || !totalPurchasesStr || !outputTaxStr || !inputTaxStr || !effectiveFrom) {
     return {
       status: "error",
       message: "Tax period, total sales, purchases, output tax, input tax, and effective date are all required.",
@@ -113,7 +115,7 @@ export async function fileVatReturnAction(
   }
 
   const returnId = String(formData.get("return_id") ?? "").trim();
-  const filedBy = String(formData.get("filed_by") ?? "Lingaraj (Super Admin)").trim();
+  const filedBy = String(identity.principalId ?? "").trim() // who filed is the signed-in principal;
 
   if (!returnId) {
     return { status: "error", message: "Return ID is required to file with the tax authority." };

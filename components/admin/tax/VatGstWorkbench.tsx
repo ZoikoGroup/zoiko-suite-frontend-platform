@@ -198,15 +198,8 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
             <form action={createSubmit} className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                  <label htmlFor="vat-legal-entity" className={LABEL}>Legal Entity ID</label>
-                  <input
-                    id="vat-legal-entity"
-                    name="legal_entity_id"
-                    defaultValue="11111111-1111-1111-1111-111111111111"
-                    className={FIELD}
-                    required
-                  />
-                  <p className={HINT}>Zoiko UK Operating Entity</p>
+                  <p className={LABEL}>Legal Entity</p>
+                  <p className={HINT}>Your session&apos;s legal entity. It is set by the server and cannot be changed here.</p>
                 </div>
 
                 <div>

@@ -94,30 +94,24 @@ export type HeaderOptions = {
   idempotencyKey?: string;
 };
 
-const DEFAULT_TENANT = "11111111-1111-1111-1111-111111111111";
-const DEFAULT_PRINCIPAL = "33333333-3333-3333-3333-333333333333";
-const DEFAULT_ENTITY = "22222222-2222-2222-2222-222222222222";
-
 function buildHeaders(opts?: HeaderOptions): HeadersInit {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "X-Tenant-Id": opts?.tenantId !== undefined ? opts.tenantId : DEFAULT_TENANT,
-    "X-Principal-Id": opts?.principalId !== undefined ? opts.principalId : DEFAULT_PRINCIPAL,
-    "X-Actor-Subject-Id": opts?.principalId !== undefined ? opts.principalId : DEFAULT_PRINCIPAL,
-    "X-Legal-Entity-Id": opts?.legalEntityId !== undefined ? opts.legalEntityId : DEFAULT_ENTITY,
+    // Identity comes only from the caller (the server actions pass the session's).
+    // There is no default: a call without a tenant goes out without one and is refused.
+    "X-Tenant-Id": opts?.tenantId ?? "",
+    "X-Principal-Id": opts?.principalId ?? "",
+    "X-Actor-Subject-Id": opts?.principalId ?? "",
+    "X-Legal-Entity-Id": opts?.legalEntityId ?? "",
     "X-Request-Id": opts?.requestId || `req-mig-${Date.now()}`,
     "X-Correlation-Id": opts?.correlationId || `corr-mig-${Date.now()}`,
     "X-Source-Channel": opts?.sourceChannel || "web",
     "Idempotency-Key": opts?.idempotencyKey || `idemp-mig-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
   };
 
-  // Remove empty headers to test missing header negative paths
-  if (opts?.tenantId === "") {
-    delete headers["X-Tenant-Id"];
-  }
-  if (opts?.principalId === "") {
-    delete headers["X-Principal-Id"];
-    delete headers["X-Actor-Subject-Id"];
+  // An identity header with no value is not sent at all.
+  for (const k of ["X-Tenant-Id", "X-Principal-Id", "X-Actor-Subject-Id", "X-Legal-Entity-Id"]) {
+    if (!headers[k]) delete headers[k];
   }
 
   return headers;

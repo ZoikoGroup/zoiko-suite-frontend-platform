@@ -1,5 +1,8 @@
 "use server";
 
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+
 import {
   getMigrationIntegrityHealth,
   validateMigration,
@@ -12,6 +15,22 @@ import {
   type AuditEntry,
   type HeaderOptions,
 } from "@/lib/api/migration-integrity";
+
+/**
+ * The session's identity. The browser cannot choose the tenant, principal or legal
+ * entity: whatever it sends in opts is replaced here.
+ */
+async function sessionOpts(opts?: HeaderOptions): Promise<HeaderOptions> {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.tenantId || !session.principalId) throw new Error("Not signed in");
+  return {
+    ...opts,
+    tenantId: session.tenantId,
+    principalId: session.principalId,
+    legalEntityId: session.legalEntityId,
+  };
+}
 
 export type MigrationQAReport = {
   id: string;
@@ -31,18 +50,20 @@ export async function checkMigrationHealthAction() {
 }
 
 export async function validateMigrationAction(req: ValidateMigrationRequest, opts?: HeaderOptions) {
-  return await validateMigration(req, opts);
+  const o = await sessionOpts(opts);
+  return await validateMigration({ ...req, legal_entity_id: o.legalEntityId ?? "" }, o);
 }
 
 export async function listMigrationJobsAction(
   filters?: { legalEntityId?: string; status?: string },
   opts?: HeaderOptions
 ) {
-  return await listMigrationJobs(filters, opts);
+  const o = await sessionOpts(opts);
+  return await listMigrationJobs({ ...filters, legalEntityId: o.legalEntityId }, o);
 }
 
 export async function getMigrationJobByIdAction(id: string, opts?: HeaderOptions) {
-  return await getMigrationJobById(id, opts);
+  return await getMigrationJobById(id, await sessionOpts(opts));
 }
 
 export async function remediateAuditEntryAction(
@@ -51,11 +72,11 @@ export async function remediateAuditEntryAction(
   notes: string,
   opts?: HeaderOptions
 ) {
-  return await remediateAuditEntry(jobId, entryId, notes, opts);
+  return await remediateAuditEntry(jobId, entryId, notes, await sessionOpts(opts));
 }
 
 export async function archiveMigrationJobAction(id: string, opts?: HeaderOptions) {
-  return await archiveMigrationJob(id, opts);
+  return await archiveMigrationJob(id, await sessionOpts(opts));
 }
 
 /**
@@ -63,9 +84,12 @@ export async function archiveMigrationJobAction(id: string, opts?: HeaderOptions
  */
 export async function runMigrationQASuiteAction(): Promise<MigrationQAReport[]> {
   const reports: MigrationQAReport[] = [];
-  const PRIMARY_TENANT = "11111111-1111-1111-1111-111111111111";
-  const SECONDARY_TENANT = "99999999-9999-9999-9999-999999999999";
-  const DEMO_ENTITY = "22222222-2222-2222-2222-222222222222";
+  // Runs as the signed-in session. The isolation check reads as a freshly generated
+  // tenant that cannot hold anyone's data, never as another real or fixed tenant.
+  const session = await sessionOpts();
+  const PRIMARY_TENANT = session.tenantId as string;
+  const SECONDARY_TENANT = crypto.randomUUID();
+  const DEMO_ENTITY = session.legalEntityId ?? "";
 
   // TC-01: Health Probe Check (:8139)
   {
@@ -103,7 +127,7 @@ export async function runMigrationQASuiteAction(): Promise<MigrationQAReport[]> 
           { ref: "ROW-QA-003", fields: { account_code: "GL-1030", amount: "1250000.00", currency: "GBP" } },
         ],
       },
-      { tenantId: PRIMARY_TENANT }
+      { ...session, tenantId: PRIMARY_TENANT }
     );
 
     const passed = res.ok && res.status === 201 && res.data.integrity_score === 100;
@@ -144,7 +168,7 @@ export async function runMigrationQASuiteAction(): Promise<MigrationQAReport[]> 
           { ref: "EMP-003", fields: { employee_id: "E-102", gross_salary: "NOT_A_NUMBER", tax_code: "BR" } }, // Format failure
         ],
       },
-      { tenantId: PRIMARY_TENANT }
+      { ...session, tenantId: PRIMARY_TENANT }
     );
 
     // Job should be created, invalid_records_count > 0, integrity_score < 100
@@ -197,7 +221,7 @@ export async function runMigrationQASuiteAction(): Promise<MigrationQAReport[]> 
         violationJobId,
         violationEntryId,
         "Corrected missing gross salary field from HR payroll master backup",
-        { tenantId: PRIMARY_TENANT }
+        { ...session, tenantId: PRIMARY_TENANT }
       );
 
       const passed = res.ok && res.status === 200 && res.entry?.is_remediated === true;
@@ -236,7 +260,7 @@ export async function runMigrationQASuiteAction(): Promise<MigrationQAReport[]> 
         notes: "Requires job from TC-02 or TC-03.",
       });
     } else {
-      const res = await archiveMigrationJob(targetId, { tenantId: PRIMARY_TENANT });
+      const res = await archiveMigrationJob(targetId, { ...session, tenantId: PRIMARY_TENANT });
       const passed = res.ok && res.status === 200;
       reports.push({
         id: "TC-05",
@@ -287,7 +311,7 @@ export async function runMigrationQASuiteAction(): Promise<MigrationQAReport[]> 
   {
     const start = Date.now();
     // Query job list under foreign tenant UUID
-    const res = await listMigrationJobs({}, { tenantId: SECONDARY_TENANT });
+    const res = await listMigrationJobs({}, { ...session, tenantId: SECONDARY_TENANT });
     // Should succeed with HTTP 200, but count should be 0 because all jobs belong to Tenant 1
     const passed = res.ok && res.status === 200 && res.count === 0;
     reports.push({

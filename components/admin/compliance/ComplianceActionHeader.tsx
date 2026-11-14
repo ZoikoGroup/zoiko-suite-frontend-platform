@@ -28,7 +28,7 @@ function NewRequirementModal({ onClose }: { onClose: () => void }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          legal_entity_id: "22222222-2222-2222-2222-222222222222",
+          legal_entity_id: null, // set from your session by /api/v1
           jurisdiction_id: "uk-gov-01",
           filing_authority: authority,
           due_date: dueDate,
@@ -158,7 +158,7 @@ function EvaluateComplianceModal({ onClose }: { onClose: () => void }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          legal_entity_id: "22222222-2222-2222-2222-222222222222",
+          legal_entity_id: null, // set from your session by /api/v1
           jurisdiction_id: jurisdiction,
           total_obligations: totalObligations,
           fulfilled_obligations: fulfilled,

@@ -14,9 +14,6 @@ import {
 import type { MigrationJob, IntegrityCheck, AuditEntry } from "@/lib/api/migration-integrity";
 import { FIELD, LABEL, HINT, BANNER_SUCCESS, BANNER_ERROR, BANNER_WARNING } from "@/components/admin/shared/form";
 
-const PRIMARY_TENANT = "11111111-1111-1111-1111-111111111111";
-const SECONDARY_TENANT = "99999999-9999-9999-9999-999999999999";
-const DEMO_LEGAL_ENTITY = "22222222-2222-2222-2222-222222222222";
 
 export function MigrationIntegrityWorkbench() {
   const [activeTab, setActiveTab] = useState<"validate" | "jobs" | "qa" | "architecture">("validate");
@@ -30,8 +27,7 @@ export function MigrationIntegrityWorkbench() {
   const [migrationName, setMigrationName] = useState("Opening Balance Ledger Cutover 2026");
   const [sourceSystem, setSourceSystem] = useState("LEGACY_SAP_ERP");
   const [targetService, setTargetService] = useState("general-ledger-svc");
-  const [legalEntityId, setLegalEntityId] = useState(DEMO_LEGAL_ENTITY);
-  const [tenantScope, setTenantScope] = useState(PRIMARY_TENANT);
+  // Tenant, principal and legal entity are the session's; the server actions set them.
   const [requiredFieldsStr, setRequiredFieldsStr] = useState("account_code, amount, currency");
   const [recordsJson, setRecordsJson] = useState(
     JSON.stringify(
@@ -83,7 +79,7 @@ export function MigrationIntegrityWorkbench() {
   async function loadJobs() {
     setJobsLoading(true);
     try {
-      const res = await listMigrationJobsAction({}, { tenantId: tenantScope });
+      const res = await listMigrationJobsAction({}, undefined);
       if (res.ok) {
         setJobs(res.jobs);
       }
@@ -168,14 +164,14 @@ export function MigrationIntegrityWorkbench() {
     try {
       const res = await validateMigrationAction(
         {
-          legal_entity_id: legalEntityId.trim(),
+          legal_entity_id: "", // set from your session by the server action
           migration_name: migrationName.trim(),
           source_system: sourceSystem.trim(),
           target_service: targetService.trim(),
           required_fields: fields,
           records: parsedRecords,
         },
-        { tenantId: tenantScope }
+        undefined
       );
 
       if (res.ok) {
@@ -199,18 +195,18 @@ export function MigrationIntegrityWorkbench() {
 
     startTransition(async () => {
       try {
-        const res = await remediateAuditEntryAction(jobId, entryId, remediationNotes.trim(), { tenantId: tenantScope });
+        const res = await remediateAuditEntryAction(jobId, entryId, remediationNotes.trim(), undefined);
         if (res.ok) {
           setRemediationFeedback(`Entry ${entryId.slice(0, 8)}... successfully marked remediated.`);
           setRemediatingEntryId(null);
           setRemediationNotes("");
           // refresh selected job or last validation
           if (lastValidationResult && lastValidationResult.id === jobId) {
-            const updated = await getMigrationJobByIdAction(jobId, { tenantId: tenantScope });
+            const updated = await getMigrationJobByIdAction(jobId, undefined);
             if (updated.ok && updated.job) setLastValidationResult(updated.job);
           }
           if (selectedJob && selectedJob.id === jobId) {
-            const updated = await getMigrationJobByIdAction(jobId, { tenantId: tenantScope });
+            const updated = await getMigrationJobByIdAction(jobId, undefined);
             if (updated.ok && updated.job) setSelectedJob(updated.job);
           }
           loadJobs();
@@ -226,7 +222,7 @@ export function MigrationIntegrityWorkbench() {
   async function handleArchive(jobId: string) {
     if (!confirm(`Archive migration job ${jobId}?`)) return;
     try {
-      const res = await archiveMigrationJobAction(jobId, { tenantId: tenantScope });
+      const res = await archiveMigrationJobAction(jobId, undefined);
       if (res.ok) {
         loadJobs();
         if (selectedJob?.id === jobId) setSelectedJob(null);
@@ -422,54 +418,8 @@ export function MigrationIntegrityWorkbench() {
 
             <form onSubmit={handleValidate} className="mt-4 space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div>
-                  <label htmlFor="tenant-scope" className={LABEL}>
-                    Tenant ID Scope <span className="text-rose-500">* (Mandatory Zero-Trust Guard)</span>
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      id="tenant-scope"
-                      type="text"
-                      value={tenantScope}
-                      onChange={(e) => setTenantScope(e.target.value)}
-                      className={`${FIELD} font-mono text-xs`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setTenantScope(PRIMARY_TENANT)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                    >
-                      Tenant 1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTenantScope(SECONDARY_TENANT)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                    >
-                      Tenant 2
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTenantScope("")}
-                      className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50 dark:border-rose-700 dark:text-rose-300"
-                    >
-                      Clear (Neg)
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="legal-entity" className={LABEL}>
-                    Legal Entity ID <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    id="legal-entity"
-                    type="text"
-                    required
-                    value={legalEntityId}
-                    onChange={(e) => setLegalEntityId(e.target.value)}
-                    className={`${FIELD} font-mono text-xs`}
-                  />
+                <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300">
+                  Runs as your session: tenant, principal and legal entity come from your sign-in and cannot be changed here.
                 </div>
 
                 <div>
@@ -860,7 +810,7 @@ export function MigrationIntegrityWorkbench() {
             {jobs.length === 0 ? (
               <div className="mt-6 rounded-lg border border-dashed border-slate-300 p-8 text-center dark:border-slate-700">
                 <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-                  No migration jobs found for tenant {tenantScope}
+                  No migration jobs found for your tenant
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
                   Run a validation in the Validation Studio tab or click a preset above.
@@ -926,7 +876,7 @@ export function MigrationIntegrityWorkbench() {
                         <td className="px-3 py-2.5 text-right space-x-1.5">
                           <button
                             onClick={async () => {
-                              const res = await getMigrationJobByIdAction(job.id, { tenantId: tenantScope });
+                              const res = await getMigrationJobByIdAction(job.id, undefined);
                               if (res.ok && res.job) setSelectedJob(res.job);
                             }}
                             className="rounded border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
