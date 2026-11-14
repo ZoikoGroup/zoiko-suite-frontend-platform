@@ -30,6 +30,7 @@ import {
   listClauses,
   listObligations,
   listBoardMeetings,
+  listBoardResolutions,
   listCorporateActions,
   listCounterparties,
   createClause,
@@ -186,6 +187,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     const res = await listObligations(identity);
     if (!res.ok) return readFailed(res.error);
     return NextResponse.json({ obligations: res.data });
+  }
+  if (endpoint === "resolutions") {
+    const res = await listBoardResolutions(identity, { legalEntityId: identity.legalEntityId });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ resolutions: res.data });
   }
   if (endpoint === "meetings") {
     const res = await listBoardMeetings(identity);
