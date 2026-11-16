@@ -31,14 +31,15 @@ import {
   listClauses,
   listObligations,
   listBoardMeetings,
+  listBoardResolutions,
   listCorporateActions,
   listCounterparties,
   createClause,
   createBoardMeeting,
   createCorporateAction,
-  listBoardResolutions,
 } from "@/lib/api/legal";
 import { draftContract } from "@/lib/api/contracts";
+
 
 import { listJournals } from "@/lib/api/general-ledger";
 import { listFiscalPeriods } from "@/lib/api/financial-close";
@@ -79,6 +80,8 @@ import {
   createAIRun,
   setActionRiskClassification,
   registerModelProvider,
+  listRiskClassifications,
+  listModelProviders,
 } from "@/lib/api/ai-governance";
 import {
   listAnomalies,
@@ -114,6 +117,13 @@ async function resolveIdentity(req: NextRequest): Promise<Required<CallerIdentit
     tenantId: session.tenantId,
     legalEntityId: session.legalEntityId,
   } as Required<CallerIdentity>;
+}
+
+// A failed read is answered as a failure with the service's own status, never as
+// an empty list: an empty list tells the page there is nothing, when the truth is
+// that the console could not look.
+function readFailed(error: { kind: string; status?: number; message: string }) {
+  return NextResponse.json({ error: error.kind, message: error.message }, { status: error.status ?? 502 });
 }
 
 const UNAUTHENTICATED = () =>
@@ -308,47 +318,54 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
 
   // ── Evidence Domain ────────────────────────────────────────────────────────
   if (endpoint === "evidence/requirements") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listEvidenceRequirements({ tenantId }, { ...identity, tenantId });
-    return NextResponse.json({ requirements: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ requirements: res.data });
   }
 
   // ── Configuration / Service Inputs ─────────────────────────────────────────
   if (endpoint === "config/feature-flags") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listFeatureFlags(tenantId);
-    return NextResponse.json({ feature_flags: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ feature_flags: res.data });
   }
   if (endpoint === "config/entries") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listConfigEntries(tenantId);
-    return NextResponse.json({ config_entries: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ config_entries: res.data });
   }
 
   // ── Delegations ────────────────────────────────────────────────────────────
   if (endpoint === "delegations") {
     const res = await listDelegations({ identity });
-    return NextResponse.json({ delegations: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ delegations: res.data });
   }
 
   // ── Secret Vault ───────────────────────────────────────────────────────────
   if (endpoint === "secrets/leases") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listLeases(tenantId);
-    return NextResponse.json({ leases: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ leases: res.data });
   }
   if (endpoint === "secrets/policies") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listApplicableSecretPolicyVersions({
       secretClass: "DATABASE_CREDENTIAL",
       callerTenantId: tenantId,
     });
-    return NextResponse.json({ policies: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ policies: res.data });
   }
   if (endpoint === "secrets/audit") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listSecretAudit(tenantId);
-    return NextResponse.json({ audit_events: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ audit_events: res.data });
   }
 
   // ── Security & Trust Domain ───────────────────────────────────────────────
@@ -376,114 +393,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   }
 
   // ── AI Governance Domain ──────────────────────────────────────────────────
-  // ILLUSTRATIVE, NOT LIVE. These three GETs answer hardcoded rows; none calls
-  // ai-governance-svc. Each response says so in `illustrative`, and the panels
-  // that read them show a notice. Against the service (zoiko-suite-backend):
-  //   runs                 -> no list route exists (only GET /v1/ai-runs/{id})
-  //   risk-classifications -> GET /v1/action-risk-classifications exists, but
-  //                           its fields (risk_category, human_review_trigger,
-  //                           requires_maker_checker) differ from these rows
-  //   model-providers      -> GET /v1/model-providers exists, also a different
-  //                           shape (provider_name, dpa_verified, data_region)
-  // Wiring the two real lists means changing what the panel displays.
+  // Read from ai-governance-svc with the session. It has no endpoint that lists
+  // AI runs (only GET /v1/ai-runs/{id}), so that read answers 501.
   if (endpoint === "ai-governance/runs") {
-    return NextResponse.json({
-      illustrative: true,
-      illustrative_reason: "ai-governance-svc has no AI-run list endpoint; these runs are hardcoded examples.",
-      runs: [
-        {
-          run_id: "run-ai-001",
-          model_provider: "anthropic",
-          model_name: "claude-3-7-sonnet",
-          prompt_tokens: 1450,
-          completion_tokens: 320,
-          cost_estimate_usd: 0.0118,
-          guardrail_status: "PASSED",
-          purpose: "Contract compliance review — MSA renewal",
-          created_at: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
-        },
-        {
-          run_id: "run-ai-002",
-          model_provider: "openai",
-          model_name: "gpt-4o",
-          prompt_tokens: 3200,
-          completion_tokens: 890,
-          cost_estimate_usd: 0.0512,
-          guardrail_status: "PASSED",
-          purpose: "Automated VAT return reconciliation extract",
-          created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
-        },
-        {
-          run_id: "run-ai-003",
-          model_provider: "anthropic",
-          model_name: "claude-3-5-haiku",
-          prompt_tokens: 820,
-          completion_tokens: 110,
-          cost_estimate_usd: 0.0016,
-          guardrail_status: "FLAGGED",
-          purpose: "Vendor due-diligence sanctions screening",
-          created_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-        },
-      ],
-    });
+    // ai-governance-svc has no endpoint that lists AI runs (a run is read by id).
+    return NextResponse.json(
+      { error: "not_supported", message: "ai-governance-svc does not list AI runs; read a run by id." },
+      { status: 501 },
+    );
   }
   if (endpoint === "ai-governance/risk-classifications") {
-    return NextResponse.json({
-      illustrative: true,
-      illustrative_reason: "Hardcoded examples; not read from ai-governance-svc.",
-      classifications: [
-        {
-          action_type: "contract.draft_generate",
-          risk_tier: "TIER_3_MEDIUM",
-          requires_human_in_the_loop: true,
-          approval_quorum: 1,
-          description: "Automated drafting of commercial agreements from standard clause templates",
-        },
-        {
-          action_type: "payment.batch_disburse",
-          risk_tier: "TIER_1_CRITICAL",
-          requires_human_in_the_loop: true,
-          approval_quorum: 2,
-          description: "Autonomous initiation or settlement of bank disbursements over £10,000",
-        },
-        {
-          action_type: "tax.determination_evaluate",
-          risk_tier: "TIER_4_LOW",
-          requires_human_in_the_loop: false,
-          approval_quorum: 0,
-          description: "Real-time calculation of VAT/GST rates on sales line items",
-        },
-        {
-          action_type: "sec.kms_key_rotate",
-          risk_tier: "TIER_2_HIGH",
-          requires_human_in_the_loop: true,
-          approval_quorum: 1,
-          description: "Initiating scheduled cryptographic key version rotation on HSM vaults",
-        },
-      ],
-    });
+    const res = await listRiskClassifications(identity);
+    if (!res.ok) return NextResponse.json({ error: res.error.kind, message: res.error.message }, { status: res.error.status ?? 502 });
+    return NextResponse.json({ classifications: res.data });
   }
   if (endpoint === "ai-governance/model-providers") {
-    return NextResponse.json({
-      illustrative: true,
-      illustrative_reason: "Hardcoded examples; not read from ai-governance-svc.",
-      providers: [
-        {
-          provider: "anthropic",
-          model: "claude-3-7-sonnet",
-          is_verified: true,
-          max_context_tokens: 200000,
-          data_residency_region: "eu-west-1",
-        },
-        {
-          provider: "openai",
-          model: "gpt-4o",
-          is_verified: true,
-          max_context_tokens: 128000,
-          data_residency_region: "eu-west-1",
-        },
-      ],
-    });
+    const res = await listModelProviders(identity);
+    if (!res.ok) return NextResponse.json({ error: res.error.kind, message: res.error.message }, { status: res.error.status ?? 502 });
+    return NextResponse.json({ providers: res.data });
   }
 
   // ── Intelligence & Reporting Domain ───────────────────────────────────────
@@ -546,7 +473,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   const endpoint = path.join("/");
   const identity = await resolveIdentity(req);
   if (!identity) return UNAUTHENTICATED();
-  const body = await req.json().catch(() => ({}));
+  const raw = await req.json().catch(() => ({}));
+  // Tenant and legal entity in a write are the session's. A page may send its own
+  // (several did, as fixed demo IDs); they are replaced here, never trusted.
+  const body = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
+  if ("tenant_id" in body) body.tenant_id = identity.tenantId;
+  if ("legal_entity_id" in body) body.legal_entity_id = identity.legalEntityId ?? null;
 
   // ── Tax Domain ─────────────────────────────────────────────────────────────
   if (endpoint === "tax-rules") {

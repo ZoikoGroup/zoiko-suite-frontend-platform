@@ -97,12 +97,18 @@ test("the proxy refuses requests without a session instead of using a demo ident
   assert.equal((ROUTE.match(/if \(!identity\) return UNAUTHENTICATED\(\);/g) ?? []).length, 2, "GET and POST both check");
 });
 
-test("AI governance examples are flagged as illustrative", () => {
+test("AI governance reads are the service's, with no hardcoded examples", () => {
   for (const ep of ["ai-governance/runs", "ai-governance/risk-classifications", "ai-governance/model-providers"]) {
     const at = ROUTE.indexOf(`endpoint === "${ep}"`);
     assert.ok(at > 0, `${ep} handler missing`);
-    assert.match(ROUTE.slice(at, at + 400), /illustrative: true/, `${ep} is not flagged`);
+    assert.doesNotMatch(ROUTE.slice(at, at + 600), /illustrative|run_id: "run-/, `${ep} answers hardcoded rows`);
   }
+  // The service has no AI-run list, so that read is refused rather than invented.
+  const runs = ROUTE.slice(
+    ROUTE.indexOf(`endpoint === "ai-governance/runs"`),
+    ROUTE.indexOf(`endpoint === "ai-governance/risk-classifications"`),
+  );
+  assert.match(runs, /status: 501/);
 });
 
 test("health probes use the same registry key as each domain's own client", () => {
@@ -209,7 +215,7 @@ for (const u of UPSTREAM) {
 }
 
 test(
-  "ai-governance-svc still has no AI-run list (why /ai-governance/runs is illustrative)",
+  "ai-governance-svc still has no AI-run list (why /ai-governance/runs answers 501)",
   { skip: HAS_BACKEND ? false : `no backend checkout at ${BACKEND}` },
   () => {
     const src = serviceSource("ai-governance-svc");

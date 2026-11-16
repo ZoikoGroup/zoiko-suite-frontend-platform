@@ -222,9 +222,11 @@ test("an unreachable service is a 502, not an empty list", { skip }, async () =>
   assert.equal(body.kind, "unreachable");
 });
 
-test("AI governance examples carry the illustrative flag", { skip }, async () => {
+test("AI governance answers no hardcoded examples; the missing AI-run list is a 501", { skip }, async () => {
   for (const ep of ["ai-governance/runs", "ai-governance/risk-classifications", "ai-governance/model-providers"]) {
-    const body = await (await get(ep)).json();
-    assert.equal(body.illustrative, true, ep);
+    const body = await (await get(ep)).json().catch(() => ({}));
+    assert.equal(body.illustrative, undefined, ep);
+    assert.doesNotMatch(JSON.stringify(body), /run-ai-00/, ep);
   }
+  assert.equal((await get("ai-governance/runs")).status, 501);
 });

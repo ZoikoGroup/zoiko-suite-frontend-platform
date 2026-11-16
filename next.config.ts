@@ -31,9 +31,7 @@ const nextConfig: NextConfig = {
   },
 
   // /admin/integrations was a static page of hardcoded connector cards; the
-  // live register is /admin/integration. Redirected here, before render: a
-  // page that called redirect() while rendering raised React error #310 in
-  // the admin shell on the client-side redirect.
+  // live register is /admin/integration.
   async redirects() {
     return [{ source: "/admin/integrations", destination: "/admin/integration", permanent: false }];
   },

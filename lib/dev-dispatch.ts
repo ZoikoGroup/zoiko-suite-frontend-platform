@@ -1,5 +1,5 @@
 // Guard for the developer routes that forward a request to a service port
-// (/api/backend/dispatch, /api/backend/ping, /api/admin/service-inputs/dispatch).
+// (/api/backend/dispatch, /api/backend/ping).
 //
 // They live outside the proxy's /admin matcher, so this is the only check in
 // front of them. They used to need no session, accept any local port, and stamp

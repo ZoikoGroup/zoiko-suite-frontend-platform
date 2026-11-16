@@ -317,7 +317,9 @@ export type CorporateTaxReturn = {
   updated_at: string;
 };
 
-type CorporateTaxResponse = { corporate_tax_returns?: CorporateTaxReturn[]; total: number };
+type CorporateTaxResponse =
+  | { corporate_tax_returns?: CorporateTaxReturn[]; total: number }
+  | CorporateTaxReturn[];
 
 export async function listCorporateTaxReturns(
   identity?: Identity,
@@ -334,9 +336,9 @@ export async function listCorporateTaxReturns(
     base,
     "corporate-tax-svc",
     identity,
-    // corporate-tax-svc lists under corporate_tax_returns; reading `returns`
-    // made every register empty.
-    (d) => d.corporate_tax_returns ?? [],
+    // corporate-tax-svc lists under corporate_tax_returns (fix/blocks-6-10-final)
+    // or as a bare array (backend main); reading `returns` made every register empty.
+    (d) => (Array.isArray(d) ? d : d.corporate_tax_returns ?? []),
   );
 }
 

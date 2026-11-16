@@ -1,108 +1,169 @@
 import type { Metadata } from "next";
-import { Bot, ShieldCheck, Cpu, Globe, Sliders } from "lucide-react";
-import { PageHeader } from "@/components/admin/shared";
-import { Card } from "@/components/ui";
-import { AIGovernancePanel } from "@/components/admin/security-trust/AIGovernancePanel";
+import { redirect } from "next/navigation";
+import { Badge } from "@/components/ui";
+import { PageHeader, CopyableId } from "@/components/admin/shared";
+import { RegisterCard } from "@/components/admin/my-work/RegisterCard";
+import { currentSession } from "@/lib/authz-inbox";
 import {
-  executeAiEvaluationAction,
-  registerModelAction,
-  setActionRiskAction,
-} from "./actions";
+  listRiskClassifications,
+  listModelProviders,
+  listAutomationPolicies,
+  listAutomationActions,
+  listPolicyChangeApprovals,
+  listUseCases,
+  listModelReleases,
+  type RiskClassificationRecord,
+  type ModelProviderRecord,
+  type AutomationPolicyRecord,
+  type AutomationActionRecord,
+  type PolicyChangeApprovalRecord,
+  type UseCaseRecord,
+  type ModelReleaseRecord,
+} from "@/lib/api/ai-governance";
+import { formatDateTime } from "@/lib/format";
+import { humanizeCode } from "@/lib/humanize";
 
 export const metadata: Metadata = {
-  title: "AI Governance & Agentic Safety | Zoiko Suite",
-  description: "Dynamic LLM output moderation, data residency enforcement, and autonomous action risk tier classification via ai-governance-svc (:8183)",
+  title: "AI Governance | Zoiko Suite",
+  description: "AI use cases, model providers and releases, action risk classifications and automation policies, read live from ai-governance-svc.",
 };
 
-export default function AIGovernancePage() {
+const SERVICE = "ai-governance-svc";
+
+const yesNo = (v: boolean) => <Badge tone={v ? "warning" : "neutral"}>{v ? "Yes" : "No"}</Badge>;
+
+export default async function AIGovernancePage() {
+  const current = await currentSession();
+  if (!current) redirect("/login");
+  const { identity } = current;
+
+  const [useCases, providers, releases, risk, policies, actions, approvals] = await Promise.all([
+    listUseCases(identity),
+    listModelProviders(identity),
+    listModelReleases(identity),
+    listRiskClassifications(identity),
+    listAutomationPolicies(identity),
+    listAutomationActions(identity),
+    listPolicyChangeApprovals(identity),
+  ]);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="AI Governance & Safety Controls"
-        description="Govern autonomous LLM runs, cost allocations, model data residency, and action risk classification under active safety guardrails (:8183)."
+        description="AI use cases, model providers and releases, action risk classifications and automation policies, read live from ai-governance-svc with your session. AI runs are read by id only: the service has no endpoint that lists them."
       />
 
-      {/* Domain Quick Overview Banner */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-              <ShieldCheck className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-xs text-slate-500">Guardrail Engine</p>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">Zero-Trust Evaluated</p>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">Strict PII redaction & output policy checks</p>
-        </div>
+      <RegisterCard<UseCaseRecord>
+        title="AI use cases"
+        description="Registered AI use cases and their lifecycle state."
+        service={SERVICE}
+        read={useCases}
+        rowKey={(u) => u.use_case_id}
+        emptyLabel="No AI use case is registered"
+        columns={[
+          { header: "Purpose", cell: (u) => u.purpose },
+          { header: "Domain", cell: (u) => humanizeCode(u.domain) },
+          { header: "Automation", cell: (u) => humanizeCode(u.automation_level) },
+          { header: "State", cell: (u) => <Badge tone="neutral">{humanizeCode(u.lifecycle_state)}</Badge> },
+          { header: "Created", cell: (u) => formatDateTime(u.created_at) },
+        ]}
+      />
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-              <Cpu className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-xs text-slate-500">Model Providers</p>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">Multi-Model Registry</p>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">Anthropic, OpenAI, AWS Bedrock & Azure</p>
-        </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <RegisterCard<ModelProviderRecord>
+          title="Model providers"
+          description="Provider registrations, data region and DPA status."
+          service={SERVICE}
+          read={providers}
+          rowKey={(p) => p.provider_registration_id}
+          emptyLabel="No model provider is registered"
+          columns={[
+            { header: "Provider", cell: (p) => p.provider_name },
+            { header: "Model", cell: (p) => p.model_name },
+            { header: "Region", cell: (p) => p.data_region },
+            { header: "DPA verified", cell: (p) => <Badge tone={p.dpa_verified ? "success" : "warning"}>{p.dpa_verified ? "Yes" : "No"}</Badge> },
+          ]}
+        />
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-              <Sliders className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-xs text-slate-500">Risk Tiering</p>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">4-Tier Classification</p>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">Enforces human-in-the-loop approvals</p>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
-              <Globe className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-xs text-slate-500">Data Residency</p>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">EU & UK Sovereign</p>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">Zero data retention beyond designated VPCs</p>
-        </div>
+        <RegisterCard<ModelReleaseRecord>
+          title="Model releases"
+          description="Model releases and their approval state."
+          service={SERVICE}
+          read={releases}
+          rowKey={(r) => r.model_release_id}
+          emptyLabel="No model release is registered"
+          columns={[
+            { header: "Provider", cell: (r) => r.provider },
+            { header: "Model", cell: (r) => r.provider_model_id },
+            { header: "Region", cell: (r) => r.deployment_region },
+            { header: "State", cell: (r) => <Badge tone="neutral">{humanizeCode(r.release_state)}</Badge> },
+          ]}
+        />
       </div>
 
-      {/* Main AI Governance Panel */}
-      <Card className="p-6">
-        <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">
-              <Bot className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                ai-governance-svc Console
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Real-time safety evaluations, token consumption economics, and policy risk registry
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-              <span className="mr-1.5 h-2 w-2 rounded-full bg-emerald-500" />
-              ONLINE :8183
-            </span>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <RegisterCard<RiskClassificationRecord>
+          title="Action risk classifications"
+          description="How each AI action type is classified, and whether it needs human review."
+          service={SERVICE}
+          read={risk}
+          rowKey={(r) => r.action_type}
+          emptyLabel="No action type is classified"
+          columns={[
+            { header: "Action", cell: (r) => <code className="text-xs">{r.action_type}</code> },
+            { header: "Risk", cell: (r) => humanizeCode(r.risk_category) },
+            { header: "Human review", cell: (r) => yesNo(r.human_review_trigger) },
+            { header: "Maker-checker", cell: (r) => yesNo(r.requires_maker_checker) },
+          ]}
+        />
 
-        <AIGovernancePanel />
-      </Card>
+        <RegisterCard<AutomationPolicyRecord>
+          title="Automation policies"
+          description="What each role may automate, with limits and kill switch."
+          service={SERVICE}
+          read={policies}
+          rowKey={(p) => p.automation_policy_id}
+          emptyLabel="No automation policy is defined"
+          columns={[
+            { header: "Role", cell: (p) => p.role },
+            { header: "Action", cell: (p) => <code className="text-xs">{p.action_type}</code> },
+            { header: "Approvals", cell: (p) => p.required_approvals },
+            { header: "Kill switch", cell: (p) => <Badge tone={p.kill_switch_engaged ? "danger" : "neutral"}>{p.kill_switch_engaged ? "Engaged" : "Off"}</Badge> },
+          ]}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <RegisterCard<AutomationActionRecord>
+          title="Automation actions"
+          description="Actions AI has proposed and their approval status."
+          service={SERVICE}
+          read={actions}
+          rowKey={(a) => a.automation_action_id}
+          emptyLabel="No automation action has been proposed"
+          columns={[
+            { header: "Action", cell: (a) => <code className="text-xs">{a.action_type}</code> },
+            { header: "Approval", cell: (a) => humanizeCode(a.approval_status) },
+            { header: "Status", cell: (a) => humanizeCode(a.status) },
+            { header: "Proposed by", cell: (a) => <CopyableId value={a.proposed_by_principal_id} /> },
+          ]}
+        />
+
+        <RegisterCard<PolicyChangeApprovalRecord>
+          title="Policy change approvals"
+          description="Proposed changes to AI policies and their decisions."
+          service={SERVICE}
+          read={approvals}
+          rowKey={(a) => a.policy_change_approval_id}
+          emptyLabel="No policy change is pending or decided"
+          columns={[
+            { header: "Policy", cell: (a) => a.target_policy_ref },
+            { header: "Decision", cell: (a) => (a.decision ? humanizeCode(a.decision) : "Pending") },
+            { header: "Proposed", cell: (a) => formatDateTime(a.created_at) },
+          ]}
+        />
+      </div>
     </div>
   );
 }

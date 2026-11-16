@@ -15,9 +15,8 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const cookieStore = await cookies();
-  // Only a session that verifies (signature and 8-hour expiry) skips sign-in.
-  // Checking that the cookie merely existed sent an expired or tampered
-  // session back to /admin, which the proxy refused, in an endless loop.
+  // Only a session that verifies (signature and expiry) skips sign-in; a cookie
+  // that merely exists sent an expired session to /admin and back, in a loop.
   if (decodeSession(cookieStore.get(SESSION_COOKIE)?.value)) {
     redirect("/admin");
   }

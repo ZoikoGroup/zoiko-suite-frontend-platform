@@ -6,7 +6,16 @@ export async function POST(req: NextRequest) {
   if (identity instanceof NextResponse) return identity;
   try {
     const payload = await req.json();
-    const { port, path = "/", method = "GET", headers = {}, body } = payload;
+    const { port, path = "/", method = "GET", headers = {}, body: rawBody } = payload;
+
+    // Tenant and legal entity in a body are the session's, never the page's.
+    let body = rawBody;
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const b = { ...(body as Record<string, unknown>) };
+      if ("tenant_id" in b) b.tenant_id = identity.tenantId;
+      if ("legal_entity_id" in b) b.legal_entity_id = identity.legalEntityId || null;
+      body = b;
+    }
 
     const portNum = dispatchPort(port);
     if (portNum instanceof NextResponse) return portNum;

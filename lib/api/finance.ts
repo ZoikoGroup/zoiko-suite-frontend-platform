@@ -16,23 +16,24 @@
 //   consolidation-svc           (8106)
 
 import { type ApiResult, type Identity } from "./client";
+import { serviceUrl } from "./config";
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
 
 function glUrl(): string {
-  return (process.env.ZOIKO_GENERAL_LEDGER_URL ?? "http://localhost:8098").replace(/\/$/, "");
+  return serviceUrl("generalLedger");
 }
 function arUrl(): string {
-  return (process.env.ZOIKO_ACCOUNTS_RECEIVABLE_URL ?? "http://localhost:8101").replace(/\/$/, "");
+  return serviceUrl("accountsReceivable");
 }
 function bankReconUrl(): string {
-  return (process.env.ZOIKO_BANK_RECONCILIATION_URL ?? "http://localhost:8102").replace(/\/$/, "");
+  return serviceUrl("bankReconciliation");
 }
 function treasuryUrl(): string {
-  return (process.env.ZOIKO_TREASURY_URL ?? "http://localhost:8103").replace(/\/$/, "");
+  return serviceUrl("treasury");
 }
 function finCloseUrl(): string {
-  return (process.env.ZOIKO_FINANCIAL_CLOSE_URL ?? "http://localhost:8104").replace(/\/$/, "");
+  return serviceUrl("financialClose");
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

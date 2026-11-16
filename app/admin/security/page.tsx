@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Lock, Shield, Key, Network, Bot } from "lucide-react";
+import { Lock, Shield, Key, Network} from "lucide-react";
 import { PageHeader } from "@/components/admin/shared";
 import { Card } from "@/components/ui";
 import {
@@ -10,7 +10,6 @@ import {
   SiemIntegrationPanel,
   CartaAssessmentPanel,
   KeyManagementPanel,
-  AIGovernancePanel,
 } from "@/components/admin/security-trust";
 
 export const metadata: Metadata = {
@@ -47,13 +46,6 @@ const PANELS = [
     icon: Key,
     Panel: KeyManagementPanel,
   },
-  {
-    name: "ai-governance-svc",
-    port: 8183,
-    purpose: "AI safety guardrails, automated cost tracking, and action risk tier classification",
-    icon: Bot,
-    Panel: AIGovernancePanel,
-  },
 ];
 
 export default function SecurityPage() {
@@ -70,7 +62,6 @@ export default function SecurityPage() {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {PANELS.map(({ name, port, purpose, icon: Icon, Panel }, index) => {
-          // If odd number of panels (5 items), make the last one span full width on xl screens
           const isLastSingle = index === PANELS.length - 1 && PANELS.length % 2 !== 0;
 
           return (
@@ -87,9 +78,6 @@ export default function SecurityPage() {
                     <h3 className="text-sm font-semibold font-mono text-slate-900 dark:text-slate-100">
                       {name}
                     </h3>
-                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                      LIVE
-                    </span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400">{purpose}</p>
                 </div>

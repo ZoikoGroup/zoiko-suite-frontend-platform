@@ -142,7 +142,6 @@ export const SERVICES: ServiceDef[] = [
     input: {
       title: "Core Infrastructure High-Performance Compute Cluster",
       department: "Engineering",
-      requested_by: "Lingaraj (Super Admin)",
       estimated_amount: 45000,
       currency: "GBP",
       priority: "HIGH",
@@ -253,7 +252,7 @@ export const SERVICES: ServiceDef[] = [
     input: {
       transaction_id: "tx-inv-2026-8841",
       source_module: "ACCOUNTS_PAYABLE",
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
+      legal_entity_id: "(your session)",
       jurisdiction_id: "GB",
       tax_category: "VAT",
       gross_amount: 150000,
@@ -272,7 +271,7 @@ export const SERVICES: ServiceDef[] = [
     path: "/api/v1/vat-returns",
     description: "Submit quarterly VAT/GST return filing with input/output tax reconciliations",
     input: {
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
+      legal_entity_id: "(your session)",
       jurisdiction_id: "GB",
       tax_registration_number: "GB998877665",
       tax_period: "2026-Q3",
@@ -293,7 +292,7 @@ export const SERVICES: ServiceDef[] = [
     path: "/api/v1/corporate-tax-returns",
     description: "Compute and file statutory corporate income tax obligations",
     input: {
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
+      legal_entity_id: "(your session)",
       jurisdiction_id: "GB",
       tax_registration_number: "GB-CT-443322",
       fiscal_year: 2026,
@@ -316,7 +315,7 @@ export const SERVICES: ServiceDef[] = [
     path: "/api/v1/withholding-tax",
     description: "Calculate and apply cross-border withholding tax deductions",
     input: {
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
+      legal_entity_id: "(your session)",
       jurisdiction_id: "DE",
       counterparty_id: "cp-acme-gmbh-01",
       payment_reference: "PAY-DE-2026-09",
@@ -338,7 +337,7 @@ export const SERVICES: ServiceDef[] = [
     path: "/api/v1/filing-preparation/drafts",
     description: "Generate structured electronic drafts for jurisdictional tax submissions",
     input: {
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
+      legal_entity_id: "(your session)",
       jurisdiction_id: "GB",
       filing_type: "VAT_RETURN",
       period_key: "2026-Q3",
@@ -443,7 +442,7 @@ export const SERVICES: ServiceDef[] = [
     description: "Dynamic risk scoring based on regulatory exposure and filing velocity",
     input: {
       jurisdiction_id: "GB",
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
+      legal_entity_id: "(your session)",
       risk_model: "DYNAMIC_WEIGHTED_V2",
       include_historical: true
     }
@@ -554,7 +553,7 @@ export const SERVICES: ServiceDef[] = [
     path: "/api/v1/carta/captable",
     description: "Synchronize shareholder equity ledgers and Carta cap table ownership",
     input: {
-      legal_entity_id: "22222222-2222-2222-2222-222222222222",
+      legal_entity_id: "(your session)",
       share_class: "COMMON_AND_PREFERRED",
       as_of_date: "2026-09-25"
     }
@@ -651,7 +650,7 @@ export const SERVICES: ServiceDef[] = [
     input: {
       document_id: "doc-msa-2026-001",
       signers: [
-        { name: "Lingaraj Admin", email: "admin@zoikosuite.com", role: "SIGNATORY" }
+        { name: "", email: "", role: "SIGNATORY" }
       ],
       expiration_days: 7
     }
@@ -748,9 +747,10 @@ export type HeaderOverrides = {
 };
 
 const DEFAULT_HEADERS: HeaderOverrides = {
-  tenantId: "11111111-1111-1111-1111-111111111111",
-  principalId: "33333333-3333-3333-3333-333333333333",
-  legalEntityId: "22222222-2222-2222-2222-222222222222",
+  // Sent nowhere: the dispatch route uses the session identity.
+  tenantId: "",
+  principalId: "",
+  legalEntityId: "",
 };
 
 function ServiceCard({
@@ -1018,7 +1018,6 @@ export default function ServiceInputsPage() {
   async function fireService(svc: ServiceDef) {
     setLoadingMap((prev) => ({ ...prev, [svc.id]: true }));
     const currentPayload = payloads[svc.id] ?? JSON.stringify(svc.input, null, 2);
-    const h = headerOverrides[svc.id] ?? DEFAULT_HEADERS;
     const t0 = Date.now();
 
     try {
@@ -1044,11 +1043,7 @@ export default function ServiceInputsPage() {
           port: svc.port,
           path: svc.path,
           method: svc.method,
-          headers: {
-            "X-Tenant-Id": h.tenantId,
-            "X-Principal-Id": h.principalId,
-            "X-Legal-Entity-Id": h.legalEntityId,
-          },
+          // Identity headers are set from your session by /api/backend/dispatch.
           body: bodyData,
         }),
       });

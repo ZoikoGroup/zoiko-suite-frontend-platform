@@ -74,7 +74,8 @@ test("every Blocks 6-10 read answers 200 with its list for a signed-in tenant", 
 test("developer dispatch routes refuse anonymous callers and unregistered ports", async ({ request }) => {
   expect((await request.post("/api/backend/dispatch", { data: { port: 8119, path: "/healthz" } })).status()).toBe(401);
   expect((await request.get("/api/backend/ping?port=8119")).status()).toBe(401);
-  expect((await request.post("/api/admin/service-inputs/dispatch", { data: { port: 8119, path: "/healthz" } })).status()).toBe(401);
+  // The unused service-inputs dispatch route is removed.
+  expect((await request.post("/api/admin/service-inputs/dispatch", { data: { port: 8119, path: "/healthz" } })).status()).toBe(404);
   const signedIn = { headers: { Cookie: `zoiko_session=${sessionValue()}` } };
   expect((await request.post("/api/backend/dispatch", { ...signedIn, data: { port: 22, path: "/" } })).status()).toBe(400);
   expect((await request.get("/api/backend/ping?port=5432", signedIn)).status()).toBe(400);

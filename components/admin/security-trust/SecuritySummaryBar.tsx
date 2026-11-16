@@ -38,20 +38,16 @@ export function SecuritySummaryBar() {
 
     async function load() {
       try {
-        const [certs, keys, siem, assessments, aiRunsBody] = await Promise.all([
+        const [certs, keys, siem, assessments, providers] = await Promise.all([
           readList("/api/v1/security/certificates", "certificates"),
           readList("/api/v1/security/keys", "keys"),
           readList("/api/v1/security/events", "events"),
           readList("/api/v1/security/assessments", "assessments"),
-          fetch("/api/v1/ai-governance/runs").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          // ai-governance-svc has no AI-run list, so the tile counts registered model providers.
+          readList("/api/v1/ai-governance/model-providers", "providers"),
         ]);
 
         if (cancelled) return;
-
-        // Runs flagged `illustrative` are hardcoded examples, not this tenant's
-        // AI activity, so they are not counted as runs.
-        const aiRunsIllustrative = !aiRunsBody || aiRunsBody.illustrative === true;
-        const aiRuns = !aiRunsIllustrative ? aiRunsBody.runs ?? [] : [];
 
         const unavailable = (svc: string): Pick<Kpi, "value" | "sub" | "tone"> => ({
           value: "Unavailable",
@@ -103,11 +99,9 @@ export function SecuritySummaryBar() {
           {
             icon: Bot,
             label: "AI Governance",
-            value: aiRunsIllustrative ? "Not available" : `${aiRuns.length} Runs`,
-            sub: aiRunsIllustrative
-              ? "No AI-run list in ai-governance-svc"
-              : "From ai-governance-svc",
-            tone: "neutral",
+            ...(providers
+              ? { value: `${providers.length} Providers`, sub: "Model providers in ai-governance-svc", tone: "neutral" as const }
+              : unavailable("ai-governance-svc")),
           },
         ]);
       } catch {

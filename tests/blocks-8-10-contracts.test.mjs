@@ -126,7 +126,8 @@ const UPSTREAM = [
   ["integration.ts", "/v1/banking/connections", "banking-connector-svc", [/"\/v1\/banking\/connections"/]],
   ["integration.ts", "/v1/hris/integrations", "hris-connector-svc", [/"\/v1\/hris"/, /"\/integrations"/]],
   ["integration.ts", "/v1/hris/sync", "hris-connector-svc", [/Post\("\/sync"/]],
-  ["integration.ts", "/v1/esignature/envelopes", "esignature-integration-svc", [/Get\("\/v1\/esignature\/envelopes"/]],
+  // Registered either as the full path or as Get("/envelopes") inside Route("/v1/esignature").
+  ["integration.ts", "/v1/esignature/envelopes", "esignature-integration-svc", [/Get\("\/v1\/esignature\/envelopes"|Route\("\/v1\/esignature", func\(r chi\.Router\) \{[^}]*?r\.Get\("\/envelopes", h\.ListEnvelopes\)/]],
   ["integration.ts", "/v1/external-data-feeds/subscriptions", "external-data-feed-svc", [/"\/v1\/external-data-feeds"/, /"\/subscriptions"/]],
 ];
 
