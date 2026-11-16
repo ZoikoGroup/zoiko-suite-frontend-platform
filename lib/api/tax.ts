@@ -9,6 +9,7 @@
 
 import { type ApiResult, type Identity } from "./client";
 import { serviceUrl } from "./config";
+import { envelopeHeaders } from "./envelope";
 
 // Base URLs come from the shared registry so ZOIKO_USE_GATEWAY applies to Tax
 // like every other domain. The per-service env overrides are unchanged:
@@ -316,7 +317,7 @@ export type CorporateTaxReturn = {
   updated_at: string;
 };
 
-type CorporateTaxResponse = { returns: CorporateTaxReturn[]; total: number };
+type CorporateTaxResponse = { corporate_tax_returns?: CorporateTaxReturn[]; total: number };
 
 export async function listCorporateTaxReturns(
   identity?: Identity,
@@ -333,7 +334,9 @@ export async function listCorporateTaxReturns(
     base,
     "corporate-tax-svc",
     identity,
-    (d) => d.returns ?? [],
+    // corporate-tax-svc lists under corporate_tax_returns; reading `returns`
+    // made every register empty.
+    (d) => d.corporate_tax_returns ?? [],
   );
 }
 
@@ -369,17 +372,11 @@ export type WithholdingTaxObligation = {
   updated_at: string;
 };
 
-// The WHT mock service uses the top-level key "obligations" and names the rate
-// field "applied_rate_percent", the amount field "tax_withheld_amount", and the
-// due-date field "statutory_due_date". We normalise all of these here so the
-// rest of the codebase only ever sees the canonical schema.
-type WithholdingResponse = {
-  // canonical (future real service)
-  withholding_obligations?: Record<string, unknown>[];
-  // mock service uses this key
-  obligations?: Record<string, unknown>[];
-  total: number;
-};
+// withholding-tax-svc lists under withholding_tax_obligations, with the same
+// field names as WithholdingTaxObligation. The old normaliser read
+// withholding_obligations/obligations (a mock's keys), so the register was
+// always empty, and it filled gaps with "USD", "system" and the current time.
+type WithholdingResponse = { withholding_tax_obligations?: WithholdingTaxObligation[]; total: number };
 
 export async function listWithholdingObligations(
   identity?: Identity,
@@ -395,47 +392,14 @@ export async function listWithholdingObligations(
     base,
     "withholding-tax-svc",
     identity,
-    (d) => {
-      const raw = d.withholding_obligations ?? d.obligations ?? [];
-      return raw.map((r) => ({
-        obligation_id:           String(r.obligation_id ?? ""),
-        tenant_id:               String(r.tenant_id ?? ""),
-        legal_entity_id:         String(r.legal_entity_id ?? ""),
-        jurisdiction_id:         String(r.jurisdiction_id ?? ""),
-        counterparty_id:         String(r.counterparty_id ?? ""),
-        payment_reference:       String(r.payment_reference ?? ""),
-        payment_type:            String(r.payment_type ?? ""),
-        gross_payment_amount:    Number(r.gross_payment_amount ?? 0),
-        taxable_base_amount:     Number(r.taxable_base_amount ?? r.gross_payment_amount ?? 0),
-        // mock uses applied_rate_percent or statutory_rate_percent
-        withholding_rate_percent: Number(
-          r.withholding_rate_percent ?? r.applied_rate_percent ?? r.statutory_rate_percent ?? 0
-        ),
-        // mock uses tax_withheld_amount
-        withheld_amount:         Number(r.withheld_amount ?? r.tax_withheld_amount ?? 0),
-        currency:                String(r.currency ?? "USD"),
-        tax_rule_id:             r.tax_rule_id != null ? String(r.tax_rule_id) : undefined,
-        tax_treaty_exemption:    Boolean(r.tax_treaty_exemption ?? false),
-        exemption_certificate_ref: r.exemption_certificate_ref != null
-          ? String(r.exemption_certificate_ref) : undefined,
-        status:                  String(r.status ?? "DRAFT") as WithholdingStatus,
-        remittance_reference:    r.remittance_reference != null ? String(r.remittance_reference) : undefined,
-        remitted_at:             r.remitted_at != null ? String(r.remitted_at) : undefined,
-        remitted_by:             r.remitted_by != null ? String(r.remitted_by) : undefined,
-        notes:                   r.notes != null ? String(r.notes) : undefined,
-        effective_from:          String(r.effective_from ?? r.statutory_due_date ?? new Date().toISOString()),
-        effective_to:            r.effective_to != null ? String(r.effective_to) : undefined,
-        created_by:              String(r.created_by ?? "system"),
-        created_at:              String(r.created_at ?? new Date().toISOString()),
-        updated_at:              String(r.updated_at ?? new Date().toISOString()),
-      })) as WithholdingTaxObligation[];
-    },
+    (d) => d.withholding_tax_obligations ?? [],
   );
 }
 
 // ─── 6. Filing Preparation ───────────────────────────────────────────────────
 
-export type ValidationStatus = "UNVALIDATED" | "PREPARED" | "BLOCKED" | "FINALIZED";
+/** filing-preparation-svc: a draft is validated, then finalized to READY_FOR_SUBMISSION. */
+export type ValidationStatus = "DRAFT" | "VALIDATING" | "PREPARED" | "BLOCKED" | "READY_FOR_SUBMISSION";
 
 export type FilingDraft = {
   draft_id: string;
@@ -481,9 +445,7 @@ function normaliseDraft(r: Record<string, unknown>): FilingDraft {
     evidence_manifest_ref: src.evidence_manifest_ref != null
       ? String(src.evidence_manifest_ref) : undefined,
     // mock status and validation_status are both valid
-    validation_status:     String(
-      src.validation_status ?? src.status ?? "UNVALIDATED"
-    ) as ValidationStatus,
+    validation_status:     String(src.validation_status ?? "") as ValidationStatus,
     block_reasons:         src.block_reasons != null ? String(src.block_reasons) : undefined,
     notes:                 src.notes != null ? String(src.notes) : undefined,
     created_by:            String(src.created_by ?? "system"),
@@ -522,75 +484,43 @@ export async function listFilingDrafts(
 
 // ─── 7. Tax Authority Interface ──────────────────────────────────────────────
 
+/** tax-authority-interface-svc TaxInterface, as the service returns it. */
 export type TaxAuthorityInterface = {
   interface_id: string;
-  tenant_id?: string;
-  jurisdiction_id: string;
-  authority_code: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  jurisdiction: string;
   authority_name: string;
-  api_endpoint: string;
-  endpoint_url?: string;
-  auth_type: string;
-  auth_credential_id?: string;
   protocol: string;
-  protocol_type?: string;
   status: string;
-  health_status?: string;
-  is_active?: boolean;
-  error_count?: number;
+  /** Empty when no authority adapter is bound; nothing is then sent to the authority. */
+  provider_key?: string;
+  adapter_kind?: string;
   created_at: string;
+  updated_at: string;
 };
 
-type TaxAuthorityResponse = { interfaces: Record<string, unknown>[]; total: number };
+// The old mapper invented what the service does not return: an authority code
+// from the id, a placeholder government endpoint, an auth type from the
+// protocol, a healthy status, is_active true and a UK jurisdiction id (the
+// service's field is `jurisdiction`), so every interface was shown as a healthy
+// UK connection.
+type TaxAuthorityResponse = { interfaces?: TaxAuthorityInterface[]; total: number };
 
 export async function listTaxAuthorityInterfaces(
   identity?: Identity
 ): Promise<ApiResult<TaxAuthorityInterface[]>> {
   const base = taxAuthorityUrl();
   const url = new URL(`${base}/v1/tax-authority/interfaces`);
+  // Scoped to the session's entity; without it the service lists the tenant's.
+  if (identity?.legalEntityId) url.searchParams.set("legal_entity_id", identity.legalEntityId);
 
   return fetchDomainService<TaxAuthorityResponse, TaxAuthorityInterface[]>(
     url.toString(),
     base,
     "tax-authority-interface-svc",
     identity,
-    (d) =>
-      (d.interfaces ?? []).map((raw) => {
-        const ifaceId = String(raw.interface_id || "if-generic");
-        const authCode = String(
-          raw.authority_code ||
-          (ifaceId.includes("hmrc") ? "HMRC_MTD" : ifaceId.includes("irs") ? "IRS_MEF" : ifaceId.toUpperCase())
-        );
-        const protocol = String(raw.protocol || raw.protocol_type || "REST_OAUTH2");
-        const endpoint = String(raw.api_endpoint || raw.endpoint_url || "https://api.tax.gov");
-        const authType = String(
-          raw.auth_type ||
-          (protocol.includes("OAUTH") ? "OAuth2" : protocol.includes("SOAP") ? "mTLS + SAML2" : "API Key")
-        );
-        const status =
-          raw.status === "ACTIVE" || raw.is_active === true || raw.health_status === "HEALTHY"
-            ? "ACTIVE"
-            : "INACTIVE";
-
-        return {
-          interface_id: ifaceId,
-          tenant_id: String(raw.tenant_id ?? ""),
-          jurisdiction_id: String(raw.jurisdiction_id || "jur-uk-gb"),
-          authority_code: authCode,
-          authority_name: String(raw.authority_name || "Tax Authority"),
-          api_endpoint: endpoint,
-          endpoint_url: endpoint,
-          auth_type: authType,
-          auth_credential_id: raw.auth_credential_id ? String(raw.auth_credential_id) : undefined,
-          protocol: protocol,
-          protocol_type: protocol,
-          status: status,
-          health_status: String(raw.health_status || "HEALTHY"),
-          is_active: raw.is_active !== false,
-          error_count: Number(raw.error_count || 0),
-          created_at: String(raw.created_at || new Date().toISOString()),
-        };
-      })
+    (d) => d.interfaces ?? [],
   );
 }
 
@@ -665,18 +595,19 @@ export async function getTaxSummaryStats(identity?: Identity): Promise<ApiResult
     .reduce((acc, c) => acc + c.balance_due, 0);
 
   const withheldTotalEUR = whtObligations
-    .filter((w) => w.status === "REMITTED" || w.status === "CALCULATED")
+    .filter((w) => w.currency === "EUR" && (w.status === "REMITTED" || w.status === "CALCULATED"))
     .reduce((acc, w) => acc + (w.withheld_amount || 0), 0);
 
+  // Drafts not yet ready for submission whose due date is today or later. A
+  // draft without a readable due date is not counted; it used to count as
+  // upcoming, and a zero result fell back to the total.
   const today = new Date();
-  const upcomingFilingCount = drafts.length > 0
-    ? drafts.filter((d) => {
-      if (d.validation_status !== "FINALIZED") return true;
-      if (!d.due_date) return true;
-      const due = new Date(d.due_date);
-      return isNaN(due.getTime()) || due >= today;
-    }).length || drafts.length
-    : 0;
+  today.setHours(0, 0, 0, 0);
+  const upcomingFilingCount = drafts.filter((d) => {
+    if (d.validation_status === "READY_FOR_SUBMISSION" || !d.due_date) return false;
+    const due = new Date(d.due_date);
+    return !isNaN(due.getTime()) && due >= today;
+  }).length;
 
   return {
     ok: true,
@@ -688,8 +619,8 @@ export async function getTaxSummaryStats(identity?: Identity): Promise<ApiResult
       corporateBalanceDueUSD,
       withheldTotalEUR,
       upcomingFilingCount,
-      finalizedDraftCount: drafts.filter((d) => d.validation_status === "FINALIZED").length,
-      activeAuthorityConnections: authorities.filter((a) => a.status === "ACTIVE" || a.is_active === true || a.health_status === "HEALTHY").length,
+      finalizedDraftCount: drafts.filter((d) => d.validation_status === "READY_FOR_SUBMISSION").length,
+      activeAuthorityConnections: authorities.filter((a) => a.status === "ACTIVE").length,
     },
   };
 }
@@ -702,21 +633,23 @@ export type TaxDeadline = {
   jurisdiction: string;
   dueDate: string;
   daysUntilDue: number;
-  type: "VAT_FILING" | "CORPORATE_TAX" | "WHT_REMITTANCE" | "ESTIMATED_PAYMENT";
+  type: "FILING";
   urgency: "overdue" | "urgent" | "upcoming" | "comfortable";
 };
 
+/**
+ * Filing drafts with a due date, soonest first.
+ *
+ * Only real due dates. This used to give an undated draft today's date (or 30
+ * days), label every draft a VAT filing, add withholding "deadlines" 30 days
+ * after effective_from (the service records no due date for them), and answer
+ * ok with an empty list when the reads failed.
+ */
 export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<ApiResult<TaxDeadline[]>> {
-  const [draftsRes, whtRes] = await Promise.all([
-    listFilingDrafts(identity),
-    listWithholdingObligations(identity),
-  ]);
-
-  const drafts = draftsRes.ok ? draftsRes.data : [];
-  const whtObligations = whtRes.ok ? whtRes.data : [];
+  const draftsRes = await listFilingDrafts(identity);
+  if (!draftsRes.ok) return draftsRes;
 
   const today = new Date();
-
   function urgency(days: number): TaxDeadline["urgency"] {
     if (days < 0) return "overdue";
     if (days <= 7) return "urgent";
@@ -724,44 +657,21 @@ export async function listUpcomingTaxDeadlines(identity?: Identity): Promise<Api
     return "comfortable";
   }
 
-  const deadlines: TaxDeadline[] = [
-    // From filing drafts
-    ...drafts.map((d) => {
-      const dueDateStr = d.due_date || new Date().toISOString().split("T")[0];
-      const due = new Date(dueDateStr);
-      const days = isNaN(due.getTime()) ? 30 : Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const deadlines: TaxDeadline[] = draftsRes.data
+    .filter((d) => d.due_date && !isNaN(new Date(d.due_date).getTime()))
+    .map((d) => {
+      const days = Math.round((new Date(d.due_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       return {
         id: d.draft_id,
         label: `${d.filing_type} — ${d.period_key}`,
         jurisdiction: d.jurisdiction_id,
-        dueDate: dueDateStr,
+        dueDate: d.due_date,
         daysUntilDue: days,
-        type: "VAT_FILING" as const,
+        type: "FILING" as const,
         urgency: urgency(days),
       };
-    }),
-    // WHT remittances pending
-    ...whtObligations
-      .filter((w) => w.status === "PENDING_REMITTANCE" || w.status === "CALCULATED")
-      .map((w) => {
-        const rawDate = w.effective_from || new Date().toISOString();
-        const due = new Date(rawDate);
-        if (isNaN(due.getTime())) {
-          due.setTime(today.getTime());
-        }
-        due.setDate(due.getDate() + 30); // 30-day remittance window
-        const days = Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        return {
-          id: w.obligation_id,
-          label: `WHT Remittance — ${w.payment_type} (${w.payment_reference})`,
-          jurisdiction: w.jurisdiction_id,
-          dueDate: due.toISOString().split("T")[0],
-          daysUntilDue: days,
-          type: "WHT_REMITTANCE" as const,
-          urgency: urgency(days),
-        };
-      }),
-  ].sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+    })
+    .sort((a, b) => a.daysUntilDue - b.daysUntilDue);
 
   return { ok: true, data: deadlines };
 }
@@ -794,23 +704,73 @@ export async function createTaxRule(
     {
       ...input,
       tenant_id: identity?.tenantId,
-      created_by: input.created_by ?? identity?.principalId,
+      created_by: identity?.principalId,
     },
     (d) => d
   );
 }
 
+/**
+ * tax-rules-svc UpdateTaxRuleRequest. Only a DRAFT rule can be changed: the
+ * service answers 409 for any PUT to an ACTIVE or DEPRECATED rule (TAX-02 — an
+ * active rate is superseded by a new version, never edited). Activation is a
+ * PUT of `status: "ACTIVE"` on a DRAFT rule. updated_by is the session's.
+ */
+export type UpdateTaxRuleInput = {
+  name?: string;
+  tax_rate_percentage?: number;
+  effective_to?: string;
+  status?: RuleStatus;
+};
+
+export async function updateTaxRule(
+  ruleId: string,
+  input: UpdateTaxRuleInput,
+  identity?: Identity
+): Promise<ApiResult<TaxRule>> {
+  const base = taxRulesUrl();
+  return fetchDomainServicePost<TaxRule, TaxRule>(
+    `${base}/v1/tax-rules/${encodeURIComponent(ruleId)}`,
+    base,
+    "tax-rules-svc",
+    identity,
+    {
+      ...(input.name ? { name: input.name } : {}),
+      ...(input.tax_rate_percentage !== undefined ? { tax_rate_percentage: input.tax_rate_percentage } : {}),
+      ...(input.effective_to ? { effective_to: input.effective_to } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      updated_by: identity?.principalId,
+    },
+    (d) => d,
+    { method: "PUT" },
+  );
+}
+
+/**
+ * tax-determination-svc DetermineTaxRequest, including the TAX-03 inputs it
+ * refuses a determination without (who supplies whom, where, when, what).
+ * The legal entity and evaluator are the session's: evaluated_by used to
+ * default to a fixed engine name and could be overridden by the body,
+ * and the service stores it as given.
+ */
 export type EvaluateDeterminationInput = {
   transaction_id: string;
   source_module?: string;
-  legal_entity_id: string;
   jurisdiction_id: string;
   tax_category: string;
   gross_amount: number;
-  taxable_amount?: number;
+  exempt_amount?: number;
   currency: string;
   effective_from?: string;
-  evaluated_by?: string;
+  seller_party_id: string;
+  buyer_party_id: string;
+  supply_jurisdiction_id: string;
+  supply_date: string;
+  product_classification: string;
+  supply_kind: "GOODS" | "SERVICES" | "DIGITAL_SERVICES";
+  supply_type: "B2B" | "B2C" | "B2G";
+  /** Required for B2B: the buyer's registration in the place of supply. */
+  buyer_tax_registration_id?: string;
 };
 
 export async function evaluateTaxDetermination(
@@ -825,10 +785,10 @@ export async function evaluateTaxDetermination(
     identity,
     {
       source_module: "ADMIN_CONSOLE",
-      effective_from: new Date().toISOString().split("T")[0],
-      evaluated_by: "tax-determination-engine",
       ...input,
-      tenant_id: identity?.tenantId,
+      effective_from: input.effective_from || input.supply_date,
+      legal_entity_id: identity?.legalEntityId,
+      evaluated_by: identity?.principalId,
     },
     (d) => d
   );
@@ -869,8 +829,9 @@ export async function createVATReturn(
   );
 }
 
+/** The evidence the filing gate requires, sent as X-Evidence-Refs. The filer is the session's principal. */
 export type FileVATReturnInput = {
-  filed_by: string;
+  evidence_refs: string[];
 };
 
 export async function fileVATReturn(
@@ -884,10 +845,9 @@ export async function fileVATReturn(
     base,
     "vat-gst-svc",
     identity,
-    {
-      filed_by: input.filed_by,
-    },
-    (d) => d
+    { filed_by: identity?.principalId },
+    (d) => d,
+    { evidenceRefs: input.evidence_refs },
   );
 }
 
@@ -905,8 +865,16 @@ export async function getVATReturn(
   );
 }
 
+/**
+ * corporate-tax-svc CreateTaxReturnRequest, minus the session's fields.
+ *
+ * The service computes taxable_income, gross_tax_liability, net_tax_payable and
+ * balance_due itself (TaxReturn.Compute); the old input sent a taxable_income
+ * the service has no field for, took legal_entity_id from the caller, and
+ * omitted tax_credits and tax_already_paid. The body is now mapped field by
+ * field, so nothing a caller adds reaches the service.
+ */
 export type CreateCorporateTaxInput = {
-  legal_entity_id: string;
   jurisdiction_id: string;
   tax_registration_number: string;
   fiscal_year: number;
@@ -914,10 +882,12 @@ export type CreateCorporateTaxInput = {
   accounting_period_end: string;
   gross_revenue: number;
   allowable_deductions: number;
-  taxable_income: number;
   tax_rate_percent: number;
+  tax_credits: number;
+  tax_already_paid: number;
   currency: string;
   effective_from: string;
+  notes?: string;
 };
 
 export async function createCorporateTaxReturn(
@@ -931,26 +901,46 @@ export async function createCorporateTaxReturn(
     "corporate-tax-svc",
     identity,
     {
-      ...input,
-      tenant_id: identity?.tenantId,
+      legal_entity_id: identity?.legalEntityId,
+      jurisdiction_id: input.jurisdiction_id,
+      tax_registration_number: input.tax_registration_number,
+      fiscal_year: input.fiscal_year,
+      accounting_period_start: input.accounting_period_start,
+      accounting_period_end: input.accounting_period_end,
+      gross_revenue: input.gross_revenue,
+      allowable_deductions: input.allowable_deductions,
+      tax_rate_percent: input.tax_rate_percent,
+      tax_credits: input.tax_credits,
+      tax_already_paid: input.tax_already_paid,
+      currency: input.currency,
+      effective_from: input.effective_from,
+      ...(input.notes ? { notes: input.notes } : {}),
       created_by: identity?.principalId,
     },
     (d) => d
   );
 }
 
+/**
+ * withholding-tax-svc CreateObligationRequest, minus the session's fields.
+ *
+ * withheld_amount is computed by the service (gross or taxable base × rate), so
+ * it is not an input; the old input required the caller to state it, and took
+ * legal_entity_id from the caller. taxable_base_amount is optional: the service
+ * uses the gross amount when it is absent.
+ */
 export type CreateWithholdingInput = {
-  legal_entity_id: string;
   jurisdiction_id: string;
   counterparty_id: string;
   payment_reference: string;
   payment_type: string;
   gross_payment_amount: number;
-  taxable_base_amount: number;
+  taxable_base_amount?: number;
   withholding_rate_percent: number;
-  withheld_amount: number;
   currency: string;
   tax_treaty_exemption?: boolean;
+  exemption_certificate_ref?: string;
+  notes?: string;
   effective_from: string;
 };
 
@@ -965,16 +955,27 @@ export async function createWithholdingObligation(
     "withholding-tax-svc",
     identity,
     {
-      ...input,
-      tenant_id: identity?.tenantId,
+      legal_entity_id: identity?.legalEntityId,
+      jurisdiction_id: input.jurisdiction_id,
+      counterparty_id: input.counterparty_id,
+      payment_reference: input.payment_reference,
+      payment_type: input.payment_type,
+      gross_payment_amount: input.gross_payment_amount,
+      ...(input.taxable_base_amount !== undefined ? { taxable_base_amount: input.taxable_base_amount } : {}),
+      withholding_rate_percent: input.withholding_rate_percent,
+      currency: input.currency,
+      tax_treaty_exemption: input.tax_treaty_exemption === true,
+      ...(input.exemption_certificate_ref ? { exemption_certificate_ref: input.exemption_certificate_ref } : {}),
+      ...(input.notes ? { notes: input.notes } : {}),
+      effective_from: input.effective_from,
       created_by: identity?.principalId,
     },
     (d) => d
   );
 }
 
+/** filing-preparation-svc CreateDraftRequest; legal entity and author are the session's. */
 export type CreateFilingDraftInput = {
-  legal_entity_id: string;
   jurisdiction_id: string;
   filing_type: string;
   period_key: string;
@@ -996,16 +997,33 @@ export async function createFilingDraft(
     identity,
     {
       ...input,
-      // Provide both field names so both mock and real service accept the body
-      reporting_period: input.period_key,
-      tenant_id: identity?.tenantId,
+      legal_entity_id: identity?.legalEntityId,
       created_by: identity?.principalId,
     },
-    // The mock returns { message, status, data: { draft: {...} } }; unwrap all layers
     (raw) => normaliseDraft(raw as Record<string, unknown>)
   );
 }
 
+/**
+ * Validate a draft against evidence-requirements-svc. The service refuses to
+ * finalize a draft that has not been validated (422), so this comes first.
+ */
+export async function validateFilingDraft(
+  draftId: string,
+  identity?: Identity
+): Promise<ApiResult<FilingDraft>> {
+  const base = filingPrepUrl();
+  return fetchDomainServicePost<Record<string, unknown>, FilingDraft>(
+    `${base}/v1/filing-preparation/drafts/${encodeURIComponent(draftId)}/validate`,
+    base,
+    "filing-preparation-svc",
+    identity,
+    { validated_by: identity?.principalId },
+    (raw) => normaliseDraft(raw as Record<string, unknown>)
+  );
+}
+
+/** Mark a validated (PREPARED) draft READY_FOR_SUBMISSION. */
 export async function finalizeFilingDraft(
   draftId: string,
   body?: { notes?: string },
@@ -1013,22 +1031,21 @@ export async function finalizeFilingDraft(
 ): Promise<ApiResult<FilingDraft>> {
   const base = filingPrepUrl();
   return fetchDomainServicePost<Record<string, unknown>, FilingDraft>(
-    `${base}/v1/filing-preparation/drafts/${draftId}/finalize`,
+    `${base}/v1/filing-preparation/drafts/${encodeURIComponent(draftId)}/finalize`,
     base,
     "filing-preparation-svc",
     identity,
-    body ?? { notes: "Finalized from Tax Governance console." },
+    { ...(body?.notes ? { notes: body.notes } : {}), finalized_by: identity?.principalId },
     (raw) => normaliseDraft(raw as Record<string, unknown>)
   );
 }
 
+/** tax-authority-interface-svc CreateInterfaceRequest; the legal entity is the session's. */
 export type CreateTaxAuthorityInput = {
-  jurisdiction_id: string;
-  authority_code: string;
+  jurisdiction: string;
   authority_name: string;
-  api_endpoint: string;
-  auth_type: string;
-  protocol: string;
+  protocol?: string;
+  provider_key?: string;
 };
 
 export async function registerTaxAuthorityInterface(
@@ -1041,78 +1058,56 @@ export async function registerTaxAuthorityInterface(
     base,
     "tax-authority-interface-svc",
     identity,
-    {
-      ...input,
-      tenant_id: identity?.tenantId,
-    },
+    { ...input, legal_entity_id: identity?.legalEntityId },
     (d) => d
   );
 }
 
-export async function testTaxAuthorityConnection(
-  interfaceId: string,
+export type TaxAuthorityHealth = {
+  provider_key: string;
+  recent_calls: number;
+  recent_failures: number;
+  window: string;
+};
+
+/**
+ * Recent submission calls to an authority adapter (GET /v1/tax-authority/health).
+ *
+ * The service has no connection test: the console used to POST
+ * /interfaces/{id}/test, which does not exist, so the button always failed.
+ * This reports what the service does record. While the adapter is off it
+ * answers 503.
+ */
+export async function getTaxAuthorityHealth(
+  providerKey: string,
   identity?: Identity
-): Promise<ApiResult<{ status: string; latency_ms: number; timestamp: string }>> {
+): Promise<ApiResult<TaxAuthorityHealth>> {
   const base = taxAuthorityUrl();
-  return fetchDomainServicePost<{ status: string; latency_ms: number; timestamp: string }, { status: string; latency_ms: number; timestamp: string }>(
-    `${base}/v1/tax-authority/interfaces/${interfaceId}/test`,
-    base,
-    "tax-authority-interface-svc",
-    identity,
-    {},
-    (d) => d
+  const url = new URL(`${base}/v1/tax-authority/health`);
+  url.searchParams.set("provider_key", providerKey);
+  return fetchDomainService<TaxAuthorityHealth, TaxAuthorityHealth>(
+    url.toString(), base, "tax-authority-interface-svc", identity, (d) => d,
   );
 }
 
-// ─── PATCH helpers ─────────────────────────────────────────────────────────────
+// ─── Shared Fetch Helpers ─────────────────────────────────────────────────────
+//
+// Headers come from envelopeHeaders, like every other client: the identity
+// headers, request/correlation ids, source channel, the session's envelope
+// JWT (needed behind the gateway; these helpers used to omit it) and, on
+// writes, an Idempotency-Key. The PATCH helpers that sat here are gone: every
+// tax service registers updates as PUT, so they could only answer 405, and
+// nothing called them.
 
-export type PatchResult = { ok: true; data: Record<string, unknown> } | { ok: false; error: { kind: string; status?: number; message: string } };
+const TAX_PURPOSE = "tax_compliance";
 
-async function fetchDomainServicePatch(
-  urlStr: string,
-  base: string,
-  serviceName: string,
-  identity: Identity | undefined,
-  body: Record<string, unknown>,
-): Promise<PatchResult> {
-  const correlationId = crypto.randomUUID();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    "X-Correlation-ID": correlationId,
-    "X-Request-Id": crypto.randomUUID(),
-    "X-Source-Channel": "web",
-    "X-Purpose-Context": "tax_compliance",
-    "Idempotency-Key": crypto.randomUUID(),
-  };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
-
-  let res: Response;
+async function readError(res: Response, fallback: string): Promise<string> {
   try {
-    res = await fetch(urlStr, { method: "PATCH", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(3000) });
-  } catch (cause) {
-    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
-    return { ok: false, error: { kind: isTimeout ? "timeout" : "unreachable", message: `${serviceName} is unreachable` } };
-  }
-
-  if (!res.ok) {
-    let errorDetail = `${serviceName} returned ${res.status}`;
-    try {
-      const errJson = (await res.json()) as Record<string, unknown>;
-      if (typeof errJson.error === "string") errorDetail = errJson.error;
-    } catch {
-      // ignore
-    }
-    return { ok: false, error: { kind: "http", status: res.status, message: errorDetail } };
-  }
-
-  try {
-    const data = (await res.json()) as Record<string, unknown>;
-    return { ok: true, data };
+    const body = (await res.json()) as Record<string, unknown>;
+    const detail = [body.error, body.detail, body.message].filter((v) => typeof v === "string" && v).join(": ");
+    return detail || fallback;
   } catch {
-    return { ok: false, error: { kind: "malformed", message: `${serviceName} returned non-JSON` } };
+    return fallback;
   }
 }
 
@@ -1123,24 +1118,17 @@ async function fetchDomainServicePost<TRaw, TOut>(
   identity: Identity | undefined,
   body: Record<string, unknown>,
   transform: (raw: TRaw) => TOut,
+  options: { evidenceRefs?: string[]; method?: "POST" | "PUT" } = {},
 ): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
-    "X-Correlation-ID": correlationId,
-    "X-Request-Id": crypto.randomUUID(),
-    "X-Source-Channel": "web",
-    "X-Purpose-Context": "tax_compliance",
-    "Idempotency-Key": crypto.randomUUID(),
+    ...envelopeHeaders({ identity, materialWrite: true, purposeContext: TAX_PURPOSE, evidenceRefs: options.evidenceRefs }),
   };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
 
   let res: Response;
   try {
-    res = await fetch(urlStr, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+    res = await fetch(urlStr, { method: options.method ?? "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
     return {
@@ -1155,23 +1143,12 @@ async function fetchDomainServicePost<TRaw, TOut>(
   }
 
   if (!res.ok) {
-    let errorDetail = `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`;
-    try {
-      const errJson = (await res.json()) as Record<string, unknown>;
-      if (typeof errJson.error === "string") {
-        errorDetail = errJson.error;
-      } else if (typeof errJson.message === "string") {
-        errorDetail = errJson.message;
-      }
-    } catch {
-      // ignore
-    }
     return {
       ok: false,
       error: {
         kind: "http",
         status: res.status,
-        message: errorDetail,
+        message: await readError(res, `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`),
       },
     };
   }
@@ -1187,43 +1164,6 @@ async function fetchDomainServicePost<TRaw, TOut>(
   }
 }
 
-export async function patchTaxRule(ruleId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
-  const base = taxRulesUrl();
-  return fetchDomainServicePatch(`${base}/v1/tax-rules/${ruleId}`, base, "tax-rules-svc", identity, body);
-}
-
-export async function patchTaxDetermination(detId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
-  const base = taxDeterminationUrl();
-  return fetchDomainServicePatch(`${base}/v1/tax-determinations/${detId}`, base, "tax-determination-svc", identity, body);
-}
-
-export async function patchVATReturn(returnId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
-  const base = vatGstUrl();
-  return fetchDomainServicePatch(`${base}/v1/vat-returns/${returnId}`, base, "vat-gst-svc", identity, body);
-}
-
-export async function patchCorporateTaxReturn(returnId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
-  const base = corporateTaxUrl();
-  return fetchDomainServicePatch(`${base}/v1/corporate-tax-returns/${returnId}`, base, "corporate-tax-svc", identity, body);
-}
-
-export async function patchWithholdingObligation(obligationId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
-  const base = withholdingTaxUrl();
-  return fetchDomainServicePatch(`${base}/v1/withholding-tax/${obligationId}`, base, "withholding-tax-svc", identity, body);
-}
-
-export async function patchFilingDraft(draftId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
-  const base = filingPrepUrl();
-  return fetchDomainServicePatch(`${base}/v1/filing-preparation/drafts/${draftId}`, base, "filing-preparation-svc", identity, body);
-}
-
-export async function patchTaxAuthorityInterface(interfaceId: string, body: Record<string, unknown>, identity?: Identity): Promise<PatchResult> {
-  const base = taxAuthorityUrl();
-  return fetchDomainServicePatch(`${base}/v1/tax-authority/interfaces/${interfaceId}`, base, "tax-authority-interface-svc", identity, body);
-}
-
-// ─── Shared Fetch Helper ──────────────────────────────────────────────────────
-
 async function fetchDomainService<TRaw, TOut>(
   urlStr: string,
   base: string,
@@ -1231,29 +1171,25 @@ async function fetchDomainService<TRaw, TOut>(
   identity: Identity | undefined,
   transform: (raw: TRaw) => TOut,
 ): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
   const headers: Record<string, string> = {
     Accept: "application/json",
-    "X-Correlation-ID": correlationId,
-    "X-Request-Id": crypto.randomUUID(),
-    "X-Source-Channel": "web",
-    "X-Purpose-Context": "tax_compliance",
+    ...envelopeHeaders({ identity, materialWrite: false, purposeContext: TAX_PURPOSE }),
   };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
 
   let res: Response;
   try {
     res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(15000) });
   } catch (cause) {
     const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    // A failed read is returned as a failure. There is no sample-data fallback:
+    // it used to answer any error with hardcoded rules, returns and healthy
+    // authority interfaces for a fixed demo tenant, shown as live.
     return {
       ok: false,
       error: {
         kind: isTimeout ? "timeout" : "unreachable",
         message: isTimeout
-          ? `${serviceName} did not respond within 15s`
+          ? `${serviceName} did not respond within 15000ms`
           : `${serviceName} is unreachable at ${base}`,
       },
     };
@@ -1265,7 +1201,7 @@ async function fetchDomainService<TRaw, TOut>(
       error: {
         kind: "http",
         status: res.status,
-        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
+        message: await readError(res, `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`),
       },
     };
   }

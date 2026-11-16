@@ -8,6 +8,13 @@ import {
   type CorporateTaxReturn,
   type WithholdingTaxObligation,
 } from "@/lib/api/tax";
+import { listCounterparties } from "@/lib/api/legal";
+import { loadJurisdictionOptions } from "./jurisdiction-options";
+import {
+  CorporateTaxReturnForm,
+  WithholdingObligationForm,
+  type CounterpartyOptions,
+} from "./CorporateAndWithholdingForms";
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT:              "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400",
@@ -25,7 +32,7 @@ function formatCurrency(amount: number, currency: string) {
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: currency || "USD",
+      currency,
       maximumFractionDigits: 0,
     }).format(amount);
   } catch {
@@ -118,33 +125,33 @@ export async function CorporateAndWithholdingTaxPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const [corpRes, whtRes] = await Promise.all([
+  const [corpRes, whtRes, jurisdictions, counterpartyRes] = await Promise.all([
     listCorporateTaxReturns(identity),
     listWithholdingObligations(identity),
+    loadJurisdictionOptions(),
+    listCounterparties(identity),
   ]);
 
-  if (!corpRes.ok && corpRes.error.kind === "unreachable") {
-    return (
-      <PanelEmptyState
-        icon={CloudOff}
-        tone="warning"
-        label="corporate-tax-svc unavailable"
-        hint={corpRes.error.message}
-      />
-    );
-  }
+  // The counterparty paid is picked from counterparty-management-svc's register.
+  const counterparties: CounterpartyOptions = counterpartyRes.ok
+    ? { ok: true, items: counterpartyRes.data.map((c) => ({ id: c.counterparty_id, name: c.name, type: c.counterparty_type })) }
+    : { ok: false, error: counterpartyRes.error.message };
 
   const corpReturns: CorporateTaxReturn[] = corpRes.ok ? corpRes.data : [];
   const whtObligations: WithholdingTaxObligation[] = whtRes.ok ? whtRes.data : [];
 
   return (
     <div className="space-y-6">
+      <CorporateTaxReturnForm jurisdictions={jurisdictions} />
+
       {/* ── Corporate Tax Returns ── */}
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Corporate Income Tax Returns ({corpReturns.length})
         </h3>
-        {corpReturns.length === 0 ? (
+        {!corpRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="corporate-tax-svc could not be read" hint={corpRes.error.message} />
+        ) : corpReturns.length === 0 ? (
           <PanelEmptyState
             icon={Landmark}
             label="No corporate tax returns"
@@ -167,6 +174,7 @@ export async function CorporateAndWithholdingTaxPanel() {
                       <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
                         {c.tax_registration_number}
                       </span>
+                      <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500">{c.return_id}</span>
                     </div>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                       {c.accounting_period_start} → {c.accounting_period_end}
@@ -199,25 +207,30 @@ export async function CorporateAndWithholdingTaxPanel() {
         )}
       </div>
 
+      <WithholdingObligationForm jurisdictions={jurisdictions} counterparties={counterparties} />
+
       {/* ── Withholding Tax Obligations ── */}
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Withholding Tax Obligations ({whtObligations.length})
         </h3>
-        {whtObligations.length === 0 ? (
+        {!whtRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="withholding-tax-svc could not be read" hint={whtRes.error.message} />
+        ) : whtObligations.length === 0 ? (
           <PanelEmptyState
             icon={Landmark}
             label="No withholding tax obligations"
             hint="Obligations created in withholding-tax-svc will appear here."
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
                   {[
                     "Payment Ref",
                     "Type",
+                    "Currency",
                     "Gross Amount",
                     "Rate (%)",
                     "Withheld Amount",
@@ -247,6 +260,7 @@ export async function CorporateAndWithholdingTaxPanel() {
                         {w.payment_type}
                       </span>
                     </td>
+                    <td className="px-4 py-3 font-mono text-xs">{w.currency || "—"}</td>
                     <td className="px-4 py-3 text-xs font-medium">
                       {formatCurrency(w.gross_payment_amount, w.currency)}
                     </td>

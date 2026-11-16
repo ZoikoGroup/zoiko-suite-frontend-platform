@@ -13,114 +13,102 @@ type Kpi = {
 
 export function SecuritySummaryBar() {
   const [kpis, setKpis] = useState<Kpi[]>([
-    {
-      icon: Shield,
-      label: "mTLS Certificates",
-      value: "—",
-      sub: "Active x509 trusted roots",
-      tone: "neutral",
-    },
-    {
-      icon: AlertOctagon,
-      label: "SIEM Security Events",
-      value: "—",
-      sub: "Ingested in last 24h",
-      tone: "neutral",
-    },
-    {
-      icon: ShieldCheck,
-      label: "CARTA Assessments",
-      value: "—",
-      sub: "Zero-trust continuous auth",
-      tone: "positive",
-    },
-    {
-      icon: Key,
-      label: "Active KMS Keys",
-      value: "—",
-      sub: "Zero pending rotations",
-      tone: "positive",
-    },
-    {
-      icon: Bot,
-      label: "AI Governance",
-      value: "—",
-      sub: "Guardrails & safety policies",
-      tone: "positive",
-    },
+    { icon: Shield, label: "mTLS Certificates", value: "—", sub: "mtls-management-svc", tone: "neutral" },
+    { icon: AlertOctagon, label: "SIEM Events", value: "—", sub: "siem-integration-svc", tone: "neutral" },
+    { icon: ShieldCheck, label: "CARTA Assessments", value: "—", sub: "carta-svc", tone: "neutral" },
+    { icon: Key, label: "Registered Keys", value: "—", sub: "key-management-svc", tone: "neutral" },
+    { icon: Bot, label: "AI Governance", value: "—", sub: "ai-governance-svc", tone: "neutral" },
   ]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
-    // Each figure is read from its owning service. A failed read shows "—" and says
-    // so: it never falls back to an invented count.
-    async function read(url: string, key: string): Promise<unknown[] | null> {
+    /** The list under `key`, or null when the read failed. Never a stand-in count. */
+    async function readList(path: string, key: string): Promise<Record<string, unknown>[] | null> {
       try {
-        const r = await fetch(url);
+        const r = await fetch(path, { signal: AbortSignal.timeout(10_000) });
         if (!r.ok) return null;
-        const data = await r.json();
-        return Array.isArray(data?.[key]) ? data[key] : null;
+        const body = await r.json();
+        return Array.isArray(body?.[key]) ? body[key] : null;
       } catch {
         return null;
       }
     }
 
     async function load() {
-      const [certs, siem, carta, keys, aiRisk] = await Promise.all([
-        read("/api/v1/security/certificates", "certificates"),
-        read("/api/v1/security/events", "events"),
-        read("/api/v1/security/assessments", "assessments"),
-        read("/api/v1/security/keys", "keys"),
-        read("/api/v1/ai-governance/risk-classifications", "classifications"),
-      ]);
-      if (cancelled) return;
+      try {
+        const [certs, keys, siem, assessments, providers] = await Promise.all([
+          readList("/api/v1/security/certificates", "certificates"),
+          readList("/api/v1/security/keys", "keys"),
+          readList("/api/v1/security/events", "events"),
+          readList("/api/v1/security/assessments", "assessments"),
+          // ai-governance-svc has no AI-run list, so the tile counts registered model providers.
+          readList("/api/v1/ai-governance/model-providers", "providers"),
+        ]);
 
-      const unread = (service: string) => `${service} could not be read`;
-      const status = (rows: unknown[], s: string) => rows.filter((x) => (x as { status?: string }).status === s).length;
-      const criticalSiem = siem
-        ? siem.filter((e) => ["CRITICAL", "HIGH"].includes((e as { severity?: string }).severity ?? "")).length
-        : 0;
+        if (cancelled) return;
 
-      setKpis([
-        {
-          icon: Shield,
-          label: "mTLS Certificates",
-          value: certs ? `${status(certs, "ACTIVE")} Active` : "—",
-          sub: certs ? `${certs.length} managed by mtls-management-svc` : unread("mtls-management-svc"),
-          tone: certs ? "neutral" : "warning",
-        },
-        {
-          icon: AlertOctagon,
-          label: "SIEM Security Events",
-          value: siem ? `${siem.length} Events` : "—",
-          sub: !siem ? unread("siem-integration-svc") : criticalSiem > 0 ? `${criticalSiem} high/critical` : "No high or critical event",
-          tone: !siem ? "warning" : criticalSiem > 0 ? "critical" : "neutral",
-        },
-        {
-          icon: ShieldCheck,
-          label: "CARTA Assessments",
-          value: carta ? `${carta.length}` : "—",
-          sub: carta ? `${carta.filter((a) => (a as { decision?: string }).decision === "ALLOW").length} allowed` : unread("carta-svc"),
-          tone: carta ? "neutral" : "warning",
-        },
-        {
-          icon: Key,
-          label: "Active KMS Keys",
-          value: keys ? `${status(keys, "ACTIVE")} Active` : "—",
-          sub: keys ? `${keys.length} managed by key-management-svc` : unread("key-management-svc"),
-          tone: keys ? "neutral" : "warning",
-        },
-        {
-          icon: Bot,
-          label: "AI Risk Classifications",
-          value: aiRisk ? `${aiRisk.length}` : "—",
-          sub: aiRisk ? "Action types classified" : unread("ai-governance-svc"),
-          tone: aiRisk ? "neutral" : "warning",
-        },
-      ]);
-      setLoading(false);
+        const unavailable = (svc: string): Pick<Kpi, "value" | "sub" | "tone"> => ({
+          value: "Unavailable",
+          sub: `${svc} could not be read`,
+          tone: "warning",
+        });
+        const activeCerts = certs?.filter((c) => c.status === "ACTIVE").length;
+        const enabledKeys = keys?.filter((k) => k.state === "ENABLED").length;
+        const criticalSiem = siem?.filter((e) => e.severity === "CRITICAL" || e.severity === "HIGH").length ?? 0;
+        const denied = assessments?.filter((a) => a.decision === "DENY" || a.decision === "ISOLATE").length ?? 0;
+
+        setKpis([
+          {
+            icon: Shield,
+            label: "mTLS Certificates",
+            ...(certs
+              ? { value: `${activeCerts} Active`, sub: `${certs.length} certificates in mtls-management-svc`, tone: "neutral" as const }
+              : unavailable("mtls-management-svc")),
+          },
+          {
+            icon: AlertOctagon,
+            label: "SIEM Events",
+            ...(siem
+              ? {
+                  value: `${siem.length} Events`,
+                  sub: criticalSiem > 0 ? `${criticalSiem} high/critical` : "Recorded only; no external delivery",
+                  tone: criticalSiem > 0 ? ("critical" as const) : ("neutral" as const),
+                }
+              : unavailable("siem-integration-svc")),
+          },
+          {
+            icon: ShieldCheck,
+            label: "CARTA Assessments",
+            ...(assessments
+              ? {
+                  value: `${assessments.length} Assessed`,
+                  sub: denied > 0 ? `${denied} denied or isolated` : "From carta-svc",
+                  tone: denied > 0 ? ("warning" as const) : ("neutral" as const),
+                }
+              : unavailable("carta-svc")),
+          },
+          {
+            icon: Key,
+            label: "Registered Keys",
+            ...(keys
+              ? { value: `${enabledKeys} Enabled`, sub: "Key metadata only; no cryptography", tone: "neutral" as const }
+              : unavailable("key-management-svc")),
+          },
+          {
+            icon: Bot,
+            label: "AI Governance",
+            ...(providers
+              ? { value: `${providers.length} Providers`, sub: "Model providers in ai-governance-svc", tone: "neutral" as const }
+              : unavailable("ai-governance-svc")),
+          },
+        ]);
+      } catch {
+        // preserve defaults
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
 
     load();

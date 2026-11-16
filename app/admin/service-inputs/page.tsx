@@ -142,7 +142,6 @@ export const SERVICES: ServiceDef[] = [
     input: {
       title: "Core Infrastructure High-Performance Compute Cluster",
       department: "Engineering",
-      requested_by: "Lingaraj (Super Admin)",
       estimated_amount: 45000,
       currency: "GBP",
       priority: "HIGH",
@@ -651,7 +650,7 @@ export const SERVICES: ServiceDef[] = [
     input: {
       document_id: "doc-msa-2026-001",
       signers: [
-        { name: "Lingaraj Admin", email: "admin@zoikosuite.com", role: "SIGNATORY" }
+        { name: "", email: "", role: "SIGNATORY" }
       ],
       expiration_days: 7
     }

@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Network, Building2, Users2, FileSignature, Radio, CheckCircle2 } from "lucide-react";
+import { Network, Building2, Users2, FileSignature, Radio } from "lucide-react";
 
 type Stage = {
   id: string;
   title: string;
   svc: string;
-  port: string;
   icon: React.ElementType;
   description: string;
 };
@@ -17,41 +16,36 @@ const STAGES: Stage[] = [
     id: "bridge",
     title: "Protocol Gateway",
     svc: "connectivity-api-bridge-svc",
-    port: "8170",
     icon: Network,
-    description: "Transforms REST, GraphQL, SOAP, and Webhook protocols into internal schema events with auth translation.",
+    description: "Registers bridge endpoints and integration connections (protocol, auth type, destination), with maker-checker on changes. No external connector is exercised yet.",
   },
   {
     id: "banking",
-    title: "Financial Pipelines",
+    title: "Bank Connections",
     svc: "banking-connector-svc",
-    port: "8171",
     icon: Building2,
-    description: "Automated statement ingestion, SWIFT messaging, and ACH reconciliation synced with core ledger.",
+    description: "Records bank connections and accepts pushed statement files for validation and normalization. No bank API adapter is connected yet.",
   },
   {
     id: "hris",
-    title: "Employee Sync",
+    title: "HRIS Integrations",
     svc: "hris-connector-svc",
-    port: "8172",
     icon: Users2,
-    description: "Bi-directional worker directory sync with Workday, BambooHR, and Rippling for payroll and identity parity.",
+    description: "Records HRIS integrations. A sync request is refused (503) until a real HRIS provider adapter is configured.",
   },
   {
     id: "esign",
-    title: "Digital Envelopes",
+    title: "Signature Envelopes",
     svc: "esignature-integration-svc",
-    port: "8174",
     icon: FileSignature,
-    description: "Multi-party contract execution workflows with DocuSign/AdobeSign and tamper-proof signature certificates.",
+    description: "Tracks signature envelopes. Sending one is refused (503) until a DocuSign or Adobe adapter is configured.",
   },
   {
     id: "feeds",
-    title: "Market Feeds",
+    title: "Data Feeds",
     svc: "external-data-feed-svc",
-    port: "8175",
     icon: Radio,
-    description: "Real-time FX rates from ECB, Bloomberg market feeds, and OFAC sanctions lists for automated compliance.",
+    description: "Records feed subscriptions (provider, feed type, symbol). It calls no provider; events are pushed in by callers.",
   },
 ];
 
@@ -63,16 +57,13 @@ export function IntegrationProcessTimeline() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            Enterprise Connectivity Fabric
+            Integration Services
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Real-time multi-protocol ingestion pipelines feeding Zoiko Suite operational domains
+            What each connector does today. No live provider adapter is configured in this environment.
           </p>
         </div>
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-cyan-600 dark:text-cyan-400">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          5 Active Adaptors
-        </span>
+        <span className="text-xs font-medium text-slate-400 dark:text-slate-500">Service map, not a status check</span>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -107,8 +98,7 @@ export function IntegrationProcessTimeline() {
               </p>
 
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-[11px] text-slate-400 dark:border-slate-800">
-                <span className="font-mono truncate max-w-[100px]">{stage.svc}</span>
-                <span className="font-mono text-cyan-600 dark:text-cyan-400">:{stage.port}</span>
+                <span className="font-mono truncate">{stage.svc}</span>
               </div>
             </div>
           );
@@ -119,7 +109,7 @@ export function IntegrationProcessTimeline() {
         <div className="mt-4 rounded-lg bg-slate-50 p-4 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-              {selected.title} — Service Architecture
+              {selected.title} ({selected.svc})
             </h4>
             <button
               type="button"
@@ -130,7 +120,7 @@ export function IntegrationProcessTimeline() {
             </button>
           </div>
           <p className="mt-1.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-            {selected.description} Mounted on port <code className="font-mono font-bold text-cyan-600 dark:text-cyan-400">:{selected.port}</code> with multi-tenant data isolation and backpressure management.
+            {selected.description}
           </p>
         </div>
       )}

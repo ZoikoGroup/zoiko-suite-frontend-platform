@@ -156,19 +156,19 @@ export const DOMAINS: Domain[] = [
     href: "/admin/security",
     icon: Lock,
     purpose:
-      "Govern mTLS certificates, SIEM integrations, cryptographic key lifecycle, and cap table records.",
+      "Govern mTLS certificates, SIEM exporters, key metadata and rotation, and zero-trust access-risk assessments.",
     status: "operational",
     coreServices: [
       "mTLS Management Service",
       "SIEM Integration Service",
-      "Carta Cap Table Service",
+      "CARTA Access-Risk Service",
       "Key Management Service",
     ],
   },
   {
     key: "integrations",
     label: "Integrations",
-    href: "/admin/integrations",
+    href: "/admin/integration",
     icon: Plug,
     purpose:
       "Govern all external system connectors — banking, HRIS, tax authority, eSignature, and data feeds.",
