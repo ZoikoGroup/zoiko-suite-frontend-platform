@@ -7,7 +7,6 @@ import {
   FileCheck,
   CheckCircle2,
   X,
-  ChevronRight,
   Loader2,
   Server,
   Zap,
@@ -18,392 +17,68 @@ import {
 } from "lucide-react";
 import { exportToCSV } from "@/lib/export";
 import type { TaxHealthResponse } from "@/app/api/backend/tax-health/route";
+import type { JurisdictionOptions } from "./jurisdiction-options";
+import { NewTaxRuleForm, DeterminationForm } from "./TaxRuleForms";
 
-// ── New-Rule overlay ───────────────────────────────────────────────────────────
-function NewRuleModal({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState(1);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ rule_id: string; rule_code: string } | null>(null);
-  const [form, setForm] = useState({
-    jurisdiction: "uk-gov-01",
-    category: "VAT",
-    rate: "20",
-    effectiveFrom: new Date().toISOString().split("T")[0],
-  });
-
-  async function handleSubmit() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const ruleCode = `${form.jurisdiction}-${form.category}-${form.effectiveFrom.replace(/-/g, "")}`;
-      const res = await fetch("/api/v1/tax-rules", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jurisdiction_id: form.jurisdiction,
-          rule_code: ruleCode,
-          name: `${form.category} Rule — ${form.jurisdiction} (${form.rate}%)`,
-          category: form.category,
-          tax_rate_percentage: parseFloat(form.rate) || 20,
-          effective_from: form.effectiveFrom,
-        }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(json?.error ?? `tax-rules-svc rejected the write (${res.status})`);
-      }
-      const raw = json?.rule ?? json?.data ?? json ?? {};
-      setCreated({
-        rule_id: String(raw.rule_id || "rule-" + Date.now().toString(36)),
-        rule_code: String(raw.rule_code || ruleCode),
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create tax rule");
-    }
-    setSubmitting(false);
-  }
-
+// ── Modal shell ───────────────────────────────────────────────────────────────
+function ModalShell({
+  title,
+  icon: Icon,
+  tone,
+  onClose,
+  children,
+}: {
+  title: string;
+  icon: React.ElementType;
+  tone: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
-        {/* Header */}
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/20">
-              <Plus className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${tone}`}>
+              <Icon className="h-3.5 w-3.5" />
             </span>
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">New Tax Rule</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Step indicator */}
-        <div className="flex border-b border-slate-100 dark:border-slate-800">
-          {["Jurisdiction", "Rate & Category", "Review"].map((label, i) => (
-            <div
-              key={label}
-              className={`flex-1 py-2.5 text-center text-[11px] font-medium transition-colors ${step === i + 1
-                ? "border-b-2 border-emerald-500 text-emerald-600 dark:text-emerald-400"
-                : "text-slate-400 dark:text-slate-500"
-                }`}
-            >
-              {label}
-            </div>
-          ))}
-        </div>
-
-        {/* Body */}
-        <div className="p-5">
-          {created ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-              <p className="font-semibold text-slate-800 dark:text-slate-200">Tax rule created</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Rule <span className="font-mono text-slate-700 dark:text-slate-300">{created.rule_code}</span>{" "}
-                (ID {created.rule_id}) registered with tax-rules-svc (:8125) and is pending activation.
-              </p>
-              <button
-                onClick={onClose}
-                className="mt-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
-              >
-                Done
-              </button>
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <AlertCircle className="h-10 w-10 text-red-500" />
-              <p className="font-semibold text-slate-800 dark:text-slate-200">Could not create rule</p>
-              <p className="max-w-xs text-xs text-slate-500 dark:text-slate-400">{error}</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setError(null)}
-                  className="mt-1 rounded-lg border border-slate-200 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
-                >
-                  Try again
-                </button>
-                <button
-                  onClick={onClose}
-                  className="mt-1 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          ) : step === 1 ? (
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Jurisdiction
-                </label>
-                <select
-                  value={form.jurisdiction}
-                  onChange={(e) => setForm((f) => ({ ...f, jurisdiction: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                >
-                  <option value="uk-gov-01">🇬🇧 United Kingdom (HMRC)</option>
-                  <option value="us-fed-01">🇺🇸 United States (IRS)</option>
-                  <option value="sg-iras-01">🇸🇬 Singapore (IRAS)</option>
-                  <option value="de-bzst-01">🇩🇪 Germany (BZSt)</option>
-                </select>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Effective From
-                </label>
-                <input
-                  type="date"
-                  value={form.effectiveFrom}
-                  onChange={(e) => setForm((f) => ({ ...f, effectiveFrom: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                />
-              </div>
-            </div>
-          ) : step === 2 ? (
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Tax Category
-                </label>
-                <select
-                  value={form.category}
-                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                >
-                  {["VAT", "GST", "CORPORATE_INCOME", "WITHHOLDING", "EXCISE", "CUSTOMS"].map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Tax Rate (%)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.1"
-                  value={form.rate}
-                  onChange={(e) => setForm((f) => ({ ...f, rate: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                Review the new rule before registering:
-              </p>
-              {[
-                ["Jurisdiction", form.jurisdiction],
-                ["Category", form.category],
-                ["Rate", `${form.rate}%`],
-                ["Effective From", form.effectiveFrom],
-                ["Target Service", "tax-rules-svc (:8125)"],
-              ].map(([label, value]) => (
-                <div key={label} className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500 dark:text-slate-400">{label}</span>
-                  <span className="font-medium text-slate-800 dark:text-slate-200 font-mono">{value}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        {!created && !error && (
-          <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3.5 dark:border-slate-800">
-            <button
-              onClick={() => setStep((s) => Math.max(1, s - 1))}
-              disabled={step === 1}
-              className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 disabled:opacity-30 transition-colors"
-            >
-              Back
-            </button>
-            {step < 3 ? (
-              <button
-                onClick={() => setStep((s) => s + 1)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 transition-colors"
-              >
-                Next <ChevronRight className="h-3 w-3" />
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors"
-              >
-                {submitting ? (
-                  <><Loader2 className="h-3 w-3 animate-spin" /> Registering…</>
-                ) : (
-                  <><CheckCircle2 className="h-3 w-3" /> Create Rule</>
-                )}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Determination Wizard overlay ───────────────────────────────────────────────
-type DeterminationResult = {
-  determination_id: string;
-  rule_id?: string;
-  taxable_amount: number;
-  tax_rate_percentage: number;
-  calculated_tax_amount: number;
-  status: string;
-};
-
-function DeterminationWizard({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<DeterminationResult | null>(null);
-  const steps = [
-    { label: "Fetching jurisdiction rules…", detail: "Querying tax-rules-svc (:8125) for the active rule" },
-    { label: "Evaluating taxable base…", detail: "Applying exemptions and deductions from the transaction payload" },
-    { label: "Calculating tax amount…", detail: "Rate × taxable base → calculated_tax_amount stored in tax-determination-svc (:8126)" },
-  ];
-
-  async function run() {
-    setRunning(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/v1/tax-determinations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transaction_id: `demo-${Date.now()}`,
-          source_module: "ADMIN_CONSOLE",
-          legal_entity_id: "22222222-2222-2222-2222-222222222222",
-          jurisdiction_id: "us-fed-01",
-          tax_category: "CORPORATE_INCOME",
-          gross_amount: 100000,
-          currency: "USD",
-          effective_from: new Date().toISOString().split("T")[0],
-          evaluated_by: "admin-console",
-        }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(json?.error ?? `tax-determination-svc rejected the write (${res.status})`);
-      }
-      const raw = json?.determination ?? json?.data ?? json ?? {};
-      const detResult: DeterminationResult = {
-        determination_id: String(raw.determination_id || "det-" + Date.now().toString(36)),
-        rule_id: raw.rule_id ? String(raw.rule_id) : "rule-uk-vat-standard",
-        taxable_amount: Number(raw.taxable_amount ?? raw.gross_amount ?? 100000),
-        tax_rate_percentage: Number(raw.tax_rate_percentage ?? 20),
-        calculated_tax_amount: Number(raw.calculated_tax_amount ?? 20000),
-        status: String(raw.status || "CALCULATED"),
-      };
-      // Animate the remaining pipeline steps, then reveal the result.
-      setStep(1);
-      setTimeout(() => setStep(2), 700);
-      setTimeout(() => setResult(detResult), 1400);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Evaluation failed");
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  const isDone = result !== null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-500/20">
-              <Calculator className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-            </span>
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Evaluate Determination</h2>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{title}</h2>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="p-5 space-y-3">
-          {steps.map((s, i) => (
-            <div key={i} className={`flex items-start gap-3 rounded-lg p-3 transition-all duration-300 ${result || i < step ? "bg-emerald-50 dark:bg-emerald-500/10" :
-              i === step && running ? "bg-blue-50 border border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/30" :
-                i === step ? "bg-slate-50 border border-slate-200 dark:bg-slate-800/40" :
-                  "bg-slate-50 dark:bg-slate-800/40 opacity-50"
-              }`}>
-              <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${result || i < step ? "bg-emerald-500 text-white" :
-                i === step && running ? "bg-blue-500 text-white animate-pulse" :
-                  "bg-slate-300 text-slate-600 dark:bg-slate-700 dark:text-slate-400"
-                }`}>{result || i < step ? "✓" : i + 1}</span>
-              <div>
-                <p className={`text-xs font-semibold ${result || i < step ? "text-emerald-700 dark:text-emerald-400" : i === step ? "text-blue-700 dark:text-blue-300" : "text-slate-500"}`}>{s.label}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{s.detail}</p>
-              </div>
-            </div>
-          ))}
-
-          {result && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500 dark:text-slate-400">Determination</span>
-                <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{result.determination_id}</span>
-              </div>
-              <div className="flex justify-between text-xs mt-1.5">
-                <span className="text-slate-500 dark:text-slate-400">Rule applied</span>
-                <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{result.rule_id ?? "fallback"}</span>
-              </div>
-              <div className="flex justify-between text-xs mt-1.5">
-                <span className="text-slate-500 dark:text-slate-400">Taxable base</span>
-                <span className="font-mono font-medium text-slate-800 dark:text-slate-200">
-                  {(result.taxable_amount ?? 0).toLocaleString("en-US")} USD
-                </span>
-              </div>
-              <div className="flex justify-between text-xs mt-1.5">
-                <span className="text-slate-500 dark:text-slate-400">Rate</span>
-                <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{result.tax_rate_percentage ?? 0}%</span>
-              </div>
-              <div className="flex justify-between text-xs mt-1.5 pt-1.5 border-t border-emerald-100 dark:border-emerald-500/20">
-                <span className="font-semibold text-slate-700 dark:text-slate-300">Calculated tax</span>
-                <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-300">
-                  {(result.calculated_tax_amount ?? 0).toLocaleString("en-US")} USD
-                </span>
-              </div>
-              <p className="mt-2 text-[10px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                {result.status}
-              </p>
-            </div>
-          )}
-
-          {error && (
-            <div className="flex items-center gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-500/20 dark:bg-red-500/10">
-              <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-red-700 dark:text-red-300">{error}</p>
-            </div>
-          )}
-        </div>
-        <div className="flex justify-end border-t border-slate-100 px-5 py-3.5 dark:border-slate-800">
-          {isDone ? (
-            <button onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 transition-colors">
-              <CheckCircle2 className="h-3 w-3" /> Determination complete
-            </button>
-          ) : (
-            <button onClick={run} disabled={running} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60 transition-colors">
-              {running ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <>Run Evaluation <ChevronRight className="h-3 w-3" /></>}
-            </button>
-          )}
-        </div>
+        <div className="p-5">{children}</div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Create a tax rule through createTaxRuleAction. The jurisdiction is picked
+ * from jurisdiction-rules-svc's register by UUID; this used to offer four
+ * hardcoded alias ids that no other service recognised, so a rule created
+ * here was never found by a determination.
+ */
+function NewRuleModal({ onClose, jurisdictions }: { onClose: () => void; jurisdictions: JurisdictionOptions }) {
+  return (
+    <ModalShell title="New Tax Rule" icon={Plus} tone="bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400" onClose={onClose}>
+      <NewTaxRuleForm jurisdictions={jurisdictions} />
+    </ModalShell>
+  );
+}
+
+/**
+ * Evaluate one supply in tax-determination-svc through
+ * evaluateDeterminationAction. Every input is the reader's; the jurisdiction and
+ * place of supply are register UUIDs, which the service validates. The rule,
+ * rate and amounts shown are the service's response.
+ */
+function DeterminationWizard({ onClose, jurisdictions }: { onClose: () => void; jurisdictions: JurisdictionOptions }) {
+  return (
+    <ModalShell title="Evaluate Determination" icon={Calculator} tone="bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400" onClose={onClose}>
+      <DeterminationForm jurisdictions={jurisdictions} />
+    </ModalShell>
   );
 }
 
@@ -413,69 +88,92 @@ type FilingResult = {
   validation_status: string;
   filing_type: string;
   period_key: string;
+  block_reasons?: string;
 };
 
+/**
+ * Create a filing draft, validate it, then finalize it.
+ *
+ * Every value is the reader's. This used to create a fixed HMRC VAT100 draft
+ * for 2026-Q2 (hardcoded entity, figures and evidence reference) and finalize
+ * it straight away; the service refuses to finalize an unvalidated draft, so
+ * it always failed. Validation consults evidence-requirements-svc and may
+ * leave the draft BLOCKED, which is reported rather than finalized.
+ */
 function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
   const [result, setResult] = useState<FilingResult | null>(null);
+  const [form, setForm] = useState({
+    jurisdiction_id: "",
+    filing_type: "",
+    period_key: "",
+    due_date: "",
+    payload_data: "",
+    evidence_manifest_ref: "",
+  });
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+  const complete = ["jurisdiction_id", "filing_type", "period_key", "due_date", "payload_data"].every(
+    (k) => form[k as keyof typeof form].trim() !== "",
+  );
+
+  async function post(path: string, body: unknown) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? "Your session has expired — sign in again."
+          : json?.error ?? `filing-preparation-svc refused the request (${res.status})`,
+      );
+    }
+    return (json?.draft ?? json?.data ?? json ?? {}) as Record<string, unknown>;
+  }
 
   async function assemble() {
+    try {
+      JSON.parse(form.payload_data);
+    } catch {
+      setError("Filing payload must be valid JSON.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      // 1. Create the draft in filing-preparation-svc
-      const createRes = await fetch("/api/v1/filing-preparation/drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          legal_entity_id: "22222222-2222-2222-2222-222222222222",
-          jurisdiction_id: "uk-gov-01",
-          filing_type: "VAT100_MTD",
-          period_key: "2026-Q2",
-          due_date: "2026-08-07",
-          payload_data: JSON.stringify({ box1: 370000, box5: 186000 }),
-          evidence_manifest_ref: "ev-manifest-2026-q2",
-          notes: "Assembled from the Tax Governance console.",
-        }),
+      const draft = await post("/api/v1/filing-preparation/drafts", {
+        ...form,
+        ...(form.evidence_manifest_ref ? {} : { evidence_manifest_ref: undefined }),
       });
-      const draftJson = await createRes.json().catch(() => null);
-      if (!createRes.ok) {
-        throw new Error(draftJson?.error ?? `filing-preparation-svc rejected the write (${createRes.status})`);
-      }
-      const rawDraft = draftJson?.draft ?? draftJson?.data ?? draftJson ?? {};
-      const draftId = String(rawDraft.draft_id || "draft-" + Date.now().toString(36));
-
-      // 2. Mark it ready for authority submission
-      const finalizeRes = await fetch(`/api/v1/filing-preparation/drafts/${draftId}/finalize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: "Ready for authority submission." }),
-      });
-      const finalized = await finalizeRes.json().catch(() => null);
-      if (!finalizeRes.ok) {
-        throw new Error(finalized?.error ?? `finalize rejected (${finalizeRes.status})`);
-      }
-      const rawFinal = finalized?.draft ?? finalized?.data ?? finalized ?? {};
-
+      const draftId = String(draft.draft_id ?? "");
+      if (!draftId) throw new Error("filing-preparation-svc returned no draft id.");
+      const validated = await post(`/api/v1/filing-preparation/drafts/${encodeURIComponent(draftId)}/validate`, {});
+      const finalRecord =
+        validated.validation_status === "PREPARED"
+          ? await post(`/api/v1/filing-preparation/drafts/${encodeURIComponent(draftId)}/finalize`, {})
+          : validated;
       setResult({
-        draft_id: String(rawFinal.draft_id || draftId),
-        validation_status: String(rawFinal.validation_status || "FINALIZED"),
-        filing_type: String(rawFinal.filing_type || "VAT100_MTD"),
-        period_key: String(rawFinal.period_key || "2026-Q2"),
+        draft_id: draftId,
+        validation_status: String(finalRecord.validation_status ?? ""),
+        filing_type: form.filing_type,
+        period_key: form.period_key,
+        block_reasons: finalRecord.block_reasons ? String(finalRecord.block_reasons) : undefined,
       });
-      setConfirmed(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Filing assembly failed");
-      setConfirmed(false);
     }
     setSubmitting(false);
   }
 
+  const ready = result?.validation_status === "READY_FOR_SUBMISSION";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 overflow-hidden">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-500/20">
@@ -487,40 +185,47 @@ function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
             <X className="h-4 w-4" />
           </button>
         </div>
-        {confirmed && result ? (
+        {result ? (
           <div className="flex flex-col items-center gap-3 p-8 text-center">
-            <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-            <p className="font-semibold text-slate-800 dark:text-slate-200">Filing assembly complete</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {result.filing_type} · {result.period_key} (draft {result.draft_id}) finalized and ready for
-              authority submission in filing-preparation-svc (:8130).
+            {ready ? <CheckCircle2 className="h-10 w-10 text-emerald-500" /> : <AlertCircle className="h-10 w-10 text-amber-500" />}
+            <p className="font-semibold text-slate-800 dark:text-slate-200">
+              {ready ? "Ready for submission" : "Draft created but not finalized"}
             </p>
-            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
-              {result.validation_status}
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {result.filing_type} · {result.period_key} (draft {result.draft_id}).{" "}
+              {ready
+                ? "Nothing has been sent to an authority."
+                : result.block_reasons ?? "Validation did not pass, so it was not finalized."}
+            </p>
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-mono font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {result.validation_status || "—"}
             </span>
-            <button onClick={onClose} className="mt-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-700 transition-colors">Done</button>
+            <button onClick={onClose} className="mt-2 rounded-lg bg-slate-800 px-4 py-2 text-xs font-medium text-white hover:bg-slate-700 transition-colors">Done</button>
           </div>
         ) : (
           <>
             <div className="p-5 space-y-3">
-              <div className="rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 p-3 flex gap-2.5">
-                <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                <p className="text-xs text-amber-800 dark:text-amber-300">
-                  This will create and finalize the HMRC MTD VAT100 draft for period <strong>2026-Q2</strong> in filing-preparation-svc, marking it ready for authority submission.
-                </p>
+              <div className="grid grid-cols-2 gap-3">
+                {([
+                  ["jurisdiction_id", "Jurisdiction ID", "text"],
+                  ["filing_type", "Filing type", "text"],
+                  ["period_key", "Period", "text"],
+                  ["due_date", "Due date", "date"],
+                ] as const).map(([k, label, type]) => (
+                  <div key={k}>
+                    <label htmlFor={`fil-${k}`} className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">{label}</label>
+                    <input id={`fil-${k}`} type={type} value={form[k]} onChange={set(k)} className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                  </div>
+                ))}
               </div>
-              {[
-                ["Filing Type", "VAT100_MTD"],
-                ["Period", "2026-Q2"],
-                ["Due Date", "2026-08-07"],
-                ["Service", "filing-preparation-svc (:8130)"],
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between text-xs">
-                  <span className="text-slate-500 dark:text-slate-400">{k}</span>
-                  <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{v}</span>
-                </div>
-              ))}
-
+              <div>
+                <label htmlFor="fil-payload" className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">Filing payload (JSON)</label>
+                <textarea id="fil-payload" rows={4} value={form.payload_data} onChange={set("payload_data")} className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700 font-mono" />
+              </div>
+              <div>
+                <label htmlFor="fil-evidence" className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">Evidence manifest reference (optional)</label>
+                <input id="fil-evidence" type="text" value={form.evidence_manifest_ref} onChange={set("evidence_manifest_ref")} className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+              </div>
               {error && (
                 <div className="flex items-center gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-500/20 dark:bg-red-500/10">
                   <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
@@ -532,10 +237,10 @@ function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
               <button onClick={onClose} disabled={submitting} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 disabled:opacity-40 transition-colors">Cancel</button>
               <button
                 onClick={assemble}
-                disabled={submitting}
+                disabled={submitting || !complete}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-60 transition-colors"
               >
-                {submitting ? <><Loader2 className="h-3 w-3 animate-spin" /> Assembling…</> : <><FileCheck className="h-3 w-3" /> Confirm Assembly</>}
+                {submitting ? <><Loader2 className="h-3 w-3 animate-spin" /> Working…</> : <><FileCheck className="h-3 w-3" /> Create, validate, finalize</>}
               </button>
             </div>
           </>
@@ -679,14 +384,14 @@ function ServiceHealthStrip() {
 // ── Main component ─────────────────────────────────────────────────────────────
 type Modal = "new-rule" | "determination" | "filing" | null;
 
-export function TaxActionHeader() {
+export function TaxActionHeader({ jurisdictions }: { jurisdictions: JurisdictionOptions }) {
   const [modal, setModal] = useState<Modal>(null);
 
   return (
     <>
       {/* Overlay portals */}
-      {modal === "new-rule" && <NewRuleModal onClose={() => setModal(null)} />}
-      {modal === "determination" && <DeterminationWizard onClose={() => setModal(null)} />}
+      {modal === "new-rule" && <NewRuleModal jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
+      {modal === "determination" && <DeterminationWizard jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
       {modal === "filing" && <FilingAssemblyPanel onClose={() => setModal(null)} />}
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
@@ -729,32 +434,28 @@ export function TaxActionHeader() {
               onClick={async () => {
                 try {
                   const res = await fetch("/api/v1/tax-rules");
-                  const json = await res.json().catch(() => ({ tax_rules: [] }));
+                  const json = await res.json().catch(() => ({}));
+                  // A failed read must not export as an empty or partial register.
+                  if (!res.ok || !Array.isArray(json.tax_rules)) {
+                    throw new Error(res.status === 401 ? "session expired" : json.error ?? `HTTP ${res.status}`);
+                  }
                   const rules: Array<{ rule_id: string; category: string; jurisdiction_id: string; status: string; tax_rate_percentage: number; effective_from: string }> = json.tax_rules ?? [];
-                  const JUR_MAP: Record<string, string> = {
-                    "uk-gov-01": "UK (HMRC)", "us-fed-01": "US (IRS)",
-                    "sg-iras-01": "SG (IRAS)", "de-bzst-01": "DE (BZSt)",
-                  };
-                  const AUTH_MAP: Record<string, string> = {
-                    "uk-gov-01": "HMRC", "us-fed-01": "IRS",
-                    "sg-iras-01": "IRAS", "de-bzst-01": "BZSt",
-                  };
+                  // Jurisdictions are named from jurisdiction-rules-svc's register,
+                  // matched by id; a rule whose id it does not list shows the id.
+                  const byId = new Map(jurisdictions.ok ? jurisdictions.items.map((j) => [j.id, `${j.code} — ${j.name}`]) : []);
                   const rows = rules.map((r) => ({
                     rule_id: r.rule_id,
                     category: r.category,
-                    jurisdiction: JUR_MAP[r.jurisdiction_id] ?? r.jurisdiction_id,
-                    authority: AUTH_MAP[r.jurisdiction_id] ?? r.jurisdiction_id,
+                    jurisdiction: byId.get(r.jurisdiction_id) ?? r.jurisdiction_id,
                     status: r.status,
                     rate: `${r.tax_rate_percentage}%`,
                     effective: r.effective_from?.split("T")[0] ?? "",
                   }));
                   exportToCSV("tax_governance_report.csv", rows.length > 0 ? rows : [
-                    { rule_id: "(no rules found)", category: "", jurisdiction: "", authority: "", status: "", rate: "", effective: "" },
+                    { rule_id: "(no rules found)", category: "", jurisdiction: "", status: "", rate: "", effective: "" },
                   ]);
-                } catch {
-                  exportToCSV("tax_governance_report.csv", [
-                    { rule_id: "(export failed — service unreachable)", category: "", jurisdiction: "", authority: "", status: "", rate: "", effective: "" },
-                  ]);
+                } catch (err) {
+                  window.alert(`Export failed: tax-rules-svc could not be read (${err instanceof Error ? err.message : "unknown error"}).`);
                 }
               }}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all"

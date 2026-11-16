@@ -41,21 +41,23 @@ export async function createVatReturnAction(
     return { status: "error", message: "Session expired — please log in again." };
   }
 
-  const legalEntityId = String(formData.get("legal_entity_id") ?? identity.legalEntityId).trim();
-  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "GB").trim();
-  const taxRegistrationNumber = String(formData.get("tax_registration_number") ?? "GB-987654321").trim();
+  // The legal entity is the session's. It used to be a form field prefilled
+  // with a demo entity, which let a return be raised for any entity.
+  const legalEntityId = identity.legalEntityId;
+  const jurisdictionId = String(formData.get("jurisdiction_id") ?? "").trim();
+  const taxRegistrationNumber = String(formData.get("tax_registration_number") ?? "").trim();
   const taxPeriod = String(formData.get("tax_period") ?? "").trim();
   const totalSalesStr = String(formData.get("total_sales_amount") ?? "").trim();
   const totalPurchasesStr = String(formData.get("total_purchase_amount") ?? "").trim();
   const outputTaxStr = String(formData.get("output_tax_amount") ?? "").trim();
   const inputTaxStr = String(formData.get("input_tax_amount") ?? "").trim();
-  const currency = String(formData.get("currency") ?? "GBP").trim().toUpperCase();
+  const currency = String(formData.get("currency") ?? "").trim().toUpperCase();
   const effectiveFrom = String(formData.get("effective_from") ?? "").trim();
 
-  if (!taxPeriod || !totalSalesStr || !totalPurchasesStr || !outputTaxStr || !inputTaxStr || !effectiveFrom) {
+  if (!jurisdictionId || !taxRegistrationNumber || !currency || !taxPeriod || !totalSalesStr || !totalPurchasesStr || !outputTaxStr || !inputTaxStr || !effectiveFrom) {
     return {
       status: "error",
-      message: "Tax period, total sales, purchases, output tax, input tax, and effective date are all required.",
+      message: "Jurisdiction, VAT registration number, currency, tax period, total sales, purchases, output tax, input tax and effective date are all required.",
     };
   }
 
@@ -113,16 +115,22 @@ export async function fileVatReturnAction(
   }
 
   const returnId = String(formData.get("return_id") ?? "").trim();
-  const filedBy = String(formData.get("filed_by") ?? "Lingaraj (Super Admin)").trim();
+  // The filer is the signed-in principal; it used to be a free-text name
+  // prefilled with the demo administrator's name, stored by the service as given.
+  // The filing gate requires evidence references (X-Evidence-Refs).
+  const evidenceRefs = String(formData.get("evidence_refs") ?? "")
+    .split(/[\s,]+/)
+    .map((r) => r.trim())
+    .filter(Boolean);
 
   if (!returnId) {
-    return { status: "error", message: "Return ID is required to file with the tax authority." };
+    return { status: "error", message: "Return ID is required to file the return." };
   }
-  if (!filedBy) {
-    return { status: "error", message: "Signatory (Filed By) name is required." };
+  if (evidenceRefs.length === 0) {
+    return { status: "error", message: "At least one evidence reference is required to file a return." };
   }
 
-  const payload: FileVATReturnInput = { filed_by: filedBy };
+  const payload: FileVATReturnInput = { evidence_refs: evidenceRefs };
   const res = await fileVATReturn(returnId, payload, identity);
 
   if (!res.ok) {
@@ -135,7 +143,7 @@ export async function fileVatReturnAction(
   revalidatePath("/admin/tax");
   return {
     status: "success",
-    message: `VAT Return ${returnId} officially FILED and locked with statutory tax gateway.`,
+    message: `VAT Return ${returnId} recorded as FILED in vat-gst-svc. Nothing is sent to a tax authority from here.`,
     returnId: res.data.return_id,
     vatReturn: res.data,
   };

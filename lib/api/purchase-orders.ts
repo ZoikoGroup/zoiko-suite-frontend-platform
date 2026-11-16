@@ -22,7 +22,7 @@ export type PurchaseOrder = {
   purchase_request_id?: string | null;
   vendor_profile_id?: string | null;
   po_number: string;
-  po_status: "ISSUED" | "CLOSED";
+  po_status: PurchaseOrderStatus;
   total_amount: number;
   currency_code: string;
   version: number;
@@ -34,7 +34,11 @@ export type PurchaseOrder = {
   closed_at?: string | null;
 };
 
-export type OrderStatusFilter = "ISSUED" | "CLOSED";
+/** purchase-order-svc's states (domain/types.go). Amend and close apply only to ISSUED. */
+export type PurchaseOrderStatus =
+  | "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "ISSUED" | "ON_HOLD" | "CANCELLED" | "CLOSED";
+
+export type OrderStatusFilter = PurchaseOrderStatus;
 
 export type ListOrdersInput = {
   identity: Identity & { tenantId: string };
@@ -214,6 +218,9 @@ export function summarise(orders: PurchaseOrder[]): OrderStats {
       closed += 1;
       continue;
     }
+    // Only an issued order (or one on hold) commits spend; a draft, pending,
+    // approved-not-issued or cancelled order used to be counted too.
+    if (order.po_status !== "ISSUED" && order.po_status !== "ON_HOLD") continue;
     issued += 1;
     openCommitmentByCurrency[order.currency_code] =
       (openCommitmentByCurrency[order.currency_code] ?? 0) + order.total_amount;

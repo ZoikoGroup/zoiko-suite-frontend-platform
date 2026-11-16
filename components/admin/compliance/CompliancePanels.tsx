@@ -11,7 +11,7 @@ export async function FilingTrackerPanel() {
 
   const identity = { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId };
   const res = await listFilingRequirements(identity);
-  if (!res.ok && res.error.kind === "unreachable") return <PanelEmptyState icon={CloudOff} tone="warning" label="filing-tracker-svc unavailable" hint={res.error.message} />;
+  if (!res.ok) return <PanelEmptyState icon={CloudOff} tone="warning" label="filing-tracker-svc unavailable" hint={res.error.message} />;
 
   const requirements: FilingRequirement[] = res.ok ? res.data : [];
 
@@ -55,7 +55,7 @@ export async function StatusAndEscalationPanel() {
   const identity = { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId };
   const [evalRes, excRes] = await Promise.all([listComplianceEvaluations(identity), listEscalatedExceptions(identity)]);
 
-  if (!evalRes.ok && evalRes.error.kind === "unreachable") return <PanelEmptyState icon={CloudOff} tone="warning" label="compliance-status-svc unavailable" hint={evalRes.error.message} />;
+  if (!evalRes.ok) return <PanelEmptyState icon={CloudOff} tone="warning" label="compliance-status-svc unavailable" hint={evalRes.error.message} />;
 
   const evaluations: ComplianceEvaluation[] = evalRes.ok ? evalRes.data : [];
   const exceptions: EscalatedException[] = excRes.ok ? excRes.data : [];
@@ -99,7 +99,9 @@ export async function StatusAndEscalationPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Escalated Exceptions ({exceptions.length})
         </h3>
-        {exceptions.length === 0 ? (
+        {!excRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="exception-escalation-svc could not be read" hint={excRes.error.message} />
+        ) : exceptions.length === 0 ? (
           <PanelEmptyState icon={AlertTriangle} label="No escalated exceptions open" hint="Exceptions in exception-escalation-svc will appear here." />
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">

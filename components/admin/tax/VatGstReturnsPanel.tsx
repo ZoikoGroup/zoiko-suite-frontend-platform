@@ -28,7 +28,7 @@ export async function VatGstReturnsPanel() {
 
   const result = await listVATReturns(identity);
 
-  if (!result.ok && result.error.kind === "unreachable") {
+  if (!result.ok) {
     return (
       <PanelEmptyState
         icon={CloudOff}

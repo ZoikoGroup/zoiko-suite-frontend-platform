@@ -8,7 +8,6 @@ type Step = {
   icon: React.ElementType;
   title: string;
   service: string;
-  port: string;
   detail: string;
 };
 
@@ -18,7 +17,6 @@ const STEPS: Step[] = [
     icon: AlertTriangle,
     title: "Anomaly Detection",
     service: "anomaly-detection-svc",
-    port: ":8160",
     detail:
       "Monitors transaction streams, journal entries, and compliance events for statistical anomalies. Flags threshold breaches and pattern deviations for human review — never auto-remediates.",
   },
@@ -27,25 +25,22 @@ const STEPS: Step[] = [
     icon: TrendingUp,
     title: "Forecasting",
     service: "forecasting-svc",
-    port: ":8161",
     detail:
-      "Runs domain-scoped predictive models (financial, compliance, tax liability). Each forecast has a model type, period, and accuracy score. Forecasts are read-only outputs — they advise, they don't mutate.",
+      "Projects a domain series (financial, payroll, cash flow, workforce, tax liability) from historical data. Each forecast records its algorithm, horizon and confidence level, and moves through review, approval and publication. Forecasts advise; they don't mutate.",
   },
   {
     id: "risk",
     icon: ShieldCheck,
     title: "Compliance Risk Scoring",
     service: "compliance-risk-scoring-svc",
-    port: ":8162",
     detail:
-      "Evaluates each legal entity's composite risk posture from evidence, exception, and filing signals. Scores are point-in-time snapshots with a validity window — not live dashboards.",
+      "Evaluates each legal entity's composite risk posture from evidence, exception, and filing signals. Scores are point-in-time evaluations against versioned thresholds; high tiers require human review.",
   },
   {
     id: "recon",
     icon: GitMerge,
     title: "Reconciliation Intelligence",
     service: "reconciliation-intelligence-svc",
-    port: ":8163",
     detail:
       "Matches records between source systems (general ledger ↔ bank feed, payroll ↔ HR). Unmatched items are exceptions, not errors — the human decides how to resolve them.",
   },
@@ -54,16 +49,14 @@ const STEPS: Step[] = [
     icon: BarChart2,
     title: "Reporting Orchestration",
     service: "reporting-orchestration-svc",
-    port: ":8164",
     detail:
-      "Queues and distributes multi-format reports (PDF, JSON, XBRL) to internal and regulatory destinations. Reports are generated from frozen snapshots, not live data.",
+      "Holds report definitions (type, output format, data sources) through draft, validation and activation. Report runs are recorded but not yet implemented: no report data is produced.",
   },
   {
     id: "decision",
     icon: Lightbulb,
     title: "Decision Support",
     service: "decision-support-svc",
-    port: ":8165",
     detail:
       "Surfaces AI-assisted recommendations for compliance actions, exception resolution, and approval decisions. Recommendations are advisory — every action still requires a human approval step.",
   },
@@ -72,9 +65,8 @@ const STEPS: Step[] = [
     icon: ArrowLeftRight,
     title: "Migration Integrity",
     service: "migration-integrity-svc",
-    port: ":8166",
     detail:
-      "Validates data migrations between legacy and target services by comparing record counts, checksums, and field mappings. A migration job completes only when validated_count equals record_count.",
+      "Validates migration batches against required fields and control totals, quarantines invalid records, and scores integrity against a threshold. A job with blockers or a score below threshold cannot be signed off.",
   },
 ];
 
@@ -105,7 +97,6 @@ export function IntelligenceProcessTimeline() {
               >
                 <step.icon className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>{step.title}</span>
-                <code className="text-[10px] font-mono opacity-60">{step.port}</code>
               </button>
               {i < STEPS.length - 1 && (
                 <div className="h-px w-4 bg-slate-200 dark:bg-slate-700" aria-hidden="true" />
@@ -121,7 +112,7 @@ export function IntelligenceProcessTimeline() {
               <p className="text-xs font-semibold text-violet-800 dark:text-violet-200">{active.title}</p>
               <p className="mt-1 text-xs text-violet-700 dark:text-violet-300 leading-relaxed">{active.detail}</p>
               <code className="mt-1 block text-[10px] text-violet-500 dark:text-violet-400">
-                {active.service} {active.port}
+                {active.service}
               </code>
             </div>
             <button

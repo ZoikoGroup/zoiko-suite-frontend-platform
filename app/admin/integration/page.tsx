@@ -15,7 +15,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Integration & Extensibility | Zoiko Suite",
-  description: "Cross-system connectivity, Open Banking feeds, HRIS synchronization, eSignature routing, and real-time market data ingestion",
+  description: "Bridge endpoints, bank connections, HRIS integrations, signature envelopes and data-feed subscriptions. No live provider adapter is configured.",
 };
 
 function PanelSkeleton({ rows = 3 }: { rows?: number }) {
@@ -32,13 +32,11 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
-  ports,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle: string;
-  ports: string;
   children: React.ReactNode;
 }) {
   return (
@@ -53,9 +51,6 @@ function SectionCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          :{ports}
-        </span>
       </div>
       <div className="p-5">{children}</div>
     </section>
@@ -63,11 +58,11 @@ function SectionCard({
 }
 
 const CORE_SERVICES = [
-  "connectivity-api-bridge-svc :8170",
-  "banking-connector-svc :8171",
-  "hris-connector-svc :8172",
-  "esignature-integration-svc :8174",
-  "external-data-feed-svc :8175",
+  "connectivity-api-bridge-svc",
+  "banking-connector-svc",
+  "hris-connector-svc",
+  "esignature-integration-svc",
+  "external-data-feed-svc",
 ];
 
 export default async function IntegrationPage() {
@@ -118,8 +113,7 @@ export default async function IntegrationPage() {
         <SectionCard
           icon={Network}
           title="Connectivity API Bridge"
-          subtitle="connectivity-api-bridge-svc — protocol transformations (REST, GraphQL, gRPC, Webhooks)"
-          ports="8170"
+          subtitle="connectivity-api-bridge-svc — registered bridge endpoints (no outbound call is made from here)"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <BridgeConnectorPanel />
@@ -129,8 +123,7 @@ export default async function IntegrationPage() {
         <SectionCard
           icon={Building2}
           title="Open Banking & SWIFT Feeds"
-          subtitle="banking-connector-svc — bank account verification, transactions, and automated statement sync"
-          ports="8171"
+          subtitle="banking-connector-svc — registered bank connections (no bank adapter is configured)"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <BankingConnectorPanel />
@@ -142,8 +135,7 @@ export default async function IntegrationPage() {
         <SectionCard
           icon={Users2}
           title="HRIS Directory Sync"
-          subtitle="hris-connector-svc — Workday, BambooHR, and Rippling worker sync"
-          ports="8172"
+          subtitle="hris-connector-svc — registered HRIS integrations (sync needs an HRIS adapter)"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <HrisConnectorPanel />
@@ -153,8 +145,7 @@ export default async function IntegrationPage() {
         <SectionCard
           icon={FileSignature}
           title="eSignature Orchestration"
-          subtitle="esignature-integration-svc — DocuSign / AdobeSign multi-party signing"
-          ports="8174"
+          subtitle="esignature-integration-svc — signature profiles and envelopes (sending needs a provider adapter)"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <EsignaturePanel />
@@ -164,8 +155,7 @@ export default async function IntegrationPage() {
         <SectionCard
           icon={Radio}
           title="External Market Feeds"
-          subtitle="external-data-feed-svc — live FX rates and sanctions lists"
-          ports="8175"
+          subtitle="external-data-feed-svc — feed subscriptions (no market-data provider is connected)"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ExternalDataFeedPanel />

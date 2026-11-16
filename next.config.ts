@@ -30,6 +30,12 @@ const nextConfig: NextConfig = {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
 
+  // /admin/integrations was a static page of hardcoded connector cards; the
+  // live register is /admin/integration.
+  async redirects() {
+    return [{ source: "/admin/integrations", destination: "/admin/integration", permanent: false }];
+  },
+
   // Allow requests from local network IPs during development
   // (fixes "Blocked cross-origin request" warnings)
   allowedDevOrigins: ["127.0.0.1", "192.168.1.3"],

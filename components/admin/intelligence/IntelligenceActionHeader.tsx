@@ -1,13 +1,15 @@
 import { Server } from "lucide-react";
 
+// Names only: where each service is reached depends on the deployment
+// (gateway prefix or ZOIKO_*_URL), so a fixed port here would be wrong somewhere.
 const SERVICES = [
-  { name: "anomaly-detection-svc", port: "8160" },
-  { name: "forecasting-svc", port: "8161" },
-  { name: "compliance-risk-scoring-svc", port: "8162" },
-  { name: "reconciliation-intelligence-svc", port: "8163" },
-  { name: "reporting-orchestration-svc", port: "8164" },
-  { name: "decision-support-svc", port: "8165" },
-  { name: "migration-integrity-svc", port: "8166" },
+  { name: "anomaly-detection-svc" },
+  { name: "forecasting-svc" },
+  { name: "compliance-risk-scoring-svc" },
+  { name: "reconciliation-intelligence-svc" },
+  { name: "reporting-orchestration-svc" },
+  { name: "decision-support-svc" },
+  { name: "migration-integrity-svc" },
 ];
 
 export function IntelligenceActionHeader() {
@@ -28,7 +30,7 @@ export function IntelligenceActionHeader() {
                 className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-mono text-slate-600 dark:bg-slate-800 dark:text-slate-400"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
-                {svc.name} :{svc.port}
+                {svc.name}
               </span>
             ))}
           </div>

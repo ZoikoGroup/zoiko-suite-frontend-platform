@@ -12,8 +12,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-// Line endings normalised: a Windows checkout (core.autocrlf) has CRLF, and
-// the markers below are matched with a bare LF.
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
 
 const DEAD = [

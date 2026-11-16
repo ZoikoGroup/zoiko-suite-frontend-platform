@@ -3,14 +3,21 @@ import { AlertTriangle, CloudOff, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listObligations, type Obligation } from "@/lib/api/legal";
+import { CreateObligationForm } from "./LegalCreateForms";
 
 const STATUS_COLORS: Record<string, string> = {
-  PENDING: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
+  PLANNED: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  ACTIVE: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
+  DUE: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300",
   IN_PROGRESS: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
-  FULFILLED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+  SATISFIED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
   BREACHED: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300",
+  DISPUTED: "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300",
   WAIVED: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400",
 };
+
+/** Obligations still to be met. SATISFIED, WAIVED, SUPERSEDED and BREACHED are settled one way or another. */
+const OPEN_STATUSES = new Set(["CANDIDATE", "PLANNED", "ACTIVE", "DUE", "IN_PROGRESS", "DISPUTED"]);
 
 const RISK_COLORS: Record<string, string> = {
   LOW: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400",
@@ -53,26 +60,31 @@ export async function ObligationTrackingPanel() {
 
   const result = await listObligations(identity);
 
-  if (!result.ok && result.error.kind === "unreachable") {
+  if (!result.ok) {
     return (
-      <PanelEmptyState
-        icon={CloudOff}
-        tone="warning"
-        label="obligation-tracking-svc unavailable"
-        hint={result.error.message}
-      />
+      <div className="space-y-5">
+        <CreateObligationForm />
+        <PanelEmptyState
+          icon={CloudOff}
+          tone="warning"
+          label="obligation-tracking-svc could not be read"
+          hint={result.error.message}
+        />
+      </div>
     );
   }
 
   const obligations: Obligation[] = result.ok && Array.isArray(result.data) ? result.data : [];
 
   const breached = obligations.filter((o) => o.status === "BREACHED");
-  const pending = obligations.filter((o) => o.status === "PENDING" || o.status === "IN_PROGRESS");
-  const dueSoon = pending.filter((o) => isDueSoon(o.due_date));
-  const overdue = pending.filter((o) => isOverdue(o.due_date) && o.status !== "FULFILLED");
+  const open = obligations.filter((o) => OPEN_STATUSES.has(o.status));
+  const dueSoon = open.filter((o) => isDueSoon(o.due_date));
+  const overdue = open.filter((o) => isOverdue(o.due_date));
 
   return (
     <div className="space-y-5">
+      <CreateObligationForm />
+
       {/* Summary chips */}
       {obligations.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -101,11 +113,12 @@ export async function ObligationTrackingPanel() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {obligations.map((o) => {
-                const over = o.status !== "FULFILLED" && isOverdue(o.due_date);
+                const over = OPEN_STATUSES.has(o.status) && isOverdue(o.due_date);
                 return (
                   <tr key={o.obligation_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200 max-w-[220px]">
                       <span className="block truncate">{o.title}</span>
+                      <span className="block font-mono text-[10px] text-slate-400 dark:text-slate-500">{o.obligation_id}</span>
                       {o.assigned_to && (
                         <span className="text-[11px] text-slate-400 dark:text-slate-500">{o.assigned_to}</span>
                       )}
@@ -113,14 +126,14 @@ export async function ObligationTrackingPanel() {
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
                       {(() => {
                         const rawObj = o as unknown as Record<string, unknown>;
-                        const typeStr = o.obligation_type || (typeof rawObj.category === "string" ? rawObj.category : "CONTRACTUAL");
-                        return typeStr.replace(/_/g, " ");
+                        const typeStr = o.obligation_type || (typeof rawObj.category === "string" ? rawObj.category : "");
+                        return typeStr ? typeStr.replace(/_/g, " ") : "—";
                       })()}
                     </td>
                     <td className="px-4 py-3">
                       {(() => {
                         const rawObj = o as unknown as Record<string, unknown>;
-                        const risk = o.risk_level || (typeof rawObj.priority === "string" ? rawObj.priority : "MEDIUM");
+                        const risk = o.risk_level || (typeof rawObj.priority === "string" ? rawObj.priority : "—");
                         return (
                           <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${RISK_COLORS[risk as keyof typeof RISK_COLORS] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`}>
                             {risk}
@@ -136,7 +149,7 @@ export async function ObligationTrackingPanel() {
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[o.status] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`}>
-                        {(o.status || "PENDING").replace(/_/g, " ")}
+                        {(o.status || "—").replace(/_/g, " ")}
                       </span>
                     </td>
                   </tr>
