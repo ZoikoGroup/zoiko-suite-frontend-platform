@@ -17,7 +17,8 @@ import { listPurchaseOrders as listVerifiedPurchaseOrders } from "./purchase-ord
 
 // The service only has two statuses — ISSUED and CLOSED. The other three were
 // never reachable; they came from the same imagined API as the field names below.
-export type PurchaseOrderStatus = "ISSUED" | "CLOSED";
+export type { PurchaseOrderStatus } from "./purchase-orders";
+import type { PurchaseOrderStatus } from "./purchase-orders";
 
 export type PurchaseOrder = {
   po_id: string;

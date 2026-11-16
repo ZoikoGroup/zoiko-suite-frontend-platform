@@ -21,8 +21,9 @@ import {
   createWithholdingObligation,
   createFilingDraft,
   registerTaxAuthorityInterface,
-  testTaxAuthorityConnection,
+  getTaxAuthorityHealth,
   finalizeFilingDraft,
+  validateFilingDraft,
 } from "@/lib/api/tax";
 
 import {
@@ -30,6 +31,7 @@ import {
   listClauses,
   listObligations,
   listBoardMeetings,
+  listBoardResolutions,
   listCorporateActions,
   listCounterparties,
   createClause,
@@ -37,6 +39,7 @@ import {
   createCorporateAction,
 } from "@/lib/api/legal";
 import { draftContract } from "@/lib/api/contracts";
+
 
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
 import { issuePurchaseOrder } from "@/lib/api/purchase-orders";
@@ -59,31 +62,33 @@ import { listDelegations, getDelegation } from "@/lib/api/delegations";
 import { listLeases, listApplicableSecretPolicyVersions, listSecretAudit } from "@/lib/api/secret-vault";
 import {
   listMtlsCertificates,
-  listSiemEvents,
+  listSiemEventsForEntity,
   listCartaAssessments,
   evaluateCartaAccess,
   listKmsKeys,
   rotateKmsKey,
+  type AccessContext,
 } from "@/lib/api/security-trust";
 import {
   createAIRun,
   setActionRiskClassification,
   registerModelProvider,
+  listRiskClassifications,
+  listModelProviders,
 } from "@/lib/api/ai-governance";
 import {
   listAnomalies,
   listForecasts,
   listRiskScores,
   listReconciliations,
-  listReports,
+  listReportDefinitions,
   listRecommendations,
   listMigrationJobs as listIntelligenceMigrationJobs,
 } from "@/lib/api/intelligence";
 import {
-  listBridgeConnections,
+  listBridges,
   listBankConnections,
-  triggerBankSync,
-  listHrisConnections,
+  listHrisIntegrations,
   triggerHrisSync,
   listEsignatureEnvelopes,
   listExternalDataFeeds,
@@ -107,339 +112,271 @@ async function resolveIdentity(req: NextRequest): Promise<Required<CallerIdentit
   } as Required<CallerIdentity>;
 }
 
+// A failed read is answered as a failure with the service's own status, never as
+// an empty list: an empty list tells the page there is nothing, when the truth is
+// that the console could not look.
+function readFailed(error: { kind: string; status?: number; message: string }) {
+  return NextResponse.json({ error: error.kind, message: error.message }, { status: error.status ?? 502 });
+}
+
 const UNAUTHENTICATED = () =>
   NextResponse.json({ error: "unauthenticated", message: "Sign in to use this API." }, { status: 401 });
+
+/**
+ * A list read under `key`, or the upstream failure with its status.
+ *
+ * The older mappings above answer { key: [] } with 200 when the service fails,
+ * so an outage reads as an empty register. The mappings that use this helper
+ * report the failure instead; `page_limit` says when the list is one page.
+ */
+function listResponse<T>(key: string, res: ApiResult<T[]>, pageLimit: number | null = null) {
+  if (res.ok) return NextResponse.json({ [key]: res.data, page_limit: pageLimit });
+  return NextResponse.json(
+    { error: res.error.message, kind: res.error.kind },
+    { status: res.error.kind === "http" && res.error.status ? res.error.status : 502 },
+  );
+}
+
+/** A 400 naming the required body fields that are absent or empty, or null. */
+function missingFields(fields: Record<string, unknown>) {
+  const missing = Object.entries(fields)
+    .filter(([, v]) => v === undefined || v === null || v === "")
+    .map(([k]) => k);
+  return missing.length
+    ? NextResponse.json({ error: "missing_fields", fields: missing }, { status: 400 })
+    : null;
+}
+
+/** Page size asked of the services whose lists are bounded; see page_limit. */
+const LIST_PAGE = 200;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const endpoint = path.join("/");
   const identity = await resolveIdentity(req);
   if (!identity) return UNAUTHENTICATED();
+  const status = req.nextUrl.searchParams.get("status") ?? undefined;
 
   // ── Tax Domain ─────────────────────────────────────────────────────────────
   if (endpoint === "tax-rules") {
-    const res = await listTaxRules(identity);
-    return NextResponse.json({ tax_rules: res.ok ? res.data : [] });
+    return listResponse("tax_rules", await listTaxRules(identity));
   }
   if (endpoint === "tax-determinations") {
-    const res = await listTaxDeterminations(identity);
-    return NextResponse.json({ determinations: res.ok ? res.data : [] });
+    return listResponse("determinations", await listTaxDeterminations(identity));
   }
   if (endpoint === "vat-returns") {
-    const res = await listVATReturns(identity);
-    return NextResponse.json({ vat_returns: res.ok ? res.data : [] });
+    return listResponse("vat_returns", await listVATReturns(identity));
   }
   if (endpoint === "corporate-tax-returns") {
-    const res = await listCorporateTaxReturns(identity);
-    return NextResponse.json({ corporate_tax_returns: res.ok ? res.data : [] });
+    return listResponse("corporate_tax_returns", await listCorporateTaxReturns(identity));
   }
   if (endpoint === "withholding-tax") {
-    const res = await listWithholdingObligations(identity);
-    return NextResponse.json({ withholding_obligations: res.ok ? res.data : [] });
+    return listResponse("withholding_obligations", await listWithholdingObligations(identity));
   }
   if (endpoint === "filing-preparation/drafts") {
-    const res = await listFilingDrafts(identity);
-    return NextResponse.json({ filing_drafts: res.ok ? res.data : [] });
+    return listResponse("filing_drafts", await listFilingDrafts(identity));
   }
   if (endpoint === "tax-authority/interfaces") {
-    const res = await listTaxAuthorityInterfaces(identity);
-    return NextResponse.json({ tax_authority_interfaces: res.ok ? res.data : [] });
+    return listResponse("tax_authority_interfaces", await listTaxAuthorityInterfaces(identity));
+  }
+  // tax-authority-interface-svc has no connection test; this is its record of
+  // recent submission calls for one provider adapter (503 while adapters are off).
+  if (endpoint === "tax-authority/health") {
+    const providerKey = req.nextUrl.searchParams.get("provider_key");
+    if (!providerKey) return NextResponse.json({ error: "provider_key is required" }, { status: 400 });
+    return toJsonResponse(await getTaxAuthorityHealth(providerKey, identity));
   }
   if (endpoint === "tax/summary") {
-    const res = await getTaxSummaryStats(identity);
-    return NextResponse.json({ summary: res.ok ? res.data : {} });
+    return toJsonResponse(await getTaxSummaryStats(identity));
   }
   if (endpoint === "tax/deadlines") {
-    const res = await listUpcomingTaxDeadlines(identity);
-    return NextResponse.json({ deadlines: res.ok ? res.data : [] });
+    return listResponse("deadlines", await listUpcomingTaxDeadlines(identity));
   }
 
   // ── Legal Domain ───────────────────────────────────────────────────────────
   if (endpoint === "contracts") {
-    const res = await listContracts(identity);
-    return NextResponse.json({ contracts: res.ok ? res.data : [] });
+    return listResponse("contracts", await listContracts(identity));
   }
   if (endpoint === "clauses") {
-    const res = await listClauses(identity);
-    return NextResponse.json({ clauses: res.ok ? res.data : [] });
+    return listResponse("clauses", await listClauses(identity));
   }
   if (endpoint === "obligations") {
-    const res = await listObligations(identity);
-    return NextResponse.json({ obligations: res.ok ? res.data : [] });
+    return listResponse("obligations", await listObligations(identity));
   }
   if (endpoint === "meetings") {
-    const res = await listBoardMeetings(identity);
-    return NextResponse.json({ meetings: res.ok ? res.data : [] });
+    return listResponse("meetings", await listBoardMeetings(identity));
   }
   if (endpoint === "corporate-actions") {
-    const res = await listCorporateActions(identity);
-    return NextResponse.json({ corporate_actions: res.ok ? res.data : [] });
+    return listResponse("corporate_actions", await listCorporateActions(identity));
   }
   if (endpoint === "counterparties") {
-    const res = await listCounterparties(identity);
-    return NextResponse.json({ counterparties: res.ok ? res.data : [] });
+    return listResponse("counterparties", await listCounterparties(identity));
+  }
+  // board-resolutions-svc GET /v1/resolutions -> { resolutions, total, limit, offset }.
+  if (endpoint === "resolutions") {
+    return listResponse("resolutions", await listBoardResolutions(identity));
   }
 
   // ── Commercial Ops Domain ──────────────────────────────────────────────────
   if (endpoint === "purchase-orders") {
-    const res = await listPurchaseOrders(identity);
-    return NextResponse.json({ purchase_orders: res.ok ? res.data : [] });
+    return listResponse("purchase_orders", await listPurchaseOrders(identity));
   }
   if (endpoint === "purchase-requests") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listPurchaseRequests({ identity: { ...identity, tenantId } });
-    return NextResponse.json({ purchase_requests: res.ok ? res.data : [] });
+    return listResponse("purchase_requests", await listPurchaseRequests({ identity }));
   }
   if (endpoint === "spend-controls/limits") {
-    const res = await listSpendLimits(identity);
-    return NextResponse.json({ spend_limits: res.ok ? res.data : [] });
+    return listResponse("spend_limits", await listSpendLimits(identity));
   }
   if (endpoint === "vendor-checks") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listVendorChecks({ identity: { ...identity, tenantId } });
-    return NextResponse.json({ vendor_checks: res.ok ? res.data : [] });
+    return listResponse("vendor_checks", await listVendorChecks({ identity }));
   }
 
   // ── Compliance Domain ──────────────────────────────────────────────────────
   if (endpoint === "filing-tracker/requirements") {
-    const res = await listFilingRequirements(identity);
-    return NextResponse.json({ requirements: res.ok ? res.data : [] });
+    return listResponse("requirements", await listFilingRequirements(identity));
   }
   if (endpoint === "compliance-status") {
-    const res = await listComplianceEvaluations(identity);
-    return NextResponse.json({ evaluations: res.ok ? res.data : [] });
+    return listResponse("evaluations", await listComplianceEvaluations(identity));
   }
   if (endpoint === "exception-escalation/exceptions") {
-    const res = await listEscalatedExceptions(identity);
-    return NextResponse.json({ exceptions: res.ok ? res.data : [] });
+    return listResponse("exceptions", await listEscalatedExceptions(identity));
   }
 
   // ── Evidence Domain ────────────────────────────────────────────────────────
   if (endpoint === "evidence/requirements") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listEvidenceRequirements({ tenantId }, { ...identity, tenantId });
-    return NextResponse.json({ requirements: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ requirements: res.data });
   }
 
   // ── Configuration / Service Inputs ─────────────────────────────────────────
   if (endpoint === "config/feature-flags") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listFeatureFlags(tenantId);
-    return NextResponse.json({ feature_flags: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ feature_flags: res.data });
   }
   if (endpoint === "config/entries") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listConfigEntries(tenantId);
-    return NextResponse.json({ config_entries: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ config_entries: res.data });
   }
 
   // ── Delegations ────────────────────────────────────────────────────────────
   if (endpoint === "delegations") {
     const res = await listDelegations({ identity });
-    return NextResponse.json({ delegations: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ delegations: res.data });
   }
 
   // ── Secret Vault ───────────────────────────────────────────────────────────
   if (endpoint === "secrets/leases") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listLeases(tenantId);
-    return NextResponse.json({ leases: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ leases: res.data });
   }
   if (endpoint === "secrets/policies") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listApplicableSecretPolicyVersions({
       secretClass: "DATABASE_CREDENTIAL",
       callerTenantId: tenantId,
     });
-    return NextResponse.json({ policies: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ policies: res.data });
   }
   if (endpoint === "secrets/audit") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
+    const tenantId = identity.tenantId;
     const res = await listSecretAudit(tenantId);
-    return NextResponse.json({ audit_events: res.ok ? res.data : [] });
+    if (!res.ok) return readFailed(res.error);
+    return NextResponse.json({ audit_events: res.data });
   }
 
   // ── Security & Trust Domain ───────────────────────────────────────────────
+  // Blocks 8-10 mappings below report a failed read with its status (see
+  // listResponse) rather than as an empty register.
   if (endpoint === "security/certificates") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listMtlsCertificates(tenantId);
-    return NextResponse.json({ certificates: res.ok ? res.data : [] });
+    return listResponse("certificates", await listMtlsCertificates(identity));
   }
   if (endpoint === "security/keys") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listKmsKeys(tenantId);
-    return NextResponse.json({ keys: res.ok ? res.data : [] });
+    return listResponse("keys", await listKmsKeys(identity));
   }
   if (endpoint === "security/events") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listSiemEvents(tenantId);
-    return NextResponse.json({ events: res.ok ? res.data : [] });
+    const res = await listSiemEventsForEntity(identity);
+    if (!res.ok) return listResponse("events", res);
+    return NextResponse.json({
+      events: res.data.events,
+      exporter_count: res.data.exporters.length,
+      exporters_read: res.data.exportersRead,
+    });
   }
   // carta-svc is a zero-trust access-risk engine, not an equity/cap-table
   // service — this route returns risk assessments, not "equity grants".
   if (endpoint === "security/assessments") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listCartaAssessments(tenantId);
-    return NextResponse.json({ assessments: res.ok ? res.data : [] });
+    return listResponse("assessments", await listCartaAssessments(identity));
   }
 
   // ── AI Governance Domain ──────────────────────────────────────────────────
+  // Read from ai-governance-svc with the session. It has no endpoint that lists
+  // AI runs (only GET /v1/ai-runs/{id}), so that read answers 501.
   if (endpoint === "ai-governance/runs") {
-    return NextResponse.json({
-      runs: [
-        {
-          run_id: "run-ai-001",
-          model_provider: "anthropic",
-          model_name: "claude-3-7-sonnet",
-          prompt_tokens: 1450,
-          completion_tokens: 320,
-          cost_estimate_usd: 0.0118,
-          guardrail_status: "PASSED",
-          purpose: "Contract compliance review — MSA renewal",
-          created_at: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
-        },
-        {
-          run_id: "run-ai-002",
-          model_provider: "openai",
-          model_name: "gpt-4o",
-          prompt_tokens: 3200,
-          completion_tokens: 890,
-          cost_estimate_usd: 0.0512,
-          guardrail_status: "PASSED",
-          purpose: "Automated VAT return reconciliation extract",
-          created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
-        },
-        {
-          run_id: "run-ai-003",
-          model_provider: "anthropic",
-          model_name: "claude-3-5-haiku",
-          prompt_tokens: 820,
-          completion_tokens: 110,
-          cost_estimate_usd: 0.0016,
-          guardrail_status: "FLAGGED",
-          purpose: "Vendor due-diligence sanctions screening",
-          created_at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-        },
-      ],
-    });
+    // ai-governance-svc has no endpoint that lists AI runs (a run is read by id).
+    return NextResponse.json(
+      { error: "not_supported", message: "ai-governance-svc does not list AI runs; read a run by id." },
+      { status: 501 },
+    );
   }
   if (endpoint === "ai-governance/risk-classifications") {
-    return NextResponse.json({
-      classifications: [
-        {
-          action_type: "contract.draft_generate",
-          risk_tier: "TIER_3_MEDIUM",
-          requires_human_in_the_loop: true,
-          approval_quorum: 1,
-          description: "Automated drafting of commercial agreements from standard clause templates",
-        },
-        {
-          action_type: "payment.batch_disburse",
-          risk_tier: "TIER_1_CRITICAL",
-          requires_human_in_the_loop: true,
-          approval_quorum: 2,
-          description: "Autonomous initiation or settlement of bank disbursements over £10,000",
-        },
-        {
-          action_type: "tax.determination_evaluate",
-          risk_tier: "TIER_4_LOW",
-          requires_human_in_the_loop: false,
-          approval_quorum: 0,
-          description: "Real-time calculation of VAT/GST rates on sales line items",
-        },
-        {
-          action_type: "sec.kms_key_rotate",
-          risk_tier: "TIER_2_HIGH",
-          requires_human_in_the_loop: true,
-          approval_quorum: 1,
-          description: "Initiating scheduled cryptographic key version rotation on HSM vaults",
-        },
-      ],
-    });
+    const res = await listRiskClassifications(identity);
+    if (!res.ok) return NextResponse.json({ error: res.error.kind, message: res.error.message }, { status: res.error.status ?? 502 });
+    return NextResponse.json({ classifications: res.data });
   }
   if (endpoint === "ai-governance/model-providers") {
-    return NextResponse.json({
-      providers: [
-        {
-          provider: "anthropic",
-          model: "claude-3-7-sonnet",
-          is_verified: true,
-          max_context_tokens: 200000,
-          data_residency_region: "eu-west-1",
-        },
-        {
-          provider: "openai",
-          model: "gpt-4o",
-          is_verified: true,
-          max_context_tokens: 128000,
-          data_residency_region: "eu-west-1",
-        },
-      ],
-    });
+    const res = await listModelProviders(identity);
+    if (!res.ok) return NextResponse.json({ error: res.error.kind, message: res.error.message }, { status: res.error.status ?? 502 });
+    return NextResponse.json({ providers: res.data });
   }
 
   // ── Intelligence & Reporting Domain ───────────────────────────────────────
   if (endpoint === "intelligence/anomalies") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listAnomalies(tenantId);
-    return NextResponse.json({ anomalies: res.ok ? res.data?.anomalies ?? [] : [] });
+    return listResponse("anomalies", await listAnomalies(identity));
   }
   if (endpoint === "intelligence/forecasts") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listForecasts(tenantId);
-    return NextResponse.json({ forecasts: res.ok ? res.data?.forecasts ?? [] : [] });
+    return listResponse("forecasts", await listForecasts(identity));
   }
   if (endpoint === "intelligence/risk-scores") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listRiskScores(tenantId);
-    return NextResponse.json({ scores: res.ok ? res.data?.scores ?? [] : [] });
+    return listResponse("scores", await listRiskScores(identity));
   }
   if (endpoint === "intelligence/reconciliations") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listReconciliations(tenantId);
-    return NextResponse.json({ reconciliations: res.ok ? res.data?.reconciliations ?? [] : [] });
+    return listResponse("reconciliations", await listReconciliations(identity));
   }
   if (endpoint === "intelligence/reports") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listReports(tenantId);
-    return NextResponse.json({ reports: res.ok ? res.data?.reports ?? [] : [] });
+    return listResponse("reports", await listReportDefinitions(identity));
   }
   if (endpoint === "intelligence/recommendations") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listRecommendations(tenantId);
-    return NextResponse.json({ recommendations: res.ok ? res.data?.recommendations ?? [] : [] });
+    return listResponse("recommendations", await listRecommendations(identity));
   }
   if (endpoint === "intelligence/migrations") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listIntelligenceMigrationJobs(tenantId);
-    return NextResponse.json({ jobs: res.ok ? res.data?.jobs ?? [] : [] });
+    return listResponse("jobs", await listIntelligenceMigrationJobs(identity));
   }
 
   // ── Integration & Extensibility Domain ────────────────────────────────────
   if (endpoint === "integration/connections") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listBridgeConnections(tenantId);
-    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+    return listResponse("connections", await listBridges(identity));
   }
   if (endpoint === "integration/banking") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listBankConnections(tenantId);
-    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+    return listResponse("connections", await listBankConnections(identity));
   }
   if (endpoint === "integration/hris") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listHrisConnections(tenantId);
-    return NextResponse.json({ connections: res.ok ? res.data?.connections ?? [] : [] });
+    return listResponse("connections", await listHrisIntegrations(identity));
   }
   if (endpoint === "integration/envelopes") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listEsignatureEnvelopes(tenantId);
-    return NextResponse.json({ envelopes: res.ok ? res.data?.envelopes ?? [] : [] });
+    return listResponse("envelopes", await listEsignatureEnvelopes(identity));
   }
   if (endpoint === "integration/feeds") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await listExternalDataFeeds(tenantId);
-    return NextResponse.json({ subscriptions: res.ok ? res.data?.subscriptions ?? [] : [] });
+    return listResponse("subscriptions", await listExternalDataFeeds(identity));
   }
 
   return NextResponse.json({ error: `Not found: ${endpoint}` }, { status: 404 });
@@ -451,8 +388,9 @@ function toJsonResponse<T>(res: ApiResult<T> | ApiWriteResult<T>) {
     return NextResponse.json(res.data, { status });
   }
   return NextResponse.json(
-    { error: res.error.message, detail: res.error.body },
-    { status: res.error.status ?? 500 },
+    { error: res.error.message, detail: res.error.body, kind: res.error.kind },
+    // No upstream status means the service was never reached (or timed out).
+    { status: res.error.status ?? 502 },
   );
 }
 
@@ -461,7 +399,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   const endpoint = path.join("/");
   const identity = await resolveIdentity(req);
   if (!identity) return UNAUTHENTICATED();
-  const body = await req.json().catch(() => ({}));
+  const raw = await req.json().catch(() => ({}));
+  // Tenant and legal entity in a write are the session's. A page may send its own
+  // (several did, as fixed demo IDs); they are replaced here, never trusted.
+  const body = raw && typeof raw === "object" && !Array.isArray(raw) ? { ...raw } : {};
+  if ("tenant_id" in body) body.tenant_id = identity.tenantId;
+  if ("legal_entity_id" in body) body.legal_entity_id = identity.legalEntityId ?? null;
 
   // ── Tax Domain ─────────────────────────────────────────────────────────────
   if (endpoint === "tax-rules") {
@@ -492,10 +435,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     const res = await registerTaxAuthorityInterface(body, identity);
     return toJsonResponse(res);
   }
-  const taxAuthorityTestMatch = endpoint.match(/^tax-authority\/interfaces\/([^/]+)\/test$/);
-  if (taxAuthorityTestMatch) {
-    const res = await testTaxAuthorityConnection(taxAuthorityTestMatch[1], identity);
-    return toJsonResponse(res);
+  const filingValidateMatch = endpoint.match(/^filing-preparation\/drafts\/([^/]+)\/validate$/);
+  if (filingValidateMatch) {
+    return toJsonResponse(await validateFilingDraft(filingValidateMatch[1], identity));
   }
   const filingFinalizeMatch = endpoint.match(/^filing-preparation\/drafts\/([^/]+)\/finalize$/);
   if (filingFinalizeMatch) {
@@ -504,77 +446,115 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   }
 
   // ── Integration & Extensibility Domain ────────────────────────────────────
-  const bankSyncMatch = endpoint.match(/^integration\/banking\/([^/]+)\/sync$/);
-  if (bankSyncMatch) {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await triggerBankSync(tenantId, bankSyncMatch[1]);
-    return toJsonResponse(res);
-  }
+  // banking-connector-svc has no sync operation (its /refresh rotates a token
+  // lease), so integration/banking/{id}/sync is no longer mapped.
   const hrisSyncMatch = endpoint.match(/^integration\/hris\/([^/]+)\/sync$/);
   if (hrisSyncMatch) {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await triggerHrisSync(tenantId, hrisSyncMatch[1]);
-    return toJsonResponse(res);
+    return toJsonResponse(await triggerHrisSync(identity, hrisSyncMatch[1]));
   }
 
   // ── Legal Domain ───────────────────────────────────────────────────────────
+  // The body is snake_case (the service's own names); it used to be spread
+  // into this camelCase input, so every field arrived undefined and the
+  // service answered 400.
   if (endpoint === "contracts") {
+    const missing = missingFields({
+      title: body.title, contract_type: body.contract_type, counterparty_id: body.counterparty_id,
+      effective_from: body.effective_from, currency: body.currency, total_value: body.total_value,
+    });
+    if (missing) return missing;
     const res = await draftContract({
-      ...body,
-      identity: {
-        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
-        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
-        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
-      },
+      identity,
+      title: String(body.title),
+      contractType: body.contract_type,
+      counterpartyId: String(body.counterparty_id),
+      ...(body.counterparty_name ? { counterpartyName: String(body.counterparty_name) } : {}),
+      ...(body.description ? { description: String(body.description) } : {}),
+      effectiveFrom: String(body.effective_from),
+      ...(body.effective_to ? { effectiveTo: String(body.effective_to) } : {}),
+      currency: String(body.currency),
+      totalValue: Number(body.total_value),
     });
     return toJsonResponse(res);
   }
+  // Only the fields the caller states; legal entity and author are the session's.
   if (endpoint === "clauses") {
-    const res = await createClause(body, identity);
-    return toJsonResponse(res);
+    const missing = missingFields({
+      title: body.title, category: body.category, body: body.body,
+      jurisdiction_id: body.jurisdiction_id, effective_from: body.effective_from,
+    });
+    if (missing) return missing;
+    return toJsonResponse(
+      await createClause(
+        {
+          title: String(body.title),
+          category: body.category,
+          body: String(body.body),
+          jurisdiction_id: String(body.jurisdiction_id),
+          effective_from: String(body.effective_from),
+        },
+        identity,
+      ),
+    );
   }
   if (endpoint === "meetings") {
     const res = await createBoardMeeting({
       ...body,
-      identity: {
-        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
-        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
-        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
-      },
+      identity,
     });
     return toJsonResponse(res);
   }
   if (endpoint === "corporate-actions") {
-    const res = await createCorporateAction(body, identity);
-    return toJsonResponse(res);
+    const missing = missingFields({ title: body.title, action_type: body.action_type, effective_date: body.effective_date });
+    if (missing) return missing;
+    return toJsonResponse(
+      await createCorporateAction(
+        {
+          title: String(body.title),
+          action_type: String(body.action_type),
+          effective_date: String(body.effective_date),
+          ...(body.description ? { description: String(body.description) } : {}),
+          ...(body.resolution_id ? { resolution_id: String(body.resolution_id) } : {}),
+        },
+        identity,
+      ),
+    );
   }
 
   // ── Commercial Ops Domain ──────────────────────────────────────────────────
+  // Amount, currency, category and period are the caller's to state. They used
+  // to default to 0 / "GBP" / "PROCUREMENT" / "MONTHLY", which recorded a
+  // commitment nobody had entered.
   if (endpoint === "purchase-orders") {
+    const totalAmount = body.totalAmount ?? body.total_amount;
+    const currencyCode = body.currencyCode ?? body.currency_code;
+    const missing = missingFields({ total_amount: totalAmount, currency_code: currencyCode });
+    if (missing) return missing;
     const res = await issuePurchaseOrder({
       ...body,
-      identity: {
-        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
-        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
-        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
-      },
-      totalAmount: Number(body.totalAmount ?? body.total_amount ?? 0),
-      currencyCode: String(body.currencyCode ?? body.currency_code ?? "GBP"),
+      identity,
+      totalAmount: Number(totalAmount),
+      currencyCode: String(currencyCode),
     });
     return toJsonResponse(res);
   }
   if (endpoint === "spend-controls/policies") {
+    const thresholdAmount = body.thresholdAmount ?? body.threshold_amount;
+    const currencyCode = body.currencyCode ?? body.currency_code;
+    const missing = missingFields({
+      category: body.category,
+      period: body.period,
+      threshold_amount: thresholdAmount,
+      currency_code: currencyCode,
+    });
+    if (missing) return missing;
     const res = await createSpendPolicy({
       ...body,
-      identity: {
-        principalId: identity.principalId ?? "00000000-0000-0000-0000-000000000001",
-        tenantId: identity.tenantId ?? "11111111-1111-1111-1111-111111111111",
-        legalEntityId: identity.legalEntityId ?? "22222222-2222-2222-2222-222222222222",
-      },
-      category: String(body.category ?? "PROCUREMENT"),
-      period: body.period ?? "MONTHLY",
-      thresholdAmount: Number(body.thresholdAmount ?? body.threshold_amount ?? 0),
-      currencyCode: String(body.currencyCode ?? body.currency_code ?? "GBP"),
+      identity,
+      category: String(body.category),
+      period: body.period,
+      thresholdAmount: Number(thresholdAmount),
+      currencyCode: String(currencyCode),
     });
     return toJsonResponse(res);
   }
@@ -583,6 +563,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   // Bodies use the backend's own snake_case field names; identity fields
   // (tenant, legal entity, created_by) always come from the session.
   if (endpoint === "filing-tracker/requirements") {
+    const missing = missingFields({
+      jurisdiction_id: body.jurisdiction_id, filing_authority: body.filing_authority, filing_type: body.filing_type,
+      period_key: body.period_key, due_date: body.due_date,
+    });
+    if (missing) return missing;
     const res = await createFilingRequirement({
       identity,
       jurisdictionId: String(body.jurisdiction_id ?? ""),
@@ -595,6 +580,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     return toJsonResponse(res);
   }
   if (endpoint === "exception-escalation/exceptions") {
+    const missing = missingFields({
+      jurisdiction_id: body.jurisdiction_id, exception_type: body.exception_type, severity_level: body.severity_level,
+      linked_object_type: body.linked_object_type, linked_object_id: body.linked_object_id, description: body.description,
+    });
+    if (missing) return missing;
     const res = await createEscalatedException({
       identity,
       jurisdictionId: String(body.jurisdiction_id ?? ""),
@@ -608,7 +598,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
     return toJsonResponse(res);
   }
   if (endpoint === "compliance-status/evaluate") {
-    const n = (v: unknown) => Number(v ?? 0);
+    // Counts and the effective date are the caller's; they used to default to
+    // 0 and to today, which recorded an evaluation nobody had made.
+    const missing = missingFields({
+      jurisdiction_id: body.jurisdiction_id, domain_name: body.domain_name,
+      total_obligations: body.total_obligations, fulfilled_obligations: body.fulfilled_obligations,
+      pending_obligations: body.pending_obligations, overdue_obligations: body.overdue_obligations,
+      open_exceptions: body.open_exceptions, effective_from: body.effective_from,
+    });
+    if (missing) return missing;
+    const n = (v: unknown) => Number(v);
     const res = await evaluateCompliance({
       identity,
       jurisdictionId: String(body.jurisdiction_id ?? ""),
@@ -618,7 +617,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
       pendingObligations: n(body.pending_obligations),
       overdueObligations: n(body.overdue_obligations),
       openExceptions: n(body.open_exceptions),
-      effectiveFrom: String(body.effective_from ?? new Date().toISOString().slice(0, 10)),
+      effectiveFrom: String(body.effective_from),
       ...(body.notes ? { notes: String(body.notes) } : {}),
     });
     return toJsonResponse(res);
@@ -627,14 +626,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pat
   // ── Security & Trust Domain ───────────────────────────────────────────────
   const rotateMatch = endpoint.match(/^security\/keys\/([^/]+)\/rotate$/);
   if (rotateMatch) {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await rotateKmsKey(tenantId, rotateMatch[1]);
-    return toJsonResponse(res);
+    return toJsonResponse(await rotateKmsKey(identity, rotateMatch[1]));
   }
   if (endpoint === "security/assessments/evaluate") {
-    const tenantId = identity.tenantId ?? "11111111-1111-1111-1111-111111111111";
-    const res = await evaluateCartaAccess(tenantId, body);
-    return toJsonResponse(res);
+    // The legal entity is the session's; a body value is not the caller's to choose.
+    // carta-svc validates the context itself and answers 400 for a bad one.
+    const { context } = (body ?? {}) as { context: AccessContext };
+    return toJsonResponse(
+      await evaluateCartaAccess(identity, { legal_entity_id: identity.legalEntityId, context }),
+    );
   }
 
   // ── AI Governance Domain ──────────────────────────────────────────────────

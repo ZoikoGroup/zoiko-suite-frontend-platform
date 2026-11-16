@@ -91,9 +91,9 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
   const [lookupState, lookupSubmit, lookupPending] = useActionState(lookupVatReturnAction, IDLE_LOOKUP_VAT);
 
   // Form input states for dynamic calculation
-  const [outputTaxInput, setOutputTaxInput] = useState("100000");
-  const [inputTaxInput, setInputTaxInput] = useState("40000");
-  const [currencyInput, setCurrencyInput] = useState("GBP");
+  const [outputTaxInput, setOutputTaxInput] = useState("");
+  const [inputTaxInput, setInputTaxInput] = useState("");
+  const [currencyInput, setCurrencyInput] = useState("");
   const [activeTab, setActiveTab] = useState<"create" | "file" | "lookup">("create");
 
   // Quick fill target for filing / lookup
@@ -196,25 +196,13 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
           </CardHeader>
           <CardContent>
             <form action={createSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div>
-                  <label htmlFor="vat-legal-entity" className={LABEL}>Legal Entity ID</label>
-                  <input
-                    id="vat-legal-entity"
-                    name="legal_entity_id"
-                    defaultValue="11111111-1111-1111-1111-111111111111"
-                    className={FIELD}
-                    required
-                  />
-                  <p className={HINT}>Zoiko UK Operating Entity</p>
-                </div>
-
+              <p className={HINT}>Raised for the legal entity of your session.</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label htmlFor="vat-jurisdiction" className={LABEL}>Jurisdiction ID</label>
                   <input
                     id="vat-jurisdiction"
                     name="jurisdiction_id"
-                    defaultValue="GB"
                     className={FIELD}
                     required
                   />
@@ -226,7 +214,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                   <input
                     id="vat-tax-reg"
                     name="tax_registration_number"
-                    defaultValue="GB-987654321"
                     className={FIELD}
                     required
                   />
@@ -240,7 +227,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                   <input
                     id="vat-period"
                     name="tax_period"
-                    defaultValue="2026-Q2"
                     placeholder="2026-Q2"
                     className={FIELD}
                     required
@@ -256,7 +242,9 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     value={currencyInput}
                     onChange={(e) => setCurrencyInput(e.target.value)}
                     className={FIELD}
+                    required
                   >
+                    <option value="">Select…</option>
                     <option value="GBP">GBP (£)</option>
                     <option value="EUR">EUR (€)</option>
                     <option value="USD">USD ($)</option>
@@ -270,7 +258,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     id="vat-effective-from"
                     name="effective_from"
                     type="date"
-                    defaultValue="2026-04-01"
                     className={FIELD}
                     required
                   />
@@ -286,7 +273,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     name="total_sales_amount"
                     type="number"
                     step="any"
-                    defaultValue="500000"
                     className={FIELD}
                     required
                   />
@@ -300,7 +286,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     name="total_purchase_amount"
                     type="number"
                     step="any"
-                    defaultValue="200000"
                     className={FIELD}
                     required
                   />
@@ -432,21 +417,20 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                 </div>
 
                 <div>
-                  <label htmlFor="file-filed-by" className={LABEL}>Filed By (Signatory Officer)</label>
+                  <label htmlFor="file-evidence-refs" className={LABEL}>Evidence references</label>
                   <input
-                    id="file-filed-by"
-                    name="filed_by"
-                    defaultValue="Lingaraj (Super Admin)"
+                    id="file-evidence-refs"
+                    name="evidence_refs"
                     className={FIELD}
                     required
                   />
-                  <p className={HINT}>Authorized legal entity filing representative</p>
+                  <p className={HINT}>Comma-separated. Filed under your signed-in identity.</p>
                 </div>
               </div>
 
               <div className="flex justify-end pt-2">
                 <Button type="submit" disabled={filePending} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">
-                  {filePending ? "Filing with Authority..." : "File Return with Statutory Gateway"}
+                  {filePending ? "Filing..." : "File Return"}
                 </Button>
               </div>
             </form>

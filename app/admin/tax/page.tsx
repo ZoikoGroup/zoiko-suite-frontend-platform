@@ -12,6 +12,7 @@ import {
   TaxProcessTimeline,
   TaxJurisdictionPanel,
 } from "@/components/admin/tax";
+import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 
 export const metadata: Metadata = { title: "Tax Governance & Engine | Zoiko Suite" };
 
@@ -53,13 +54,11 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
-  ports,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle: string;
-  ports: string;
   children: React.ReactNode;
 }) {
   return (
@@ -83,9 +82,6 @@ function SectionCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          :{ports}
-        </span>
       </div>
 
       {/* Card body */}
@@ -96,6 +92,9 @@ function SectionCard({
 
 export default async function TaxPage() {
   const domain = DOMAINS.find((d) => d.key === "tax")!;
+  // The jurisdiction register, read once here for the header's rule and
+  // determination forms. A failed read is passed through, not replaced.
+  const jurisdictions = await loadJurisdictionOptions();
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 p-6">
@@ -113,7 +112,7 @@ export default async function TaxPage() {
       </Suspense>
 
       {/* ── Interactive Action Header ────────────────────────────────────── */}
-      <TaxActionHeader />
+      <TaxActionHeader jurisdictions={jurisdictions} />
 
       {/* ── Process Timeline ─────────────────────────────────────────────── */}
       <TaxProcessTimeline />
@@ -134,7 +133,6 @@ export default async function TaxPage() {
           icon={Percent}
           title="Tax Rules & Determination Engine"
           subtitle="tax-rules-svc & tax-determination-svc — jurisdiction rules and transaction evaluation"
-          ports="8125, 8126"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <TaxRulesAndDeterminationPanel />
@@ -146,7 +144,6 @@ export default async function TaxPage() {
           icon={Receipt}
           title="VAT / GST Engine"
           subtitle="vat-gst-svc — periodic VAT and GST returns"
-          ports="8127"
         >
           <Suspense fallback={<PanelSkeleton rows={3} />}>
             <VatGstReturnsPanel />
@@ -158,7 +155,6 @@ export default async function TaxPage() {
           icon={Landmark}
           title="Corporate & Withholding Tax"
           subtitle="corporate-tax-svc & withholding-tax-svc — income tax returns and source withholding"
-          ports="8128, 8129"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <CorporateAndWithholdingTaxPanel />
@@ -170,7 +166,6 @@ export default async function TaxPage() {
           icon={FileCheck}
           title="Filing Preparation & Authority Interfaces"
           subtitle="filing-preparation-svc & tax-authority-interface-svc — draft assembly and tax gateway connections"
-          ports="8130, 8147"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <FilingPrepAndAuthorityPanel />

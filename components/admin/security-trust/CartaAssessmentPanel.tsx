@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { fetchPanelList } from "@/lib/panel-fetch";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -73,88 +74,38 @@ const RISK_BADGES: Record<CartaRiskLevel, string> = {
   CRITICAL: "text-rose-700 bg-rose-50 dark:bg-rose-900/30 dark:text-rose-400 border-rose-200",
 };
 
-const MOCK_ASSESSMENTS: CartaAssessment[] = [
-  {
-    id: "eval-001",
-    subject_id: "usr-sec-alice@zoiko.com",
-    context: {
-      subject_id: "usr-sec-alice@zoiko.com",
-      subject_type: "USER",
-      device_trust_level: 95,
-      ip_address: "192.168.1.45",
-      is_known_location: true,
-      resource_sensitivity: "HIGH",
-      action_requested: "hsm:key:export_public",
-      time_of_day_hour: 14,
-    },
-    trust_score: 92,
-    risk_level: "LOW",
-    decision: "ALLOW",
-    risk_factors: ["Managed enterprise device", "Known corporate VPN subnet"],
-    assessment_timestamp: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "eval-002",
-    subject_id: "svc-procurement-worker",
-    context: {
-      subject_id: "svc-procurement-worker",
-      subject_type: "SERVICE_ACCOUNT",
-      device_trust_level: 80,
-      ip_address: "10.0.4.12",
-      is_known_location: true,
-      resource_sensitivity: "RESTRICTED",
-      action_requested: "purchase_order:approve_bulk",
-      time_of_day_hour: 23,
-    },
-    trust_score: 64,
-    risk_level: "MEDIUM",
-    decision: "STEP_UP_MFA",
-    risk_factors: ["Off-hours restricted action", "Elevated approval threshold"],
-    assessment_timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "eval-003",
-    subject_id: "usr-contractor-guest",
-    context: {
-      subject_id: "usr-contractor-guest",
-      subject_type: "USER",
-      device_trust_level: 25,
-      ip_address: "198.51.100.89",
-      is_known_location: false,
-      resource_sensitivity: "RESTRICTED",
-      action_requested: "secrets:master_vault:read",
-      time_of_day_hour: 3,
-    },
-    trust_score: 18,
-    risk_level: "CRITICAL",
-    decision: "DENY",
-    risk_factors: ["Unrecognized IP geofence", "Untrusted device profile", "Restricted resource breach attempt"],
-    assessment_timestamp: new Date(Date.now() - 32 * 60 * 1000).toISOString(),
-  },
-];
-
 export function CartaAssessmentPanel() {
   const [assessments, setAssessments] = useState<CartaAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [evaluating, setEvaluating] = useState(false);
   const [filterDecision, setFilterDecision] = useState<string>("ALL");
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [ctx, setCtx] = useState({
+    subject_id: "",
+    subject_type: "",
+    device_trust_level: "",
+    ip_address: "",
+    is_known_location: false,
+    resource_sensitivity: "",
+    action_requested: "",
+    time_of_day_hour: "",
+  });
+  const ctxComplete =
+    ctx.subject_id.trim() && ctx.subject_type && ctx.device_trust_level !== "" && ctx.ip_address.trim() &&
+    ctx.resource_sensitivity && ctx.action_requested.trim() && ctx.time_of_day_hour !== "";
 
+  // Only carta-svc's own assessments are shown. There is no sample data: an
+  // empty list or a failed read is shown as it is.
   const fetchAssessments = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch("/api/v1/security/assessments");
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.assessments) && data.assessments.length > 0) {
-          setAssessments(data.assessments);
-        } else {
-          setAssessments(MOCK_ASSESSMENTS);
-        }
-      } else {
-        setAssessments(MOCK_ASSESSMENTS);
-      }
-    } catch {
-      setAssessments(MOCK_ASSESSMENTS);
+      setAssessments(await fetchPanelList<CartaAssessment>("/api/v1/security/assessments", "assessments", "carta-svc"));
+    } catch (e) {
+      setAssessments([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -164,49 +115,42 @@ export function CartaAssessmentPanel() {
     fetchAssessments();
   }, []);
 
-  const handleTestEvaluation = async () => {
+  // Sends an evaluation of the access context the reader entered to carta-svc
+  // and records what it decided. The legal entity is the session's (the proxy
+  // sets it). This used to evaluate a random subject with a random trust level
+  // and a fixed IP, and carta-svc stored each of those invented assessments.
+  const handleEvaluation = async () => {
     setEvaluating(true);
+    setActionError(null);
     try {
       const newContext: AccessContext = {
-        subject_id: `agent-run-${Math.floor(Math.random() * 900 + 100)}@zoiko.com`,
-        subject_type: "BOT",
-        device_trust_level: Math.floor(Math.random() * 50 + 50),
-        ip_address: "10.244.0.88",
-        is_known_location: true,
-        resource_sensitivity: "MEDIUM",
-        action_requested: "ai_governance:evaluate_policy",
-        time_of_day_hour: new Date().getHours(),
+        subject_id: ctx.subject_id.trim(),
+        subject_type: ctx.subject_type as AccessContext["subject_type"],
+        device_trust_level: Number(ctx.device_trust_level),
+        ip_address: ctx.ip_address.trim(),
+        is_known_location: ctx.is_known_location,
+        resource_sensitivity: ctx.resource_sensitivity as AccessContext["resource_sensitivity"],
+        action_requested: ctx.action_requested.trim(),
+        time_of_day_hour: Number(ctx.time_of_day_hour),
       };
 
       const res = await fetch("/api/v1/security/assessments/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          legal_entity_id: "22222222-2222-2222-2222-222222222222",
-          context: newContext,
-        }),
+        body: JSON.stringify({ context: newContext }),
       });
 
-      if (res.ok) {
-        const newRecord = await res.json();
-        setAssessments((prev) => [newRecord, ...prev]);
+      const body = await res.json().catch(() => null);
+      if (res.ok && body?.id) {
+        setAssessments((prev) => [body as CartaAssessment, ...prev]);
+        setFormOpen(false);
+      } else if (res.status === 401) {
+        setActionError("Your session has expired — sign in again.");
       } else {
-        // Fallback live simulated zero-trust decision
-        const mockScore = Math.floor(Math.random() * 30 + 70);
-        const simAssessment: CartaAssessment = {
-          id: `eval-${Date.now().toString(36)}`,
-          subject_id: newContext.subject_id,
-          context: newContext,
-          trust_score: mockScore,
-          risk_level: mockScore > 80 ? "LOW" : "MEDIUM",
-          decision: mockScore > 80 ? "ALLOW" : "STEP_UP_MFA",
-          risk_factors: ["Dynamic telemetry verified", "Standard API gateway routing"],
-          assessment_timestamp: new Date().toISOString(),
-        };
-        setAssessments((prev) => [simAssessment, ...prev]);
+        setActionError(`carta-svc refused the evaluation: ${body?.error ?? `HTTP ${res.status}`}`);
       }
     } catch {
-      // ignore
+      setActionError("The evaluation could not be sent to carta-svc.");
     } finally {
       setEvaluating(false);
     }
@@ -217,19 +161,19 @@ export function CartaAssessmentPanel() {
     : assessments.filter((a) => a.decision === filterDecision);
 
   const avgTrustScore = assessments.length
-    ? Math.round(assessments.reduce((acc, a) => acc + (a.trust_score || 0), 0) / assessments.length)
-    : 85;
+    ? `${Math.round(assessments.reduce((acc, a) => acc + (a.trust_score || 0), 0) / assessments.length)}/100`
+    : "—";
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>Continuous Adaptive Risk & Trust Assessment (CARTA)</span>
-          <span className="font-mono text-[11px] text-slate-400">(:8142)</span>
+          <span className="font-mono text-[11px] text-slate-400">carta-svc</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="font-medium text-slate-700 dark:text-slate-300">
-            Avg Trust Score: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{avgTrustScore}/100</span>
+            Avg Trust Score: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{avgTrustScore}</span>
           </span>
           <button
             type="button"
@@ -261,18 +205,59 @@ export function CartaAssessmentPanel() {
 
         <button
           type="button"
-          onClick={handleTestEvaluation}
-          disabled={evaluating}
-          className="inline-flex items-center gap-1.5 rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+          onClick={() => setFormOpen((o) => !o)}
+          aria-expanded={formOpen}
+          className="inline-flex items-center gap-1.5 rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-emerald-700"
         >
-          <Play className={`h-3 w-3 ${evaluating ? "animate-spin" : ""}`} />
-          {evaluating ? "Evaluating..." : "Evaluate Test Subject"}
+          <Play className="h-3 w-3" />
+          Evaluate Access
         </button>
       </div>
 
+      {formOpen && (
+        <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-4 dark:border-slate-800">
+          <input aria-label="Subject ID" placeholder="Subject ID" value={ctx.subject_id} onChange={(e) => setCtx({ ...ctx, subject_id: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
+          <select aria-label="Subject type" value={ctx.subject_type} onChange={(e) => setCtx({ ...ctx, subject_type: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800">
+            <option value="">Subject type…</option>
+            <option value="USER">User</option>
+            <option value="SERVICE_ACCOUNT">Service account</option>
+            <option value="BOT">Bot</option>
+          </select>
+          <input aria-label="Device trust level (0-100)" placeholder="Device trust 0-100" type="number" min={0} max={100} value={ctx.device_trust_level} onChange={(e) => setCtx({ ...ctx, device_trust_level: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
+          <input aria-label="IP address" placeholder="IP address" value={ctx.ip_address} onChange={(e) => setCtx({ ...ctx, ip_address: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
+          <select aria-label="Resource sensitivity" value={ctx.resource_sensitivity} onChange={(e) => setCtx({ ...ctx, resource_sensitivity: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800">
+            <option value="">Sensitivity…</option>
+            <option value="LOW">Low</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HIGH">High</option>
+            <option value="RESTRICTED">Restricted</option>
+          </select>
+          <input aria-label="Action requested" placeholder="Action requested" value={ctx.action_requested} onChange={(e) => setCtx({ ...ctx, action_requested: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
+          <input aria-label="Hour of day (0-23)" placeholder="Hour 0-23" type="number" min={0} max={23} value={ctx.time_of_day_hour} onChange={(e) => setCtx({ ...ctx, time_of_day_hour: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
+          <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+            <input type="checkbox" checked={ctx.is_known_location} onChange={(e) => setCtx({ ...ctx, is_known_location: e.target.checked })} />
+            Known location
+          </label>
+          <button
+            type="button"
+            onClick={handleEvaluation}
+            disabled={evaluating || !ctxComplete}
+            className="col-span-2 inline-flex items-center justify-center gap-1.5 rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50 sm:col-span-4"
+          >
+            {evaluating ? "Evaluating..." : "Send to carta-svc"}
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{actionError}</p>
+      )}
+
       {/* Assessment List */}
       <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
-        {filtered.length === 0 ? (
+        {error ? (
+          <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{error}</p>
+        ) : filtered.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-500 dark:border-slate-800">
             No access risk assessments found.
           </div>

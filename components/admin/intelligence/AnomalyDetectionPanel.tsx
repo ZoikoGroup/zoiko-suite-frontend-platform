@@ -2,16 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { fetchPanelList } from "@/lib/panel-fetch";
+import { AnomalyRuleSection } from "./IntelligenceCreateForms";
+import type { Anomaly } from "@/lib/api/intelligence";
 
-type Anomaly = {
-  anomaly_id: string;
-  source_service: string;
-  anomaly_type: string;
-  severity: string;
-  description: string;
-  status: string;
-  detected_at: string;
-};
+/** Statuses that still need someone's attention. */
+const UNRESOLVED = new Set(["OPEN", "UNDER_INVESTIGATION", "CONFIRMED_ANOMALY"]);
 
 const SEVERITY_STYLES: Record<string, { badge: string; dot: string }> = {
   CRITICAL: { badge: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300", dot: "bg-red-500" },
@@ -29,11 +25,10 @@ export function AnomalyDetectionPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/intelligence/anomalies", { signal: AbortSignal.timeout(5000) });
-      const json = await res.json().catch(() => ({ anomalies: [] }));
-      setAnomalies(json.anomalies ?? []);
-    } catch {
-      setError("anomaly-detection-svc (:8160) could not be reached — data is unavailable.");
+      setAnomalies(await fetchPanelList<Anomaly>("/api/v1/intelligence/anomalies", "anomalies", "anomaly-detection-svc"));
+    } catch (e) {
+      setAnomalies([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -47,7 +42,7 @@ export function AnomalyDetectionPanel() {
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-red-500" aria-hidden="true" />
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Anomaly Detection</p>
-          <code className="text-[10px] font-mono text-slate-400">anomaly-detection-svc :8160</code>
+          <code className="text-[10px] font-mono text-slate-400">anomaly-detection-svc</code>
         </div>
         <button
           id="anomaly-refresh-btn"
@@ -61,6 +56,10 @@ export function AnomalyDetectionPanel() {
       </div>
 
       <div className="p-5">
+        <div className="mb-4">
+          <AnomalyRuleSection onCreated={load} />
+        </div>
+
         {error && (
           <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{error}</p>
         )}
@@ -81,22 +80,22 @@ export function AnomalyDetectionPanel() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                        {a.anomaly_type.replace(/_/g, " ")}
+                        {a.domain_name.replace(/_/g, " ")}
                       </p>
                       <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${style.badge}`}>
                         {a.severity}
                       </span>
                       <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                        a.status === "OPEN"
+                        UNRESOLVED.has(a.status)
                           ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
                           : "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
                       }`}>
-                        {a.status}
+                        {a.status.replace(/_/g, " ")}
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{a.description}</p>
                     <p className="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">
-                      Source: {a.source_service} · {new Date(a.detected_at).toLocaleString()}
+                      Observed {a.observed_value} vs expected {a.expected_value} · score {a.anomaly_score} · {a.source_entity_id} · {new Date(a.detected_at).toLocaleString()}
                     </p>
                   </div>
                 </div>

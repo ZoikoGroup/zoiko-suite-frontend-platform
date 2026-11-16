@@ -77,7 +77,7 @@ export async function ContractLifecyclePanel() {
 
   const result = await listContracts(identity);
 
-  if (!result.ok && result.error.kind === "unreachable") {
+  if (!result.ok) {
     return (
       <PanelEmptyState
         icon={CloudOff}
@@ -95,7 +95,13 @@ export async function ContractLifecyclePanel() {
   const pending = contracts.filter((c) => c.status === "REVIEW" || c.status === "APPROVED");
   const expiringSoon = active.filter(isExpiringSoon);
 
-  const totalValue = active.reduce((sum, c) => sum + (c.total_value ?? c.value ?? 0), 0);
+  // Per currency: contract values in different currencies cannot be added
+  // (the single total used to be labelled USD whatever it held).
+  const activeValueByCurrency: Record<string, number> = {};
+  for (const c of active) {
+    const v = c.total_value ?? c.value;
+    if (c.currency && typeof v === "number") activeValueByCurrency[c.currency] = (activeValueByCurrency[c.currency] ?? 0) + v;
+  }
 
   return (
     <div className="space-y-5">
@@ -106,12 +112,12 @@ export async function ContractLifecyclePanel() {
           {pending.length > 0 && <StatChip label="Pending" value={pending.length} color="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" />}
           {draft.length > 0 && <StatChip label="Draft" value={draft.length} color="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400" />}
           {expiringSoon.length > 0 && <StatChip label="Expiring ≤30d" value={expiringSoon.length} color="bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300" />}
-          {totalValue > 0 && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
-              <span className="font-bold">{formatCurrency(totalValue, "USD")}</span>
+          {Object.entries(activeValueByCurrency).map(([currency, total]) => (
+            <span key={currency} className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+              <span className="font-bold">{formatCurrency(total, currency)}</span>
               <span className="opacity-70">active value</span>
             </span>
-          )}
+          ))}
         </div>
       )}
 
@@ -133,11 +139,11 @@ export async function ContractLifecyclePanel() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {contracts.map((c) => {
-                const status = (c.status ?? c.stage ?? "DRAFT") as string;
+                const status = (c.status ?? c.stage ?? "—") as string;
                 const warnExpiry = isExpiringSoon(c);
-                const value = c.total_value ?? c.value ?? 0;
-                const currency = c.currency ?? "GBP";
-                const type = (c.contract_type ?? c.type ?? "MSA") as string;
+                const value = c.total_value ?? c.value;
+                const currency = c.currency;
+                const type = (c.contract_type ?? c.type ?? "—") as string;
                 const counterparty = c.counterparty_name || c.counterparty || c.counterparty_id || "—";
                 const version = c.version ?? 1;
 
@@ -166,7 +172,7 @@ export async function ContractLifecyclePanel() {
                       <span className="block truncate">{counterparty}</span>
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                      {value > 0 ? formatCurrency(value, currency) : "—"}
+                      {typeof value === "number" && currency ? formatCurrency(value, currency) : "—"}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {c.effective_to || c.expires_at ? (

@@ -1,4 +1,6 @@
 import { cookies } from "next/headers";
+import { listJurisdictions, type Jurisdiction } from "@/lib/api/jurisdictions";
+import { TaxRuleRowActions } from "./TaxRuleForms";
 import { CloudOff, Percent, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
@@ -20,28 +22,11 @@ const STATUS_COLORS: Record<string, string> = {
   REVERSED:   "bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300",
 };
 
-const JURISDICTION_LABEL: Record<string, { flag: string; short: string }> = {
-  "uk-gov-01":  { flag: "🇬🇧", short: "UK" },
-  "us-fed-01":  { flag: "🇺🇸", short: "US" },
-  "sg-iras-01": { flag: "🇸🇬", short: "SG" },
-  "de-bzst-01": { flag: "🇩🇪", short: "DE" },
-  "jur-uk-gb":  { flag: "🇬🇧", short: "UK" },
-  "jur-us-fed": { flag: "🇺🇸", short: "US" },
-  "jur-sg-01":  { flag: "🇸🇬", short: "SG" },
-  "jur-sg-sg":  { flag: "🇸🇬", short: "SG" },
-  "jur-de-fed": { flag: "🇩🇪", short: "DE" },
-  "uk":         { flag: "🇬🇧", short: "UK" },
-  "gb":         { flag: "🇬🇧", short: "UK" },
-  "us":         { flag: "🇺🇸", short: "US" },
-  "sg":         { flag: "🇸🇬", short: "SG" },
-  "de":         { flag: "🇩🇪", short: "DE" },
-};
-
 function formatCurrency(amount: number, currency: string) {
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: currency || "USD",
+      currency,
       maximumFractionDigits: 0,
     }).format(amount);
   } catch {
@@ -67,13 +52,20 @@ function RateBar({ rate }: { rate: number }) {
   );
 }
 
-function JurisdictionPill({ jurisdictionId }: { jurisdictionId: string }) {
-  const key = jurisdictionId?.toLowerCase();
-  const j = JURISDICTION_LABEL[key] || Object.entries(JURISDICTION_LABEL).find(([k]) => key?.includes(k))?.[1];
-  if (!j) return <span className="text-xs text-slate-400 font-mono">{jurisdictionId}</span>;
+/**
+ * A jurisdiction named from jurisdiction-rules-svc's register, matched by
+ * jurisdiction_id exactly. An id the register does not list is shown as the id:
+ * it is not a jurisdiction any validating service would accept.
+ */
+function JurisdictionPill({ jurisdictionId, register }: { jurisdictionId: string; register: Map<string, Jurisdiction> }) {
+  const j = register.get(jurisdictionId);
+  if (!j) return <span className="text-xs text-slate-400 font-mono break-all">{jurisdictionId || "—"}</span>;
   return (
-    <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-      <span>{j.flag}</span> {j.short}
+    <span
+      className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+      title={j.jurisdiction_name}
+    >
+      {j.jurisdiction_code}
     </span>
   );
 }
@@ -99,12 +91,16 @@ export async function TaxRulesAndDeterminationPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const [rulesRes, determinationsRes] = await Promise.all([
+  const [rulesRes, determinationsRes, jurisdictionsRes] = await Promise.all([
     listTaxRules(identity),
     listTaxDeterminations(identity),
+    listJurisdictions(),
   ]);
+  const register = new Map(
+    jurisdictionsRes.ok ? jurisdictionsRes.data.map((j) => [j.jurisdiction_id, j] as const) : [],
+  );
 
-  if (!rulesRes.ok && rulesRes.error.kind === "unreachable") {
+  if (!rulesRes.ok) {
     return (
       <PanelEmptyState
         icon={CloudOff}
@@ -120,6 +116,15 @@ export async function TaxRulesAndDeterminationPanel() {
 
   return (
     <div className="space-y-6">
+      {!jurisdictionsRes.ok && (
+        <PanelEmptyState
+          icon={CloudOff}
+          tone="warning"
+          label="jurisdiction-rules-svc could not be read"
+          hint={`Jurisdictions are shown by id. ${jurisdictionsRes.error.message}`}
+        />
+      )}
+
       {/* ── Tax Rules ── */}
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
@@ -128,15 +133,15 @@ export async function TaxRulesAndDeterminationPanel() {
         {rules.length === 0 ? (
           <PanelEmptyState
             icon={Percent}
-            label="No active tax rules"
+            label="No tax rules"
             hint="Tax rules created in tax-rules-svc will appear here."
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Jurisdiction", "Code", "Name", "Category", "Rate", "Effective", "Status"].map((h) => (
+                  {["Jurisdiction", "Code", "Name", "Category", "Rate", "Effective", "Status", "Actions"].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400"
@@ -153,7 +158,7 @@ export async function TaxRulesAndDeterminationPanel() {
                     className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                   >
                     <td className="px-4 py-3">
-                      <JurisdictionPill jurisdictionId={r.jurisdiction_id} />
+                      <JurisdictionPill jurisdictionId={r.jurisdiction_id} register={register} />
                     </td>
                     <td className="px-4 py-3 font-mono text-xs font-medium text-slate-700 dark:text-slate-300">
                       {r.rule_code}
@@ -182,6 +187,18 @@ export async function TaxRulesAndDeterminationPanel() {
                         {r.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3">
+                      <TaxRuleRowActions
+                        rule={{
+                          rule_id: r.rule_id,
+                          rule_code: r.rule_code,
+                          name: r.name,
+                          status: r.status,
+                          tax_rate_percentage: r.tax_rate_percentage,
+                          effective_to: r.effective_to,
+                        }}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -195,18 +212,20 @@ export async function TaxRulesAndDeterminationPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Tax Determinations ({determinations.length})
         </h3>
-        {determinations.length === 0 ? (
+        {!determinationsRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="tax-determination-svc could not be read" hint={determinationsRes.error.message} />
+        ) : determinations.length === 0 ? (
           <PanelEmptyState
             icon={Percent}
             label="No determinations evaluated"
             hint="Evaluated transactions from tax-determination-svc will appear here."
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Tx ID", "Source", "Supply", "Place of supply", "Gross", "Taxable", "Calculated Tax", "Rate", "Status"].map((h) => (
+                  {["Tx ID", "Source", "Rule", "Supply", "Place of supply", "Gross", "Taxable", "Calculated Tax", "Rate", "Status"].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400"
@@ -230,6 +249,9 @@ export async function TaxRulesAndDeterminationPanel() {
                         {d.source_module}
                       </span>
                     </td>
+                    <td className="px-4 py-3 font-mono text-[10px] text-slate-500 dark:text-slate-400 break-all max-w-[140px]">
+                      {d.rule_id ?? "—"}
+                    </td>
                     {/* TAX-03's classification facts. What is being supplied and
                         to whom is what decides the treatment — a rate shown
                         without them says nothing about why it applies. */}
@@ -246,7 +268,7 @@ export async function TaxRulesAndDeterminationPanel() {
                     </td>
 
                     <td className="px-4 py-3">
-                      <JurisdictionPill jurisdictionId={d.supply_jurisdiction_id || d.jurisdiction_id} />
+                      <JurisdictionPill jurisdictionId={d.supply_jurisdiction_id || d.jurisdiction_id} register={register} />
                       <div className="mt-1 flex flex-col gap-0.5">
                         {d.supply_date && (
                           <span className="text-[10px] text-slate-500 dark:text-slate-400">

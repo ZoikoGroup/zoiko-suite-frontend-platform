@@ -8,18 +8,17 @@ import {
   getMigrationJobByIdAction,
   remediateAuditEntryAction,
   archiveMigrationJobAction,
-  runMigrationQASuiteAction,
-  type MigrationQAReport,
 } from "@/app/admin/migrations/actions";
 import type { MigrationJob, IntegrityCheck, AuditEntry } from "@/lib/api/migration-integrity";
 import { FIELD, LABEL, HINT, BANNER_SUCCESS, BANNER_ERROR, BANNER_WARNING } from "@/components/admin/shared/form";
 
-const PRIMARY_TENANT = "11111111-1111-1111-1111-111111111111";
-const SECONDARY_TENANT = "99999999-9999-9999-9999-999999999999";
-const DEMO_LEGAL_ENTITY = "22222222-2222-2222-2222-222222222222";
+// Jobs are read and written as the signed-in session's tenant and legal
+// entity; the server actions take no identity from this component. The
+// tenant-scope picker ("Tenant 1 / Tenant 2 / Clear") and the QA suite that
+// wrote as fixed tenants are gone.
 
 export function MigrationIntegrityWorkbench() {
-  const [activeTab, setActiveTab] = useState<"validate" | "jobs" | "qa" | "architecture">("validate");
+  const [activeTab, setActiveTab] = useState<"validate" | "jobs" | "architecture">("validate");
   const [isPending, startTransition] = useTransition();
 
   // Health state
@@ -27,23 +26,15 @@ export function MigrationIntegrityWorkbench() {
   const [healthLoading, setHealthLoading] = useState(false);
 
   // Validation Form state
-  const [migrationName, setMigrationName] = useState("Opening Balance Ledger Cutover 2026");
-  const [sourceSystem, setSourceSystem] = useState("LEGACY_SAP_ERP");
-  const [targetService, setTargetService] = useState("general-ledger-svc");
-  const [legalEntityId, setLegalEntityId] = useState(DEMO_LEGAL_ENTITY);
-  const [tenantScope, setTenantScope] = useState(PRIMARY_TENANT);
-  const [requiredFieldsStr, setRequiredFieldsStr] = useState("account_code, amount, currency");
-  const [recordsJson, setRecordsJson] = useState(
-    JSON.stringify(
-      [
-        { ref: "ROW-001", fields: { account_code: "GL-1010", amount: "250000.00", currency: "GBP" } },
-        { ref: "ROW-002", fields: { account_code: "GL-1020", amount: "185000.50", currency: "GBP" } },
-        { ref: "ROW-003", fields: { account_code: "GL-2010", amount: "435000.50", currency: "GBP" } },
-      ],
-      null,
-      2
-    )
-  );
+  const [migrationName, setMigrationName] = useState("");
+  const [sourceSystem, setSourceSystem] = useState("");
+  const [targetService, setTargetService] = useState("");
+  const [requiredFieldsStr, setRequiredFieldsStr] = useState("");
+  const [recordsJson, setRecordsJson] = useState("");
+  const [exceptionOwnerId, setExceptionOwnerId] = useState("");
+  const [amountField, setAmountField] = useState("");
+  const [recordCount, setRecordCount] = useState("");
+  const [amountTotal, setAmountTotal] = useState("");
   const [validating, setValidating] = useState(false);
   const [lastValidationResult, setLastValidationResult] = useState<MigrationJob | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -51,17 +42,13 @@ export function MigrationIntegrityWorkbench() {
   // Remediation state
   const [remediatingEntryId, setRemediatingEntryId] = useState<string | null>(null);
   const [remediationNotes, setRemediationNotes] = useState("");
+  const [remediationEvidenceRef, setRemediationEvidenceRef] = useState("");
   const [remediationFeedback, setRemediationFeedback] = useState<string | null>(null);
 
   // Jobs list state
   const [jobs, setJobs] = useState<MigrationJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [selectedJob, setSelectedJob] = useState<MigrationJob | null>(null);
-
-  // QA Suite state
-  const [qaReports, setQaReports] = useState<MigrationQAReport[]>([]);
-  const [qaLoading, setQaLoading] = useState(false);
-  const [qaRunCompleted, setQaRunCompleted] = useState(false);
 
   useEffect(() => {
     fetchHealth();
@@ -83,7 +70,7 @@ export function MigrationIntegrityWorkbench() {
   async function loadJobs() {
     setJobsLoading(true);
     try {
-      const res = await listMigrationJobsAction({}, { tenantId: tenantScope });
+      const res = await listMigrationJobsAction({});
       if (res.ok) {
         setJobs(res.jobs);
       }
@@ -166,17 +153,19 @@ export function MigrationIntegrityWorkbench() {
       .filter(Boolean);
 
     try {
-      const res = await validateMigrationAction(
-        {
-          legal_entity_id: legalEntityId.trim(),
-          migration_name: migrationName.trim(),
-          source_system: sourceSystem.trim(),
-          target_service: targetService.trim(),
-          required_fields: fields,
-          records: parsedRecords,
+      const res = await validateMigrationAction({
+        migration_name: migrationName.trim(),
+        source_system: sourceSystem.trim(),
+        target_service: targetService.trim(),
+        required_fields: fields,
+        records: parsedRecords,
+        exception_owner_id: exceptionOwnerId.trim(),
+        control_totals: {
+          amount_field: amountField.trim(),
+          record_count: Number(recordCount),
+          amount_total: amountTotal.trim(),
         },
-        { tenantId: tenantScope }
-      );
+      });
 
       if (res.ok) {
         setLastValidationResult(res.data);
@@ -192,25 +181,30 @@ export function MigrationIntegrityWorkbench() {
   }
 
   async function handleRemediate(jobId: string, entryId: string) {
-    if (!remediationNotes.trim()) {
-      alert("Please enter compliance remediation notes");
+    if (!remediationNotes.trim() || !remediationEvidenceRef.trim()) {
+      alert("A remediation reason and an evidence reference are both required.");
       return;
     }
 
     startTransition(async () => {
       try {
-        const res = await remediateAuditEntryAction(jobId, entryId, remediationNotes.trim(), { tenantId: tenantScope });
+        const res = await remediateAuditEntryAction(jobId, entryId, {
+          disposition: "REMEDIATED",
+          remediation_reason: remediationNotes.trim(),
+          remediation_evidence_ref: remediationEvidenceRef.trim(),
+        });
         if (res.ok) {
           setRemediationFeedback(`Entry ${entryId.slice(0, 8)}... successfully marked remediated.`);
           setRemediatingEntryId(null);
           setRemediationNotes("");
+          setRemediationEvidenceRef("");
           // refresh selected job or last validation
           if (lastValidationResult && lastValidationResult.id === jobId) {
-            const updated = await getMigrationJobByIdAction(jobId, { tenantId: tenantScope });
+            const updated = await getMigrationJobByIdAction(jobId);
             if (updated.ok && updated.job) setLastValidationResult(updated.job);
           }
           if (selectedJob && selectedJob.id === jobId) {
-            const updated = await getMigrationJobByIdAction(jobId, { tenantId: tenantScope });
+            const updated = await getMigrationJobByIdAction(jobId);
             if (updated.ok && updated.job) setSelectedJob(updated.job);
           }
           loadJobs();
@@ -226,7 +220,7 @@ export function MigrationIntegrityWorkbench() {
   async function handleArchive(jobId: string) {
     if (!confirm(`Archive migration job ${jobId}?`)) return;
     try {
-      const res = await archiveMigrationJobAction(jobId, { tenantId: tenantScope });
+      const res = await archiveMigrationJobAction(jobId);
       if (res.ok) {
         loadJobs();
         if (selectedJob?.id === jobId) setSelectedJob(null);
@@ -235,22 +229,6 @@ export function MigrationIntegrityWorkbench() {
       }
     } catch (err: any) {
       alert(err.message);
-    }
-  }
-
-  async function handleRunQASuite() {
-    setQaLoading(true);
-    setQaRunCompleted(false);
-    try {
-      const reports = await runMigrationQASuiteAction();
-      setQaReports(reports);
-      setQaRunCompleted(true);
-      fetchHealth();
-      loadJobs();
-    } catch (err: any) {
-      alert(`QA Test Runner Exception: ${err.message}`);
-    } finally {
-      setQaLoading(false);
     }
   }
 
@@ -377,23 +355,6 @@ export function MigrationIntegrityWorkbench() {
         </button>
 
         <button
-          onClick={() => setActiveTab("qa")}
-          className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
-            activeTab === "qa"
-              ? "border-navy-900 text-navy-900 dark:border-cyan-400 dark:text-cyan-400"
-              : "border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-          }`}
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-          </svg>
-          Senior QA Test Matrix (7 Scenarios)
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-            Automated
-          </span>
-        </button>
-
-        <button
           onClick={() => setActiveTab("architecture")}
           className={`flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
             activeTab === "architecture"
@@ -423,53 +384,54 @@ export function MigrationIntegrityWorkbench() {
             <form onSubmit={handleValidate} className="mt-4 space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
-                  <label htmlFor="tenant-scope" className={LABEL}>
-                    Tenant ID Scope <span className="text-rose-500">* (Mandatory Zero-Trust Guard)</span>
+                  <label htmlFor="exception-owner" className={LABEL}>
+                    Exception owner (principal ID) <span className="text-rose-500">*</span>
                   </label>
-                  <div className="flex gap-2">
-                    <input
-                      id="tenant-scope"
-                      type="text"
-                      value={tenantScope}
-                      onChange={(e) => setTenantScope(e.target.value)}
-                      className={`${FIELD} font-mono text-xs`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setTenantScope(PRIMARY_TENANT)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                    >
-                      Tenant 1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTenantScope(SECONDARY_TENANT)}
-                      className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                    >
-                      Tenant 2
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTenantScope("")}
-                      className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50 dark:border-rose-700 dark:text-rose-300"
-                    >
-                      Clear (Neg)
-                    </button>
-                  </div>
+                  <input
+                    id="exception-owner"
+                    type="text"
+                    required
+                    value={exceptionOwnerId}
+                    onChange={(e) => setExceptionOwnerId(e.target.value)}
+                    className={`${FIELD} font-mono text-xs`}
+                  />
+                  <p className={HINT}>Runs as your session&apos;s tenant and legal entity.</p>
                 </div>
 
                 <div>
-                  <label htmlFor="legal-entity" className={LABEL}>
-                    Legal Entity ID <span className="text-rose-500">*</span>
+                  <label htmlFor="control-amount-field" className={LABEL}>
+                    Control totals <span className="text-rose-500">*</span>
                   </label>
-                  <input
-                    id="legal-entity"
-                    type="text"
-                    required
-                    value={legalEntityId}
-                    onChange={(e) => setLegalEntityId(e.target.value)}
-                    className={`${FIELD} font-mono text-xs`}
-                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      id="control-amount-field"
+                      aria-label="Amount field"
+                      placeholder="amount field"
+                      required
+                      value={amountField}
+                      onChange={(e) => setAmountField(e.target.value)}
+                      className={`${FIELD} font-mono text-xs`}
+                    />
+                    <input
+                      aria-label="Record count"
+                      placeholder="records"
+                      type="number"
+                      min={0}
+                      required
+                      value={recordCount}
+                      onChange={(e) => setRecordCount(e.target.value)}
+                      className={`${FIELD} font-mono text-xs`}
+                    />
+                    <input
+                      aria-label="Amount total"
+                      placeholder="amount total"
+                      required
+                      value={amountTotal}
+                      onChange={(e) => setAmountTotal(e.target.value)}
+                      className={`${FIELD} font-mono text-xs`}
+                    />
+                  </div>
+                  <p className={HINT}>From the extract manifest; the service reconciles the batch against them.</p>
                 </div>
 
                 <div>
@@ -790,9 +752,18 @@ export function MigrationIntegrityWorkbench() {
                                 <div className="flex items-center gap-2">
                                   <input
                                     type="text"
-                                    placeholder="Enter remediation notes..."
+                                    placeholder="Remediation reason"
+                                    aria-label="Remediation reason"
                                     value={remediationNotes}
                                     onChange={(e) => setRemediationNotes(e.target.value)}
+                                    className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                                  />
+                                  <input
+                                    type="text"
+                                    placeholder="Evidence reference"
+                                    aria-label="Evidence reference"
+                                    value={remediationEvidenceRef}
+                                    onChange={(e) => setRemediationEvidenceRef(e.target.value)}
                                     className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
                                   />
                                   <button
@@ -813,9 +784,8 @@ export function MigrationIntegrityWorkbench() {
                                 <button
                                   onClick={() => {
                                     setRemediatingEntryId(entry.id!);
-                                    setRemediationNotes(
-                                      `Corrected ${entry.field_name || "record"} from audit source verification`
-                                    );
+                                    setRemediationNotes("");
+                                    setRemediationEvidenceRef("");
                                   }}
                                   className="rounded border border-navy-300 bg-white px-2.5 py-1 text-xs font-semibold text-navy-800 hover:bg-navy-50 dark:border-slate-700 dark:bg-slate-800 dark:text-cyan-300"
                                 >
@@ -860,7 +830,7 @@ export function MigrationIntegrityWorkbench() {
             {jobs.length === 0 ? (
               <div className="mt-6 rounded-lg border border-dashed border-slate-300 p-8 text-center dark:border-slate-700">
                 <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-                  No migration jobs found for tenant {tenantScope}
+                  No migration jobs recorded for your legal entity
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
                   Run a validation in the Validation Studio tab or click a preset above.
@@ -926,7 +896,7 @@ export function MigrationIntegrityWorkbench() {
                         <td className="px-3 py-2.5 text-right space-x-1.5">
                           <button
                             onClick={async () => {
-                              const res = await getMigrationJobByIdAction(job.id, { tenantId: tenantScope });
+                              const res = await getMigrationJobByIdAction(job.id);
                               if (res.ok && res.job) setSelectedJob(res.job);
                             }}
                             className="rounded border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -1005,156 +975,6 @@ export function MigrationIntegrityWorkbench() {
               ) : (
                 <p className="mt-3 text-xs text-slate-500">No defect audit entries recorded for this job (Clean batch).</p>
               )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 3: Automated QA Suite */}
-      {activeTab === "qa" && (
-        <div className="space-y-4">
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                  Automated Senior QA Acceptance Test Matrix
-                </h3>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Executes all 7 acceptance criteria tests: health probes, clean cutover validation, defect detection,
-                  audit entry remediation, job archival lifecycle, missing-tenant scope guard, and Postgres RLS cross-tenant
-                  isolation.
-                </p>
-              </div>
-
-              <button
-                onClick={handleRunQASuite}
-                disabled={qaLoading}
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-navy-900 px-6 py-2.5 text-sm font-bold text-white shadow-md hover:bg-navy-800 disabled:opacity-50 dark:bg-cyan-600 dark:hover:bg-cyan-500"
-              >
-                {qaLoading ? (
-                  <>
-                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                    </svg>
-                    Executing 7 Test Cases...
-                  </>
-                ) : (
-                  <>
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Run Complete QA Test Suite
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Scorecard Strip */}
-            {qaRunCompleted && (
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t border-slate-100 pt-4 dark:border-slate-800">
-                <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">Total Executed</span>
-                  <div className="mt-1 text-xl font-extrabold text-slate-800 dark:text-slate-100">
-                    {qaReports.length} Tests
-                  </div>
-                </div>
-                <div className="rounded-lg bg-emerald-50 p-3 dark:bg-emerald-950/40">
-                  <span className="text-[10px] uppercase font-bold text-emerald-600">Passed</span>
-                  <div className="mt-1 text-xl font-extrabold text-emerald-600 dark:text-emerald-400">
-                    {qaReports.filter((r) => r.passed).length} / {qaReports.length}
-                  </div>
-                </div>
-                <div className="rounded-lg bg-rose-50 p-3 dark:bg-rose-950/40">
-                  <span className="text-[10px] uppercase font-bold text-rose-600">Failed</span>
-                  <div className="mt-1 text-xl font-extrabold text-rose-600 dark:text-rose-400">
-                    {qaReports.filter((r) => !r.passed).length}
-                  </div>
-                </div>
-                <div className="rounded-lg bg-cyan-50 p-3 dark:bg-cyan-950/40">
-                  <span className="text-[10px] uppercase font-bold text-cyan-700">Total Duration</span>
-                  <div className="mt-1 text-xl font-extrabold text-cyan-800 dark:text-cyan-300">
-                    {qaReports.reduce((sum, r) => sum + r.latencyMs, 0)}ms
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Test Case Cards */}
-          {qaReports.length > 0 && (
-            <div className="space-y-3">
-              {qaReports.map((report) => (
-                <div
-                  key={report.id}
-                  className={`rounded-lg border p-4 transition-all ${
-                    report.passed
-                      ? "border-emerald-200 bg-white dark:border-emerald-800/40 dark:bg-slate-900"
-                      : "border-rose-300 bg-rose-50/50 dark:border-rose-800/60 dark:bg-rose-950/20"
-                  }`}
-                >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span
-                        className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold ${
-                          report.passed
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                            : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
-                        }`}
-                      >
-                        {report.passed ? "PASS" : "FAIL"}
-                      </span>
-                      <span className="font-mono text-xs font-bold text-slate-500">{report.id}</span>
-                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{report.title}</h4>
-                      <span
-                        className={`rounded px-2 py-0.5 text-[10px] font-bold ${
-                          report.category === "POSITIVE"
-                            ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                            : "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
-                        }`}
-                      >
-                        {report.category}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-xs">
-                      <span className="font-mono text-slate-500">
-                        Status: <strong className={report.passed ? "text-emerald-600" : "text-rose-600"}>{report.actualStatus}</strong>{" "}
-                        (Exp: {report.expectedStatus})
-                      </span>
-                      <span className="font-mono text-slate-400">{report.latencyMs}ms</span>
-                    </div>
-                  </div>
-
-                  <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{report.description}</p>
-
-                  <div className="mt-3 grid grid-cols-1 gap-2 rounded bg-slate-50 p-2.5 text-xs dark:bg-slate-800 sm:grid-cols-2">
-                    <div>
-                      <strong className="text-slate-700 dark:text-slate-300">Response Summary:</strong>{" "}
-                      <span className="font-mono text-slate-600 dark:text-slate-400">{report.responseSummary}</span>
-                    </div>
-                    <div>
-                      <strong className="text-slate-700 dark:text-slate-300">QA Assessment:</strong>{" "}
-                      <span className="text-slate-500 dark:text-slate-400">{report.notes}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!qaRunCompleted && !qaLoading && (
-            <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center dark:border-slate-700">
-              <svg className="mx-auto h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
-              <p className="mt-2 text-sm font-semibold text-slate-700 dark:text-slate-300">
-                Acceptance Test Matrix Ready
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Click &quot;Run Complete QA Test Suite&quot; above to execute the 7 automated end-to-end acceptance scenarios.
-              </p>
             </div>
           )}
         </div>

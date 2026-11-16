@@ -58,13 +58,13 @@ export async function BoardResolutionsPanel() {
     listBoardResolutions(identity),
   ]);
 
-  if (!meetingsResult.ok && meetingsResult.error.kind === "unreachable") {
+  if (!meetingsResult.ok) {
     return (
       <PanelEmptyState
         icon={CloudOff}
         tone="warning"
-        label="The board records cannot be reached"
-        hint="Nothing is lost — the service that holds them is not responding. Try again shortly."
+        label="The board records could not be read"
+        hint={meetingsResult.error.message}
       />
     );
   }
@@ -147,7 +147,9 @@ export async function BoardResolutionsPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Resolutions put to the board ({resolutions.length})
         </h3>
-        {resolutions.length === 0 ? (
+        {!resolutionsResult.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="board-resolutions-svc (resolutions) could not be read" hint={resolutionsResult.error.message} />
+        ) : resolutions.length === 0 ? (
           <PanelEmptyState
             icon={Scale}
             label="No resolutions have been put to the board"

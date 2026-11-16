@@ -27,13 +27,11 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
-  ports,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle: string;
-  ports: string;
   children: React.ReactNode;
 }) {
   return (
@@ -48,9 +46,6 @@ function SectionCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          :{ports}
-        </span>
       </div>
       <div className="p-5">{children}</div>
     </section>
@@ -96,7 +91,6 @@ export default async function CompliancePage() {
           icon={FileCheck}
           title="Statutory Filing Requirements"
           subtitle="obligations-svc & evidence-requirements-svc — regulatory obligations and evidentiary standards"
-          ports="8088, 8130"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <FilingTrackerPanel />
@@ -107,7 +101,6 @@ export default async function CompliancePage() {
           icon={ShieldCheck}
           title="Compliance Status & Exception Escalations"
           subtitle="evidence-manifest-svc & exception-escalation-svc — verified evidence manifests and SLA breach tracking"
-          ports="8095, 8138"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <StatusAndEscalationPanel />

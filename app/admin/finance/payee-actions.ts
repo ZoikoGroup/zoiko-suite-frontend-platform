@@ -22,17 +22,13 @@ async function getIdentity(overridePrincipal?: string): Promise<SessionIdentity>
   const store = await cookies();
   const raw = store.get(SESSION_COOKIE)?.value;
   const decoded = decodeSession(raw);
-  const baseIdentity: SessionIdentity = decoded
-    ? {
-        principalId: decoded.principalId,
-        tenantId: decoded.tenantId,
-        legalEntityId: decoded.legalEntityId,
-      }
-    : {
-        principalId: "44444444-4444-4444-4444-444444444444",
-        tenantId: "11111111-1111-1111-1111-111111111111",
-        legalEntityId: "11111111-1111-1111-1111-111111111111",
-      };
+  // No session, no identity: never fall back to a fixed tenant or principal.
+  if (!decoded) throw new Error("Not signed in");
+  const baseIdentity: SessionIdentity = {
+    principalId: decoded.principalId,
+    tenantId: decoded.tenantId,
+    legalEntityId: decoded.legalEntityId,
+  };
 
   if (overridePrincipal && overridePrincipal.trim()) {
     return {

@@ -2,18 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { ArrowLeftRight, RefreshCw } from "lucide-react";
-
-type MigrationJob = {
-  job_id: string;
-  source_system: string;
-  target_service: string;
-  record_count: number;
-  validated_count: number;
-  failed_count: number;
-  status: string;
-  started_at: string;
-  completed_at?: string;
-};
+import { fetchPanelList } from "@/lib/panel-fetch";
+import type { MigrationJob } from "@/lib/api/intelligence";
 
 const STATUS_STYLES: Record<string, string> = {
   PENDING: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400",
@@ -31,11 +21,10 @@ export function MigrationIntegrityPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/intelligence/migrations", { signal: AbortSignal.timeout(5000) });
-      const json = await res.json().catch(() => ({ jobs: [] }));
-      setJobs(json.jobs ?? []);
-    } catch {
-      setError("migration-integrity-svc (:8166) could not be reached.");
+      setJobs(await fetchPanelList<MigrationJob>("/api/v1/intelligence/migrations", "jobs", "migration-integrity-svc"));
+    } catch (e) {
+      setJobs([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -49,7 +38,7 @@ export function MigrationIntegrityPanel() {
         <div className="flex items-center gap-2">
           <ArrowLeftRight className="h-4 w-4 text-teal-500" aria-hidden="true" />
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Migration Integrity</p>
-          <code className="text-[10px] font-mono text-slate-400">migration-integrity-svc :8166</code>
+          <code className="text-[10px] font-mono text-slate-400">migration-integrity-svc</code>
         </div>
         <button
           id="migration-refresh-btn"
@@ -76,18 +65,18 @@ export function MigrationIntegrityPanel() {
         {jobs.length > 0 && (
           <div className="space-y-4">
             {jobs.map((j) => {
-              const progress = j.record_count > 0
-                ? Math.round((j.validated_count / j.record_count) * 100)
+              const progress = j.total_records_count > 0
+                ? Math.round((j.valid_records_count / j.total_records_count) * 100)
                 : 0;
               return (
-                <div key={j.job_id} className="space-y-2">
+                <div key={j.id} className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
                         {j.source_system} → {j.target_service}
                       </p>
                       <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                        {j.validated_count.toLocaleString()} / {j.record_count.toLocaleString()} records · {j.failed_count} failures
+                        {j.valid_records_count.toLocaleString()} / {j.total_records_count.toLocaleString()} records valid · {j.invalid_records_count} invalid · integrity {j.integrity_score} (threshold {j.integrity_score_threshold})
                       </p>
                     </div>
                     <span className={`inline-flex shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_STYLES[j.status] ?? STATUS_STYLES.PENDING}`}>
@@ -96,7 +85,7 @@ export function MigrationIntegrityPanel() {
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800">
                     <div
-                      className={`h-1.5 rounded-full transition-all ${j.failed_count > 0 ? "bg-red-500" : "bg-teal-500"}`}
+                      className={`h-1.5 rounded-full transition-all ${j.invalid_records_count > 0 ? "bg-red-500" : "bg-teal-500"}`}
                       style={{ width: `${progress}%` }}
                     />
                   </div>

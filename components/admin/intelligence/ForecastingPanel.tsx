@@ -2,22 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { TrendingUp, RefreshCw } from "lucide-react";
-
-type Forecast = {
-  forecast_id: string;
-  model_type: string;
-  domain: string;
-  period: string;
-  accuracy_score: number;
-  status: string;
-  generated_at: string;
-};
+import { fetchPanelList } from "@/lib/panel-fetch";
+import { ForecastCreateForm } from "./IntelligenceCreateForms";
+import type { Forecast } from "@/lib/api/intelligence";
 
 const STATUS_STYLES: Record<string, string> = {
-  COMPLETED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
-  RUNNING: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400",
-  PENDING: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400",
-  FAILED: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400",
+  PUBLISHED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
+  APPROVED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
+  REVIEWED: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400",
+  CALCULATED: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400",
+  SUPERSEDED: "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400",
+  ARCHIVED: "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400",
 };
 
 export function ForecastingPanel() {
@@ -29,11 +24,10 @@ export function ForecastingPanel() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/intelligence/forecasts", { signal: AbortSignal.timeout(5000) });
-      const json = await res.json().catch(() => ({ forecasts: [] }));
-      setForecasts(json.forecasts ?? []);
-    } catch {
-      setError("forecasting-svc (:8161) could not be reached.");
+      setForecasts(await fetchPanelList<Forecast>("/api/v1/intelligence/forecasts", "forecasts", "forecasting-svc"));
+    } catch (e) {
+      setForecasts([]);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -47,7 +41,7 @@ export function ForecastingPanel() {
         <div className="flex items-center gap-2">
           <TrendingUp className="h-4 w-4 text-blue-500" aria-hidden="true" />
           <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Forecasting</p>
-          <code className="text-[10px] font-mono text-slate-400">forecasting-svc :8161</code>
+          <code className="text-[10px] font-mono text-slate-400">forecasting-svc</code>
         </div>
         <button
           id="forecast-refresh-btn"
@@ -61,6 +55,10 @@ export function ForecastingPanel() {
       </div>
 
       <div className="p-5">
+        <div className="mb-4">
+          <ForecastCreateForm onCreated={load} />
+        </div>
+
         {error && (
           <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-2">{error}</p>
         )}
@@ -78,21 +76,25 @@ export function ForecastingPanel() {
                 <th className="pb-2 font-medium">Domain</th>
                 <th className="pb-2 font-medium">Period</th>
                 <th className="pb-2 font-medium">Model</th>
-                <th className="pb-2 font-medium text-right">Accuracy</th>
+                <th className="pb-2 font-medium text-right">Confidence</th>
                 <th className="pb-2 font-medium">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {forecasts.map((f) => (
-                <tr key={f.forecast_id} className="text-slate-700 dark:text-slate-300">
-                  <td className="py-2 font-medium">{f.domain}</td>
-                  <td className="py-2">{f.period}</td>
-                  <td className="py-2 font-mono text-[10px] text-slate-500">{f.model_type.replace(/_/g, " ")}</td>
+                <tr key={f.id} className="text-slate-700 dark:text-slate-300">
+                  <td className="py-2 font-medium">{f.domain.replace(/_/g, " ")}</td>
+                  <td className="py-2">
+                    {f.historical_start_date} → {f.historical_end_date} · {f.horizon_periods} {f.granularity.toLowerCase()} periods
+                  </td>
+                  <td className="py-2 font-mono text-[10px] text-slate-500">
+                    {f.model_name} · {f.algorithm_type.replace(/_/g, " ")}
+                  </td>
                   <td className="py-2 text-right tabular-nums">
-                    {f.accuracy_score != null ? `${Math.round(f.accuracy_score * 100)}%` : "—"}
+                    {f.confidence_level != null ? `${f.confidence_level}%` : "—"}
                   </td>
                   <td className="py-2">
-                    <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_STYLES[f.status] ?? STATUS_STYLES.PENDING}`}>
+                    <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_STYLES[f.status] ?? STATUS_STYLES.CALCULATED}`}>
                       {f.status}
                     </span>
                   </td>

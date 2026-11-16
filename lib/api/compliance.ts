@@ -186,21 +186,6 @@ export async function evaluateCompliance(
   );
 }
 
-export type RiskScore = {
-  score_id: string;
-  category: string;
-  score: number;
-  risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-  last_evaluated: string;
-};
-
-export async function getRiskScoringSummary(identity?: Identity): Promise<ApiResult<RiskScore[]>> {
-  const res = await apiGet<{ scores?: RiskScore[] } | RiskScore[]>("complianceRiskScoring", "/v1/scores", { identity });
-  if (!res.ok) return res;
-  const list = Array.isArray(res.data) ? res.data : res.data.scores ?? [];
-  return { ok: true, data: list };
-}
-
 // ─── 3. Exception Escalation (exception-escalation-svc, /v1/exception-escalation) ─
 
 export type ExceptionSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -284,41 +269,6 @@ export async function resolveException(
     { closed_by: identity.principalId, closure_reason: closureReason },
     { identity },
   );
-}
-
-// ─── 4. Anomaly Detection ─────────────────────────────────────────────────────
-
-export type ComplianceAnomaly = {
-  anomaly_id: string;
-  domain: string;
-  description: string;
-  confidence_score: number;
-  detected_at: string;
-  status: "NEW" | "ACKNOWLEDGED" | "DISMISSED";
-};
-
-export async function listAnomalies(identity?: Identity): Promise<ApiResult<ComplianceAnomaly[]>> {
-  const res = await apiGet<{ anomalies?: ComplianceAnomaly[] } | ComplianceAnomaly[]>("anomalyDetection", "/v1/anomalies", { identity });
-  if (!res.ok) return res;
-  const list = Array.isArray(res.data) ? res.data : res.data.anomalies ?? [];
-  return { ok: true, data: list };
-}
-
-// ─── 5. Decision Support & Readiness ──────────────────────────────────────────
-
-export type DecisionSupportItem = {
-  item_id: string;
-  category: string;
-  recommendation: string;
-  impact_level: "HIGH" | "MEDIUM" | "LOW";
-  is_completed: boolean;
-};
-
-export async function getDecisionSupportChecklist(identity?: Identity): Promise<ApiResult<DecisionSupportItem[]>> {
-  const res = await apiGet<{ items?: DecisionSupportItem[] } | DecisionSupportItem[]>("decisionSupport", "/v1/recommendations", { identity });
-  if (!res.ok) return res;
-  const list = Array.isArray(res.data) ? res.data : res.data.items ?? [];
-  return { ok: true, data: list };
 }
 
 // ─── 6. Evidence Manifest ────────────────────────────────────────────────────

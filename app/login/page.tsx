@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SESSION_COOKIE } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { LoginBrandPanel, LoginForm } from "@/components/login";
 import { Logo } from "@/components/ui";
 
@@ -15,7 +15,9 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const cookieStore = await cookies();
-  if (cookieStore.get(SESSION_COOKIE)?.value) {
+  // Only a session that verifies (signature and expiry) skips sign-in; a cookie
+  // that merely exists sent an expired session to /admin and back, in a loop.
+  if (decodeSession(cookieStore.get(SESSION_COOKIE)?.value)) {
     redirect("/admin");
   }
 
