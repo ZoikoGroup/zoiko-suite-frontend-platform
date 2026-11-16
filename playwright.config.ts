@@ -12,6 +12,13 @@ const ASSISTANT_PORT = 18181; // keep in step with tests/e2e/backend.ts
 
 export default defineConfig({
   testDir: "tests/e2e",
+  // Console journeys live in tests/e2e/console and need a live backend stack
+  // (docker compose) plus the console started with ZOIKO_USE_GATEWAY. They
+  // have their own configs: playwright.console.config.ts and
+  // playwright.jurisdictions.config.ts. This assistant suite must not pick
+  // them up: CI runs no live stack, so every console spec failed here and
+  // took the assistant job down with it.
+  testIgnore: ["**/console/**"],
   outputDir: "test-results/e2e",
   workers: 1, // T10 stops and restarts the shared assistant service
   fullyParallel: false,
