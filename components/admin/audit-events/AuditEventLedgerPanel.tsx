@@ -24,11 +24,9 @@ import {
 export function AuditEventLedgerPanel({
   events,
   summary,
-  isMock,
 }: {
   events: AuditEvent[];
   summary: AuditEventSummary;
-  isMock?: boolean;
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDomain, setSelectedDomain] = useState<string>("all");
@@ -90,17 +88,6 @@ export function AuditEventLedgerPanel({
 
   return (
     <div className="space-y-6">
-      {/* Fallback Banner */}
-      {isMock && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-          <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-          <span>
-            <strong>Offline Fallback Dataset Loaded:</strong> Connected to audit-event-store-svc mock buffer.
-            All SHA-256 signatures are synthetically generated for demonstration.
-          </span>
-        </div>
-      )}
-
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="border-slate-200 dark:border-slate-800">
@@ -115,11 +102,10 @@ export function AuditEventLedgerPanel({
               <span className="text-2xl font-bold text-slate-900 dark:text-slate-100">
                 {summary.totalEvents}
               </span>
-              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                +{summary.throughputPerMin}/min
-              </span>
             </div>
-            <p className="mt-1 text-xs text-slate-500">Append-only audit trail</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {summary.returnedEvents} shown; status counts cover these only
+            </p>
           </CardContent>
         </Card>
 
@@ -129,14 +115,21 @@ export function AuditEventLedgerPanel({
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Hash Chain Status
               </span>
-              <Lock className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              {summary.hashChainVerified ? (
+                <Lock className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              ) : (
+                <ShieldAlert className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+              )}
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                100% Intact
-              </span>
+              {/* Was a literal "100% Intact" whatever the service said. */}
+              {summary.hashChainVerified ? (
+                <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">Intact</span>
+              ) : (
+                <span className="text-2xl font-bold text-rose-600 dark:text-rose-400">Broken</span>
+              )}
             </div>
-            <p className="mt-1 text-xs text-slate-500">Cryptographically immutable</p>
+            <p className="mt-1 text-xs text-slate-500">audit-event-store-svc verdict for the events shown</p>
           </CardContent>
         </Card>
 

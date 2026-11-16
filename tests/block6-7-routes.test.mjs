@@ -12,7 +12,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+// Line endings normalised: a Windows checkout (core.autocrlf) has CRLF, and
+// the markers below are matched with a bare LF.
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
 
 const DEAD = [
   ["lib/api/contracts.ts", /\/v1\/contracts\/\$\{[^}]+\}\/submit[`"]/, "contract /submit (use /submit-review)"],

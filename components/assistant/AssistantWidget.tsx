@@ -1226,7 +1226,7 @@ export function AssistantWidget({
     }
     const backendDown = kind === "network" && (status === undefined || status >= 500);
     if (process.env.NODE_ENV === "development" && backendDown) {
-      text += " Dev: the assistant service (public-ai-svc) is not reachable at ZOIKO_PUBLIC_AI_URL (default http://127.0.0.1:8001). Start it from zoiko-suite-backend/services/public-ai-svc with PUBLIC_AI_ENABLED=true PUBLIC_AI_ENVIRONMENT=dev go run ./cmd/server.";
+      text += " Dev: the assistant service (public-ai-svc) is not reachable at ZOIKO_PUBLIC_AI_URL (default http://127.0.0.1:8001). Start it (it then restarts by itself) from zoiko-suite-backend with: docker compose -f deployments/docker-compose.public-ai-dev.yml up -d --build. Check nothing else holds port 8001 (the gateway uses 8000).";
     }
     return text;
   }
@@ -1485,7 +1485,11 @@ export function AssistantWidget({
         all={menu}
         view={view}
         disabled={sending}
-        showMore={messages.length === 0 && !moreTopics && (pageChips?.length ? serverMenu !== null : menu.length > visibleCount)}
+        // Doc 02 §05 C01 / §22 Homepage: the welcome shows exactly four
+        // chips on desktop, nothing behind "More topics"; the full menu
+        // stays in the header (Browse topics). A page with its own chips, or
+        // mobile (three chips), keeps "More topics".
+        showMore={messages.length === 0 && !moreTopics && (pageChips?.length ? serverMenu !== null : menu.length > visibleCount && visibleCount < MAX_STARTERS)}
         copy={{ main: t("ui.menu.main"), back: t("ui.menu.back"), more: t("ui.more_topics") }}
         onView={setMenuView}
         onMore={() => setMoreTopics(true)}
@@ -1674,6 +1678,7 @@ export function AssistantWidget({
                       onClick={() => {
                         setMoreOpen(false);
                         setMenuView({ kind: "main" });
+                        setMoreTopics(true); // every topic, including those past the welcome four
                       }}
                     >
                       <LayoutGrid size={18} aria-hidden />

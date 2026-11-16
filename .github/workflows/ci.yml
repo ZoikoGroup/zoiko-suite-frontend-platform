@@ -89,11 +89,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # A widget PR that depends on an unmerged backend change names that
+      # branch in its description with a line "Backend-Ref: <branch>". It is
+      # used while it exists; otherwise (no line, or merged and deleted) the
+      # suite runs against the backend's main. The description is read from
+      # the environment and the ref limited to branch-name characters.
+      - name: Pick the assistant service ref
+        id: backend
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          ref=$(printf '%s\n' "$PR_BODY" | tr -d '\r' | sed -n 's/^Backend-Ref:[[:space:]]*\([A-Za-z0-9._/-]\{1,200\}\)[[:space:]]*$/\1/p' | head -n 1)
+          if [ -n "$ref" ] && git ls-remote --exit-code --heads https://github.com/ZoikoGroup/zoiko-suite-backend "refs/heads/$ref" > /dev/null; then
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          else
+            ref=main
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Assistant service ref: $ref"
+
       - name: Checkout the assistant service
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ZoikoGroup/zoiko-suite-backend
-          ref: main
+          ref: ${{ steps.backend.outputs.ref }}
           token: ${{ secrets.BACKEND_REPO_TOKEN || github.token }}
           path: backend
           sparse-checkout: services/public-ai-svc

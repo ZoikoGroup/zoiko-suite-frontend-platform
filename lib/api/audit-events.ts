@@ -1,4 +1,5 @@
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, type Identity } from "./client";
+import { parseEventListResponse, parseVerifyResponse, type AuditEventCounts } from "./audit-event-summary";
 
 export interface AuditEvent {
   id: string;
@@ -18,222 +19,52 @@ export interface AuditEvent {
   metadata: Record<string, string | number | boolean>;
 }
 
-export interface AuditEventSummary {
-  totalEvents: number;
-  hashChainVerified: boolean;
-  authorizedCount: number;
-  escalatedCount: number;
-  deniedCount: number;
-  throughputPerMin: number;
-}
+export type AuditEventSummary = AuditEventCounts;
 
-const FALLBACK_AUDIT_EVENTS: AuditEvent[] = [
-  {
-    id: "evt-2026-90812",
-    correlation_id: "corr-8f921a-4421-9980",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-admin-001",
-    principal_name: "Eleanor Vance (Chief Governance Officer)",
-    action: "ISSUE_PURCHASE_ORDER",
-    domain: "commercial-ops",
-    resource: "PurchaseOrder",
-    resource_id: "PO-2026-0414",
-    status: "COMMITTED",
-    timestamp: "2026-07-31T16:20:15Z",
-    hash_signature: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    previous_hash: "a189f72bc91028e47b01d32a901e82847291a182049281a02931818290318294",
-    ip_address: "192.168.1.42",
-    metadata: { amount: 450000, vendor: "Acme Cloud Infrastructure Inc.", currency: "USD" },
-  },
-  {
-    id: "evt-2026-90811",
-    correlation_id: "corr-7e112b-3310-8871",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-legal-004",
-    principal_name: "Marcus Aurelius (General Counsel)",
-    action: "EXECUTE_CONTRACT",
-    domain: "legal",
-    resource: "Contract",
-    resource_id: "cnt-2026-001",
-    status: "AUTHORIZED",
-    timestamp: "2026-07-31T15:45:00Z",
-    hash_signature: "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-    previous_hash: "8f7e2a1b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f",
-    ip_address: "10.0.4.19",
-    metadata: { contract_title: "Global Enterprise Cloud MSA", risk_rating: "LOW" },
-  },
-  {
-    id: "evt-2026-90810",
-    correlation_id: "corr-6d001c-2209-7762",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-tax-002",
-    principal_name: "Sarah Jenkins (Global Tax Director)",
-    action: "EVALUATE_TAX_DETERMINATION",
-    domain: "tax",
-    resource: "TaxDetermination",
-    resource_id: "det-uk-vat-2026",
-    status: "COMMITTED",
-    timestamp: "2026-07-31T14:12:30Z",
-    hash_signature: "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969",
-    previous_hash: "2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3",
-    ip_address: "192.168.1.88",
-    metadata: { jurisdiction: "GB", vat_rate: 20, net_amount: 1250000 },
-  },
-  {
-    id: "evt-2026-90809",
-    correlation_id: "corr-5c990d-1108-6653",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-payroll-009",
-    principal_name: "David Chen (VP Head of Payroll)",
-    action: "TRIGGER_PAY_RUN",
-    domain: "payroll",
-    resource: "PayRun",
-    resource_id: "pr-2026-07-monthly",
-    status: "ESCALATED",
-    timestamp: "2026-07-31T13:05:44Z",
-    hash_signature: "36579075782782e4e1a0670846503c513e9a117075c3ca57223e7178c7b8e235",
-    previous_hash: "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4",
-    ip_address: "10.0.2.14",
-    metadata: { employee_count: 1420, gross_total: 4850000, escalation_reason: "High overtime threshold exceeded" },
-  },
-  {
-    id: "evt-2026-90808",
-    correlation_id: "corr-4b889e-0097-5544",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-hr-003",
-    principal_name: "Amara Diallo (People Operations Officer)",
-    action: "ONBOARD_EMPLOYEE",
-    domain: "hr",
-    resource: "EmployeeRecord",
-    resource_id: "emp-2026-0891",
-    status: "COMMITTED",
-    timestamp: "2026-07-31T11:30:12Z",
-    hash_signature: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-    previous_hash: "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5",
-    ip_address: "192.168.1.104",
-    metadata: { position: "Senior Cloud Architect", department: "Engineering" },
-  },
-  {
-    id: "evt-2026-90807",
-    correlation_id: "corr-3a778f-9986-4433",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-comp-007",
-    principal_name: "Victor Sterling (Head of Regulatory Compliance)",
-    action: "FILE_STATUTORY_DECLARATION",
-    domain: "compliance",
-    resource: "StatutoryFiling",
-    resource_id: "fil-sec-10k-2026",
-    status: "AUTHORIZED",
-    timestamp: "2026-07-31T10:15:22Z",
-    hash_signature: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
-    previous_hash: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6",
-    ip_address: "10.0.1.5",
-    metadata: { jurisdiction: "US-SEC", compliance_status: "PASSED" },
-  },
-  {
-    id: "evt-2026-90806",
-    correlation_id: "corr-2z667e-8875-3322",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-unauth-099",
-    principal_name: "External Service Account (API)",
-    action: "MUTATE_FEES_SCHEDULE",
-    domain: "finance",
-    resource: "FeeSchedule",
-    resource_id: "sched-2026-v1",
-    status: "DENIED",
-    timestamp: "2026-07-31T09:04:11Z",
-    hash_signature: "f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8",
-    previous_hash: "6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7",
-    ip_address: "203.0.113.88",
-    metadata: { refusal_reason: "RBAC principal lacks mutate:finance permission" },
-  },
-];
+// There used to be a FALLBACK_AUDIT_EVENTS list here: six invented events with
+// named principals and synthetic SHA-256 hashes, returned whenever the service
+// could not be read, with a summary claiming the chain was verified and a
+// throughput of 142/min. On success the summary still hardcoded
+// hashChainVerified: true and 180/min. None of it came from a service. A failed
+// read is now an error, and every figure in the summary is the service's own.
 
 /**
- * Fetch all logged audit events from audit-event-store-svc.
+ * Read one page of audit events from audit-event-store-svc.
+ *
+ * The service requires X-Principal-Id and X-Tenant-Id and checks
+ * AUDIT_EVENT_READ, so the caller's session identity is mandatory.
  */
-export async function getAuditEvents(): Promise<{
-  data: AuditEvent[];
-  summary: AuditEventSummary;
-  isMock: boolean;
-  error: string | null;
-}> {
-  const res = await apiGet<AuditEvent[]>("auditEventStore", "/v1/events");
+export async function getAuditEvents(
+  identity: Identity,
+): Promise<
+  { ok: true; data: AuditEvent[]; summary: AuditEventSummary } | { ok: false; error: string }
+> {
+  const res = await apiGet<unknown>("auditEventStore", "/v1/events", { identity });
+  if (!res.ok) return { ok: false, error: res.error.message };
 
-  if (!res.ok) {
-    return {
-      data: FALLBACK_AUDIT_EVENTS,
-      summary: {
-        totalEvents: FALLBACK_AUDIT_EVENTS.length,
-        hashChainVerified: true,
-        authorizedCount: FALLBACK_AUDIT_EVENTS.filter((e) => e.status === "AUTHORIZED").length,
-        escalatedCount: FALLBACK_AUDIT_EVENTS.filter((e) => e.status === "ESCALATED").length,
-        deniedCount: FALLBACK_AUDIT_EVENTS.filter((e) => e.status === "DENIED").length,
-        throughputPerMin: 142,
-      },
-      isMock: true,
-      error: res.error.message,
-    };
-  }
-
-  const raw = res.data;
-  // audit-event-store-svc returns { events: [...], total, hash_chain_valid }
-  // apiGet<AuditEvent[]> passes the raw object through — extract the array safely.
-  const events: AuditEvent[] = Array.isArray(raw)
-    ? raw
-    : Array.isArray((raw as unknown as Record<string, unknown>)?.events)
-    ? ((raw as unknown as Record<string, unknown>).events as AuditEvent[])
-    : [];
-
-  return {
-    data: events,
-    summary: {
-      totalEvents: events.length,
-      hashChainVerified: true,
-      authorizedCount: events.filter((e) => e.status === "AUTHORIZED").length,
-      escalatedCount: events.filter((e) => e.status === "ESCALATED").length,
-      deniedCount: events.filter((e) => e.status === "DENIED").length,
-      throughputPerMin: 180,
-    },
-    isMock: false,
-    error: null,
-  };
+  const parsed = parseEventListResponse<AuditEvent>(res.data);
+  if (!parsed.ok) return parsed;
+  return { ok: true, data: parsed.events, summary: parsed.summary };
 }
 
 /**
- * Perform cryptographic hash verification on an audit event log chain.
+ * Ask the service to verify the audit hash chain.
+ *
+ * Throws when no verdict could be obtained. It used to answer `verified: true`
+ * when the service was unreachable, and to treat any response that did not say
+ * `false` as intact, so an outage read as "no tampering detected".
  */
-export async function verifyAuditChain(): Promise<{
+export async function verifyAuditChain(identity: Identity): Promise<{
   verified: boolean;
   timestamp: string;
   checkedEvents: number;
 }> {
-  const res = await apiPost<{ verified?: boolean; checkedEvents?: number; hash_chain_valid?: boolean; status?: string }>(
-    "auditEventStore",
-    "/v1/events/verify",
-    {}
-  );
+  const res = await apiPost<unknown>("auditEventStore", "/v1/events/verify", {}, { identity });
+  if (!res.ok) throw new Error(res.error.message);
 
-  if (!res.ok) {
-    return {
-      verified: true,
-      timestamp: new Date().toISOString(),
-      checkedEvents: FALLBACK_AUDIT_EVENTS.length,
-    };
-  }
-
-  const raw = res.data;
-  const isVerified =
-    raw.verified === true ||
-    raw.hash_chain_valid === true ||
-    raw.status === "INGESTED" ||
-    (raw.verified !== false && raw.hash_chain_valid !== false);
-
-  return {
-    verified: isVerified,
-    timestamp: new Date().toISOString(),
-    checkedEvents: raw.checkedEvents ?? FALLBACK_AUDIT_EVENTS.length,
-  };
+  const parsed = parseVerifyResponse(res.data);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return { verified: parsed.verified, timestamp: parsed.timestamp, checkedEvents: parsed.checkedEvents };
 }
 
 // ─── Write: Ingest Audit Event ────────────────────────────────────────────────
