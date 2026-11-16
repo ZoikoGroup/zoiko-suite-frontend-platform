@@ -74,6 +74,8 @@ async function ChangeDrawer({ id, links, ctx }: { id: string; links: { close: st
     const b = read.data;
     if (!b) return null;
     const proposer = b.proposed_by === ctx.me;
+    // The service refuses to apply a batch with an invalid row; only Reject is offered then.
+    const applicable = !b.invalid_count;
     return (
       <DetailDrawer
         heading="Import batch"
@@ -88,9 +90,11 @@ async function ChangeDrawer({ id, links, ctx }: { id: string; links: { close: st
               <Cmd command="import.reject" label="Reject" tone="danger" title="Reject this import" hidden={{ id: raw }}>
                 <TextArea name="reason" label="Reason" />
               </Cmd>
-              <Cmd command="import.approve" label="Approve and apply" tone="accent" title="Approve this import" hidden={{ id: raw }} description="Applies every row in one transaction: jurisdictions added, updated or retired with their history.">
-                <TextArea name="reason" label="Note" optional />
-              </Cmd>
+              {applicable && (
+                <Cmd command="import.approve" label="Approve and apply" tone="accent" title="Approve this import" hidden={{ id: raw }} description="Applies every row in one transaction: jurisdictions added, updated or retired with their history.">
+                  <TextArea name="reason" label="Note" optional />
+                </Cmd>
+              )}
             </>
           ) : undefined
         }
@@ -106,6 +110,7 @@ async function ChangeDrawer({ id, links, ctx }: { id: string; links: { close: st
           ]}
         />
         {proposer && b.status === "PROPOSED" && <DrawerNote>You proposed this import, so a second person approves or rejects it.</DrawerNote>}
+        {!applicable && b.status === "PROPOSED" && <DrawerNote>{b.invalid_count} row(s) failed validation, so this batch cannot be applied. Reject it and propose a corrected one.</DrawerNote>}
         <MiniList
           empty="No rows."
           items={(b.items ?? []).map((i) => ({ key: String(i.item_no), primary: `Row ${i.item_no}`, secondary: (i.validation_errors ?? []).join("; ") || i.outcome || "valid", right: i.validation_errors?.length ? <Chip text="Invalid" tone="danger" /> : undefined }))}

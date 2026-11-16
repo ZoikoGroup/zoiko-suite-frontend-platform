@@ -10,13 +10,17 @@
 // One action, `commandAction`, serves every dialog on the page: the form's
 // hidden `command` names the step, and the table below maps it to one call.
 // Every result is the AuthzResult shape the shared ActionDialog shows.
+//
+// No action refreshes the page: the dialog does when its result is closed
+// (refreshOnClose). Refreshing here re-rendered state-dependent commands away
+// (an "Approve and activate" on a rule that is now ACTIVE) and took the
+// dialog, and the person's only view of the result, with them.
 
 import { cookies } from "next/headers";
-import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, toIdentity, type SessionIdentity } from "@/lib/auth";
 import type { ApiError, ApiWriteResult } from "@/lib/api/client";
 import type { AuthzResult } from "@/app/admin/authorization/state";
-import { createWorkflow, decideWorkflow, getWorkflow } from "@/lib/api/workflow";
+import { createWorkflow, decideWorkflow, getWorkflowVersioned } from "@/lib/api/workflow";
 import { person } from "@/lib/directory";
 import * as J from "@/lib/api/jurisdictions";
 
@@ -83,11 +87,10 @@ function fail(error: ApiError): AuthzResult {
   return { status: J.isRefusal(error) ? "refused" : "error", message: J.explainJurisdictionProblem(error) };
 }
 
-/** Run one write; on success refresh the page and say what happened. */
+/** Run one write and say what happened (the dialog refreshes the page on close). */
 async function write<T>(call: Promise<ApiWriteResult<T>>, ok: (data: T, status: number) => AuthzResult): Promise<AuthzResult> {
   const r = await call;
   if (!r.ok) return fail(r.error);
-  refresh();
   return ok(r.data, r.status);
 }
 
@@ -101,6 +104,19 @@ const short = (s: string | null | undefined) => (s ? (s.length > 24 ? `${s.slice
 
 function explanation(lines: string[] | null | undefined): AuthzResult["table"] {
   return lines?.length ? { headers: ["Step"], rows: lines.map((l) => [l]) } : undefined;
+}
+
+/** A blank "At" means now; the runtime routes require the instant. */
+const atOrNow = (fd: FormData) => instant(opt(fd, "effective_at")) ?? new Date().toISOString();
+
+/**
+ * A recorded negative answer (UNSUPPORTED_JURISDICTION, NO_RULE, AMBIGUOUS …)
+ * in words, with its steps and the evidence id: a refusal shows only its
+ * message, so nothing the service recorded may be left out of it.
+ */
+function negative(lead: string, outcome: string, lines: (string | null | undefined)[], decisionId: string | undefined): string {
+  const why = lines.filter(Boolean).join(" ");
+  return `${lead}: ${outcome.replaceAll("_", " ").toLowerCase()}.${why ? ` ${why}` : ""}${decisionId ? ` Recorded as decision ${decisionId}.` : ""}`;
 }
 
 // ── commands ─────────────────────────────────────────────────────────────────
@@ -240,7 +256,6 @@ const COMMANDS: Record<string, Handler> = {
       idempotencyKey: crypto.randomUUID(),
     });
     if (!r.ok) return { status: J.isRefusal(r.error) ? "refused" : "error", message: `workflow-svc did not open the approval: ${r.error.message}` };
-    refresh();
     return {
       status: "pending",
       message: `Approval requested from ${person(approver).name}. They approve and activate the rule from its drawer, citing this approval.`,
@@ -253,11 +268,12 @@ const COMMANDS: Record<string, Handler> = {
   "rule.approve-activate": async (fd, me) => {
     const ruleId = need(fd, "id", "The rule");
     const ref = need(fd, "approval_reference", "The approval reference");
-    const wf = await getWorkflow(ref, me);
-    if (!wf.ok) return { status: "refused", message: `workflow-svc does not show that approval to you: ${wf.error.message}` };
+    const read = await getWorkflowVersioned(ref, me);
+    if (!read.ok) return { status: "refused", message: `workflow-svc does not show that approval to you: ${read.error.message}` };
+    const wf = read.data;
     if (wf.data.subject_type !== "jurisdiction_rule" || wf.data.subject_id !== ruleId) return { status: "refused", message: "That approval is not bound to this rule." };
     if (wf.data.workflow_status === "PENDING" || wf.data.workflow_status === "ESCALATED") {
-      const decided = await decideWorkflow({ identity: me, workflowInstanceId: ref, decision: "APPROVE", rationale: opt(fd, "rationale"), quorum: false, idempotencyKey: crypto.randomUUID() });
+      const decided = await decideWorkflow({ identity: me, workflowInstanceId: ref, decision: "APPROVE", rationale: opt(fd, "rationale"), quorum: false, idempotencyKey: crypto.randomUUID(), ifMatch: wf.etag });
       if (!decided.ok) return { status: J.isRefusal(decided.error) ? "refused" : "error", message: `workflow-svc did not record your approval: ${decided.error.message}` };
     }
     const rule = await J.getRule(ruleId, me);
@@ -272,7 +288,6 @@ const COMMANDS: Record<string, Handler> = {
     const ref = need(fd, "approval_reference", "The approval reference");
     const r = await decideWorkflow({ identity: me, workflowInstanceId: ref, decision: "REJECT", rationale: need(fd, "rationale", "A reason"), quorum: false, idempotencyKey: crypto.randomUUID() });
     if (!r.ok) return { status: J.isRefusal(r.error) ? "refused" : "error", message: `workflow-svc did not record the rejection: ${r.error.message}` };
-    refresh();
     return done("Approval rejected. The rule stays DRAFT; its author can revise it and ask again.");
   },
   "rule.close": (fd, me) => {
@@ -400,7 +415,7 @@ const COMMANDS: Record<string, Handler> = {
   // Packs
   "pack.create": (fd, me) =>
     write(
-      J.createPack({ packRef: need(fd, "pack_ref", "A pack ref").toLowerCase(), packName: need(fd, "pack_name", "A name"), owner: need(fd, "owner", "An owner"), supportOwner: opt(fd, "support_owner") }, me),
+      J.createPack({ packRef: J.codeOf("pack", need(fd, "pack_ref", "A pack ref")), packName: need(fd, "pack_name", "A name"), owner: need(fd, "owner", "An owner"), supportOwner: opt(fd, "support_owner") }, me),
       (p, s) => done(s === 201 ? `Pack ${p.pack_ref} registered. Add a version with its manifest next.` : `Pack ${p.pack_ref} already exists.`),
     ),
   "pack.version": (fd, me) => {
@@ -502,7 +517,7 @@ const COMMANDS: Record<string, Handler> = {
     ),
   "pack.retro": (fd, me) => write(J.completeRetrospective(need(fd, "ref", "The pack"), need(fd, "version", "The version"), need(fd, "note", "A note"), me), () => done("Retrospective recorded.")),
   "key.register": (fd, me) =>
-    write(J.registerSigningKey({ keyRef: need(fd, "key_ref", "A key ref"), publicKey: need(fd, "public_key", "The public key"), algorithm: opt(fd, "algorithm") }, me), (k, s) =>
+    write(J.registerSigningKey({ keyRef: J.codeOf("key", need(fd, "key_ref", "A key ref")), publicKey: need(fd, "public_key", "The public key"), algorithm: opt(fd, "algorithm") }, me), (k, s) =>
       done(s === 201 ? `Public key ${k.key_ref} is trusted for verification.` : `${k.key_ref} was already registered with this key.`),
     ),
   "key.status": (fd, me) => {
@@ -510,39 +525,46 @@ const COMMANDS: Record<string, Handler> = {
     return write(J.setSigningKeyStatus(need(fd, "id", "The key"), to, need(fd, "reason", "A reason"), me), (k) => done(`${k.key_ref} is ${k.status}.`));
   },
   "ring.create": (fd, me) =>
-    write(J.createRing({ ringCode: need(fd, "ring_code", "A ring code").toUpperCase(), ordinal: num(fd, "ordinal") ?? 0, minSoakSeconds: num(fd, "min_soak_seconds") ?? 0, description: opt(fd, "description") }, me), (r) => done(`Ring ${r.ring_code} created.`)),
-  "region.create": (fd, me) => write(J.createRegion({ regionCode: need(fd, "region_code", "A region code").toUpperCase(), description: opt(fd, "description") }, me), (r) => done(`Region ${r.region_code} created.`)),
+    write(J.createRing({ ringCode: J.codeOf("ring", need(fd, "ring_code", "A ring code")), ordinal: num(fd, "ordinal") ?? 0, minSoakSeconds: num(fd, "min_soak_seconds") ?? 0, description: opt(fd, "description") }, me), (r) => done(`Ring ${r.ring_code} created.`)),
+  "region.create": (fd, me) => write(J.createRegion({ regionCode: J.codeOf("region", need(fd, "region_code", "A region code")), description: opt(fd, "description") }, me), (r) => done(`Region ${r.region_code} created.`)),
 
   // Runtime
   "resolve.rule": async (fd, me) => {
     const r = await J.resolveRule(
-      { jurisdiction: need(fd, "jurisdiction", "A jurisdiction code").toUpperCase(), ruleDomain: need(fd, "rule_domain", "A domain").toUpperCase(), ruleCode: need(fd, "rule_code", "A rule code").toUpperCase(), effectiveAt: instant(opt(fd, "effective_at")) },
+      { jurisdiction: need(fd, "jurisdiction", "A jurisdiction code").toUpperCase(), ruleDomain: need(fd, "rule_domain", "A domain").toUpperCase(), ruleCode: need(fd, "rule_code", "A rule code").toUpperCase(), effectiveAt: atOrNow(fd) },
       me,
     );
-    if (!r.ok) return fail(r.error);
-    const d = r.data;
+    const a = J.recordedAnswer(r);
+    if (!a) return fail(r.ok ? { kind: "malformed", message: "The service gave no decision." } : r.error);
+    const d = a.decision;
+    if (d.outcome !== "RESOLVED") return { status: "refused", message: negative("No single rule answers", d.outcome, [d.basis, ...(d.explanation ?? [])], a.decision_id) };
     return {
-      status: d.outcome === "RESOLVED" ? "done" : "refused",
-      message: d.outcome === "RESOLVED" ? `Resolved ${d.rule_code} from ${d.pack?.pack_ref}@${d.pack?.version}. The decision is recorded as evidence.` : `No single rule answers: ${d.outcome.replaceAll("_", " ").toLowerCase()}. ${d.basis ?? ""}`,
+      status: "done",
+      message: `Resolved ${d.rule_code} from ${d.pack?.pack_ref}@${d.pack?.version}. The decision is recorded as evidence.`,
       details: [
         { label: "Outcome", value: d.outcome },
         { label: "Rule", value: d.rule ? `${d.rule.rule_name} (${short(d.rule.content_digest)})` : "—" },
         { label: "Pack", value: d.pack ? `${d.pack.pack_ref}@${d.pack.version}` : "—" },
-        { label: "Decision id", value: d.decision_id ?? "—" },
+        { label: "Decision id", value: a.decision_id },
       ],
       table: explanation(d.explanation),
     };
   },
   "determine.jurisdiction": async (fd, me) => {
     const r = await J.determineJurisdiction(
-      { legalEntityId: need(fd, "legal_entity_id", "A legal entity"), purpose: need(fd, "purpose", "A purpose"), effectiveAt: instant(opt(fd, "effective_at")), claimedJurisdiction: opt(fd, "claimed_jurisdiction") },
+      { legalEntityId: need(fd, "legal_entity_id", "A legal entity"), purpose: need(fd, "purpose", "A purpose"), effectiveAt: atOrNow(fd), claimedJurisdiction: opt(fd, "claimed_jurisdiction")?.toUpperCase() },
       me,
     );
-    if (!r.ok) return fail(r.error);
-    const d = r.data;
+    const a = J.recordedAnswer(r);
+    if (!a) return fail(r.ok ? { kind: "malformed", message: "The service gave no decision." } : r.error);
+    const d = a.determination;
+    if (d.outcome !== "JURISDICTION_DETERMINED") {
+      const candidates = (d.candidates ?? []).map((c) => `${c.jurisdiction_code} (${c.support.replaceAll("_", " ").toLowerCase()})`).join(", ");
+      return { status: "refused", message: negative("Not determined", d.outcome, [candidates && `Candidates: ${candidates}.`, ...(d.explanation ?? [])], a.decision_id) };
+    }
     return {
-      status: d.outcome === "JURISDICTION_DETERMINED" ? "done" : "refused",
-      message: d.jurisdiction ? `Determined: ${d.jurisdiction.jurisdiction_code} (${d.basis}).` : `Not determined: ${d.outcome.replaceAll("_", " ").toLowerCase()}.`,
+      status: "done",
+      message: `Determined: ${d.jurisdiction?.jurisdiction_code} (${d.basis}).`,
       details: [
         { label: "Outcome", value: d.outcome },
         { label: "Candidates", value: (d.candidates ?? []).map((c) => c.jurisdiction_code).join(", ") || "—" },
@@ -557,14 +579,23 @@ const COMMANDS: Record<string, Handler> = {
     const body = json(fd, "body", "The request");
     if (typeof body !== "object" || body === null || Array.isArray(body)) throw new FormProblem("The request must be a JSON object.");
     const r = await J.evaluate(kind, body as Record<string, unknown>, me);
-    if (!r.ok) return fail(r.error);
-    const d = r.data;
-    const inner = Object.values(d).find((v) => v && typeof v === "object" && !Array.isArray(v) && "explanation" in (v as object)) as { explanation?: string[] } | undefined;
-    const facts = Object.entries(d)
-      .filter(([k, v]) => k !== "resolution" && k !== "explanation" && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+    const a = J.recordedAnswer(r);
+    if (!a) return fail(r.ok ? { kind: "malformed", message: "The service gave no answer." } : r.error);
+    const u = J.unwrapEvaluation(a);
+    if (!r.ok) return { status: "refused", message: negative(J.EVALUATORS[kind].label, u.outcome, u.explanation, u.decisionId) };
+    const flat = Object.entries(u.result).flatMap(([k, v]) =>
+      v && typeof v === "object" && !Array.isArray(v) && k !== "resolution" ? Object.entries(v as Record<string, unknown>) : [[k, v] as [string, unknown]],
+    );
+    const facts = flat
+      .filter(([k, v]) => k !== "outcome" && k !== "explanation" && (typeof v === "string" || typeof v === "number" || typeof v === "boolean") && v !== "")
       .slice(0, 8)
       .map(([k, v]) => ({ label: k.replaceAll("_", " "), value: String(v) }));
-    return { status: "done", message: `${J.EVALUATORS[kind].label}: ${d.outcome ?? "answered"}.`, details: facts, table: explanation(d.explanation ?? inner?.explanation) };
+    return {
+      status: "done",
+      message: `${J.EVALUATORS[kind].label}: ${u.outcome.replaceAll("_", " ").toLowerCase()}.`,
+      details: [...facts, ...(u.decisionId ? [{ label: "Decision id", value: u.decisionId }] : [])],
+      table: explanation(u.explanation),
+    };
   },
   "resolver.invalidate": (_fd, me) => write(J.invalidateResolverCache(me), () => done("This replica's resolver cache was dropped. The next resolution reads the released packs again.")),
   "entity.backfill": (fd, me) =>
@@ -574,7 +605,7 @@ const COMMANDS: Record<string, Handler> = {
   "submission.register": (fd, me) =>
     write(
       J.registerSubmission(
-        { jurisdiction: need(fd, "jurisdiction", "A jurisdiction code").toUpperCase(), kind: need(fd, "kind", "A kind").toUpperCase(), profileCode: need(fd, "profile_code", "A profile code").toUpperCase(), effectiveAt: instant(opt(fd, "effective_at")), subjectRef: need(fd, "subject_ref", "A subject reference"), payloadHash: need(fd, "payload_hash", "The payload hash") },
+        { jurisdiction: need(fd, "jurisdiction", "A jurisdiction code").toUpperCase(), kind: need(fd, "kind", "A kind").toUpperCase(), profileCode: need(fd, "profile_code", "A profile code").toUpperCase(), effectiveAt: atOrNow(fd), subjectRef: need(fd, "subject_ref", "A subject reference"), payloadHash: need(fd, "payload_hash", "The payload hash") },
         me,
       ),
       (s) => {
@@ -594,7 +625,7 @@ const COMMANDS: Record<string, Handler> = {
 
   // Calendars, payment terms, obligation rules
   "calendar.create": (fd, me) =>
-    write(J.createCalendar({ calendarCode: need(fd, "calendar_code", "A code").toUpperCase(), jurisdictionId: need(fd, "jurisdiction_id", "The jurisdiction"), authority: need(fd, "authority", "The authority"), description: opt(fd, "description") }, me), (c) =>
+    write(J.createCalendar({ calendarCode: J.codeOf("calendar", need(fd, "calendar_code", "A code")), jurisdictionId: need(fd, "jurisdiction_id", "The jurisdiction"), authority: need(fd, "authority", "The authority"), description: opt(fd, "description") }, me), (c) =>
       done(`Calendar ${c.calendar_code} created. Add a version with its holidays, then a second person publishes it.`),
     ),
   "calendar.version": (fd, me) =>
@@ -644,7 +675,7 @@ const COMMANDS: Record<string, Handler> = {
     };
   },
   "term.create": (fd, me) =>
-    write(J.createPaymentTerm({ termCode: need(fd, "term_code", "A code").toUpperCase(), termName: need(fd, "term_name", "A name"), jurisdictionId: opt(fd, "jurisdiction_id") }, me), (t) =>
+    write(J.createPaymentTerm({ termCode: J.codeOf("term", need(fd, "term_code", "A code")), termName: need(fd, "term_name", "A name"), jurisdictionId: opt(fd, "jurisdiction_id") }, me), (t) =>
       done(`Payment term ${t.term_code} created. Add a version (its formula), then a second person approves it.`),
     ),
   "term.version": (fd, me) =>
@@ -657,7 +688,7 @@ const COMMANDS: Record<string, Handler> = {
           due_days: num(fd, "due_days"),
           due_day_of_month: num(fd, "due_day_of_month"),
           business_day_convention: need(fd, "business_day_convention", "A business-day convention"),
-          calendar_code: opt(fd, "calendar_code"),
+          calendar_code: J.codeOf("calendar", opt(fd, "calendar_code")),
           grace_days: num(fd, "grace_days"),
           rationale: need(fd, "rationale", "A rationale"),
           source_ref: opt(fd, "source_ref"),
@@ -695,7 +726,7 @@ const COMMANDS: Record<string, Handler> = {
       J.createObligationRule(
         {
           jurisdiction_id: need(fd, "jurisdiction_id", "The jurisdiction"),
-          obligation_code: need(fd, "obligation_code", "An obligation code").toUpperCase(),
+          obligation_code: J.codeOf("obligation", need(fd, "obligation_code", "An obligation code")),
           name: need(fd, "name", "A name"),
           period_basis: need(fd, "period_basis", "A period basis"),
           anchor: need(fd, "anchor", "An anchor"),
@@ -703,7 +734,7 @@ const COMMANDS: Record<string, Handler> = {
           offset_days: num(fd, "offset_days") ?? 0,
           offset_to_month_end: text(fd, "offset_to_month_end") === "true",
           business_day_adjustment: need(fd, "business_day_adjustment", "A business-day adjustment"),
-          calendar_code: opt(fd, "calendar_code") ?? "",
+          calendar_code: J.codeOf("calendar", opt(fd, "calendar_code")) ?? "",
           effective_from: need(fd, "effective_from", "Effective from"),
           extension_allowed: false,
           cutoff_applies: false,
@@ -720,14 +751,14 @@ const COMMANDS: Record<string, Handler> = {
   "rollout.create": (fd, me) =>
     write(
       J.createRollout(
-        { familyRef: need(fd, "family_ref", "A family ref"), displayName: need(fd, "display_name", "A name"), layer: need(fd, "layer", "A layer"), jurisdictionCode: opt(fd, "jurisdiction_code")?.toUpperCase(), scopeNote: need(fd, "scope_note", "A scope note"), owner: need(fd, "owner", "An owner"), supportOwner: opt(fd, "support_owner") },
+        { familyRef: J.codeOf("family", need(fd, "family_ref", "A family ref")), displayName: need(fd, "display_name", "A name"), layer: need(fd, "layer", "A layer"), jurisdictionCode: opt(fd, "jurisdiction_code")?.toUpperCase(), scopeNote: need(fd, "scope_note", "A scope note"), owner: need(fd, "owner", "An owner"), supportOwner: opt(fd, "support_owner") },
         me,
       ),
       (r) => done(`Rollout ${r.display_name} is ${r.status}.`, [{ label: "Rollout id", value: r.rollout_id }]),
     ),
   "rollout.seed": (_fd, me) => write(J.seedRolloutPortfolio(me), () => done("The standard rollout portfolio is seeded (existing rollouts are left as they are).")),
   "rollout.owner": (fd, me) => write(J.setRolloutOwner(need(fd, "id", "The rollout"), { owner: need(fd, "owner", "An owner"), supportOwner: opt(fd, "support_owner") }, me), () => done("Owner recorded.")),
-  "rollout.packs": (fd, me) => write(J.linkRolloutPacks(need(fd, "id", "The rollout"), list(fd, "pack_refs"), me), () => done("Packs linked to the rollout.")),
+  "rollout.packs": (fd, me) => write(J.linkRolloutPacks(need(fd, "id", "The rollout"), list(fd, "pack_refs").map((r) => J.codeOf("pack", r)), me), () => done("Packs linked to the rollout.")),
   "rollout.attest": (fd, me) =>
     write(J.attestRollout(need(fd, "id", "The rollout"), { checklist: need(fd, "checklist", "The checklist"), itemCode: need(fd, "item_code", "The item"), met: text(fd, "met") !== "false", evidenceRef: need(fd, "evidence_ref", "Evidence") }, me), () =>
       done("Checklist item attested with its evidence."),
@@ -740,7 +771,7 @@ const COMMANDS: Record<string, Handler> = {
   "rollout.transition": (fd, me) => write(J.transitionRollout(need(fd, "id", "The rollout"), need(fd, "to", "The new status"), need(fd, "reason", "A reason"), me), () => done("Rollout moved.")),
   "remediation.open": (fd, me) =>
     write(
-      J.openRemediationCase({ packRef: need(fd, "pack_ref", "The pack"), version: need(fd, "version", "The version"), ring: opt(fd, "ring"), region: opt(fd, "region"), reason: need(fd, "reason", "A reason"), evidenceRef: need(fd, "evidence_ref", "Evidence") }, me),
+      J.openRemediationCase({ packRef: J.codeOf("pack", need(fd, "pack_ref", "The pack")), version: need(fd, "version", "The version"), ring: J.codeOf("ring", opt(fd, "ring")), region: J.codeOf("region", opt(fd, "region")), reason: need(fd, "reason", "A reason"), evidenceRef: need(fd, "evidence_ref", "Evidence") }, me),
       (c) => done(`Case opened with ${c.decisions_total} decision(s) to disposition.`, [{ label: "Case id", value: c.case_id }]),
     ),
   "remediation.disposition": (fd, me) =>

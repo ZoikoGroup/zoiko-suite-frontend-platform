@@ -278,13 +278,13 @@ async function RuleDrawer({
               { label: "Interpretation", value: provenance.data?.interpretation_id ? <Mono>{provenance.data.interpretation_id.slice(0, 8)}</Mono> : "—" },
               { label: "Sources", value: provenance.data?.source_ids?.length ?? 0 },
               { label: "Published on", value: provenance.data?.published_on ?? "—" },
-              { label: "Typed parameters", value: parameters.data ? "Set" : "None" },
+              { label: "Typed parameters", value: parameters.data?.parameters ? "Set" : "None" },
             ]}
           />
-          {parameters.data && (
+          {parameters.data?.parameters != null && (
             <details className="mt-2 text-[11.5px]">
               <summary className="cursor-pointer text-slate-500">Parameters (JSON)</summary>
-              <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-50 p-2 dark:bg-slate-800">{JSON.stringify(parameters.data.parameters ?? parameters.data, null, 2)}</pre>
+              <pre className="mt-1 max-h-48 overflow-auto rounded bg-slate-50 p-2 dark:bg-slate-800">{JSON.stringify(parameters.data.parameters, null, 2)}</pre>
             </details>
           )}
           <div className="mt-3">
@@ -299,7 +299,13 @@ async function RuleDrawer({
                 </FieldGrid>
               </Cmd>
               <Cmd command="rule.parameters" label="Set parameters" title={`Typed parameters of ${r.rule_code}`} hidden={{ id }}>
-                <TextArea name="parameters" label="Parameters (JSON)" rows={6} placeholder='{"family":"TAX_RATE","class":"STANDARD","rate":"0.2000","rounding":{"mode":"HALF_UP","scale":2}}' />
+                <TextArea
+                  name="parameters"
+                  label="Parameters (JSON)"
+                  rows={6}
+                  placeholder='{"family":"TAX_RATE","rate":"0.2000","rounding":{"mode":"HALF_UP","scale":2}}'
+                  hint='Families: TAX_RATE, TAX_BANDS, AMOUNT, RETENTION, MAPPING, the registration and submission-profile families. Rates and amounts are decimal strings. "class" is only the payroll statutory class (INCOME_WITHHOLDING, EMPLOYEE_CONTRIBUTION …).'
+                />
               </Cmd>
             </Commands>
           </div>

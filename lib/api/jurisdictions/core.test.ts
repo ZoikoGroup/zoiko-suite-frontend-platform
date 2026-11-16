@@ -30,6 +30,14 @@ describe("explainJurisdictionProblem", () => {
     expect(explainJurisdictionProblem(problem(400, "invalid_ring_code", "ring_code must be UPPER_SNAKE"))).toBe("Ring_code must be UPPER_SNAKE.");
   });
 
+  it("explains an import version clash and a bare conflict without sending the person the wrong way", () => {
+    const clash = explainJurisdictionProblem(problem(409, "import_version_conflict", "this source version already has an import with different content"));
+    expect(clash).toMatch(/source standard and version already has an import/);
+    expect(clash).not.toMatch(/register changed/);
+    expect(explainJurisdictionProblem(problem(409, "conflict"))).toMatch(/already recorded with different values/);
+    expect(explainJurisdictionProblem(problem(409, "conflict"))).not.toMatch(/returned 409/);
+  });
+
   it("says unreachable and timeout plainly, and a 412 without a code still reads as a stale page", () => {
     expect(explainJurisdictionProblem({ kind: "unreachable", message: "" })).toMatch(/could not be reached/);
     expect(explainJurisdictionProblem({ kind: "timeout", message: "" })).toMatch(/did not answer in time/);

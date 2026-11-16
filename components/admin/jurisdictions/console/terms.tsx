@@ -96,7 +96,7 @@ export function TermsActions({ jurisdictions, code }: { jurisdictions: J.Jurisdi
               <Field name="due_days" label="Due days" type="number" optional />
               <Field name="due_day_of_month" label="Day of month" type="number" optional />
               <SelectField name="business_day_convention" label="Business-day convention" options={J.BUSINESS_DAY_CONVENTIONS.map((b) => [b, b.replaceAll("_", " ").toLowerCase()] as const)} />
-              <Field name="calendar_code" label="Calendar" optional placeholder="GB-ENG" />
+              <Field name="calendar_code" label="Calendar" optional placeholder="gb-eng" />
               <Field name="grace_days" label="Grace days" type="number" optional />
               <Field name="effective_from" label="Effective from" type="date" />
               <TextArea name="rationale" label="Rationale" className="sm:col-span-2" />

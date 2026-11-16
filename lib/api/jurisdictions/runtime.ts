@@ -52,8 +52,10 @@ export type ResolverDecision = {
   considered_rule_ids: string[] | null;
   packs_consulted: { pack_ref: string; version: string; outcome: string; rule_id: string }[] | null;
   explanation: string[] | null;
-  decision_id?: string;
 };
+
+/** Runtime answers are recorded as decision evidence and returned wrapped: `{decision_id, replayed, <result>}`. */
+export type Recorded<K extends string, T> = { decision_id: string; replayed: boolean } & { [P in K]: T };
 
 export type StoredDecision = {
   decision_id: string;
@@ -72,8 +74,8 @@ export type StoredDecision = {
 export function resolveRule(
   input: { jurisdiction: string; ruleDomain: string; ruleCode: string; effectiveAt?: string; packRef?: string; packVersion?: string },
   identity: Caller,
-): Promise<ApiWriteResult<ResolverDecision>> {
-  return post<ResolverDecision>(
+): Promise<ApiWriteResult<Recorded<"decision", ResolverDecision>>> {
+  return post(
     "/v1/rule-resolutions:resolve",
     {
       jurisdiction: input.jurisdiction,
@@ -105,7 +107,6 @@ export type Determination = {
   candidates: { jurisdiction_id: string; jurisdiction_code: string; applicability_types: string[] | null; support: string }[] | null;
   claim: { claimed: string; status: string };
   explanation: string[] | null;
-  decision_id?: string;
 };
 
 export const DETERMINATION_PURPOSES = ["TAX", "FILING", "ANY"] as const;
@@ -113,8 +114,8 @@ export const DETERMINATION_PURPOSES = ["TAX", "FILING", "ANY"] as const;
 export function determineJurisdiction(
   input: { legalEntityId: string; purpose: string; effectiveAt?: string; claimedJurisdiction?: string },
   identity: Caller,
-): Promise<ApiWriteResult<Determination>> {
-  return post<Determination>(
+): Promise<ApiWriteResult<Recorded<"determination", Determination>>> {
+  return post(
     "/v1/jurisdiction-decisions:resolve",
     {
       legal_entity_id: input.legalEntityId,
@@ -128,21 +129,75 @@ export function determineJurisdiction(
 
 // ─── Applicability evaluators (F20) ──────────────────────────────────────────
 
-/** Each evaluator answers `{outcome, resolution?, <result>…}`; the explanation lists its steps. */
-export type Evaluation = { outcome?: string; explanation?: string[] | null; resolution?: ResolverDecision | null; [k: string]: unknown };
+/**
+ * Each evaluator answers `{decision_id, replayed, <key>: {outcome, resolution?, <result>…}}`
+ * (or the result unwrapped, for the due-date calculation); the explanation
+ * lists its steps.
+ */
+export type Evaluation = { outcome?: string; explanation?: string[] | null; resolution?: ResolverDecision | null; decision_id?: string; replayed?: boolean; [k: string]: unknown };
 
+/** The evaluator's own answer inside the recorded-decision wrapper, and the steps it took. */
+export function unwrapEvaluation(e: Evaluation): { outcome: string; decisionId?: string; result: Record<string, unknown>; explanation: string[] } {
+  const inner = Object.entries(e).find(([k, v]) => k !== "resolution" && v && typeof v === "object" && !Array.isArray(v) && "outcome" in (v as object));
+  const result = (inner ? inner[1] : e) as Record<string, unknown>;
+  const nested = Object.values(result).find((v) => v && typeof v === "object" && !Array.isArray(v) && Array.isArray((v as { explanation?: unknown }).explanation)) as { explanation: string[] } | undefined;
+  const explanation = (Array.isArray(result.explanation) ? (result.explanation as string[]) : nested?.explanation) ?? [];
+  return { outcome: String(result.outcome ?? e.outcome ?? "answered"), decisionId: e.decision_id, result, explanation };
+}
+
+/**
+ * A runtime answer, including a recorded negative one. The service records
+ * every decision as evidence and answers UNSUPPORTED_JURISDICTION, NO_*,
+ * INVALID_FACTS … with 422 and AMBIGUOUS with 409, each WITH the recorded
+ * decision (`decision_id`, outcome, explanation). That is an answer to show,
+ * not a failure. Anything else (a problem body without a recorded decision,
+ * 5xx, unreachable) is null: the caller reports the error.
+ */
+export function recordedAnswer<T extends { decision_id?: string }>(r: ApiWriteResult<T>): T | null {
+  if (r.ok) return r.data;
+  const { status, body } = r.error;
+  if ((status === 409 || status === 422) && body && typeof body === "object" && typeof (body as { decision_id?: unknown }).decision_id === "string") return body as T;
+  return null;
+}
+
+// Each evaluator's request, as an example a person can start from (the
+// service's request shapes; see its OpenAPI description of each route).
 export const EVALUATORS = {
-  "registration-obligations": { path: "/v1/registration-obligations:resolve", label: "Registration obligations" },
-  "registration-identifier": { path: "/v1/registration-identifiers:validate", label: "Validate a registration identifier" },
-  licence: { path: "/v1/licences:evaluate", label: "Evaluate a licence" },
-  "scheme-election": { path: "/v1/scheme-elections:evaluate", label: "Scheme eligibility" },
-  "threshold-monitor": { path: "/v1/threshold-monitors:evaluate", label: "Threshold monitor" },
-  "submission-profile": { path: "/v1/submission-profiles:resolve", label: "Submission profile" },
-  "payroll-parameters": { path: "/v1/payroll-statutory-parameters:resolve", label: "Payroll statutory parameters" },
-  retention: { path: "/v1/retention-rules:resolve", label: "Retention rule" },
-  "accounting-mapping": { path: "/v1/accounting-mappings:resolve", label: "Accounting mapping" },
-  calculation: { path: "/v1/regulatory-calculations:execute", label: "Regulatory calculation" },
-  obligation: { path: "/v1/obligation-calculations:calculate", label: "Obligation due date" },
+  "registration-obligations": {
+    path: "/v1/registration-obligations:resolve",
+    label: "Registration obligations",
+    example: '{"jurisdiction":"GB","as_of":"2026-09-01","registrations":[{"registration_code":"VAT","registration_date":"2026-01-01"}]}',
+  },
+  "registration-identifier": {
+    path: "/v1/registration-identifiers:validate",
+    label: "Validate a registration identifier",
+    example: '{"jurisdiction":"GB","registration_code":"VAT","identifier":"GB123456789","as_of":"2026-09-01"}',
+  },
+  licence: { path: "/v1/licences:evaluate", label: "Evaluate a licence", example: '{"jurisdiction":"GB","licence_code":"MSB","issue_date":"2026-01-01","as_of":"2026-09-01"}' },
+  "scheme-election": {
+    path: "/v1/scheme-elections:evaluate",
+    label: "Scheme eligibility",
+    example: '{"jurisdiction":"GB","scheme_code":"FLAT_RATE","metric_value":"120000.00","start_date":"2026-01-01","as_of":"2026-09-01"}',
+  },
+  "threshold-monitor": {
+    path: "/v1/threshold-monitors:evaluate",
+    label: "Threshold monitor",
+    example: '{"jurisdiction":"GB","monitor_code":"VAT_REGISTRATION","as_of":"2026-09-01","observations":[{"date":"2026-08-31","amount":"91000.00"}]}',
+  },
+  "submission-profile": {
+    path: "/v1/submission-profiles:resolve",
+    label: "Submission profile",
+    example: '{"jurisdiction":"GB","kind":"FILING","profile_code":"VAT_RETURN","effective_at":"2026-09-01T00:00:00Z"}',
+  },
+  "payroll-parameters": { path: "/v1/payroll-statutory-parameters:resolve", label: "Payroll statutory parameters", example: '{"jurisdiction":"GB","effective_at":"2026-09-01T00:00:00Z"}' },
+  retention: { path: "/v1/retention-rules:resolve", label: "Retention rule", example: '{"jurisdiction":"GB","record_class":"INVOICE","trigger_date":"2026-09-01"}' },
+  "accounting-mapping": { path: "/v1/accounting-mappings:resolve", label: "Accounting mapping", example: '{"jurisdiction":"GB","mapping_code":"VAT_TO_ACCOUNT","effective_at":"2026-09-01T00:00:00Z"}' },
+  calculation: {
+    path: "/v1/regulatory-calculations:execute",
+    label: "Regulatory calculation",
+    example: '{"jurisdiction":"GB","rule_domain":"TAX","rule_code":"STD","effective_at":"2026-09-01T00:00:00Z","taxable_amount":"100.00","currency":"GBP"}',
+  },
+  obligation: { path: "/v1/obligation-calculations:calculate", label: "Obligation due date", example: '{"jurisdiction":"GB","obligation_code":"VAT_RETURN","period_end":"2026-09-30"}' },
 } as const;
 
 export type EvaluatorKey = keyof typeof EVALUATORS;

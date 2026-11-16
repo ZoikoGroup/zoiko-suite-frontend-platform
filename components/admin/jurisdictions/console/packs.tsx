@@ -163,7 +163,8 @@ async function PackDrawer({
                   { label: "Manifest digest", value: <Mono title={v.manifest_digest}>{shortHash(v.manifest_digest)}</Mono> },
                   { label: "Artifact digest", value: <Mono title={v.artifact_digest ?? ""}>{shortHash(v.artifact_digest)}</Mono> },
                   { label: "Signature", value: v.signature ? `key ${v.signature_key_ref}` : "Not signed" },
-                  { label: "Compiler", value: artifact?.data ? `${artifact.data.compiler_name} ${artifact.data.compiler_version} · ${artifact.data.report.errors} error(s)` : "—" },
+                  { label: "Compiler", value: artifact?.data?.artifact ? `${artifact.data.artifact.compiler_name} ${artifact.data.artifact.compiler_version} · ${artifact.data.artifact.report?.errors ?? 0} error(s)` : "—" },
+                  { label: "Verification", value: artifact?.data?.verification ? (artifact.data.verification.verified ? "Digest and signature verify" : `Fails: ${(artifact.data.verification.reasons ?? []).join("; ")}`) : "—" },
                   { label: "Author", value: who(v.created_by_principal_id) },
                 ]}
               />
@@ -216,7 +217,7 @@ async function PackDrawer({
                 items={(reviews?.data ?? []).map((x) => ({ key: x.review_id, primary: `${x.role} · ${x.decision}`, secondary: `${who(x.reviewer)} · ${x.findings || "no findings"}`, right: <StatusChip status={x.decision === "APPROVE" ? "APPROVED" : "REJECTED"} text={x.decision === "APPROVE" ? "Approve" : "Reject"} /> }))}
               />
               <PaneTitle>Certification</PaneTitle>
-              <p className="text-[12px] text-slate-600 dark:text-slate-300">{cert?.data ? `Certified ${day(cert.data.certified_at)} by ${who(cert.data.certified_by)} (${cert.data.min_reviews} review(s) required)` : "Not certified."}</p>
+              <p className="text-[12px] text-slate-600 dark:text-slate-300">{cert?.data?.certification ? `Certified ${day(cert.data.certification.certified_at)} by ${who(cert.data.certification.certified_by)} (${cert.data.certification.min_reviews} review(s) required)` : "Not certified."}</p>
               <div className="mt-3">
                 <Commands>
                   {["DRAFT", "REVIEW"].includes(v.status) && (
@@ -367,7 +368,7 @@ async function ReleaseSettings({ ctx }: { ctx: Ctx }) {
           <p className="text-[12.5px] font-semibold text-navy-950 dark:text-slate-100">Deployment rings</p>
           <Cmd command="ring.create" label="New ring" title="New deployment ring">
             <FieldGrid>
-              <Field name="ring_code" label="Ring code" placeholder="CANARY" />
+              <Field name="ring_code" label="Ring code" placeholder="canary" />
               <Field name="ordinal" label="Order" type="number" />
               <Field name="min_soak_seconds" label="Minimum soak (seconds)" type="number" />
               <Field name="description" label="Description" optional />
@@ -381,7 +382,7 @@ async function ReleaseSettings({ ctx }: { ctx: Ctx }) {
           <p className="text-[12.5px] font-semibold text-navy-950 dark:text-slate-100">Deployment regions</p>
           <Cmd command="region.create" label="New region" title="New deployment region">
             <FieldGrid>
-              <Field name="region_code" label="Region code" placeholder="EU-WEST" />
+              <Field name="region_code" label="Region code" placeholder="eu-west" />
               <Field name="description" label="Description" optional />
             </FieldGrid>
           </Cmd>

@@ -133,7 +133,7 @@ export function RegistryActions({ jurisdictions }: { jurisdictions: J.Jurisdicti
             rows={6}
             className="sm:col-span-2"
             placeholder='[{"action":"ADD","target":{"code":"XX","type":"COUNTRY"},"jurisdiction_name":"Example","authority_type":"NATIONAL","effective_from":"2027-01-01T00:00:00Z"}]'
-            hint="Each row: action ADD, UPDATE or RETIRE; target {code, type} or {jurisdiction_id}."
+            hint="Each row: action ADD, UPDATE or RETIRE. A target, parent or successor is named as {code, type} (both) or {jurisdiction_id}."
           />
         </FieldGrid>
       </Cmd>

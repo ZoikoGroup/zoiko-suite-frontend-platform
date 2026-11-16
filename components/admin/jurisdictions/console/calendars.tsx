@@ -49,7 +49,7 @@ export function CalendarsActions({ jurisdictions }: { jurisdictions: J.Jurisdict
   return (
     <Cmd command="calendar.create" label="New calendar" icon={<Plus className="h-4 w-4" />} title="Create a business calendar">
       <FieldGrid>
-        <Field name="calendar_code" label="Code" placeholder="GB-ENG" />
+        <Field name="calendar_code" label="Code" placeholder="gb-eng" />
         <SelectField name="jurisdiction_id" label="Jurisdiction" options={jurisdictions.filter((j) => j.active_flag).map((j) => [j.jurisdiction_id, J.describeJurisdiction(j)] as const)} />
         <Field name="authority" label="Authority" placeholder="UK Government" className="sm:col-span-2" />
         <TextArea name="description" label="Description" optional className="sm:col-span-2" />
@@ -66,6 +66,9 @@ async function CalendarDrawer({ code, links, ctx }: { code: string; links: { clo
   if (!c) return null;
   const list = [...(versions.data ?? [])].sort((a, b) => b.version - a.version);
   const published = list.find((v) => v.status === "PUBLISHED");
+  // A version is published only when it cites a reviewed source (the official calendar it was transcribed from).
+  const drafts = list.filter((v) => v.status === "DRAFT");
+  const cites = (v: J.CalendarVersion) => (v.source_ids ?? []).length > 0;
   return (
     <DetailDrawer
       heading="Business calendar"
@@ -110,16 +113,19 @@ async function CalendarDrawer({ code, links, ctx }: { code: string; links: { clo
         items={list.map((v) => ({
           key: v.calendar_version_id,
           primary: `v${v.version} · from ${v.effective_from}`,
-          secondary: `${(v.holidays ?? []).length} holiday(s) · ${who(v.created_by_principal_id)}${v.published_by ? ` · published by ${who(v.published_by)}` : ""}`,
+          secondary: `${(v.holidays ?? []).length} holiday(s) · ${(v.source_ids ?? []).length} source(s) · ${who(v.created_by_principal_id)}${v.published_by ? ` · published by ${who(v.published_by)}` : ""}`,
           right:
-            v.status === "DRAFT" && v.created_by_principal_id !== ctx.me ? (
+            v.status === "DRAFT" && v.created_by_principal_id !== ctx.me && cites(v) ? (
               <Cmd command="calendar.publish" label="Publish" tone="accent" title={`Publish v${v.version} of ${code}`} hidden={{ id: code, version: v.version }} description="Makes the version the one in force from its date. It cannot change afterwards." />
+            ) : v.status === "DRAFT" && !cites(v) ? (
+              <StatusChip status="DRAFT" text="Needs a source" />
             ) : (
               <StatusChip status={v.status} />
             ),
         }))}
       />
       {list.some((v) => v.status === "DRAFT" && v.created_by_principal_id === ctx.me) && <DrawerNote>You authored a draft version here, so a second person publishes it.</DrawerNote>}
+      {drafts.some((v) => !cites(v)) && <DrawerNote>A draft is published only once it cites the reviewed source it was transcribed from: use Set sources.</DrawerNote>}
       <div className="mt-3">
         <Commands>
           <Cmd command="calendar.import" label="Import holidays" title={`Import a holiday list into ${code}`} hidden={{ id: code }} description="ImportHolidayCalendar: the authority's list, with observed-day rules applied, as a DRAFT version.">
@@ -133,9 +139,12 @@ async function CalendarDrawer({ code, links, ctx }: { code: string; links: { clo
               <TextArea name="holidays" label="Holidays" rows={5} className="sm:col-span-2" hint={HOLIDAYS_HINT} />
             </FieldGrid>
           </Cmd>
-          {list[0] && (
-            <Cmd command="calendar.sources" label="Set sources" title={`Sources of v${list[0].version}`} hidden={{ id: code, version: list[0].version }}>
-              <TextArea name="source_ids" label="Source ids" defaultValue={(list[0].source_ids ?? []).join("\n")} />
+          {drafts.length > 0 && (
+            <Cmd command="calendar.sources" label="Set sources" title={`Sources of a draft version of ${code}`} hidden={{ id: code }} description="The reviewed, non-superseded sources the version was transcribed from. A published version cannot change.">
+              <FieldGrid>
+                <SelectField name="version" label="Version" options={drafts.map((v) => [String(v.version), `v${v.version} · from ${v.effective_from}`] as const)} className="sm:col-span-2" />
+                <TextArea name="source_ids" label="Source ids" defaultValue={(drafts[0].source_ids ?? []).join("\n")} className="sm:col-span-2" hint="One per line." />
+              </FieldGrid>
             </Cmd>
           )}
         </Commands>

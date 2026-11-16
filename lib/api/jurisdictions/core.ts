@@ -121,7 +121,9 @@ const SENTENCES: Record<string, string> = {
   unknown_jurisdiction_code: "No jurisdiction has that code here.",
   rule_not_found: "No such rule in this register.",
   source_not_found: "No such source in the register.",
-  source_not_ready: "That source cannot be used yet: it must be reviewed by a second person first, and not superseded.",
+  // One code for "no source cited", "a cited source not reviewed or superseded" and (obligation rules) "no regime or interpretation".
+  source_not_ready:
+    "The provenance is not complete: cite at least one source, each reviewed by a second person and not superseded (an obligation rule also needs its regime and an approved interpretation).",
   interpretation_not_found: "No such interpretation.",
   interpretation_not_approved: "That interpretation is not approved yet. A second person must approve it before rules or packs cite it.",
   regime_not_found: "No such regime.",
@@ -148,7 +150,10 @@ const SENTENCES: Record<string, string> = {
   import_not_found: "No such import batch.",
   import_already_decided: "This import was already approved or rejected.",
   import_has_invalid_rows: "This import has rows that failed validation, so it cannot be approved. Reject it and propose a corrected one.",
-  import_version_conflict: "The register changed since this import was proposed. Propose it again against the current register.",
+  import_version_conflict:
+    "This source standard and version already has an import with different content. Give the corrected rows a new source version (proposing the same rows again changes nothing).",
+  // A bare 409 (append-only reference data: rings, regions, regimes …).
+  conflict: "That is already recorded with different values: the same code (or, for a ring, the same order) is taken. Records here are append-only, so use a new code.",
   alias_not_found: "No such alias.",
   alias_conflict: "That alias code is already mapped for this period.",
   calendar_not_found: "No such calendar.",

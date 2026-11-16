@@ -5,7 +5,7 @@
 
 import { LifeBuoy, Plus } from "lucide-react";
 import { RegisterView, type RegisterSpec, type Row } from "@/components/admin/authorization/console/register";
-import { DetailDrawer, DrawerFacts, TwoLine } from "@/components/admin/console";
+import { DetailDrawer, DrawerFacts, DrawerNote, TwoLine } from "@/components/admin/console";
 import { Field, FieldGrid, SelectField, TextArea } from "@/components/admin/authorization/ui";
 import * as J from "@/lib/api/jurisdictions";
 import { BASE, day, loadRemediation, settle, type Ctx, type Query } from "./data";
@@ -94,7 +94,7 @@ async function CaseDrawer({ id, links, ctx }: { id: string; links: { close: stri
                 </FieldGrid>
               </Cmd>
             )}
-            {pending.length === 0 && (
+            {pending.length === 0 && c.opened_by !== ctx.me && (
               <Cmd command="remediation.close" label="Close case" tone="accent" title="Close this case" hidden={{ id }} description="Every decision has a disposition.">
                 <TextArea name="note" label="Closing note" />
               </Cmd>
@@ -112,6 +112,7 @@ async function CaseDrawer({ id, links, ctx }: { id: string; links: { close: stri
           { label: "Closed", value: c.closed_at ? `${day(c.closed_at)} by ${who(c.closed_by)} · ${c.closure_note ?? ""}` : "—" },
         ]}
       />
+      {c.status === "OPEN" && pending.length === 0 && c.opened_by === ctx.me && <DrawerNote>You opened this case, so a second person closes it.</DrawerNote>}
       <PaneTitle>Decisions</PaneTitle>
       <MiniList
         empty={decisions.error ? "Unavailable." : "No decision."}

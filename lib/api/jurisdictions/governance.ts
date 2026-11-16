@@ -53,7 +53,7 @@ export function getRollout(id: string, identity: Identity): Promise<ApiResult<Ro
   return get<RolloutDetail>(`/v1/admin/rollouts/${seg(id)}`, identity);
 }
 
-export function listRolloutChecklists(identity: Identity): Promise<ApiResult<{ code: string; checklist: string; text: string }[] | { items: { code: string; checklist: string; text: string }[] }>> {
+export function listRolloutChecklists(identity: Identity): Promise<ApiResult<{ definition_of_ready: { code: string; checklist: string; text: string }[]; definition_of_done: { code: string; checklist: string; text: string }[] }>> {
   return get("/v1/rollout-checklists", identity);
 }
 

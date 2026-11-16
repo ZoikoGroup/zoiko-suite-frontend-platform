@@ -7,7 +7,7 @@ import { RegisterView, type RegisterSpec, type Row } from "@/components/admin/au
 import { DetailDrawer, DrawerFacts, DrawerNote, TwoLine } from "@/components/admin/console";
 import { Field, FieldGrid, SelectField, TextArea } from "@/components/admin/authorization/ui";
 import * as J from "@/lib/api/jurisdictions";
-import { BASE, day, jurisdictionLabel, loadJurisdictions, loadObligationRules, type Ctx, type Query } from "./data";
+import { BASE, day, jurisdictionLabel, loadJurisdictions, loadObligationRules, loadRegimes, type Ctx, type Query } from "./data";
 import { Cmd, Commands, StatusChip, Unavailable, who } from "./shared";
 
 export async function ObligationsTab({ query, ctx }: { query: Query; ctx: Ctx }) {
@@ -61,7 +61,7 @@ export function ObligationsActions({ jurisdictions }: { jurisdictions: J.Jurisdi
         <Field name="offset_days" label="Offset days" type="number" defaultValue="7" />
         <SelectField name="offset_to_month_end" label="To month end" options={[["false", "No"], ["true", "Yes"]]} />
         <SelectField name="business_day_adjustment" label="Business-day adjustment" options={[["NONE", "None"], ["NEXT", "Next business day"], ["PREVIOUS", "Previous business day"]]} />
-        <Field name="calendar_code" label="Calendar" optional placeholder="GB-ENG" />
+        <Field name="calendar_code" label="Calendar" optional placeholder="gb-eng" />
         <Field name="effective_from" label="Effective from" type="date" />
       </FieldGrid>
     </Cmd>
@@ -69,10 +69,12 @@ export function ObligationsActions({ jurisdictions }: { jurisdictions: J.Jurisdi
 }
 
 async function ObligationDrawer({ id, links, ctx, byId }: { id: string; links: { close: string; pane: string; paneHref: (k: string) => string }; ctx: Ctx; byId: Map<string, J.Jurisdiction> }) {
-  const rules = await loadObligationRules(ctx.identity);
+  const [rules, regimes] = await Promise.all([loadObligationRules(ctx.identity), loadRegimes(ctx.identity)]);
   const o = (rules.data ?? []).find((x) => x.obligation_rule_id === id);
   if (!o) return null;
   const author = o.created_by_principal_id === ctx.me;
+  // Publishing needs the full provenance: regime, an approved interpretation and reviewed sources.
+  const missing = [!o.regime_id && "a regime", !o.interpretation_id && "an approved interpretation", !(o.source_ids ?? []).length && "a reviewed source"].filter(Boolean) as string[];
   const code = byId.get(o.jurisdiction_id)?.jurisdiction_code ?? "";
   return (
     <DetailDrawer
@@ -87,7 +89,7 @@ async function ObligationDrawer({ id, links, ctx, byId }: { id: string; links: {
           <Cmd command="evaluate" label="Calculate a due date" title={`Due date for ${o.obligation_code}`} hidden={{ kind: "obligation" }} description="From the released packs (the rule must be in a released pack version).">
             <TextArea name="body" label="Request (JSON)" rows={5} defaultValue={JSON.stringify({ jurisdiction: code, obligation_code: o.obligation_code, period_end: "2026-12-31" }, null, 2)} />
           </Cmd>
-          {o.status === "DRAFT" && !author && <Cmd command="obligation.publish" label="Publish" tone="accent" title={`Publish ${o.obligation_code} v${o.rule_version}`} hidden={{ id }} />}
+          {o.status === "DRAFT" && !author && missing.length === 0 && <Cmd command="obligation.publish" label="Publish" tone="accent" title={`Publish ${o.obligation_code} v${o.rule_version}`} hidden={{ id }} />}
         </>
       }
     >
@@ -104,12 +106,13 @@ async function ObligationDrawer({ id, links, ctx, byId }: { id: string; links: {
         ]}
       />
       {author && o.status === "DRAFT" && <DrawerNote>You authored this rule, so a second person publishes it.</DrawerNote>}
+      {o.status === "DRAFT" && missing.length > 0 && <DrawerNote>It can be published once its provenance names {missing.join(", ")}: use Set provenance.</DrawerNote>}
       <div className="mt-3">
         <Commands>
           <Cmd command="obligation.provenance" label="Set provenance" title={`Provenance of ${o.obligation_code}`} hidden={{ id }}>
             <FieldGrid>
-              <Field name="regime_id" label="Regime id" optional />
-              <Field name="interpretation_id" label="Interpretation id" optional />
+              <SelectField name="regime_id" label="Regime" optional defaultValue={o.regime_id ?? ""} options={[["", "None"], ...(regimes.data ?? []).map((g) => [g.regime_id, `${g.regime_code} · ${g.regime_name}`] as const)]} />
+              <Field name="interpretation_id" label="Interpretation id" optional defaultValue={o.interpretation_id ?? ""} hint="Approved; from the source's interpretation." />
               <TextArea name="source_ids" label="Source ids" defaultValue={(o.source_ids ?? []).join("\n")} className="sm:col-span-2" />
             </FieldGrid>
           </Cmd>

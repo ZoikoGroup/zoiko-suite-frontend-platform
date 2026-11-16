@@ -78,7 +78,8 @@ export const loadRemediation = cache((identity: SessionIdentity) => J.listRemedi
 export const loadRollouts = cache((identity: SessionIdentity) => J.listRollouts(identity).then(settle));
 export const loadCalendars = cache((identity: SessionIdentity) => J.listCalendars(identity).then(settle));
 export const loadObligationRules = cache((identity: SessionIdentity) => J.listObligationRules(identity).then(settle));
-export const loadRules = cache((jurisdictionId: string, identity: SessionIdentity) => J.listRules(jurisdictionId, identity).then(settle));
+/** The register view of a jurisdiction's rules: DRAFT and future-dated included. */
+export const loadRules = cache((jurisdictionId: string, identity: SessionIdentity) => J.listAllRules(jurisdictionId, identity).then(settle));
 export const loadEntities = cache(async (identity: SessionIdentity): Promise<Read<LegalEntity[]>> =>
   identity.tenantId ? settle(await listEntities(identity.tenantId, identity)) : { data: null, error: { kind: "malformed", message: "The session names no tenant." } },
 );

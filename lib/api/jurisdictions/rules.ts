@@ -4,7 +4,7 @@
 // history, provenance (regime, interpretation, sources) and typed parameters.
 
 import type { ApiResult, ApiWriteResult, Identity } from "../client";
-import { etagOf, get, post, put, seg, type Caller } from "./core";
+import { etagOf, get, listAll, post, put, seg, type Caller } from "./core";
 
 export type JurisdictionRule = {
   jurisdiction_rule_id: string;
@@ -89,9 +89,18 @@ export function isDriftedInForce(rule: Pick<JurisdictionRule, "rule_status" | "l
   return rule.rule_status === "ACTIVE" && rule.legal_drift_state !== "CURRENT";
 }
 
-/** Every rule recorded ON this jurisdiction (not the inherited, resolved set). */
+/** The rules recorded ON this jurisdiction and in force now (not the inherited, resolved set; no DRAFT). */
 export function listRules(jurisdictionId: string, identity?: Identity): Promise<ApiResult<JurisdictionRule[]>> {
   return get<JurisdictionRule[]>(`/v1/jurisdictions/${seg(jurisdictionId)}/rules`, identity);
+}
+
+/**
+ * The register view (scope=all): every rule recorded on this jurisdiction,
+ * DRAFT and future-dated included, newest first. What an author and an
+ * approver work from — a DRAFT awaiting activation is in no point-in-time answer.
+ */
+export function listAllRules(jurisdictionId: string, identity?: Identity): Promise<ApiResult<JurisdictionRule[]>> {
+  return listAll<JurisdictionRule>(`/v1/jurisdictions/${seg(jurisdictionId)}/rules`, identity, { scope: "all" });
 }
 
 export function getRule(ruleId: string, identity?: Identity): Promise<ApiResult<JurisdictionRule>> {

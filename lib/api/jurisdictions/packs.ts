@@ -256,8 +256,9 @@ export type PackArtifact = {
 
 export type Verification = { verified: boolean; reasons: string[] | null; computed_digest: string; stored_digest: string; signature_key_ref: string | null };
 
-export function getArtifact(ref: string, version: string, identity?: Identity): Promise<ApiResult<PackArtifact>> {
-  return get<PackArtifact>(`/v1/packs/${seg(ref)}/versions/${seg(version)}/artifact`, identity);
+/** The compiled artifact and its verification, answered together: `{artifact, verification}`. */
+export function getArtifact(ref: string, version: string, identity?: Identity): Promise<ApiResult<{ artifact: PackArtifact; verification: Verification | null }>> {
+  return get(`/v1/packs/${seg(ref)}/versions/${seg(version)}/artifact`, identity);
 }
 
 /** Version steps that take no body beyond an optional reason and evidence. */
@@ -314,8 +315,9 @@ export function listTestRuns(ref: string, v: string, identity?: Identity): Promi
 export function listReviews(ref: string, v: string, identity?: Identity): Promise<ApiResult<ReviewRecord[]>> {
   return listAll<ReviewRecord>(`${versionPath(ref, v)}/reviews`, identity);
 }
-export function getCertification(ref: string, v: string, identity?: Identity): Promise<ApiResult<CertificationRecord>> {
-  return get<CertificationRecord>(`${versionPath(ref, v)}/certification`, identity);
+/** The certification record and the artifact's verification: `{certification, verification}`. */
+export function getCertification(ref: string, v: string, identity?: Identity): Promise<ApiResult<{ certification: CertificationRecord; verification: Verification | null }>> {
+  return get(`${versionPath(ref, v)}/certification`, identity);
 }
 
 /** The test bundle the version must pass (ZS-JUR §22): `{bundle_version, cases[]}`. */

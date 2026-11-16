@@ -56,6 +56,7 @@ export function Cmd({
       submitLabel={submitLabel ?? label}
       variant={children ? "drawer" : "modal"}
       footnote={footnote}
+      refreshOnClose
     >
       {children}
     </ActionDialog>

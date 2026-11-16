@@ -79,7 +79,7 @@ async function EntityDrawer({ id, links, ctx, byId }: { id: string; links: { clo
           <Cmd command="determine.jurisdiction" label="Determine jurisdiction" tone="accent" icon={<Gavel className="h-4 w-4" />} title={`Which jurisdiction governs ${e.entity_code}?`} hidden={{ legal_entity_id: id }} description="JUR-1: decided from the entity's recorded assignments, never from a claim. A claim is checked against them.">
             <FieldGrid>
               <SelectField name="purpose" label="Purpose" options={J.DETERMINATION_PURPOSES.map((p) => [p, p.charAt(0) + p.slice(1).toLowerCase()] as const)} />
-              <Field name="effective_at" label="At" type="date" optional />
+              <Field name="effective_at" label="At" type="date" optional hint="Blank = now." />
               <Field name="claimed_jurisdiction" label="Claimed jurisdiction (code)" optional className="sm:col-span-2" />
             </FieldGrid>
           </Cmd>
@@ -121,7 +121,7 @@ export function ApplicabilityActions({ jurisdictions }: { jurisdictions: J.Juris
       <Cmd command="resolve.rule" label="Resolve a rule" icon={<Search className="h-4 w-4" />} title="Resolve a rule" description="From the released, verified packs in force at the date. The decision and its basis are recorded as evidence.">
         <FieldGrid>
           <Field name="jurisdiction" label="Jurisdiction code" placeholder="GB" />
-          <Field name="effective_at" label="At" type="date" optional />
+          <Field name="effective_at" label="At" type="date" optional hint="Blank = now." />
           <Field name="rule_domain" label="Domain" placeholder="TAX" />
           <Field name="rule_code" label="Rule code" placeholder="STD" />
         </FieldGrid>
@@ -129,24 +129,35 @@ export function ApplicabilityActions({ jurisdictions }: { jurisdictions: J.Juris
       <Cmd command="rule.validate" label="Validate an action" icon={<ShieldCheck className="h-4 w-4" />} title="Validate an action" description="Whether an action is permitted under the rules in force (J-06). Conflicting or missing rules are an answer, never a guess.">
         <FieldGrid>
           <SelectField name="jurisdiction_id" label="Jurisdiction" options={jOpts} className="sm:col-span-2" />
-          <Field name="action_type" label="Action type" placeholder="CREATE_INVOICE" />
+          <Field name="action_type" label="Action type" placeholder="TAX.STD" hint="The rule that governs it: <domain>.<rule code>." />
           <Field name="entity_type" label="Entity type" placeholder="SUBSIDIARY" />
-          <Field name="effective_at" label="At" type="date" optional />
+          <Field name="effective_at" label="At" type="date" optional hint="Blank = now." />
           <TextArea name="payload" label="Payload (JSON)" optional className="sm:col-span-2" />
         </FieldGrid>
       </Cmd>
       <Cmd command="evaluate" label="Evaluate" icon={<FlaskConical className="h-4 w-4" />} title="Run an applicability evaluator" description="Registrations, licences, schemes, thresholds, submission profiles, payroll parameters, retention, accounting mappings, calculations and due dates: each answers from the released packs, with its steps.">
         <FieldGrid>
           <SelectField name="kind" label="Evaluator" options={evaluators} className="sm:col-span-2" />
-          <TextArea name="body" label="Request (JSON)" rows={7} className="sm:col-span-2" placeholder='{"jurisdiction":"GB","rule_domain":"TAX","rule_code":"STD","taxable_amount":"100.00","currency":"GBP"}' />
+          <TextArea name="body" label="Request (JSON)" rows={7} className="sm:col-span-2" placeholder={J.EVALUATORS.calculation.example} />
         </FieldGrid>
+        <details className="mt-3 text-[12px] text-slate-600 dark:text-slate-300">
+          <summary className="cursor-pointer font-medium">Example request for each evaluator</summary>
+          <dl className="mt-2 space-y-2">
+            {Object.values(J.EVALUATORS).map((e) => (
+              <div key={e.path}>
+                <dt className="font-semibold">{e.label}</dt>
+                <dd className="break-all font-mono text-[11px]">{e.example}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
       </Cmd>
       <Cmd command="submission.register" label="Register submission" icon={<Send className="h-4 w-4" />} title="Register a regulatory submission" description="Binds a filing or e-invoice to the submission profile in force, so later provider callbacks are checked against its lifecycle.">
         <FieldGrid>
           <Field name="jurisdiction" label="Jurisdiction code" placeholder="GB" />
           <Field name="kind" label="Kind" placeholder="E_INVOICE or FILING" />
           <Field name="profile_code" label="Profile code" />
-          <Field name="effective_at" label="At" type="date" optional />
+          <Field name="effective_at" label="At" type="date" optional hint="Blank = now." />
           <Field name="subject_ref" label="Subject reference" className="sm:col-span-2" />
           <Field name="payload_hash" label="Payload hash" placeholder="sha256:…" className="sm:col-span-2" />
         </FieldGrid>
