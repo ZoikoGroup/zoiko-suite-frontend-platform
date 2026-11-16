@@ -134,13 +134,6 @@ export function jurisdictionLabel(byId: Map<string, J.Jurisdiction>, id: string 
   return j ? `${j.jurisdiction_name} (${j.jurisdiction_code})` : `${id.slice(0, 8)}…`;
 }
 
-/** A regional-indicator flag for a two-letter country code; nothing for anything else. */
-export function flagOf(code: string): string {
-  const cc = code.split("-")[0].toUpperCase();
-  if (!/^[A-Z]{2}$/.test(cc)) return "";
-  return String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
-}
-
 export function day(v: string | null | undefined): string {
   if (!v) return "—";
   const d = new Date(v.length === 10 ? `${v}T00:00:00Z` : v);

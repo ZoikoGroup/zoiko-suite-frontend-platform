@@ -38,6 +38,31 @@ describe("explainJurisdictionProblem", () => {
     expect(explainJurisdictionProblem(problem(409, "conflict"))).not.toMatch(/returned 409/);
   });
 
+  it("says what provenance is missing, and which ring holds a taken order", () => {
+    expect(explainJurisdictionProblem(problem(409, "provenance_incomplete", "the provenance is incomplete: the obligation rule names no regime, interpretation"))).toBe(
+      "The provenance is incomplete: the obligation rule names no regime, interpretation.",
+    );
+    expect(explainJurisdictionProblem(problem(409, "ring_ordinal_taken", "the ring ordinal is taken: ordinal 1 is already ring canary; rings are append-only, so use the next free ordinal"))).toMatch(
+      /^The ring ordinal is taken: ordinal 1 is already ring canary/,
+    );
+    expect(explainJurisdictionProblem(problem(409, "source_not_ready"))).toMatch(/reviewed by a second person/);
+  });
+
+  it("lists the gates a blocked operation failed, and keeps the lifecycle reason", () => {
+    const blocked: ApiError = {
+      kind: "http",
+      status: 409,
+      message: "x (409)",
+      body: { status: 409, code: "operation_blocked", detail: "one or more gates are not met", reasons: ["ring_order: r2 needs this version active in r1", "soak: 600s not reached"] },
+    };
+    const text = explainJurisdictionProblem(blocked);
+    expect(text).toMatch(/ring_order: r2 needs this version active in r1/);
+    expect(text).toMatch(/soak: 600s not reached/);
+    const life = explainJurisdictionProblem(problem(409, "invalid_lifecycle_state", "invalid lifecycle: a hotfix must be declared while the version is DRAFT or REVIEW, this one is RELEASED"));
+    expect(life).toMatch(/state machine/);
+    expect(life).toMatch(/DRAFT or REVIEW, this one is RELEASED/);
+  });
+
   it("says unreachable and timeout plainly, and a 412 without a code still reads as a stale page", () => {
     expect(explainJurisdictionProblem({ kind: "unreachable", message: "" })).toMatch(/could not be reached/);
     expect(explainJurisdictionProblem({ kind: "timeout", message: "" })).toMatch(/did not answer in time/);

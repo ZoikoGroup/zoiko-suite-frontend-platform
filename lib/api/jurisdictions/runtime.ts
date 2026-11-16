@@ -301,7 +301,16 @@ export function backfillApplicability(legalEntityId: string | undefined, identit
 
 // ─── Async operations (API-5) and parked outbox events (J-16) ────────────────
 
-export type Operation = { id: string; type: string; state: string; resource_ref?: string; cancelable: boolean; created_at: string; error?: unknown };
+/** An async operation (API-5). A failed one carries its RFC 9457 problem. */
+export type Operation = {
+  id: string;
+  type: string;
+  state: string;
+  resource_ref?: string;
+  cancelable: boolean;
+  created_at: string;
+  problem?: { code?: string; detail?: string; title?: string; status?: number } | null;
+};
 
 export function getOperation(id: string, identity: Identity): Promise<ApiResult<Operation>> {
   return get<Operation>(`/v1/operations/${seg(id)}`, identity);

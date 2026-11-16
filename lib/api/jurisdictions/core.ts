@@ -121,9 +121,11 @@ const SENTENCES: Record<string, string> = {
   unknown_jurisdiction_code: "No jurisdiction has that code here.",
   rule_not_found: "No such rule in this register.",
   source_not_found: "No such source in the register.",
-  // One code for "no source cited", "a cited source not reviewed or superseded" and (obligation rules) "no regime or interpretation".
-  source_not_ready:
-    "The provenance is not complete: cite at least one source, each reviewed by a second person and not superseded (an obligation rule also needs its regime and an approved interpretation).",
+  // A cited source not yet reviewed, or superseded (nothing cited is provenance_incomplete).
+  source_not_ready: "A cited source cannot be used yet: each must be reviewed by a second person and not superseded.",
+  provenance_incomplete:
+    "The provenance is incomplete: cite at least one reviewed source (an obligation rule also needs its regime and an approved interpretation).",
+  ring_ordinal_taken: "Another ring already holds that order. Rings are append-only, so use the next free order.",
   interpretation_not_found: "No such interpretation.",
   interpretation_not_approved: "That interpretation is not approved yet. A second person must approve it before rules or packs cite it.",
   regime_not_found: "No such regime.",
@@ -197,6 +199,15 @@ export function explainJurisdictionProblem(error: ApiError): string {
   const code = problemCode(error);
   const detail = problemDetail(error);
   if (code === "missing_field") return `A required field is empty: ${detail || "see the form"}.`;
+  // Every unmet gate is reported together in `reasons`; the person needs each of them.
+  if (code === "operation_blocked") {
+    const reasons = (error.body as { reasons?: unknown } | undefined)?.reasons;
+    const list = Array.isArray(reasons) ? reasons.filter((r): r is string => typeof r === "string") : [];
+    return list.length ? `Not done, ${list.length} gate(s) not met: ${list.join("; ")}.` : `Not done: ${detail || "a gate is not met"}.`;
+  }
+  // The detail names what is missing, or which ring holds the order.
+  if ((code === "provenance_incomplete" || code === "ring_ordinal_taken") && detail) return `${capitalize(detail)}${detail.endsWith(".") ? "" : "."}`;
+  if (code === "invalid_lifecycle_state" && detail) return `${SENTENCES.invalid_lifecycle_state} ${capitalize(detail.replace(/^invalid lifecycle( state)?: /, ""))}${detail.endsWith(".") ? "" : "."}`;
   if (code === "approval_not_valid") return `${SENTENCES.approval_not_valid}${detail ? ` ${capitalize(detail.replace(/^approval reference is not a valid approval of this rule: /, ""))}.` : ""}`;
   if (SENTENCES[code]) return SENTENCES[code];
   if (code.startsWith("invalid_") || code.endsWith("_not_found")) return detail ? capitalize(detail) + (detail.endsWith(".") ? "" : ".") : `The service refused the request (${code}).`;

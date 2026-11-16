@@ -127,6 +127,20 @@ export function who(id: string | null | undefined): string {
   return id ? person(id).name : "—";
 }
 
+/**
+ * A jurisdiction's country part as a small badge ("GB" for GB-SCT). Emoji
+ * flags render as two letters on Windows, which has no flag-emoji font, so
+ * the code itself is the mark everywhere.
+ */
+export function CodeMark({ code }: { code: string }) {
+  const cc = code.split("-")[0].slice(0, 4).toUpperCase();
+  return (
+    <span aria-hidden className="inline-flex h-5 min-w-7 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 px-1 font-mono text-[10px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+      {cc || "·"}
+    </span>
+  );
+}
+
 export function Mono({ children, title }: { children: ReactNode; title?: string }) {
   return (
     <span title={title} className="font-mono text-[11.5px]">

@@ -10,7 +10,6 @@ import * as J from "@/lib/api/jurisdictions";
 import {
   BASE,
   day,
-  flagOf,
   jurisdictionLabel,
   loadJurisdictions,
   loadPacks,
@@ -21,7 +20,7 @@ import {
   type Ctx,
   type Query,
 } from "./data";
-import { Chip, Cmd, Commands, MiniList, PaneTitle, StatusChip, Unavailable, who } from "./shared";
+import { Chip, Cmd, CodeMark, Commands, MiniList, PaneTitle, StatusChip, Unavailable, who } from "./shared";
 
 const TYPE_OPTIONS = (types: string[]) => types.map((t) => [t, t.replaceAll("_", " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())] as const);
 
@@ -44,9 +43,7 @@ export async function RegistryTab({ query, ctx }: { query: Query; ctx: Ctx }) {
       facets: { type: j.jurisdiction_type, state: j.active_flag ? "ACTIVE" : "INACTIVE" },
       cells: [
         <span key="n" className="flex items-center gap-2">
-          <span aria-hidden className="w-5 text-center text-[15px]">
-            {flagOf(j.jurisdiction_code) || "·"}
-          </span>
+          <CodeMark code={j.jurisdiction_code} />
           <TwoLine primary={j.jurisdiction_name} secondary={parent ? `in ${parent.jurisdiction_name}` : j.jurisdiction_type.replaceAll("_", " ").toLowerCase()} />
         </span>,
         released ? (
@@ -196,7 +193,7 @@ async function JurisdictionDrawer({ id, links, ctx }: { id: string; links: { clo
       icon={Globe2}
       title={
         <span className="inline-flex items-center gap-2">
-          <span aria-hidden>{flagOf(j.jurisdiction_code)}</span>
+          <CodeMark code={j.jurisdiction_code} />
           {j.jurisdiction_name}
         </span>
       }

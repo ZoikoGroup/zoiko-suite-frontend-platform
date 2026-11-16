@@ -6,6 +6,7 @@
 // the state machine would refuse; reviewers never see review buttons on a
 // version they authored.
 
+import Form from "next/form";
 import Link from "next/link";
 import { FileCheck2, KeyRound, Package, Plus } from "lucide-react";
 import { RegisterView, type RegisterSpec, type Row } from "@/components/admin/authorization/console/register";
@@ -63,7 +64,49 @@ export async function PacksTab({ query, ctx }: { query: Query; ctx: Ctx }) {
     <>
       <RegisterView spec={spec} query={query} />
       <ReleaseSettings ctx={ctx} />
+      <OperationLookup query={query} ctx={ctx} />
     </>
+  );
+}
+
+/**
+ * Async operations (API-5: a compile or test run asked with Prefer: respond-async)
+ * have no list route: a lookup by id, its state, and Cancel while it can be.
+ */
+async function OperationLookup({ query, ctx }: { query: Query; ctx: Ctx }) {
+  const id = (query.op ?? "").trim();
+  const read = id ? await J.getOperation(id, ctx.identity) : null;
+  const op = read?.ok ? read.data : null;
+  return (
+    <div className="border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+      <Form action={BASE} scroll={false} className="flex flex-wrap items-center gap-2">
+        <input type="hidden" name="tab" value="packs" />
+        <label className="text-[12.5px] font-semibold text-navy-950 dark:text-slate-100" htmlFor="op">
+          Async operation
+        </label>
+        <input id="op" name="op" defaultValue={id} placeholder="Operation id (from a Location header)" className="h-9 min-w-72 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] dark:border-slate-700 dark:bg-slate-900" />
+        <button type="submit" className="h-9 rounded-lg border border-slate-200 px-3 text-[12.5px] font-medium hover:bg-slate-50 dark:border-slate-700">
+          Look up
+        </button>
+      </Form>
+      {read && !read.ok && <p className="mt-2 text-[12px] text-amber-700">{J.explainJurisdictionProblem(read.error)}</p>}
+      {op && (
+        <div className="mt-3 flex flex-wrap items-start gap-4">
+          <DrawerFacts
+            items={[
+              { label: "State", value: <StatusChip status={op.state.toUpperCase()} text={op.state} /> },
+              { label: "Type", value: op.type },
+              { label: "Resource", value: op.resource_ref ? <Mono>{op.resource_ref}</Mono> : "—" },
+              { label: "Started", value: day(op.created_at) },
+              { label: "Why it failed", value: op.problem ? `${op.problem.code ?? op.problem.title ?? "error"}: ${op.problem.detail ?? ""}` : "—" },
+            ]}
+          />
+          {op.cancelable && (
+            <Cmd command="operation.cancel" label="Cancel operation" tone="danger" title={`Cancel ${op.type}`} hidden={{ id: op.id }} description="Stops the operation if it has not finished. A finished one is left as it is." />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -126,7 +169,8 @@ async function PackDrawer({
     </Cmd>
   );
   const verPane = (k: string) => `${links.paneHref(k)}${ver ? `&ver=${encodeURIComponent(ver)}` : ""}`;
-  const ringOpts = (rings?.data ?? []).map((r) => [r.ring_code, `${r.ring_code} (order ${r.ordinal})`] as const);
+  const ringOpts = [...(rings?.data ?? [])].sort((a, b) => a.ordinal - b.ordinal).map((r) => [r.ring_code, `${r.ring_code} (order ${r.ordinal})`] as const);
+  const releasedOthers = p.versions.filter((x) => x.status === "RELEASED" && x.version !== ver);
   const regionOpts = (regions?.data ?? []).map((r) => [r.region_code, r.region_code] as const);
 
   return (
@@ -171,7 +215,8 @@ async function PackDrawer({
               <div className="mt-3">
                 <Commands>
                   {v.status === "DRAFT" && step("submit-review", "Submit for review", { description: "Moves the version to REVIEW. Compile it and run its tests before reviewers decide." })}
-                  {!v.artifact_digest && ["DRAFT", "REVIEW"].includes(v.status) && step("compile", "Compile", { description: "Builds the immutable artifact from the manifest's modules, named by its digest." })}
+                  {/* The service compiles only under REVIEW. */}
+                  {!v.artifact_digest && v.status === "REVIEW" && step("compile", "Compile", { description: "Builds the immutable artifact from the manifest's modules, named by its digest." })}
                   {v.artifact_digest && !v.signature && step("sign", "Sign", { description: "Signs the artifact digest with the service's signing key." })}
                   {v.status === "CERTIFIED" && step("publish", "Publish", { tone: "accent", description: "Releases the version: re-verified, its dependencies released. Then deploy it." })}
                   {v.status === "RELEASED" && step("withdraw", "Withdraw", { tone: "danger", reason: true, evidence: true, description: "Stops all new use. A remediation case lists decisions already made with it." })}
@@ -220,7 +265,8 @@ async function PackDrawer({
               <p className="text-[12px] text-slate-600 dark:text-slate-300">{cert?.data?.certification ? `Certified ${day(cert.data.certification.certified_at)} by ${who(cert.data.certification.certified_by)} (${cert.data.certification.min_reviews} review(s) required)` : "Not certified."}</p>
               <div className="mt-3">
                 <Commands>
-                  {["DRAFT", "REVIEW"].includes(v.status) && (
+                  {/* The service takes a test bundle only under REVIEW. */}
+                  {v.status === "REVIEW" && (
                     <Cmd command="pack.test-bundle" label="Submit test bundle" title={`Test bundle for ${refId}@${ver}`} hidden={{ ref: refId, version: ver }}>
                       <TextArea name="bundle" label="Bundle (JSON)" rows={8} placeholder='{"bundle_version":"1","cases":[{"id":"c1","class":"GOLDEN","description":"…","input":{"jurisdiction":"GB","rule_domain":"TAX","rule_code":"STD","effective_at":"2026-09-01T00:00:00Z"},"expect":{"outcome":"RESOLVED"}}]}' />
                     </Cmd>
@@ -238,6 +284,7 @@ async function PackDrawer({
                   {v.status === "REVIEW" && !author && step("certify", "Certify", { tone: "accent", description: "Certifies when the latest test run passed and enough independent reviews approve this artifact." })}
                 </Commands>
                 {v.status === "REVIEW" && author && <DrawerNote>You authored this version, so its reviews and certification are someone else&apos;s.</DrawerNote>}
+                {v.status === "DRAFT" && <DrawerNote>Submit the version for review first: it is compiled, tested and reviewed under REVIEW.</DrawerNote>}
               </div>
             </>
           )}
@@ -256,7 +303,14 @@ async function PackDrawer({
               <div className="mt-3">
                 <Commands>
                   {v.status === "RELEASED" && (
-                    <Cmd command="pack.deploy" label="Deploy" tone="accent" title={`Deploy ${refId}@${ver}`} hidden={{ ref: refId, version: ver }} description="Promotes the released version to a ring and region, in ring order.">
+                    <Cmd
+                      command="pack.deploy"
+                      label="Deploy"
+                      tone="accent"
+                      title={`Deploy ${refId}@${ver}`}
+                      hidden={{ ref: refId, version: ver }}
+                      description="Promotes the released version to a ring and region, in ring order: start with the lowest order; each next ring needs it active, and soaked, in the previous ring of the same region."
+                    >
                       <FieldGrid>
                         <SelectField name="ring" label="Ring" options={ringOpts} />
                         <SelectField name="region" label="Region" options={regionOpts} />
@@ -283,13 +337,21 @@ async function PackDrawer({
                       </FieldGrid>
                     </Cmd>
                   )}
-                  {["CERTIFIED", "RELEASED"].includes(v.status) && !hotfix?.data && (
-                    <Cmd command="pack.hotfix" label="Declare hotfix" tone="danger" title={`Declare a hotfix for ${refId}@${ver}`} hidden={{ ref: refId, version: ver }} description="An emergency release with enhanced review; a retrospective is due afterwards.">
+                  {/* A hotfix is declared before certification (DRAFT or REVIEW), naming an older RELEASED version to fall back to. */}
+                  {["DRAFT", "REVIEW"].includes(v.status) && !hotfix?.data && releasedOthers.length > 0 && (
+                    <Cmd
+                      command="pack.hotfix"
+                      label="Declare hotfix"
+                      tone="danger"
+                      title={`Declare a hotfix for ${refId}@${ver}`}
+                      hidden={{ ref: refId, version: ver }}
+                      description="An emergency release under enhanced review: certifying it then needs two independent approving reviewers, its incident commander may skip ring order when deploying, and a retrospective is due afterwards."
+                    >
                       <FieldGrid>
                         <SelectField name="severity" label="Severity" options={[["P0", "P0"], ["P1", "P1"]]} />
                         <Field name="incident_ref" label="Incident" />
                         <Field name="incident_commander" label="Incident commander (principal id)" className="sm:col-span-2" />
-                        <Field name="rollback_target_version" label="Rollback target version" />
+                        <SelectField name="rollback_target_version" label="Rollback target (an older released version)" options={releasedOthers.map((x) => [x.version, x.version] as const)} className="sm:col-span-2" />
                         <TextArea name="scope_summary" label="Scope" className="sm:col-span-2" />
                       </FieldGrid>
                     </Cmd>
