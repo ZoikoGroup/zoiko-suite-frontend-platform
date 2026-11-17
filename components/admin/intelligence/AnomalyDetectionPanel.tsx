@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { AnomalyRuleSection } from "./IntelligenceCreateForms";
 import type { Anomaly } from "@/lib/api/intelligence";
 
@@ -97,6 +98,15 @@ export function AnomalyDetectionPanel() {
                     <p className="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">
                       Observed {a.observed_value} vs expected {a.expected_value} · score {a.anomaly_score} · {a.source_entity_id} · {new Date(a.detected_at).toLocaleString()}
                     </p>
+                    <div className="mt-2">
+                      <RowActions
+                        actions={["anomaly.investigate", "anomaly.confirm", "anomaly.false-positive", "anomaly.resolve"]}
+                        recordId={a.anomaly_id}
+                        status={a.status}
+                        version={a.version}
+                        onDone={load}
+                      />
+                    </div>
                   </div>
                 </div>
               );

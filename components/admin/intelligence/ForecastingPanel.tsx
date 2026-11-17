@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { TrendingUp, RefreshCw } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { ForecastCreateForm } from "./IntelligenceCreateForms";
 import type { Forecast } from "@/lib/api/intelligence";
 
@@ -78,6 +79,7 @@ export function ForecastingPanel() {
                 <th className="pb-2 font-medium">Model</th>
                 <th className="pb-2 font-medium text-right">Confidence</th>
                 <th className="pb-2 font-medium">Status</th>
+                <th className="pb-2 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -97,6 +99,15 @@ export function ForecastingPanel() {
                     <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_STYLES[f.status] ?? STATUS_STYLES.CALCULATED}`}>
                       {f.status}
                     </span>
+                  </td>
+                  <td className="py-2 pl-2 min-w-[180px]">
+                    <RowActions
+                      actions={["forecast.submit", "forecast.approve", "forecast.publish", "forecast.recalculate", "forecast.reforecast", "forecast.archive"]}
+                      recordId={f.id}
+                      status={f.status}
+                      version={f.version}
+                      onDone={load}
+                    />
                   </td>
                 </tr>
               ))}

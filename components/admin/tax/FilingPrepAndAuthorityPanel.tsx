@@ -2,7 +2,15 @@ import { cookies } from "next/headers";
 import { CloudOff, FileCheck, ShieldAlert, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listFilingDrafts, listTaxAuthorityInterfaces, type FilingDraft, type TaxAuthorityInterface } from "@/lib/api/tax";
+import {
+  listFilingDrafts,
+  listTaxAuthorityFilings,
+  listTaxAuthorityInterfaces,
+  type FilingDraft,
+  type TaxAuthorityFiling,
+  type TaxAuthorityInterface,
+} from "@/lib/api/tax";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { SubmissionHealthButton } from "./TestConnectionButton";
 import { refresh } from "next/cache";
 import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordForm";
@@ -149,9 +157,10 @@ export async function FilingPrepAndAuthorityPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const [draftsRes, authorityRes] = await Promise.all([
+  const [draftsRes, authorityRes, filingsRes] = await Promise.all([
     listFilingDrafts(identity),
     listTaxAuthorityInterfaces(identity),
+    listTaxAuthorityFilings(identity),
   ]);
 
   // Each section reports its own failed read. Only "unreachable" used to be
@@ -337,6 +346,50 @@ export async function FilingPrepAndAuthorityPanel() {
           </div>
         )}
       </div>
+
+      <AuthorityFilings result={filingsRes} />
+    </div>
+  );
+}
+
+/** Filings held by tax-authority-interface-svc, with the transitions it accepts. */
+function AuthorityFilings({ result }: { result: Awaited<ReturnType<typeof listTaxAuthorityFilings>> }) {
+  const filings: TaxAuthorityFiling[] = result.ok ? result.data : [];
+  return (
+    <div>
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+        Authority Filings ({filings.length})
+      </h3>
+      {!result.ok ? (
+        <PanelEmptyState icon={CloudOff} tone="warning" label="tax-authority-interface-svc filings could not be read" hint={result.error.message} />
+      ) : filings.length === 0 ? (
+        <PanelEmptyState icon={FileCheck} label="No filings" hint="Filings prepared in tax-authority-interface-svc will appear here." />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800/60">
+              <tr>
+                {["Filing", "Type", "Period", "Status", "Actions"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filings.map((f) => (
+                <tr key={f.submission_id}>
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-600 dark:text-slate-300">{f.submission_id}</td>
+                  <td className="px-4 py-3 text-xs">{f.filing_type || "—"}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{f.tax_period || "—"}</td>
+                  <td className="px-4 py-3 text-xs font-medium">{f.status}</td>
+                  <td className="px-4 py-3 min-w-[160px]">
+                    <RowActions actions={["tax-filing.validate", "tax-filing.submit", "tax-filing.poll"]} recordId={f.submission_id} status={f.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { CloudOff, FileCode, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { listClauses, listTemplates, type Clause, type ContractTemplate } from "@/lib/api/legal";
 
 export async function ClausesAndTemplatesPanel() {
@@ -39,7 +40,7 @@ export async function ClausesAndTemplatesPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Title", "Category", "Version", "Status"].map((h) => (
+                  {["Title", "Category", "Version", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -51,6 +52,13 @@ export async function ClausesAndTemplatesPanel() {
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{c.category}</td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-600">v{c.version}</td>
                     <td className="px-4 py-3 text-xs font-medium text-emerald-600">{c.status}</td>
+                    <td className="px-4 py-3">
+                      <RowActions
+                        actions={["clause.submit-review", "clause.approve", "clause.activate", "clause.retire", "clause.supersede"]}
+                        recordId={c.clause_id}
+                        status={c.status}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -72,7 +80,7 @@ export async function ClausesAndTemplatesPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Template", "Type", "Version", "Status"].map((h) => (
+                  {["Template", "Type", "Version", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -84,6 +92,9 @@ export async function ClausesAndTemplatesPanel() {
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{t.contract_type}</td>
                     <td className="px-4 py-3 font-mono text-xs text-slate-600">v{t.version}</td>
                     <td className="px-4 py-3 text-xs font-medium text-emerald-600">{t.status}</td>
+                    <td className="px-4 py-3">
+                      <RowActions actions={["template.approve"]} recordId={t.template_id} status={t.status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

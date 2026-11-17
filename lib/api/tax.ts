@@ -526,6 +526,36 @@ export async function listTaxAuthorityInterfaces(
   );
 }
 
+/** A filing as tax-authority-interface-svc lists it (GET /v1/tax-authority/filings). */
+export type TaxAuthorityFiling = {
+  submission_id: string;
+  interface_id?: string;
+  filing_type?: string;
+  tax_period?: string;
+  tax_amount?: number;
+  status: string;
+  ack_reference?: string;
+  submitted_at?: string;
+};
+
+type TaxAuthorityFilingsResponse = { submissions?: TaxAuthorityFiling[]; total: number };
+
+export async function listTaxAuthorityFilings(
+  identity?: Identity
+): Promise<ApiResult<TaxAuthorityFiling[]>> {
+  const base = taxAuthorityUrl();
+  const url = new URL(`${base}/v1/tax-authority/filings`);
+  if (identity?.legalEntityId) url.searchParams.set("legal_entity_id", identity.legalEntityId);
+
+  return fetchDomainService<TaxAuthorityFilingsResponse, TaxAuthorityFiling[]>(
+    url.toString(),
+    base,
+    "tax-authority-interface-svc",
+    identity,
+    (d) => d.submissions ?? [],
+  );
+}
+
 // ─── 8. Tax Summary Stats (KPI Aggregator) ──────────────────────────────────
 
 export type TaxSummaryStats = {

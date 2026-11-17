@@ -3,6 +3,7 @@ import { CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import {
   describeRequestStatus,
   formatRequestAmount,
@@ -42,6 +43,9 @@ export function PurchaseRequestTable({ requests }: { requests: PurchaseRequest[]
             </th>
             <th scope="col" className={HEAD}>
               Request ID
+            </th>
+            <th scope="col" className={HEAD}>
+              Actions
             </th>
           </tr>
         </thead>
@@ -107,6 +111,14 @@ export function PurchaseRequestTable({ requests }: { requests: PurchaseRequest[]
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
                   <CopyableId value={request.request_id} className="text-xs" />
+                </td>
+                <td className={cn(CELL, "min-w-[160px]")}>
+                  <RowActions
+                    actions={["purchase-request.convert", "purchase-request.cancel"]}
+                    recordId={request.request_id}
+                    status={request.status}
+                    version={request.version}
+                  />
                 </td>
               </tr>
             );

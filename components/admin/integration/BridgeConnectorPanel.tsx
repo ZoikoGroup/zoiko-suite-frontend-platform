@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Network, RefreshCw, CheckCircle2 } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { BridgeCreateForm } from "./IntegrationCreateForms";
 import type { BridgeEndpoint } from "@/lib/api/integration";
 
@@ -100,6 +101,15 @@ export function BridgeConnectorPanel() {
                     {c.status}
                   </span>
                 </div>
+              </div>
+              <div className="mt-2">
+                <RowActions
+                  actions={["bridge.submit", "bridge.approve", "bridge.reject", "bridge.activate", "bridge.suspend", "bridge.revoke", "bridge.archive"]}
+                  recordId={c.bridge_id}
+                  status={c.status}
+                  version={c.version}
+                  onDone={fetchConnections}
+                />
               </div>
             </div>
           ))}
