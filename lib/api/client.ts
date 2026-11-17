@@ -95,7 +95,10 @@ type GetOptions = EnvelopeOptions & {
   onHeaders?: (headers: Headers) => void;
 };
 
-type WriteOptions = EnvelopeOptions & { identity?: Identity };
+type WriteOptions = EnvelopeOptions & { 
+  identity?: Identity;
+  extraHeaders?: Record<string, string>;
+};
 
 /**
  * GET a JSON resource from a backend service.
@@ -300,6 +303,8 @@ async function apiWrite<T>(
 ): Promise<ApiWriteResult<T>> {
   const url = absoluteURL ? path : serviceUrl(service) + path;
 
+  const { extraHeaders, ...envelopeOptions } = options;
+
   let response: Response;
   try {
     response = await fetch(url, {
@@ -311,7 +316,8 @@ async function apiWrite<T>(
         // envelope carries an idempotency key (INV-08). DELETE included: it is
         // idempotent at the HTTP level but not at the accounting level, and the
         // registry's end-dating routes use it.
-        ...envelopeHeaders({ ...options, materialWrite: true }),
+        ...envelopeHeaders({ ...envelopeOptions, materialWrite: true }),
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

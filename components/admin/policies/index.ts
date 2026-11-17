@@ -10,3 +10,6 @@ export {
 // Plain-English rendering of the three records policy-svc returns. Used by the
 // forms above, and available to any panel that has one of these records in hand.
 export { PolicySummary, VersionSummary, EvaluationSummary } from "./PolicySummary";
+
+// Policies & Controls console (v2.0 layout): app/admin/policies/page.tsx imports
+// these directly from ./console/*.
