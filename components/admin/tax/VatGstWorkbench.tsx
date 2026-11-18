@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useActionState } from "react";
+import { JurisdictionSelect } from "./JurisdictionSelect";
+import type { JurisdictionOptions } from "./jurisdiction-options";
 import {
   Receipt,
   PlusCircle,
@@ -85,7 +87,7 @@ function OutputInputBar({ output, input, currency }: { output: number; input: nu
   );
 }
 
-export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATReturn[] }) {
+export function VatGstWorkbench({ initialReturns = [], jurisdictions }: { initialReturns: VATReturn[]; jurisdictions: JurisdictionOptions }) {
   const [createState, createSubmit, createPending] = useActionState(createVatReturnAction, IDLE_ACTION);
   const [fileState, fileSubmit, filePending] = useActionState(fileVatReturnAction, IDLE_ACTION);
   const [lookupState, lookupSubmit, lookupPending] = useActionState(lookupVatReturnAction, IDLE_LOOKUP_VAT);
@@ -199,14 +201,14 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
               <p className={HINT}>Raised for the legal entity of your session.</p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="vat-jurisdiction" className={LABEL}>Jurisdiction ID</label>
-                  <input
+                  <JurisdictionSelect
                     id="vat-jurisdiction"
                     name="jurisdiction_id"
+                    label="Jurisdiction"
+                    options={jurisdictions}
+                    labelClassName={LABEL}
                     className={FIELD}
-                    required
                   />
-                  <p className={HINT}>HMRC / Statutory Jurisdiction Code</p>
                 </div>
 
                 <div>

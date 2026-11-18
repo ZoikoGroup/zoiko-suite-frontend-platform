@@ -9,6 +9,7 @@ import {
   type RequestStatus,
 } from "@/lib/api/purchase-requests";
 import { PurchaseRequestTable } from "./PurchaseRequestTable";
+import { vendorProfileOptions, itemsOf } from "@/lib/form-options";
 
 const TILE =
   "flex items-center gap-3 rounded-lg border border-slate-200 px-3.5 py-3 dark:border-slate-800";
@@ -68,15 +69,15 @@ export async function PurchaseRequestPanel({
     );
   }
 
-  const result = await listPurchaseRequests({
-    identity: {
-      principalId: session.principalId,
-      tenantId: session.tenantId,
-      legalEntityId: session.legalEntityId,
-    },
-    status,
-    legalEntityId,
-  });
+  const sessionIdentity = {
+    principalId: session.principalId,
+    tenantId: session.tenantId,
+    legalEntityId: session.legalEntityId,
+  };
+  const [result, vendors] = await Promise.all([
+    listPurchaseRequests({ identity: sessionIdentity, status, legalEntityId }),
+    vendorProfileOptions(sessionIdentity),
+  ]);
 
   if (!result.ok) {
     return (
@@ -181,7 +182,7 @@ export async function PurchaseRequestPanel({
         </div>
       </div>
 
-      <PurchaseRequestTable requests={requests} />
+      <PurchaseRequestTable requests={requests} vendorProfiles={itemsOf(vendors)} />
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   type ProcurementCaseActionState,
 } from "@/app/admin/commercial-ops/state";
 import type { ProcurementCaseStatus } from "@/lib/api/commercial-ops";
+import { PickList } from "@/components/admin/shared/PickList";
 
 const FIELD =
   "block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 " +
@@ -65,14 +66,8 @@ export function OpenProcurementCaseForm() {
           <label htmlFor="case_category" className={LABEL}>
             Spend category
           </label>
-          <input
-            id="case_category"
-            name="category"
-            required
-            placeholder="SOFTWARE"
-            className={FIELD}
-            autoComplete="off"
-          />
+          <PickList id="case_category" name="category" kind="spend-categories" required allowOther className={FIELD} />
+          <p className="mt-1 text-[11px] text-slate-400">Suggestions are the categories with a spend limit in force; the limit for this category decides the case.</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -104,9 +99,9 @@ export function OpenProcurementCaseForm() {
         </div>
         <div className="sm:col-span-2">
           <label htmlFor="case_vendor" className={LABEL}>
-            Vendor profile ID <span className="font-normal text-slate-400">(optional, UUID)</span>
+            Vendor profile <span className="font-normal text-slate-400">(optional)</span>
           </label>
-          <input id="case_vendor" name="vendor_profile_id" className={`${FIELD} font-mono text-xs`} autoComplete="off" />
+          <PickList id="case_vendor" name="vendor_profile_id" kind="vendor-profiles" blank="None" className={FIELD} empty="No vendor profile yet." />
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">

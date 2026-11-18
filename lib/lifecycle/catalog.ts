@@ -34,7 +34,8 @@ const CLAUSES = {
   "clause.supersede": {
     service: "clauseTemplate", serviceLabel: "clause-template-svc", method: "POST",
     path: "/v1/clauses/{id}/supersede", label: "Supersede", from: ["ACTIVE"], danger: true,
-    fields: [{ name: "superseded_by", label: "Replacing clause id", kind: "text", required: true }],
+    dynamicFields: ["superseded_by"],
+    fields: [{ name: "superseded_by", label: "Replacing clause", kind: "select", required: true }],
   },
   "template.approve": {
     service: "clauseTemplate", serviceLabel: "clause-template-svc", method: "POST",
@@ -51,10 +52,11 @@ const OBLIGATIONS = {
   "obligation.schedule": {
     service: "obligationTracking", serviceLabel: "obligation-tracking-svc", method: "POST",
     path: "/v1/obligations/{id}/schedule", label: "Schedule", from: ["PLANNED"], actorFields: ["scheduled_by"],
+    dynamicFields: ["source_clause_id"],
     fields: [
       { name: "trigger_description", label: "Trigger", kind: "text", required: true },
       { name: "calculation_method", label: "How the due date is calculated", kind: "text", required: true },
-      { name: "source_clause_id", label: "Source clause id", kind: "text" },
+      { name: "source_clause_id", label: "Source clause", kind: "select" },
     ],
   },
   "obligation.mark-due": {
@@ -87,7 +89,8 @@ const OBLIGATIONS = {
   "obligation.supersede": {
     service: "obligationTracking", serviceLabel: "obligation-tracking-svc", method: "POST",
     path: "/v1/obligations/{id}/supersede", label: "Supersede", from: ["CANDIDATE", "PLANNED", ...OBLIGATION_OPEN], danger: true,
-    fields: [{ name: "superseded_by", label: "Replacing obligation id", kind: "text", required: true }],
+    dynamicFields: ["superseded_by"],
+    fields: [{ name: "superseded_by", label: "Replacing obligation", kind: "select", required: true }],
   },
 } satisfies Record<string, LifecycleActionSpec>;
 
@@ -124,8 +127,9 @@ const TAX = {
   "corporate-tax.submit": {
     service: "corporateTax", serviceLabel: "corporate-tax-svc", method: "POST",
     path: "/v1/corporate-tax-returns/{id}/submit", label: "Submit return", from: ["DRAFT", "DISPUTED"],
-    purposeContext: "tax.corporate.submit", confirm: true,
-    note: "Records the return as submitted in corporate-tax-svc; it does not file with a tax authority.",
+    purposeContext: "tax.corporate.submit", evidenceRefsField: "evidence_refs",
+    note: "Records the return as submitted in corporate-tax-svc; it does not file with a tax authority. The service checks the evidence the return requires.",
+    fields: [{ name: "evidence_refs", label: "Evidence references", kind: "text", hint: "Comma-separated evidence ids supporting the return." }],
   },
   "corporate-tax.assess": {
     service: "corporateTax", serviceLabel: "corporate-tax-svc", method: "POST",
@@ -204,11 +208,11 @@ const COMMERCIAL = {
   "purchase-request.convert": {
     service: "purchaseRequest", serviceLabel: "purchase-request-svc", method: "POST",
     path: "/v1/purchase-requests/{id}/convert-to-purchase-order", label: "Convert to purchase order", from: ["APPROVED"],
-    version: "expected-version",
-    note: "purchase-request-svc raises the order in purchase-order-svc.",
+    version: "expected-version", dynamicFields: ["vendor_profile_id"],
+    note: "purchase-request-svc raises the order in purchase-order-svc. The supplier is checked for eligibility (AP-01); without a supplier reference the vendor profile is used.",
     fields: [
-      { name: "supplier_ref", label: "Supplier reference", kind: "text" },
-      { name: "vendor_profile_id", label: "Vendor profile id", kind: "text" },
+      { name: "supplier_ref", label: "Supplier reference", kind: "text", hint: "As registered in supplier financial profiles." },
+      { name: "vendor_profile_id", label: "Vendor profile", kind: "select" },
     ],
   },
 } satisfies Record<string, LifecycleActionSpec>;

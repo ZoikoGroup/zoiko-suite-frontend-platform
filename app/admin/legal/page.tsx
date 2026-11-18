@@ -31,6 +31,7 @@ import {
   LegalProcessTimeline,
 } from "@/components/admin/legal";
 import { DOMAINS } from "@/lib/constants";
+import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 
 export const metadata: Metadata = { title: "Legal & Contracts Governance | Zoiko Suite" };
 
@@ -116,7 +117,8 @@ function RegisterSkeleton() {
   );
 }
 
-export default function LegalPage() {
+export default async function LegalPage() {
+  const jurisdictions = await loadJurisdictionOptions();
   return (
     <div>
       <PageHeader title={DOMAIN.label} description={DOMAIN.purpose} />
@@ -229,7 +231,7 @@ export default function LegalPage() {
       </div>
 
       <div className="mt-6">
-        <LegalActionHeader />
+        <LegalActionHeader jurisdictions={jurisdictions} />
       </div>
 
       <div className="mt-6">

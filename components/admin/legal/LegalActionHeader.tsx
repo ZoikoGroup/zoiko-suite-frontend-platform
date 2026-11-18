@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { JurisdictionSelect } from "@/components/admin/tax/JurisdictionSelect";
+import type { JurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 import { Plus, Edit3, Vote, CheckCircle2, X, Loader2 } from "lucide-react";
 import { BoardResolutionForm } from "./BoardResolutionForm";
 import { DraftContractForm } from "./DraftContractForm";
@@ -36,7 +38,7 @@ function CreateContractModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function DraftClauseModal({ onClose }: { onClose: () => void }) {
+function DraftClauseModal({ onClose, jurisdictions }: { onClose: () => void; jurisdictions: JurisdictionOptions }) {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,12 +142,14 @@ function DraftClauseModal({ onClose }: { onClose: () => void }) {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="clause-jurisdiction" className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Jurisdiction ID</label>
-                  <input
+                  <JurisdictionSelect
                     id="clause-jurisdiction"
-                    type="text"
+                    name="jurisdiction_id"
+                    label="Jurisdiction"
+                    options={jurisdictions}
                     value={jurisdiction}
-                    onChange={(e) => setJurisdiction(e.target.value)}
+                    onChange={setJurisdiction}
+                    labelClassName="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                     className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
                   />
                 </div>
@@ -238,13 +242,13 @@ function ProposeResolutionModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function LegalActionHeader() {
+export function LegalActionHeader({ jurisdictions }: { jurisdictions: JurisdictionOptions }) {
   const [modal, setModal] = useState<string | null>(null);
 
   return (
     <>
       {modal === "create" && <CreateContractModal onClose={() => setModal(null)} />}
-      {modal === "clause" && <DraftClauseModal onClose={() => setModal(null)} />}
+      {modal === "clause" && <DraftClauseModal jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
       {modal === "resolution" && <ProposeResolutionModal onClose={() => setModal(null)} />}
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">

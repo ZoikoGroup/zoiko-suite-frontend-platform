@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { AlertTriangle, CloudOff, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listObligations, type Obligation } from "@/lib/api/legal";
+import { listClauses, listObligations, type Obligation } from "@/lib/api/legal";
 import { CreateObligationForm } from "./LegalCreateForms";
 import { RowActions } from "@/components/admin/shared/RowActions";
 
@@ -71,7 +71,8 @@ export async function ObligationTrackingPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const result = await listObligations(identity);
+  const [result, clausesRes] = await Promise.all([listObligations(identity), listClauses(identity)]);
+  const clauseChoices = clausesRes.ok ? clausesRes.data.map((c) => ({ value: c.clause_id, label: `${c.title} (${c.status})` })) : [];
 
   if (!result.ok) {
     return (
@@ -166,7 +167,17 @@ export async function ObligationTrackingPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3 min-w-[180px]">
-                      <RowActions actions={OBLIGATION_ACTIONS} recordId={o.obligation_id} status={o.status} />
+                      <RowActions
+                        actions={OBLIGATION_ACTIONS}
+                        recordId={o.obligation_id}
+                        status={o.status}
+                        fieldOptions={{
+                          source_clause_id: clauseChoices,
+                          superseded_by: obligations
+                            .filter((x) => x.obligation_id !== o.obligation_id && OPEN_STATUSES.has(x.status))
+                            .map((x) => ({ value: x.obligation_id, label: `${x.title} (${x.status})` })),
+                        }}
+                      />
                     </td>
                   </tr>
                 );

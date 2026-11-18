@@ -57,6 +57,11 @@ export async function ClausesAndTemplatesPanel() {
                         actions={["clause.submit-review", "clause.approve", "clause.activate", "clause.retire", "clause.supersede"]}
                         recordId={c.clause_id}
                         status={c.status}
+                        fieldOptions={{
+                          superseded_by: clauses
+                            .filter((o) => o.clause_id !== c.clause_id && o.status !== "RETIRED" && o.status !== "SUPERSEDED")
+                            .map((o) => ({ value: o.clause_id, label: `${o.title} v${o.version} (${o.status})` })),
+                        }}
                       />
                     </td>
                   </tr>

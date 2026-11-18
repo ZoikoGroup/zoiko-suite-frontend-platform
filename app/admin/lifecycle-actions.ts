@@ -62,8 +62,15 @@ export async function runLifecycleAction(
   if (!identity) return { ok: false, message: "Your session has expired — sign in again." };
 
   const body: Record<string, unknown> = {};
+  let evidenceRefs: string[] | undefined;
   for (const f of spec.fields ?? []) {
     const raw = String(values?.[f.name] ?? "").trim();
+    if (f.name === spec.evidenceRefsField) {
+      const refs = raw.split(/[\n,]/).map((v) => v.trim()).filter(Boolean);
+      if (f.required && refs.length === 0) return { ok: false, message: `${f.label} is required.` };
+      if (refs.length) evidenceRefs = refs;
+      continue;
+    }
     if (f.kind === "checkbox") {
       body[f.name] = raw === "on" || raw === "true";
       continue;
@@ -131,6 +138,7 @@ export async function runLifecycleAction(
   const options = {
     identity,
     ...(spec.purposeContext ? { purposeContext: spec.purposeContext } : {}),
+    ...(evidenceRefs ? { evidenceRefs } : {}),
     ...(spec.version === "if-match-v" && v ? { ifMatch: `"v${v.replace(/^v/, "")}"` } : {}),
     ...(spec.version === "if-match" && v ? { ifMatch: `"${v}"` } : {}),
     ...(spec.version === "expected-version" && v ? { expectedVersion: v } : {}),

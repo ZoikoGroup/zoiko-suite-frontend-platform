@@ -10,6 +10,7 @@ import {
   ComplianceProcessTimeline,
   ExceptionAndAnomalyPanels,
 } from "@/components/admin/compliance";
+import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 
 export const metadata: Metadata = { title: "Compliance Governance & Evidence | Zoiko Suite" };
 
@@ -53,6 +54,7 @@ function SectionCard({
 }
 
 export default async function CompliancePage() {
+  const jurisdictions = await loadJurisdictionOptions();
   const domain = DOMAINS.find((d) => d.key === "compliance")!;
 
   return (
@@ -68,7 +70,7 @@ export default async function CompliancePage() {
         <ComplianceSummaryBar />
       </Suspense>
 
-      <ComplianceActionHeader />
+      <ComplianceActionHeader jurisdictions={jurisdictions} />
 
       <ComplianceProcessTimeline />
 

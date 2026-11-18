@@ -39,6 +39,14 @@ const unwrap = (d: unknown, key: string): Raw => {
   return (r[key] && typeof r[key] === "object" ? r[key] : r) as Raw;
 };
 
+/**
+ * ai-governance-svc answers 200, not 201, when it registers a provider or
+ * sets a classification (an upsert), so a 200 here is a write, not a replay.
+ */
+function recorded(state: CreateState, what: string): CreateState {
+  return state.status === "created" && state.httpStatus === 200 ? { ...state, message: `ai-governance-svc recorded the ${what}.` } : state;
+}
+
 /** Record one AI run with its model, prompt and evidence references (POST /v1/ai-runs). */
 export async function recordAiRunAction(previous: CreateState, fd: FormData): Promise<CreateState> {
   const identity = await sessionIdentity();
@@ -110,7 +118,7 @@ export async function registerModelProviderAction(previous: CreateState, fd: For
 
   const res = await apiPost<unknown>("aiGovernance", "/v1/model-providers", body, { identity });
   if (res.ok) refresh();
-  return toState(previous, fd, res, "ai-governance-svc", (d) => {
+  return recorded(toState(previous, fd, res, "ai-governance-svc", (d) => {
     const r = unwrap(d, "provider");
     return [
       ["Registration", show(r.provider_registration_id)],
@@ -118,7 +126,7 @@ export async function registerModelProviderAction(previous: CreateState, fd: For
       ["Training use", show(r.training_use_posture)],
       ["Region", show(r.data_region)],
     ];
-  });
+  }), "provider registration");
 }
 
 /** Classify a business action's risk (POST /v1/action-risk-classifications). */
@@ -142,7 +150,7 @@ export async function setActionRiskAction(previous: CreateState, fd: FormData): 
     { identity },
   );
   if (res.ok) refresh();
-  return toState(previous, fd, res, "ai-governance-svc", (d) => {
+  return recorded(toState(previous, fd, res, "ai-governance-svc", (d) => {
     const r = unwrap(d, "classification");
     return [
       ["Action", show(r.action_type)],
@@ -150,5 +158,5 @@ export async function setActionRiskAction(previous: CreateState, fd: FormData): 
       ["Human review", show(r.human_review_trigger)],
       ["Maker-checker", show(r.requires_maker_checker)],
     ];
-  });
+  }), "classification");
 }

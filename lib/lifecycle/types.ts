@@ -37,6 +37,8 @@ export type LifecycleActionSpec = {
   dynamicFields?: readonly string[];
   /** Fields typed as comma- or newline-separated values; sent as a string array. */
   listFields?: readonly string[];
+  /** A comma-separated field sent as the X-Evidence-Refs header instead of in the body. */
+  evidenceRefsField?: string;
   /** Fields that must be UUIDs. */
   uuidFields?: readonly string[];
   /** Fields that must be given together or not at all, the first not after the second. */

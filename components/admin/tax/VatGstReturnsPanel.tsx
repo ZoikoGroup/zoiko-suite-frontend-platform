@@ -4,6 +4,7 @@ import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listVATReturns, type VATReturn } from "@/lib/api/tax";
 import { VatGstWorkbench } from "./VatGstWorkbench";
+import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 
 export async function VatGstReturnsPanel() {
   const store = await cookies();
@@ -42,5 +43,6 @@ export async function VatGstReturnsPanel() {
   const vatReturns: VATReturn[] = result.ok ? result.data : [];
   const sorted = [...vatReturns].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  return <VatGstWorkbench initialReturns={sorted} />;
+  const jurisdictions = await loadJurisdictionOptions();
+  return <VatGstWorkbench initialReturns={sorted} jurisdictions={jurisdictions} />;
 }
