@@ -191,7 +191,7 @@ export async function StatusAndEscalationPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Type", "Linked to", "Severity", "Status"].map((h) => (
+                  {["Type", "Linked to", "Severity", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -205,6 +205,9 @@ export async function StatusAndEscalationPanel() {
                     </td>
                     <td className="px-4 py-3 text-xs font-bold text-red-500">{ex.severity_level}</td>
                     <td className="px-4 py-3 text-xs font-medium text-slate-600">{ex.case_status}</td>
+                    <td className="px-4 py-3 min-w-[160px]">
+                      <RowActions actions={["exception.escalate", "exception.resolve"]} recordId={ex.exception_case_id} status={ex.case_status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

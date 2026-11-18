@@ -29,6 +29,20 @@ export type LifecycleActionSpec = {
   idField?: string;
   /** Fields the reader types as JSON; sent as the parsed object, refused if not an object. */
   jsonFields?: readonly string[];
+  /**
+   * Select fields whose options the page supplies from a live list (e.g. other
+   * records of the same register). The service validates the value; the
+   * Server Action only checks it is an id.
+   */
+  dynamicFields?: readonly string[];
+  /** Fields typed as comma- or newline-separated values; sent as a string array. */
+  listFields?: readonly string[];
+  /** Fields that must be UUIDs. */
+  uuidFields?: readonly string[];
+  /** Fields that must be given together or not at all, the first not after the second. */
+  pairedDates?: readonly (readonly [string, string])[];
+  /** Body reshaping the service needs (e.g. nesting a reference), applied last. Pure. */
+  shape?: (body: Record<string, unknown>) => Record<string, unknown>;
   /** X-Purpose-Context, for services that refuse a write without one. */
   purposeContext?: string;
   /** The record statuses the service accepts this action from. Absent: always shown. */

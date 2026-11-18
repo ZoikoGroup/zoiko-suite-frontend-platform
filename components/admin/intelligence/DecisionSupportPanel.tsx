@@ -103,6 +103,11 @@ export function DecisionSupportPanel() {
                     status={r.status}
                     version={r.version}
                     onDone={load}
+                    fieldOptions={{
+                      replacement_recommendation_id: recommendations
+                        .filter((o) => o.recommendation_id !== r.recommendation_id && o.status === "REVIEW_REQUIRED")
+                        .map((o) => ({ value: o.recommendation_id, label: `${o.action_type}: ${o.recommended_action} (${o.subject_reference})` })),
+                    }}
                   />
                 </div>
               </div>

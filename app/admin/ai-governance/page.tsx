@@ -21,6 +21,7 @@ import {
   type ModelReleaseRecord,
 } from "@/lib/api/ai-governance";
 import { formatDateTime } from "@/lib/format";
+import { AiGovernanceInteractivePanel } from "@/components/admin/ai-governance/AiGovernanceInteractivePanel";
 import { humanizeCode } from "@/lib/humanize";
 
 export const metadata: Metadata = {
@@ -53,6 +54,8 @@ export default async function AIGovernancePage() {
         title="AI Governance & Safety Controls"
         description="AI use cases, model providers and releases, action risk classifications and automation policies, read live from ai-governance-svc with your session. AI runs are read by id only: the service has no endpoint that lists them."
       />
+
+      <AiGovernanceInteractivePanel />
 
       <RegisterCard<UseCaseRecord>
         title="AI use cases"

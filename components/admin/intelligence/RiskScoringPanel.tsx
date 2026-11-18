@@ -103,7 +103,7 @@ export function RiskScoringPanel() {
                   </p>
                   <div className="flex flex-wrap gap-3">
                     {/* review follows review_status; archive follows the score's status. */}
-                    <RowActions actions={["risk-score.review"]} recordId={sc.id} status={sc.review_status} version={sc.version} onDone={load} />
+                    <RowActions actions={["risk-score.review", "risk-score.review-escalated"]} recordId={sc.id} status={sc.review_status} version={sc.version} onDone={load} />
                     <RowActions actions={["risk-score.archive"]} recordId={sc.id} status={sc.status} version={sc.version} onDone={load} />
                   </div>
                 </div>

@@ -108,6 +108,8 @@ const CORPORATE = {
 
 // ── Tax and compliance (Block 7) ─────────────────────────────────────────────
 
+const EXCEPTION_OPEN = ["OPEN", "UNDER_INVESTIGATION", "ESCALATED"] as const;
+
 const TAX = {
   "tax-determination.override": {
     service: "taxDetermination", serviceLabel: "tax-determination-svc", method: "POST",
@@ -166,6 +168,23 @@ const TAX = {
     service: "taxAuthorityInterface", serviceLabel: "tax-authority-interface-svc", method: "POST",
     path: "/v1/tax-authority/filings/{id}/poll", label: "Check status", from: ["SUBMITTED", "PENDING_UNKNOWN", "ACCEPTED"],
     purposeContext: "tax.authority.filing.poll",
+  },
+  "exception.escalate": {
+    service: "exceptionEscalation", serviceLabel: "exception-escalation-svc", method: "POST",
+    path: "/v1/exception-escalation/exceptions/{id}/escalate", label: "Escalate", from: EXCEPTION_OPEN,
+    actorFields: ["escalated_by"],
+    fields: [
+      { name: "escalated_to_role", label: "Escalate to role", kind: "text", required: true },
+      { name: "escalated_to_user", label: "Escalate to user (principal id)", kind: "text" },
+      { name: "escalation_reason", label: "Escalation reason", kind: "textarea", required: true },
+    ],
+  },
+  "exception.resolve": {
+    service: "exceptionEscalation", serviceLabel: "exception-escalation-svc", method: "POST",
+    path: "/v1/exception-escalation/exceptions/{id}/resolve", label: "Resolve", from: EXCEPTION_OPEN,
+    actorFields: ["closed_by"],
+    note: "The person who raised the exception cannot resolve it.",
+    fields: [{ name: "closure_reason", label: "Closure reason", kind: "textarea", required: true }],
   },
   "compliance-gap.resolve": {
     service: "complianceStatus", serviceLabel: "compliance-status-svc", method: "POST",
@@ -260,10 +279,20 @@ const INTELLIGENCE = {
   // review is offered by review_status, archive by status: the panel passes each.
   "risk-score.review": {
     service: "complianceRiskScoring", serviceLabel: "compliance-risk-scoring-svc", method: "POST",
-    path: "/v1/risk-scores/{id}/review", label: "Review", from: ["PENDING_REVIEW", "ESCALATED"], version: "if-match",
+    path: "/v1/risk-scores/{id}/review", label: "Review", from: ["PENDING_REVIEW"], version: "if-match",
     note: "The person who calculated the score cannot review it.",
     fields: [
       { name: "disposition", label: "Disposition", kind: "select", required: true, options: opts("CONFIRMED", "DISMISSED", "ESCALATED") },
+      { name: "note", label: "Note", kind: "textarea", required: true },
+    ],
+  },
+  // An escalated score can only be confirmed or dismissed; escalating again is refused.
+  "risk-score.review-escalated": {
+    service: "complianceRiskScoring", serviceLabel: "compliance-risk-scoring-svc", method: "POST",
+    path: "/v1/risk-scores/{id}/review", label: "Decide escalation", from: ["ESCALATED"], version: "if-match",
+    note: "The person who calculated the score cannot review it.",
+    fields: [
+      { name: "disposition", label: "Disposition", kind: "select", required: true, options: opts("CONFIRMED", "DISMISSED") },
       { name: "note", label: "Note", kind: "textarea", required: true },
     ],
   },
@@ -273,15 +302,27 @@ const INTELLIGENCE = {
     fields: [reason("Reason", false)],
   },
 
-  "reconciliation.apply": {
+  "reconciliation.decide": {
     service: "reconciliationIntel", serviceLabel: "reconciliation-intelligence-svc", method: "POST",
-    path: "/v1/reconciliations/{id}/resolutions/{sub}/apply", label: "Decide", version: "if-match",
-    from: ["RECOMMENDED", "APPROVED"],
-    note: "Executing a write-off or timing adjustment needs a posted journal reference, which this form does not send; the service will say so.",
+    path: "/v1/reconciliations/{id}/resolutions/{sub}/apply", label: "Decide", version: "if-match", from: ["RECOMMENDED"],
+    note: "The person who requested the analysis cannot approve its suggestions.",
     fields: [
-      { name: "suggestion_status", label: "Decision", kind: "select", required: true, options: opts("APPROVED", "REJECTED", "EXECUTED") },
+      { name: "suggestion_status", label: "Decision", kind: "select", required: true, options: opts("APPROVED", "REJECTED") },
       notes(),
     ],
+  },
+  "reconciliation.execute": {
+    service: "reconciliationIntel", serviceLabel: "reconciliation-intelligence-svc", method: "POST",
+    path: "/v1/reconciliations/{id}/resolutions/{sub}/apply", label: "Record execution", version: "if-match", from: ["APPROVED"],
+    fixed: { suggestion_status: "EXECUTED" },
+    uuidFields: ["journal_id"],
+    note: "A write-off or timing adjustment needs the posted general-ledger journal; an auto-match or duplicate confirmation must not have one.",
+    fields: [
+      notes(),
+      { name: "journal_id", label: "Posted GL journal id", kind: "text" },
+    ],
+    // reconciliation-intelligence-svc takes the journal as authoritative_ref {kind, journal_id}.
+    shape: ({ journal_id, ...rest }) => (journal_id ? { ...rest, authoritative_ref: { kind: "GL_JOURNAL", journal_id } } : rest),
   },
   "reconciliation.archive": {
     service: "reconciliationIntel", serviceLabel: "reconciliation-intelligence-svc", method: "DELETE",
@@ -312,6 +353,7 @@ const INTELLIGENCE = {
     service: "reportingOrchestration", serviceLabel: "reporting-orchestration-svc", method: "POST",
     path: "/v1/reports/definitions/{id}/runs", label: "Request run", from: ["ACTIVE"],
     note: "reporting-orchestration-svc records the run but does not produce report data yet; it answers NOT_IMPLEMENTED.",
+    pairedDates: [["period_start", "period_end"]],
     fields: [
       { name: "period_start", label: "Period start", kind: "date" },
       { name: "period_end", label: "Period end", kind: "date" },
@@ -342,8 +384,9 @@ const INTELLIGENCE = {
   "recommendation.supersede": {
     service: "decisionSupport", serviceLabel: "decision-support-svc", method: "POST",
     path: "/v1/recommendations/{id}/supersede", label: "Supersede", from: ["REVIEW_REQUIRED"], version: "if-match",
+    dynamicFields: ["replacement_recommendation_id"],
     fields: [
-      { name: "replacement_recommendation_id", label: "Replacing recommendation id", kind: "text", required: true },
+      { name: "replacement_recommendation_id", label: "Replacing recommendation", kind: "select", required: true, hint: "Another recommendation still under review, for the same entity, subject and action." },
       reason("Reason", false),
     ],
   },
@@ -362,6 +405,22 @@ const bank = (path: string, label: string, from: readonly string[], extra: Parti
 });
 
 const INTEGRATION: Record<string, LifecycleActionSpec> = {
+  // Submit refuses a bridge whose configuration is incomplete; this sets it.
+  "bridge.configure": {
+    service: "connectivityBridge", serviceLabel: "connectivity-api-bridge-svc", method: "PATCH",
+    path: "/v1/bridges/{id}", label: "Configure", from: ["DRAFT", "PENDING_APPROVAL", "ACTIVE", "DEGRADED", "SUSPENDED"],
+    version: "expected-version", listFields: ["scopes"], uuidFields: ["credential_ref"],
+    note: "Changing protected settings on an active, degraded, suspended or pending bridge returns it to DRAFT. Leave a field blank to keep it.",
+    fields: [
+      { name: "purpose", label: "Purpose", kind: "text", hint: "Lower-case identifier, 3 to 64 characters: letters, digits, . _ -" },
+      { name: "provider_key", label: "Provider profile key", kind: "text", hint: "A CERTIFIED external provider profile." },
+      { name: "provider_profile_version", label: "Provider profile version", kind: "number", step: "1", min: "1" },
+      { name: "destination_region", label: "Destination region", kind: "text", hint: "One of the profile's allowed regions." },
+      { name: "sync_mode", label: "Sync mode", kind: "select", options: opts("PULL", "PUSH", "NONE") },
+      { name: "scopes", label: "Scopes", kind: "text", hint: "Comma-separated, 1 to 32, within the profile's supported scopes." },
+      { name: "credential_ref", label: "Credential policy id", kind: "text", hint: "The secret-vault policy (a UUID). Leave blank for auth type NONE." },
+    ],
+  },
   "bridge.submit": bridge("submit", "Submit for approval", ["DRAFT"]),
   "bridge.approve": bridge("approve", "Approve", ["PENDING_APPROVAL"], {
     fields: [reason("Reason", false)],
@@ -375,6 +434,15 @@ const INTEGRATION: Record<string, LifecycleActionSpec> = {
   }),
   "bridge.archive": bridge("archive", "Archive", ["REVOKED"], { confirm: true, danger: true }),
 
+  "bank-connection.complete-authorization": bank("complete-authorization", "Record authorization", ["REQUESTED", "AUTHORIZING"], {
+    listFields: ["granted_scope"],
+    note: "Records the token lease the bank's consent produced. The token stays in the vault; only its lease reference is sent.",
+    fields: [
+      { name: "token_lease_ref", label: "Token lease reference", kind: "text", required: true },
+      { name: "token_expires_at", label: "Token expires at", kind: "datetime-local", required: true },
+      { name: "granted_scope", label: "Granted scope", kind: "text", hint: "Comma-separated; within the requested scope." },
+    ],
+  }),
   "bank-connection.activate": bank("activate", "Activate", ["AUTHORIZING"], {
     note: "Needs an unexpired token from the bank's authorization; without one the service refuses.",
   }),

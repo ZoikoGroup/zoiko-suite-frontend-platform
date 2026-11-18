@@ -104,7 +104,7 @@ export function BridgeConnectorPanel() {
               </div>
               <div className="mt-2">
                 <RowActions
-                  actions={["bridge.submit", "bridge.approve", "bridge.reject", "bridge.activate", "bridge.suspend", "bridge.revoke", "bridge.archive"]}
+                  actions={["bridge.configure", "bridge.submit", "bridge.approve", "bridge.reject", "bridge.activate", "bridge.suspend", "bridge.revoke", "bridge.archive"]}
                   recordId={c.bridge_id}
                   status={c.status}
                   version={c.version}

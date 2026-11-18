@@ -1,3 +1,4 @@
+import { IssueOrderSection } from "@/components/admin/commercial-ops/IssueOrderSection";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
@@ -5,7 +6,6 @@ import { Wallet, ShoppingCart, GitBranch } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader, LookupById } from "@/components/admin/shared";
 import {
-  IssueOrderForm,
   PurchaseOrderPanel,
   PurchaseRequestPanel,
   RaiseRequestForm,
@@ -537,7 +537,7 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
           </div>
         </CardHeader>
         <CardContent>
-          <IssueOrderForm />
+          <IssueOrderSection />
         </CardContent>
       </Card>
 

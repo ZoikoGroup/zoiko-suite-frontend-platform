@@ -32,6 +32,8 @@ export function MigrationIntegrityWorkbench() {
   const [requiredFieldsStr, setRequiredFieldsStr] = useState("");
   const [recordsJson, setRecordsJson] = useState("");
   const [exceptionOwnerId, setExceptionOwnerId] = useState("");
+  const [remediationDisposition, setRemediationDisposition] = useState<"REMEDIATED" | "WAIVED">("REMEDIATED");
+  const [waiverExpiresAt, setWaiverExpiresAt] = useState("");
   const [amountField, setAmountField] = useState("");
   const [recordCount, setRecordCount] = useState("");
   const [amountTotal, setAmountTotal] = useState("");
@@ -147,6 +149,18 @@ export function MigrationIntegrityWorkbench() {
       return;
     }
 
+    // Checked before sending, in migration-integrity-svc's own terms
+    // (domain/requests.go): both systems named, a whole record count, and the
+    // amount total as a plain decimal of at most 6 places.
+    const refuse = (message: string) => {
+      setValidationError(message);
+      setValidating(false);
+    };
+    if (!sourceSystem.trim() || !targetService.trim()) return refuse("Choose the source system and the target service.");
+    if (!/^\d+$/.test(recordCount.trim())) return refuse("Control record count must be a whole number, 0 or more.");
+    if (!/^-?\d+(\.\d{1,6})?$/.test(amountTotal.trim())) return refuse("Control amount total must be a plain decimal, e.g. 1250.00 (at most 6 places).");
+    if (!exceptionOwnerId.trim()) return refuse("Name the exception owner: a principal other than you.");
+
     const fields = requiredFieldsStr
       .split(",")
       .map((s) => s.trim())
@@ -185,16 +199,22 @@ export function MigrationIntegrityWorkbench() {
       alert("A remediation reason and an evidence reference are both required.");
       return;
     }
+    if (remediationDisposition === "WAIVED" && !(waiverExpiresAt && new Date(waiverExpiresAt) > new Date())) {
+      alert("A waiver needs an expiry date and time in the future.");
+      return;
+    }
 
     startTransition(async () => {
       try {
         const res = await remediateAuditEntryAction(jobId, entryId, {
-          disposition: "REMEDIATED",
+          disposition: remediationDisposition,
           remediation_reason: remediationNotes.trim(),
           remediation_evidence_ref: remediationEvidenceRef.trim(),
+          // A waiver must expire, in the future (RFC 3339); a remediation must not carry one.
+          ...(remediationDisposition === "WAIVED" ? { waiver_expires_at: new Date(waiverExpiresAt).toISOString() } : {}),
         });
         if (res.ok) {
-          setRemediationFeedback(`Entry ${entryId.slice(0, 8)}... successfully marked remediated.`);
+          setRemediationFeedback(`Entry ${entryId.slice(0, 8)}... recorded as ${remediationDisposition}.`);
           setRemediatingEntryId(null);
           setRemediationNotes("");
           setRemediationEvidenceRef("");
@@ -460,6 +480,7 @@ export function MigrationIntegrityWorkbench() {
                     onChange={(e) => setSourceSystem(e.target.value)}
                     className={FIELD}
                   >
+                    <option value="">Select…</option>
                     <option value="LEGACY_SAP_ERP">LEGACY_SAP_ERP</option>
                     <option value="ORACLE_EBS_GL">ORACLE_EBS_GL</option>
                     <option value="EXCEL_IMPORT">EXCEL_IMPORT</option>
@@ -478,6 +499,7 @@ export function MigrationIntegrityWorkbench() {
                     onChange={(e) => setTargetService(e.target.value)}
                     className={FIELD}
                   >
+                    <option value="">Select…</option>
                     <option value="general-ledger-svc">general-ledger-svc (:8098)</option>
                     <option value="accounts-payable-svc">accounts-payable-svc (:8099)</option>
                     <option value="payroll-run-svc">payroll-run-svc (:8110)</option>
@@ -750,6 +772,24 @@ export function MigrationIntegrityWorkbench() {
                             <div>
                               {remediatingEntryId === entry.id ? (
                                 <div className="flex items-center gap-2">
+                                  <select
+                                    aria-label="Disposition"
+                                    value={remediationDisposition}
+                                    onChange={(e) => setRemediationDisposition(e.target.value as "REMEDIATED" | "WAIVED")}
+                                    className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                                  >
+                                    <option value="REMEDIATED">REMEDIATED</option>
+                                    <option value="WAIVED">WAIVED</option>
+                                  </select>
+                                  {remediationDisposition === "WAIVED" && (
+                                    <input
+                                      type="datetime-local"
+                                      aria-label="Waiver expires at"
+                                      value={waiverExpiresAt}
+                                      onChange={(e) => setWaiverExpiresAt(e.target.value)}
+                                      className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                                    />
+                                  )}
                                   <input
                                     type="text"
                                     placeholder="Remediation reason"

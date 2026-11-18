@@ -19,6 +19,7 @@ import type { LifecycleResult } from "@/lib/lifecycle/types";
 // Ids are UUIDs or service-generated keys; anything else would let a value
 // change the route, so it is refused before a request is built.
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function sessionIdentity(): Promise<SessionIdentity | null> {
   const store = await cookies();
@@ -35,7 +36,10 @@ async function sessionIdentity(): Promise<SessionIdentity | null> {
 /** The status the service reports on the record it returned, under its usual names. */
 function statusOf(data: unknown): string | undefined {
   if (!data || typeof data !== "object") return undefined;
-  const r = data as Record<string, unknown>;
+  const top = data as Record<string, unknown>;
+  // Some services wrap the record, e.g. {exception_case: {...}, escalation_record: {...}}.
+  const wrapped = top.exception_case;
+  const r = wrapped && typeof wrapped === "object" ? (wrapped as Record<string, unknown>) : top;
   for (const k of ["status", "state", "case_status", "lifecycle_status", "resolution_status", "approval_status"]) {
     if (typeof r[k] === "string" && r[k]) return r[k] as string;
   }
@@ -68,6 +72,22 @@ export async function runLifecycleAction(
       if (f.required) return { ok: false, message: `${f.label} is required.` };
       continue;
     }
+    if (spec.dynamicFields?.includes(f.name)) {
+      if (!ID_RE.test(raw)) return { ok: false, message: `${f.label}: choose one from the list.` };
+      body[f.name] = raw;
+      continue;
+    }
+    if (spec.uuidFields?.includes(f.name) && !UUID_RE.test(raw)) return { ok: false, message: `${f.label} must be a UUID.` };
+    if (spec.listFields?.includes(f.name)) {
+      body[f.name] = raw.split(/[\n,]/).map((v) => v.trim()).filter(Boolean);
+      continue;
+    }
+    if (f.kind === "datetime-local") {
+      const d = new Date(raw);
+      if (Number.isNaN(d.getTime())) return { ok: false, message: `${f.label} must be a date and time.` };
+      body[f.name] = d.toISOString();
+      continue;
+    }
     if (f.kind === "select" && f.options && !f.options.some((o) => o.value === raw)) {
       return { ok: false, message: `${f.label}: choose one of the listed values.` };
     }
@@ -85,6 +105,9 @@ export async function runLifecycleAction(
     if (f.kind === "number") {
       const n = Number(raw);
       if (!Number.isFinite(n)) return { ok: false, message: `${f.label} must be a number.` };
+      if (f.step === "1" && !Number.isInteger(n)) return { ok: false, message: `${f.label} must be a whole number.` };
+      if (f.min !== undefined && n < Number(f.min)) return { ok: false, message: `${f.label} must be at least ${f.min}.` };
+      if (f.max !== undefined && n > Number(f.max)) return { ok: false, message: `${f.label} must be at most ${f.max}.` };
       body[f.name] = n;
       continue;
     }
@@ -92,11 +115,17 @@ export async function runLifecycleAction(
   }
   Object.assign(body, spec.fixed ?? {});
   if (spec.idField) body[spec.idField] = recordId;
+  for (const [a, b] of spec.pairedDates ?? []) {
+    const has = (k: string) => body[k] !== undefined;
+    if (has(a) !== has(b)) return { ok: false, message: "Give both dates of the period, or neither." };
+    if (has(a) && String(body[a]) > String(body[b])) return { ok: false, message: "The period must not end before it starts." };
+  }
   for (const f of spec.actorFields ?? []) {
     if (!identity.principalId) return { ok: false, message: "Your session has no principal; sign in again." };
     body[f] = identity.principalId;
   }
 
+  const sent = spec.shape ? spec.shape(body) : body;
   const v = version === undefined || version === null || version === "" ? undefined : String(version);
   if (spec.version && !v) return { ok: false, message: "The record's version is unknown; refresh the list and try again." };
   const options = {
@@ -114,16 +143,16 @@ export async function runLifecycleAction(
   let res: ApiWriteResult<unknown>;
   switch (spec.method) {
     case "POST":
-      res = await apiPost<unknown>(spec.service, path, body, options);
+      res = await apiPost<unknown>(spec.service, path, sent, options);
       break;
     case "PUT":
-      res = await apiPut<unknown>(spec.service, path, body, options);
+      res = await apiPut<unknown>(spec.service, path, sent, options);
       break;
     case "PATCH":
-      res = await apiPatch<unknown>(spec.service, path, body, options);
+      res = await apiPatch<unknown>(spec.service, path, sent, options);
       break;
     case "DELETE":
-      res = await apiDelete<unknown>(spec.service, path, { ...options, ...(Object.keys(body).length ? { data: body } : {}) });
+      res = await apiDelete<unknown>(spec.service, path, { ...options, ...(Object.keys(sent).length ? { data: sent } : {}) });
       break;
   }
   if (!res.ok) {

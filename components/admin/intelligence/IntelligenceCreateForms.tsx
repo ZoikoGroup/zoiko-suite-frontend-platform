@@ -37,9 +37,24 @@ const DETECT_FIELDS: FieldSpec[] = [
   { name: "observed_value", label: "Observed value", kind: "number", step: "any", required: true },
   { name: "expected_value", label: "Expected value", kind: "number", step: "any", required: true },
   { name: "std_deviation", label: "Standard deviation", kind: "number", step: "any" },
-  { name: "rule_id", label: "Rule ID", kind: "text", hint: "arule-… from the rules list, to score against that rule." },
   { name: "description", label: "Description", kind: "textarea" },
 ];
+
+/** The detect form, with the rule picked from anomaly-detection-svc's active rules. */
+function detectFields(rules: AnomalyRule[] | null): FieldSpec[] {
+  const active = (rules ?? []).filter((r) => r.is_active);
+  return [
+    ...DETECT_FIELDS.slice(0, -1),
+    {
+      name: "rule_id",
+      label: "Rule",
+      kind: "select",
+      options: active.map((r) => ({ value: r.rule_id, label: `${r.rule_name} (${r.domain_name} · ${r.metric_type})` })),
+      hint: active.length ? "Optional: score the observation against this rule's cutoff." : "No active rules yet; the service's default cutoff is used.",
+    },
+    DETECT_FIELDS[DETECT_FIELDS.length - 1],
+  ];
+}
 
 export function AnomalyRuleSection({ onCreated }: OnCreated) {
   const [rules, setRules] = useState<AnomalyRule[] | null>(null);
@@ -75,7 +90,7 @@ export function AnomalyRuleSection({ onCreated }: OnCreated) {
         <CreateRecordForm
           title="Record an observation"
           description="The service scores the observation and records an OPEN anomaly with the severity it computes. It is advisory; nothing is blocked."
-          fields={DETECT_FIELDS}
+          fields={detectFields(rules)}
           action={detectAnomalyAction}
           submitLabel="Submit observation"
           onCreated={onCreated}
@@ -105,7 +120,7 @@ const FORECAST_FIELDS: FieldSpec[] = [
   { name: "domain", label: "Domain", kind: "select", required: true, options: opts("FINANCIAL", "PAYROLL", "CASH_FLOW", "WORKFORCE", "TAX_LIABILITY") },
   { name: "historical_data", label: "Historical data", kind: "text", required: true, hint: "At least 2 values, comma-separated, oldest first." },
   { name: "historical_start_date", label: "Historical start date", kind: "date", required: true },
-  { name: "horizon_periods", label: "Horizon periods", kind: "number", hint: "1 to 120. Blank: the service's default, recorded on the forecast." },
+  { name: "horizon_periods", label: "Horizon periods", kind: "number", step: "1", min: "1", max: "120", hint: "1 to 120. Blank: the service's default, recorded on the forecast." },
   { name: "granularity", label: "Granularity", kind: "select", options: opts("DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ANNUAL"), hint: "Blank: the service's default." },
   { name: "algorithm_type", label: "Algorithm", kind: "select", options: opts("LINEAR_TREND", "EXPONENTIAL_SMOOTHING", "MOVING_AVERAGE", "SEASONAL_ADJUSTED"), hint: "Blank: the service's default." },
   { name: "scenario_type", label: "Scenario", kind: "select", options: opts("BASELINE", "OPTIMISTIC", "PESSIMISTIC"), hint: "Blank: the service's default." },
@@ -126,13 +141,19 @@ export function ForecastCreateForm({ onCreated }: OnCreated) {
 
 const RISK_FIELDS: FieldSpec[] = [
   { name: "assessment_name", label: "Assessment name", kind: "text", required: true },
-  { name: "subject_type", label: "Subject type", kind: "text", hint: "Blank: the service assesses the legal entity." },
-  { name: "subject_id", label: "Subject ID", kind: "text" },
-  { name: "open_obligations_count", label: "Open obligations", kind: "number", required: true, hint: "Enter 0 when there are none." },
-  { name: "policy_violations_count", label: "Policy violations", kind: "number", required: true },
-  { name: "audit_exceptions_count", label: "Audit exceptions", kind: "number", required: true },
-  { name: "privacy_incidents_count", label: "Privacy incidents", kind: "number", required: true },
-  { name: "tax_penalties_count", label: "Tax penalties", kind: "number", required: true },
+  {
+    name: "subject_type",
+    label: "Subject type",
+    kind: "select",
+    options: opts("LEGAL_ENTITY", "OBLIGATION", "FILING", "CONTROL"),
+    hint: "Blank: the service assesses your legal entity.",
+  },
+  { name: "subject_id", label: "Subject ID", kind: "text", hint: "Required unless the subject is the legal entity: the obligation, filing or control id." },
+  { name: "open_obligations_count", label: "Open obligations", kind: "number", step: "1", min: "0", max: "1000000", required: true, hint: "Enter 0 when there are none." },
+  { name: "policy_violations_count", label: "Policy violations", kind: "number", step: "1", min: "0", max: "1000000", required: true },
+  { name: "audit_exceptions_count", label: "Audit exceptions", kind: "number", step: "1", min: "0", max: "1000000", required: true },
+  { name: "privacy_incidents_count", label: "Privacy incidents", kind: "number", step: "1", min: "0", max: "1000000", required: true },
+  { name: "tax_penalties_count", label: "Tax penalties", kind: "number", step: "1", min: "0", max: "1000000", required: true },
   { name: "source_references", label: "Source references", kind: "text", hint: "Comma-separated references to where the counts came from." },
 ];
 

@@ -13,6 +13,7 @@ import { Loader2 } from "lucide-react";
 import { runLifecycleAction } from "@/app/admin/lifecycle-actions";
 import { LIFECYCLE_ACTIONS } from "@/lib/lifecycle/catalog";
 import type { LifecycleResult } from "@/lib/lifecycle/types";
+import type { FieldOption } from "@/components/admin/intelligence/create-state";
 import { FIELD, LABEL, HINT, OPTIONAL, BANNER_SUCCESS, BANNER_ERROR } from "./form";
 
 type Props = {
@@ -27,6 +28,8 @@ type Props = {
   subId?: string;
   /** Re-read the list after the service accepted an action. */
   onDone?: () => void;
+  /** Options for the catalog's dynamic fields, read by the page from a live list. */
+  fieldOptions?: Record<string, FieldOption[]>;
 };
 
 const BTN =
@@ -34,7 +37,7 @@ const BTN =
 const BTN_NORMAL = `${BTN} border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200`;
 const BTN_DANGER = `${BTN} border-rose-200 bg-white text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:bg-slate-800 dark:text-rose-300`;
 
-export function RowActions({ actions, recordId, status, version, subId, onDone }: Props) {
+export function RowActions({ actions, recordId, status, version, subId, onDone, fieldOptions }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [result, setResult] = useState<LifecycleResult | null>(null);
@@ -134,14 +137,17 @@ export function RowActions({ actions, recordId, status, version, subId, onDone }
                   {f.kind === "select" ? (
                     <select id={id} name={f.name} defaultValue="" aria-required={f.required} className={FIELD}>
                       <option value="">Select…</option>
-                      {f.options?.map((o) => (
+                      {(fieldOptions?.[f.name] ?? f.options)?.map((o) => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
                   ) : f.kind === "textarea" ? (
                     <textarea id={id} name={f.name} rows={2} placeholder={f.placeholder} aria-required={f.required} className={FIELD} />
                   ) : (
-                    <input id={id} name={f.name} type={f.kind} step={f.step} placeholder={f.placeholder} aria-required={f.required} autoComplete="off" className={FIELD} />
+                    <input id={id} name={f.name} type={f.kind} step={f.step} min={f.min} max={f.max} placeholder={f.placeholder} aria-required={f.required} autoComplete="off" className={FIELD} />
+                  )}
+                  {fieldOptions && f.name in fieldOptions && fieldOptions[f.name].length === 0 && (
+                    <p className={HINT}>Nothing to choose from yet.</p>
                   )}
                   {f.hint && <p className={HINT}>{f.hint}</p>}
                 </div>

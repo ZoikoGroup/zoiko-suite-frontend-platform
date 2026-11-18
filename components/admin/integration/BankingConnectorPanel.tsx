@@ -119,7 +119,7 @@ export function BankingConnectorPanel() {
               </div>
               <div className="mt-2">
                 <RowActions
-                  actions={["bank-connection.activate", "bank-connection.reconnect", "bank-connection.reconsent", "bank-connection.suspend", "bank-connection.revoke"]}
+                  actions={["bank-connection.complete-authorization", "bank-connection.activate", "bank-connection.reconnect", "bank-connection.reconsent", "bank-connection.suspend", "bank-connection.revoke"]}
                   recordId={b.connection_id}
                   status={b.status}
                   onDone={fetchBanks}

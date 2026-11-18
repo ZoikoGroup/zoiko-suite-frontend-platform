@@ -126,8 +126,11 @@ for (const [key, service, method, p] of entries()) {
       const segs = p.split("/").filter(Boolean);
       const last = segs[segs.length - 1];
       if (/^\{\w+\}$/.test(last)) {
-        // A route on the record itself, e.g. DELETE /v1/forecasts/{id}.
-        assert.match(src, new RegExp(`${verb(method)}\\("[^"]*\\{\\w+\\}"`), `${service}: no ${method} on a record`);
+        // A route on the record itself, e.g. DELETE /v1/forecasts/{id}, or
+        // Patch("/") inside Route("/{id}", ...).
+        const onRecord = new RegExp(`${verb(method)}\\("[^"]*\\{\\w+\\}"`).test(src) ||
+          new RegExp(`Route\\("/\\{\\w+\\}", func\\(r chi\\.Router\\) \\{[\\s\\S]{0,400}?r\\.${verb(method)}\\("/"`).test(src);
+        assert.ok(onRecord, `${service}: no ${method} on a record`);
       } else {
         // Registered as a literal, or as a const prefix plus a literal (p+"/{id}/activate").
         const seg = last.replace(/[-]/g, "\\-");

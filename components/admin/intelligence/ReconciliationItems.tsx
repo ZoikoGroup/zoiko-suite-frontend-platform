@@ -61,7 +61,7 @@ export function ReconciliationItems({ jobId, onDone }: Props) {
                 <span className="font-mono text-[10px] text-slate-400">{item.status}</span> · {item.summary}
               </p>
               <RowActions
-                actions={["reconciliation.apply"]}
+                actions={["reconciliation.decide", "reconciliation.execute"]}
                 recordId={jobId}
                 subId={item.id}
                 status={item.status}
