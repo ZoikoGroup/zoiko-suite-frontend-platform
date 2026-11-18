@@ -428,6 +428,13 @@ test.describe("Accounting policies (REF-07), maker–checker (live)", () => {
     await submit(checker, "a2-supersede");
     await expect.poll(() => status(checker, 2), { timeout: 60_000 }).toMatch(/In force/);
     expect(await status(checker, 1)).toMatch(/Superseded/);
+
+    // policy-svc's own explanation: version 2 governs at the entity, and the
+    // domain is among the accounting policies that apply there.
+    const resolution = checker.getByTestId("resolution");
+    await expect(resolution).toContainText("Resolves");
+    await expect(resolution).toContainText(new RegExp(`ACCT:${DOMAIN}:[0-9a-f]+ v2`));
+    await expect(checker.getByTestId("applicable")).toContainText(`${DOMAIN} (resolves)`);
   });
 
   test("an emergency suspension without the person's own break-glass session is refused", async () => {

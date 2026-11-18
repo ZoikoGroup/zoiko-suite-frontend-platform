@@ -182,7 +182,21 @@ export type PolicyDetail = {
    * force, what activating it would touch. Empty for every other type.
    */
   accounting: Map<string, { version: Read<P.AccountingPolicyVersion>; impact: Read<P.AccountingImpact> | null }>;
+  /**
+   * How this kind of policy resolves at the reader's legal entity now, with the
+   * service's trace of every candidate (GET /v1/policies/explain, or
+   * /v1/accounting-policies/explain for the family's domain).
+   */
+  resolution: Read<P.Resolution | P.AccountingResolution>;
+  /** Accounting only: every accounting policy that applies at the entity now (GET /v1/accounting-policies). */
+  applicable: Read<{ as_of: string; known_at: string; policies: P.AccountingResolution[] }> | null;
 };
+
+/** The domain of an accounting family, from its code ACCT:<domain>:<digest>. */
+export function accountingDomainOf(policyCode: string): string {
+  const parts = policyCode.split(":");
+  return parts.length >= 3 && parts[0] === "ACCT" ? parts[1] : "";
+}
 
 /** Accounting versions whose activation is still ahead, so their impact matters. */
 const PRE_ACTIVE = new Set(["DRAFT", "REVIEW", "APPROVED"]);
@@ -203,8 +217,10 @@ export async function loadPolicyDetail(
 ): Promise<PolicyDetail> {
   const certified = P.CERTIFIED_POLICY_TYPES.includes(family.policy_type);
   const live = certified ? versions.filter((v) => LIVE_ABLE.has(v.version_status)).slice(0, 10) : [];
-  const accountingVersions = family.policy_type === P.ACCOUNTING_POLICY_TYPE ? versions.slice(0, 10) : [];
-  const [transitions, evaluations, attestations, testCases, certs, comparison, accounting] = await Promise.all([
+  const isAccounting = family.policy_type === P.ACCOUNTING_POLICY_TYPE;
+  const accountingVersions = isAccounting ? versions.slice(0, 10) : [];
+  const domain = isAccounting ? accountingDomainOf(family.policy_code) : "";
+  const [transitions, evaluations, attestations, testCases, certs, comparison, accounting, resolution, applicable] = await Promise.all([
     Promise.all(
       versions.slice(0, 25).map(async (v) => {
         const r = await readAll((c) => P.listTransitions(v.policy_version_id, identity, 200, c), 400);
@@ -242,8 +258,23 @@ export async function loadPolicyDetail(
         return [v.policy_version_id, { version, impact }] as const;
       }),
     ),
+    (isAccounting
+      ? P.explainAccountingResolution(identity, domain, undefined, undefined, identity.legalEntityId)
+      : P.explainPolicyResolution({ policyType: family.policy_type, tenantId: identity.tenantId, legalEntityId: identity.legalEntityId, caller: identity, callerTenantId: identity.tenantId })
+    ).then((r): Read<P.Resolution | P.AccountingResolution> => settle<P.Resolution | P.AccountingResolution>(r)),
+    isAccounting ? P.listApplicableAccountingPolicies(identity, undefined, undefined, undefined, identity.legalEntityId).then(settle) : Promise.resolve(null),
   ]);
-  return { transitions, evaluations, attestations, testCases, certification: new Map(certs), comparison, accounting: new Map(accounting) };
+  return {
+    transitions,
+    evaluations,
+    attestations,
+    testCases,
+    certification: new Map(certs),
+    comparison,
+    accounting: new Map(accounting),
+    resolution,
+    applicable,
+  };
 }
 
 export async function loadControlDetail(identity: SessionIdentity, control: P.ControlTestDefinition): Promise<ControlDetail> {

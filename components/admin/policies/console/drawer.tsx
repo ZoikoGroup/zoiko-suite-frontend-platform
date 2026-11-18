@@ -438,6 +438,7 @@ function PolicyRequirements({
   const live = versions.some((v) => v.version_status === "ACTIVE" || v.version_status === "SCHEDULED");
   return (
     <div className="space-y-3 pt-1">
+      {detail && <ResolutionHere detail={detail} accounting={accounting} />}
       {!sorted.length && <Muted>No version has been drafted. A policy sets no rule until a version is drafted, approved and activated.</Muted>}
       <ul className="space-y-2">
         {sorted.map((v) => {
@@ -533,6 +534,63 @@ function PolicyRequirements({
         </Section>
       )}
     </div>
+  );
+}
+
+const RESOLUTION: Record<string, { label: string; tone: "success" | "warning" | "danger" | "neutral" | "info" }> = {
+  RESOLVED: { label: "Resolves", tone: "success" },
+  NOT_APPLICABLE: { label: "Nothing applies", tone: "neutral" },
+  CONFLICTED: { label: "Conflicted", tone: "danger" },
+};
+
+/**
+ * What a caller at the reader's legal entity gets now: policy-svc's own
+ * explanation, every candidate in precedence order with why it governs or not.
+ * For accounting, also every accounting policy that applies there.
+ */
+function ResolutionHere({ detail, accounting }: { detail: PolicyDetail; accounting: boolean }) {
+  const r = detail.resolution;
+  return (
+    <Section title="How it resolves here now">
+      {r.error || !r.data ? (
+        <Failed what="The resolution" error={r.error} />
+      ) : (
+        <div className="space-y-1.5" data-testid="resolution">
+          <p className="flex items-center gap-2 text-[12px]">
+            <Badge tone={(RESOLUTION[r.data.status] ?? RESOLUTION.NOT_APPLICABLE).tone}>{(RESOLUTION[r.data.status] ?? { label: r.data.status }).label}</Badge>
+            <span className="text-slate-500">as of {formatDate(r.data.as_of)}</span>
+            {"blocks_calculation" in r.data && r.data.blocks_calculation && <span className="text-rose-700 dark:text-rose-300">calculations are blocked</span>}
+          </p>
+          {r.data.trace && r.data.trace.length > 0 ? (
+            <ol className="list-decimal space-y-0.5 pl-4 text-[11.5px] text-slate-600 dark:text-slate-300">
+              {r.data.trace.map((t) => (
+                <li key={t.policy_version_id}>
+                  <span className={t.governs ? "font-semibold text-navy-950 dark:text-slate-100" : undefined}>
+                    {t.policy_code} v{t.version_number}
+                  </span>{" "}
+                  · {t.scope_type.toLowerCase().replace(/_/g, " ")} · {t.version_status.toLowerCase()} — {t.reason}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <Muted>No version is a candidate at this scope.</Muted>
+          )}
+        </div>
+      )}
+      {accounting && detail.applicable && (
+        detail.applicable.error || !detail.applicable.data ? (
+          <Failed what="The accounting policies that apply here" error={detail.applicable.error} />
+        ) : (
+          <p className="mt-2 text-[11.5px] text-slate-500" data-testid="applicable">
+            Accounting policies applying here now:{" "}
+            {detail.applicable.data.policies.length
+              ? detail.applicable.data.policies.map((p) => `${p.policy_domain} (${(RESOLUTION[p.status] ?? { label: p.status }).label.toLowerCase()})`).join(", ")
+              : "none"}
+            .
+          </p>
+        )
+      )}
+    </Section>
   );
 }
 
