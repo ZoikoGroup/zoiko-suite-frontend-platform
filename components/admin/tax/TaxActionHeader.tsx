@@ -222,6 +222,9 @@ function FilingAssemblyPanel({ onClose, jurisdictions }: { onClose: () => void; 
                           id="fil-filing_type"
                           name="filing_type"
                           kind="evidence-domains"
+                          // filing-preparation-svc accepts any filing type; the evidence
+                          // requirement domains are offered as the known ones.
+                          allowOther
                           value={form.filing_type}
                           onChange={(v) => setForm((f) => ({ ...f, filing_type: v }))}
                           className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"

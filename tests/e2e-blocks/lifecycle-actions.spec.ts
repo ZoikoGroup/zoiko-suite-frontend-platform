@@ -387,6 +387,8 @@ test("procurement case: opened, approval refused to its requester, approved by a
   await signIn(context, sessionValue(ID.principal2));
   await open(page, "/admin/commercial-ops");
   await card().getByRole("button", { name: "Approve", exact: true }).click();
+  // The Server Action re-renders the register once the service has answered.
+  await expect(card()).toContainText("APPROVED", { timeout: 20_000 });
   await open(page, "/admin/commercial-ops");
   await expect(card()).toContainText("APPROVED", { timeout: 15_000 });
   await expect(card().getByRole("button", { name: "Issue purchase order" })).toBeVisible();

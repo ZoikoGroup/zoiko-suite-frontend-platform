@@ -93,6 +93,8 @@ for (const path of PAGES) {
 }
 
 test("seeded records render on their pages, and another tenant sees none of them", async ({ page, browser, browserHealth }) => {
+  // Ten full page loads, two tenants: more than the default per-test budget.
+  test.setTimeout(180_000);
   const expectations: [string, string][] = [
     ["/admin/legal", NAMES.clause],
     ["/admin/tax", NAMES.rule],
@@ -247,10 +249,8 @@ test("tax: assemble a filing — create, validate, then finalize or report the b
   await page.locator("#tax-action-assemble").click();
   const modal = modalOf(page, "Assemble Filing");
   await pickJurisdictionGB(modal.locator("#fil-jurisdiction_id"));
-  const filingType = modal.locator("#fil-filing_type");
-  const domains = await filingType.locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
-  test.skip(domains.length === 0, "evidence-requirements-svc defines no filing domain on this stack");
-  await filingType.selectOption(domains.includes("VAT") ? "VAT" : domains[0]);
+  // Suggested from evidence-requirements-svc's domains; the service accepts any type.
+  await modal.locator("#fil-filing_type").fill("VAT");
   await modal.locator("#fil-period_key").fill(`2026-UI-${TAG.slice(0, 4)}`);
   await modal.locator("#fil-due_date").fill("2026-12-07");
   await modal.locator("#fil-payload").fill('{"box1":10}');
