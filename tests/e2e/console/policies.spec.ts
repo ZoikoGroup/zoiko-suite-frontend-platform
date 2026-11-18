@@ -312,3 +312,135 @@ test.describe("Policy lifecycle, maker–checker (live)", () => {
     await expect(maker.locator("li", { hasText: `E2E-${RUN}` })).toContainText("REVOKED");
   });
 });
+
+// REF-07 accounting policies from the console (POL-FE-4): the maker drafts with
+// an impact analysis and a pinned rule mapping and submits; the maker cannot
+// approve; the checker approves and activates; a second version supersedes the
+// first by name; an emergency suspension without the person's own live
+// break-glass session is refused. Every refusal is policy-svc's own.
+//
+// Preconditions (dev stack): the ACCOUNTING_POLICY_* actions on the demo
+// POLICY_FULL bundle (deployments/scripts/seed-demo-rbac.ps1 since 18 Nov).
+// Approving a break-glass session needs a TOTP step-up the demo principals
+// cannot give, so the suspension's success and its review are not driven here.
+test.describe("Accounting policies (REF-07), maker–checker (live)", () => {
+  let maker: Page;
+  let checker: Page;
+  const DOMAIN = `REV_E2E_${RUN}`;
+  let drawer = "";
+
+  async function draft(page: Page, semver: string) {
+    await open(page, `${P}?new=accounting`);
+    const f = page.getByTestId("accounting-draft");
+    await f.locator("#ap_domain").fill(DOMAIN);
+    await f.locator("#ap_framework").fill("IFRS");
+    await f.locator("#ap_semver").fill(semver);
+    await f.locator("#ap_source").fill("IFRS 15 paragraphs 31–38");
+    await f.locator("#ap_text").fill(`doc://policies/accounting/${DOMAIN.toLowerCase()}-${semver}`);
+    await f.locator("#ap_impact").fill("Revenue on multi-element contracts is recognised per performance obligation.");
+    // In force today, so from 00:00 UTC: retroactive, which must say so and why.
+    await f.locator("#ap_from").fill(new Date().toISOString().slice(0, 10));
+    await f.locator("#ap_periods").selectOption("OPEN_PERIODS");
+    await f.locator("#ap_retro").fill("The current period is open and must be recognised under this policy from its first day.");
+    await f.locator("#ap_map_kind").fill("POSTING_RULE");
+    await f.locator("#ap_map_ref").fill("PR-REV-001");
+    await f.locator("#ap_map_version").fill("3");
+    await f.locator("#ap_map_rationale").fill("The posting rule that books recognised revenue.");
+    await f.locator("#ap_rationale").fill(`UI e2e ${RUN}: version ${semver}`);
+    await f.locator('button[type="submit"]').click();
+    const banner = page.getByTestId("accounting-draft-result");
+    await expect(banner).toContainText("is drafted", { timeout: 60_000 });
+  }
+
+  async function submit(page: Page, testId: string) {
+    const form = page.locator(`form[data-testid="${testId}"]`);
+    const details = page.locator("details", { has: form }).first();
+    if ((await details.count()) > 0 && (await details.getAttribute("open")) === null) await details.locator("summary").first().click();
+    await form.locator('button[type="submit"]').click();
+  }
+
+  async function banner(page: Page, testId: string): Promise<string> {
+    const b = page.getByTestId(`${testId}-result`);
+    await expect(b).toBeVisible({ timeout: 60_000 });
+    return (await b.innerText()).replace(/\s+/g, " ").trim();
+  }
+
+  async function status(page: Page, n: number): Promise<string> {
+    await open(page, `${drawer}&pane=requirements`);
+    return (await page.getByTestId(`version-${n}-status`).innerText()).trim();
+  }
+
+  test.beforeAll(async ({ browser }) => {
+    maker = await signIn(browser);
+    const body = await open(maker, P);
+    test.skip(/policy service is not running|could not be reached/i.test(body), "policy-svc is not reachable from this console");
+    checker = await signIn(browser, CHECKER);
+  });
+
+  test.afterAll(async () => {
+    await maker?.context().close();
+    await checker?.context().close();
+  });
+
+  test("the maker drafts version 1 with its impact and a pinned rule, and submits it", async () => {
+    await draft(maker, "1.0.0");
+    await open(maker, `${P}?type=policy&q=ACCT:${DOMAIN}`);
+    const link = await maker.getByRole("link", { name: new RegExp(`^ACCT:${DOMAIN}:`) }).first().getAttribute("href");
+    const id = new URL(link ?? "", "http://x").searchParams.get("id");
+    expect(id, "the register lists the accounting family").toMatch(/^[0-9a-f-]{36}$/);
+    drawer = `${P}?type=policy&q=ACCT:${DOMAIN}&id=${id}`;
+
+    await open(maker, `${drawer}&pane=requirements`);
+    const v1 = maker.getByTestId("accounting-1");
+    await expect(v1).toContainText(`${DOMAIN} · IFRS`);
+    await expect(v1).toContainText("POSTING_RULE PR-REV-001@3");
+    await expect(maker.getByTestId("accounting-1-impact")).toContainText("Nothing governs this scope now");
+    expect(await status(maker, 1)).toMatch(/Draft/);
+
+    await submit(maker, "a1-submit-review");
+    await expect.poll(() => status(maker, 1), { timeout: 60_000 }).toMatch(/In review/);
+  });
+
+  test("the maker cannot approve their own version; the checker approves and activates it", async () => {
+    await open(maker, `${drawer}&pane=requirements`);
+    await submit(maker, "a1-approve");
+    expect(await banner(maker, "a1-approve")).toMatch(/You drafted this version/);
+    expect(await status(maker, 1)).toMatch(/In review/);
+
+    await open(checker, `${drawer}&pane=requirements`);
+    await submit(checker, "a1-approve");
+    await expect.poll(() => status(checker, 1), { timeout: 60_000 }).toMatch(/Approved/);
+    await submit(checker, "a1-activate");
+    await expect.poll(() => status(checker, 1), { timeout: 60_000 }).toMatch(/In force/);
+  });
+
+  test("version 2 supersedes version 1 by name", async () => {
+    await draft(maker, "1.1.0");
+    await open(maker, `${drawer}&pane=requirements`);
+    await submit(maker, "a2-submit-review");
+    await expect.poll(() => status(maker, 2), { timeout: 60_000 }).toMatch(/In review/);
+    await open(checker, `${drawer}&pane=requirements`);
+    await submit(checker, "a2-approve");
+    await expect.poll(() => status(checker, 2), { timeout: 60_000 }).toMatch(/Approved/);
+
+    await open(checker, `${drawer}&pane=requirements`);
+    await expect(checker.getByTestId("accounting-2-impact")).toContainText("Activating it replaces v1");
+    await submit(checker, "a2-supersede");
+    await expect.poll(() => status(checker, 2), { timeout: 60_000 }).toMatch(/In force/);
+    expect(await status(checker, 1)).toMatch(/Superseded/);
+  });
+
+  test("an emergency suspension without the person's own break-glass session is refused", async () => {
+    for (const session of ["", "00000000-0000-4000-8000-000000000bad"]) {
+      await open(checker, `${drawer}&pane=requirements`);
+      const form = checker.locator('form[data-testid="a2-emergency-suspend"]');
+      const details = checker.locator("details", { has: form }).first();
+      if ((await details.getAttribute("open")) === null) await details.locator("summary").first().click();
+      if (session) await form.locator('input[name="break_glass_session_id"]').fill(session);
+      await form.locator('select[name="reason_code"]').selectOption("RULE_ERROR");
+      await form.locator('button[type="submit"]').click();
+      expect(await banner(checker, "a2-emergency-suspend")).toMatch(/honoured only under your own live break-glass session/);
+    }
+    expect(await status(checker, 2)).toMatch(/In force/);
+  });
+});

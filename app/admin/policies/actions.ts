@@ -51,6 +51,14 @@ import {
   createAttestation,
   revokeAttestation,
   redeliverPolicyEvidence,
+  draftAccountingPolicy,
+  submitAccountingPolicy,
+  approveAccountingPolicyVersion,
+  activateAccountingPolicyVersion,
+  supersedeAccountingPolicyVersion,
+  emergencySuspendAccountingPolicy,
+  reviewAccountingPolicySuspension,
+  type AccountingPolicyVersion,
   type PolicyVersion,
 } from "@/lib/api/policies";
 import type { ApiError, ApiWriteResult } from "@/lib/api/client";
@@ -546,6 +554,186 @@ export async function submitVersionCommand(_previous: CommandState, formData: Fo
   if (!result.ok) return commandFailure(result.error, command);
   refresh();
   return { status: "done", message: VERSION_DONE[command](result.data) };
+}
+
+// ── REF-07 accounting policies ───────────────────────────────────────────────
+
+const ACCOUNTING_COMMANDS = ["submit-review", "approve", "activate", "supersede", "emergency-suspend", "review-suspension"] as const;
+type AccountingCommand = (typeof ACCOUNTING_COMMANDS)[number];
+
+const ACCOUNTING_DONE: Record<AccountingCommand, (v: AccountingPolicyVersion) => string> = {
+  "submit-review": () => "Submitted for review. A person other than you must approve it.",
+  approve: () => "Approved. The designated accounting authority can now bring it into force — anyone with that authority except its author.",
+  activate: (v) =>
+    v.version_status === "SCHEDULED" ? `Scheduled: it governs from ${v.effective_from.slice(0, 10)}.` : "In force. Calculations in its scope now resolve to this version.",
+  supersede: () => "In force, replacing the version it names. The replaced version governs nothing from now; its history stays on record.",
+  "emergency-suspend": () =>
+    "Suspended under the break-glass session. Calculations in its scope are blocked (nothing falls back to an older version) until a different person reviews the suspension.",
+  "review-suspension": (v) =>
+    v.suspension_review_outcome === "OVERTURNED" ? "Review recorded: the suspension was overturned." : "Review recorded: the suspension was upheld.",
+};
+
+function accountingFailure(error: ApiError, command: AccountingCommand): CommandState {
+  const { code, reason } = problemOf(error);
+  if (code === "EMERGENCY_SESSION_REQUIRED") {
+    return {
+      status: "refused",
+      message:
+        "An emergency suspension is honoured only under your own live break-glass session. Request one on the Authorization page (Elevated access); once a second person approves it, give its session id here. Holding the permission alone suspends nothing.",
+    };
+  }
+  if (code === "SUPERSESSION_REQUIRED") {
+    return {
+      status: "conflict",
+      message:
+        reason === "invalid_supersedes"
+          ? "The version named is not the one in force for this scope, so nothing was replaced. Reload the page: the impact shows which version this would supersede."
+          : "Another version already governs this scope. Replacing it is never a side effect: supersede it by name (the Supersede command) instead of activating.",
+    };
+  }
+  return commandFailure(error, command === "emergency-suspend" ? "suspend" : command === "supersede" ? "activate" : command);
+}
+
+/**
+ * Draft an accounting policy version (REF-07): where it applies, the framework
+ * and its source, the impact analysis, and the rules it pins. Always DRAFT;
+ * review, approval and activation are separate, attributable acts.
+ */
+export async function submitAccountingDraft(_previous: CommandState, formData: FormData): Promise<CommandState> {
+  const who = await commandIdentity();
+  if (isState(who)) return who;
+  const field = (k: string) => String(formData.get(k) ?? "").trim();
+  const scope = field("scope");
+  const affected = field("affected_periods");
+  const effectiveFrom = field("effective_from");
+  const effectiveTo = field("effective_to");
+  const missing = (
+    [
+      ["policy_domain", "the policy domain"],
+      ["framework", "the framework"],
+      ["semantic_version", "the version number"],
+      ["framework_source", "the framework source"],
+      ["policy_text_ref", "the policy text reference"],
+      ["impact_summary", "the impact summary"],
+      ["effective_from", "the effective date"],
+      ["rationale", "the rationale"],
+    ] as const
+  ).filter(([k]) => !field(k));
+  if (missing.length) return { status: "error", message: `Fill in ${missing.map(([, l]) => l).join(", ")}.` };
+  if (affected !== "FUTURE_ONLY" && affected !== "OPEN_PERIODS") return { status: "error", message: "Say which periods the change reaches." };
+
+  const mapping = {
+    ref_kind: field("map_kind"),
+    ref: field("map_ref"),
+    ref_version: field("map_version"),
+    rationale: field("map_rationale"),
+    maps_to: field("map_to") || undefined,
+  };
+  const anyMapping = [mapping.ref_kind, mapping.ref, mapping.ref_version, mapping.rationale].some(Boolean);
+  if (anyMapping && ![mapping.ref_kind, mapping.ref, mapping.ref_version, mapping.rationale].every(Boolean)) {
+    return { status: "error", message: "A rule mapping needs its kind, reference, pinned version and rationale — or leave all four empty." };
+  }
+
+  const result = await draftAccountingPolicy({
+    policyDomain: field("policy_domain").toUpperCase(),
+    framework: field("framework").toUpperCase(),
+    bookId: field("book_id") || undefined,
+    jurisdictionId: field("jurisdiction_id") || undefined,
+    legalEntityId: scope === "entity" ? who.legalEntityId : undefined,
+    semanticVersion: field("semantic_version"),
+    precedence: Number(field("precedence") || "0"),
+    frameworkSource: field("framework_source"),
+    policyTextRef: field("policy_text_ref"),
+    ruleMappings: anyMapping ? [mapping] : undefined,
+    impactAnalysis: {
+      summary: field("impact_summary"),
+      affected_periods: affected,
+      closed_history_unchanged: formData.get("closed_history_unchanged") === "on",
+      retroactive_justification: field("retroactive_justification") || undefined,
+    },
+    effectiveFrom: new Date(`${effectiveFrom}T00:00:00Z`).toISOString(),
+    effectiveTo: effectiveTo ? new Date(`${effectiveTo}T00:00:00Z`).toISOString() : undefined,
+    rationale: field("rationale"),
+    identity: who,
+    callerTenantId: who.tenantId,
+    callerLegalEntityId: who.legalEntityId,
+  });
+  if (!result.ok) {
+    const { reason } = problemOf(result.error);
+    if (reason === "invalid_accounting_policy") {
+      // policy-svc lists everything wrong at once, in words; show its list.
+      const errors = (result.error.body as { errors?: unknown } | undefined)?.errors;
+      const list = Array.isArray(errors) ? errors.filter((e): e is string => typeof e === "string") : [];
+      return {
+        status: "error",
+        message: list.length
+          ? `Nothing was saved. Correct these and draft it again: ${list.join("; ")}.`
+          : explainPolicyError(result.error.message, { status: result.error.status }),
+      };
+    }
+    return result.error.status === 409
+      ? { status: "conflict", message: "This draft repeats an earlier one with different content under the same key, so nothing was saved. Reload and draft it again." }
+      : commandFailure(result.error, "submit-review");
+  }
+  refresh();
+  const v = result.data;
+  return {
+    status: result.status === 201 ? "done" : "unchanged",
+    message: `${v.policy_code ?? "Accounting policy"} ${v.details?.semantic_version ?? ""} is drafted (version ${v.version_number}). Open it below and submit it for review.`.replace(/\s+/g, " "),
+  };
+}
+
+/**
+ * One REF-07 lifecycle command on an accounting version. The form carries the
+ * version's row_version; an emergency suspension also carries the live
+ * break-glass session it is made under (X-Break-Glass-Session-Id).
+ */
+export async function submitAccountingCommand(_previous: CommandState, formData: FormData): Promise<CommandState> {
+  const who = await commandIdentity();
+  if (isState(who)) return who;
+  const field = (k: string) => String(formData.get(k) ?? "").trim();
+  const command = field("command") as AccountingCommand;
+  const versionId = field("version_id");
+  const expected = Number(field("expected_version"));
+  if (!ACCOUNTING_COMMANDS.includes(command) || !looksLikeReference(versionId) || !(expected >= 1)) {
+    return { status: "error", message: "This form is incomplete. Reload the page and try again." };
+  }
+  const reasonCode = field("reason_code") || undefined;
+  if ((command === "emergency-suspend" || command === "review-suspension") && !reasonCode) {
+    return { status: "error", message: "Choose a reason. A suspension and its review are recorded with their reason." };
+  }
+  const outcome = field("outcome");
+  if (command === "review-suspension" && outcome !== "UPHELD" && outcome !== "OVERTURNED") {
+    return { status: "error", message: "Choose whether the suspension is upheld or overturned." };
+  }
+  const supersedes = field("supersedes_version_id");
+  if (command === "supersede" && !looksLikeReference(supersedes)) {
+    return { status: "error", message: "Name the version this replaces. Reload the page: the impact shows it." };
+  }
+  const session = field("break_glass_session_id");
+  const input = {
+    versionId,
+    expectedVersion: expected,
+    reasonCode,
+    reason: field("reason") || undefined,
+    approvalReference: field("approval_reference") || undefined,
+    outcome: command === "review-suspension" ? (outcome as "UPHELD" | "OVERTURNED") : undefined,
+    supersedesVersionId: command === "supersede" ? supersedes : undefined,
+    breakGlassSessionId: command === "emergency-suspend" && session ? session : undefined,
+    identity: who,
+  };
+  const call = {
+    "submit-review": submitAccountingPolicy,
+    approve: approveAccountingPolicyVersion,
+    activate: activateAccountingPolicyVersion,
+    supersede: supersedeAccountingPolicyVersion,
+    "emergency-suspend": emergencySuspendAccountingPolicy,
+    "review-suspension": reviewAccountingPolicySuspension,
+  }[command];
+  const result = await call(input);
+  if (!result.ok) return accountingFailure(result.error, command);
+  refresh();
+  return { status: "done", message: ACCOUNTING_DONE[command](result.data) };
 }
 
 /** Retire a whole policy family: final, and refused while a version is in force or scheduled. */

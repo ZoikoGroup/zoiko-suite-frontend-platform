@@ -102,7 +102,7 @@ export default async function PoliciesPage({ searchParams }: { searchParams: Pro
         }
       />
 
-      <NewPanel query={query} open={open} />
+      <NewPanel query={query} open={open} tomorrow={new Date(data.asOf + 86_400_000).toISOString().slice(0, 10)} />
 
       {readError && <Unavailable what="Part of the policy register" message={explainPolicyError(readError.message, { status: readError.status })} />}
       {data.truncated && (

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui";
 import { ResultBanner, type BannerTone } from "@/components/admin/shared/ResultBanner";
 import { FIELD, HINT, LABEL, OPTIONAL } from "@/components/admin/shared/form";
 import {
+  submitAccountingCommand,
   submitAttestation,
   submitAttestationRevocation,
   submitEvidenceRedelivery,
@@ -208,6 +209,92 @@ export function VersionCommands({ v, viewer, certifiable }: { v: VersionFacts; v
     items.push(
       <Command key="retire" testId={`${id}-retire`} action={submitVersionCommand} hidden={{ ...base, command: "retire" }} label="Retire" pendingLabel="Retiring…"
         fields={<ReasonFields id={`${id}-ret`} codes={RETIRE_REASONS} />} />,
+    );
+  }
+  if (!items.length) return null;
+  return <div className="mt-2 flex flex-wrap items-start gap-2">{items}</div>;
+}
+
+const EMERGENCY_REASONS: [string, string][] = [
+  ["MISSTATEMENT_RISK", "It would misstate the books"],
+  ["RULE_ERROR", "The mapped rule is wrong"],
+  ["LEGAL_CHANGE", "The standard or law changed"],
+  ["OTHER", "Other (explain below)"],
+];
+
+export type AccountingFacts = {
+  versionId: string;
+  versionNumber?: number;
+  status: string;
+  rowVersion: number;
+  author: string;
+  suspender?: string;
+  /** From the impact report: the version in force that activating this one would replace. */
+  supersedes?: { id: string; label: string };
+};
+
+/**
+ * REF-07 lifecycle on an accounting version: review, approval and activation
+ * by different people; replacing the version in force is stated (Supersede
+ * names it), never a side effect; an emergency suspension needs the person's
+ * own live break-glass session. policy-svc decides every refusal.
+ */
+export function AccountingVersionCommands({ v, viewer }: { v: AccountingFacts; viewer: string }) {
+  const base = { version_id: v.versionId, expected_version: v.rowVersion };
+  const id = `a${v.versionNumber ?? v.versionId.slice(0, 8)}`;
+  const mine = viewer === v.author;
+  const items: ReactNode[] = [];
+
+  if (v.status === "DRAFT") {
+    items.push(
+      <Command key="submit" testId={`${id}-submit-review`} action={submitAccountingCommand} hidden={{ ...base, command: "submit-review" }} label="Submit for review" pendingLabel="Submitting…" primary />,
+    );
+  }
+  if (v.status === "REVIEW") {
+    items.push(
+      <Command key="approve" testId={`${id}-approve`} action={submitAccountingCommand} hidden={{ ...base, command: "approve" }} label="Approve" pendingLabel="Approving…" primary
+        hint={mine ? "You drafted this version: a different person must approve it." : undefined}
+        fields={
+          <div>
+            <label htmlFor={`${id}-apref`} className={LABEL}>Approval reference <span className={OPTIONAL}>(optional: minute, ticket)</span></label>
+            <input id={`${id}-apref`} name="approval_reference" maxLength={256} className={FIELD} autoComplete="off" />
+          </div>
+        } />,
+    );
+  }
+  if (v.status === "APPROVED") {
+    items.push(
+      v.supersedes ? (
+        <Command key="supersede" testId={`${id}-supersede`} action={submitAccountingCommand}
+          hidden={{ ...base, command: "supersede", supersedes_version_id: v.supersedes.id }}
+          label={`Supersede ${v.supersedes.label}`} pendingLabel="Superseding…" primary
+          hint={mine ? "You drafted this version: the designated accounting authority, not its author, brings it into force." : `Replaces ${v.supersedes.label}, which governs this scope now.`} />
+      ) : (
+        <Command key="activate" testId={`${id}-activate`} action={submitAccountingCommand} hidden={{ ...base, command: "activate" }} label="Activate" pendingLabel="Activating…" primary
+          hint={mine ? "You drafted this version: the designated accounting authority, not its author, brings it into force." : undefined} />
+      ),
+    );
+  }
+  if (v.status === "ACTIVE" || v.status === "SCHEDULED") {
+    items.push(
+      <Command key="emergency" testId={`${id}-emergency-suspend`} action={submitAccountingCommand} hidden={{ ...base, command: "emergency-suspend" }} label="Emergency suspend" pendingLabel="Suspending…"
+        hint="Honoured only under your own live break-glass session (Authorization › Elevated access). Calculations in its scope are then blocked until a different person reviews it."
+        fields={
+          <>
+            <div>
+              <label htmlFor={`${id}-bg`} className={LABEL}>Break-glass session id</label>
+              <input id={`${id}-bg`} name="break_glass_session_id" maxLength={64} className={FIELD} autoComplete="off" placeholder="from Authorization › Elevated access" />
+            </div>
+            <ReasonFields id={`${id}-sus`} codes={EMERGENCY_REASONS} />
+          </>
+        } />,
+    );
+  }
+  if (v.status === "SUSPENDED") {
+    items.push(
+      <Command key="review" testId={`${id}-review-suspension`} action={submitAccountingCommand} hidden={{ ...base, command: "review-suspension" }} label="Review suspension" pendingLabel="Recording…" primary
+        hint={viewer === v.suspender ? "You suspended this version: a different approver must review it." : undefined}
+        fields={<ReasonFields id={`${id}-rev`} codes={REVIEW_REASONS} outcome />} />,
     );
   }
   if (!items.length) return null;

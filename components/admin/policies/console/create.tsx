@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { Card } from "@/components/ui";
 import { ActivateVersionForm, CreatePolicyForm, CreateVersionForm, EvaluatePolicyForm } from "../PolicyForms";
-import { CreateControlTestForm } from "./forms";
+import { AccountingDraftForm, CreateControlTestForm } from "./forms";
 import { href, type Query } from "./data";
 import type { Row } from "./model";
 
@@ -18,6 +18,7 @@ const ITEMS: { key: string; label: string; hint: string }[] = [
   { key: "activate", label: "Activate a version", hint: "Bring an approved version into force" },
   { key: "evaluate", label: "Evaluate an action", hint: "Check an amount against the threshold in force" },
   { key: "control", label: "Define a control test", hint: "The methodology a control is tested by" },
+  { key: "accounting", label: "Draft an accounting policy", hint: "REF-07: framework, impact analysis and rule mappings, as a draft" },
 ];
 
 export function NewMenu({ query }: { query: Query }) {
@@ -40,7 +41,7 @@ export function NewMenu({ query }: { query: Query }) {
   );
 }
 
-export function NewPanel({ query, open }: { query: Query; open?: Row }) {
+export function NewPanel({ query, open, tomorrow }: { query: Query; open?: Row; tomorrow: string }) {
   const item = ITEMS.find((i) => i.key === query.new);
   if (!item) return null;
   let body: ReactNode;
@@ -56,6 +57,9 @@ export function NewPanel({ query, open }: { query: Query; open?: Row }) {
       break;
     case "evaluate":
       body = <EvaluatePolicyForm />;
+      break;
+    case "accounting":
+      body = <AccountingDraftForm firstDay={tomorrow} />;
       break;
     default:
       body = <CreateControlTestForm defaultRef={open?.kind === "policy" ? open.ref : undefined} />;

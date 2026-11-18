@@ -1167,6 +1167,13 @@ export async function explainPolicyResolution(
 
 // ─── Accounting Policies (REF-07) ────────────────────────────────────────────
 
+/**
+ * The policy_type of every accounting policy family. Its versions move through
+ * /v1/accounting-policies/versions/{id}/…, never the GOV-05 routes (policy-svc
+ * refuses those with `accounting_policy_endpoint_required`).
+ */
+export const ACCOUNTING_POLICY_TYPE = "ACCOUNTING_POLICY";
+
 export type ImpactAnalysis = {
   summary: string;
   affected_periods: "FUTURE_ONLY" | "OPEN_PERIODS";

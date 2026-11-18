@@ -29,6 +29,7 @@ import { DOMAIN_LABEL, EFF_LABEL, EFF_TONE, STATUS_LABEL, STATUS_TONE, cadenceOf
 import { BASE, compareOf, entityName, href, type ControlDetail, type PolicyDetail, type Query } from "./data";
 import { RecordExecutionForm } from "./forms";
 import {
+  AccountingVersionCommands,
   AttestationForm,
   RedeliverForm,
   RetireFamilyForm,
@@ -431,6 +432,7 @@ function PolicyRequirements({
   asOf: number;
 }) {
   const certifiable = P.CERTIFIED_POLICY_TYPES.includes(family.policy_type);
+  const accounting = family.policy_type === P.ACCOUNTING_POLICY_TYPE;
   const testCases = (detail?.testCases.data ?? []).filter((t) => t.test_status === "ACTIVE");
   const sorted = [...versions].sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0) || b.created_at.localeCompare(a.created_at));
   const live = versions.some((v) => v.version_status === "ACTIVE" || v.version_status === "SCHEDULED");
@@ -475,21 +477,25 @@ function PolicyRequirements({
                   defaultExpiry={dayOf(asOf + 30 * 86_400_000)}
                 />
               )}
-              <VersionCommands
-                viewer={viewer}
-                certifiable={certifiable}
-                v={{
-                  policyId: v.policy_id,
-                  versionId: v.policy_version_id,
-                  versionNumber: v.version_number,
-                  status: v.version_status,
-                  rowVersion: v.row_version ?? 1,
-                  effectiveFrom: v.effective_from,
-                  author: v.created_by_principal_id,
-                  suspender: v.suspended_by_principal_id,
-                  future: new Date(v.effective_from).getTime() > asOf,
-                }}
-              />
+              {accounting ? (
+                <AccountingVersion v={v} read={detail?.accounting.get(v.policy_version_id)} versions={versions} viewer={viewer} />
+              ) : (
+                <VersionCommands
+                  viewer={viewer}
+                  certifiable={certifiable}
+                  v={{
+                    policyId: v.policy_id,
+                    versionId: v.policy_version_id,
+                    versionNumber: v.version_number,
+                    status: v.version_status,
+                    rowVersion: v.row_version ?? 1,
+                    effectiveFrom: v.effective_from,
+                    author: v.created_by_principal_id,
+                    suspender: v.suspended_by_principal_id,
+                    future: new Date(v.effective_from).getTime() > asOf,
+                  }}
+                />
+              )}
             </li>
           );
         })}
@@ -521,11 +527,89 @@ function PolicyRequirements({
         </Section>
       )}
 
-      {!family.retired_at && !live && (
+      {!family.retired_at && !live && !accounting && (
         <Section title="Retire this policy">
           <RetireFamilyForm policyId={family.policy_id} />
         </Section>
       )}
+    </div>
+  );
+}
+
+/**
+ * One REF-07 accounting version: what it applies to and rests on, its impact
+ * analysis and pinned rules, what activating it would touch, and the commands
+ * its status allows.
+ */
+function AccountingVersion({
+  v,
+  read,
+  versions,
+  viewer,
+}: {
+  v: P.PolicyVersion;
+  read?: { version: { data: P.AccountingPolicyVersion | null; error: { message: string; status?: number } | null }; impact: { data: P.AccountingImpact | null; error: { message: string; status?: number } | null } | null };
+  versions: P.PolicyVersion[];
+  viewer: string;
+}) {
+  if (!read) return <Muted>The accounting record of this version was not read (only the latest ten versions are).</Muted>;
+  if (read.version.error || !read.version.data) return <Failed what="The accounting record of this version" error={read.version.error} />;
+  const a = read.version.data;
+  const impact = read.impact?.data ?? null;
+  const replaced = impact?.would_supersede;
+  const replacedNumber = replaced ? versions.find((x) => x.policy_version_id === replaced.policy_version_id)?.version_number : undefined;
+  const label = (r: P.ImpactVersionRef) => {
+    const n = versions.find((x) => x.policy_version_id === r.policy_version_id)?.version_number;
+    return `${n ? `v${n}` : r.policy_version_id.slice(0, 8)} (${r.semantic_version})`;
+  };
+  return (
+    <div className="mt-2 space-y-2" data-testid={`accounting-${v.version_number}`}>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11.5px]">
+        <dt className="text-slate-500">Domain · framework</dt>
+        <dd className="text-navy-950 dark:text-slate-200">{a.applicability.policy_domain} · {a.applicability.framework}</dd>
+        <dt className="text-slate-500">Version · precedence</dt>
+        <dd className="text-navy-950 dark:text-slate-200">{a.details.semantic_version} · {a.details.precedence}</dd>
+        <dt className="text-slate-500">Framework source</dt>
+        <dd className="text-navy-950 dark:text-slate-200">{a.details.framework_source}</dd>
+        <dt className="text-slate-500">Policy text</dt>
+        <dd className="break-all text-navy-950 dark:text-slate-200">{a.details.policy_text_ref}</dd>
+        <dt className="text-slate-500">Impact</dt>
+        <dd className="text-navy-950 dark:text-slate-200">
+          {a.details.impact_analysis.summary} ({a.details.impact_analysis.affected_periods === "OPEN_PERIODS" ? "open periods too" : "future periods only"})
+        </dd>
+      </dl>
+      {a.rule_mappings.length > 0 && (
+        <ul className="space-y-1" aria-label="Rule mappings">
+          {a.rule_mappings.map((m) => (
+            <li key={`${m.ref_kind}|${m.ref}`} className="rounded border border-slate-200 px-2 py-1 text-[11px] dark:border-slate-700">
+              <span className="font-mono font-semibold text-navy-950 dark:text-slate-100">{m.ref_kind} {m.ref}@{m.ref_version}</span>
+              {m.maps_to && <span className="text-slate-500"> → {m.maps_to}</span>} <span className="text-slate-500">· {m.rationale}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {read.impact?.error && <Failed what="What activating it would touch" error={read.impact.error} />}
+      {impact && (
+        <div className="rounded-lg bg-slate-50 px-2.5 py-2 text-[11.5px] text-slate-600 dark:bg-slate-800/60 dark:text-slate-300" data-testid={`accounting-${v.version_number}-impact`}>
+          {replaced ? <p>Activating it replaces {label(replaced)}, which governs this scope now.</p> : <p>Nothing governs this scope now: it would be the first.</p>}
+          {impact.retroactive && <p>It takes effect in the past, so open periods are recalculated under it.</p>}
+          {impact.ambiguous_with.length > 0 && <p>Tied with {impact.ambiguous_with.map(label).join(", ")} at the same precedence: resolution would be CONFLICTED.</p>}
+          {impact.depended_on_by.length > 0 && <p>Pinned by {impact.depended_on_by.map(label).join(", ")}.</p>}
+          {impact.activation_blockers.length > 0 && <p className="text-amber-700 dark:text-amber-300">Activation is refused today: {impact.activation_blockers.join("; ")}.</p>}
+        </div>
+      )}
+      <AccountingVersionCommands
+        viewer={viewer}
+        v={{
+          versionId: v.policy_version_id,
+          versionNumber: v.version_number,
+          status: v.version_status,
+          rowVersion: a.row_version ?? v.row_version ?? 1,
+          author: v.created_by_principal_id,
+          suspender: v.suspended_by_principal_id,
+          supersedes: replaced ? { id: replaced.policy_version_id, label: replacedNumber ? `v${replacedNumber}` : label(replaced) } : undefined,
+        }}
+      />
     </div>
   );
 }

@@ -176,7 +176,16 @@ export type PolicyDetail = {
   certification: Map<string, { state: Read<P.Certification>; waivers: Read<P.Waiver[]> }>;
   /** The History pane's comparison, when ?cmp names two versions. */
   comparison: Read<P.Comparison> | null;
+  /**
+   * REF-07 accounting policies only: each version's accounting record (domain,
+   * framework, impact analysis, rule mappings) and, while it can still go into
+   * force, what activating it would touch. Empty for every other type.
+   */
+  accounting: Map<string, { version: Read<P.AccountingPolicyVersion>; impact: Read<P.AccountingImpact> | null }>;
 };
+
+/** Accounting versions whose activation is still ahead, so their impact matters. */
+const PRE_ACTIVE = new Set(["DRAFT", "REVIEW", "APPROVED"]);
 
 /** Versions that can still move through the lifecycle, so certification matters for them. */
 const LIVE_ABLE = new Set(["DRAFT", "REVIEW", "APPROVED", "SCHEDULED", "ACTIVE", "SUSPENDED"]);
@@ -194,7 +203,8 @@ export async function loadPolicyDetail(
 ): Promise<PolicyDetail> {
   const certified = P.CERTIFIED_POLICY_TYPES.includes(family.policy_type);
   const live = certified ? versions.filter((v) => LIVE_ABLE.has(v.version_status)).slice(0, 10) : [];
-  const [transitions, evaluations, attestations, testCases, certs, comparison] = await Promise.all([
+  const accountingVersions = family.policy_type === P.ACCOUNTING_POLICY_TYPE ? versions.slice(0, 10) : [];
+  const [transitions, evaluations, attestations, testCases, certs, comparison, accounting] = await Promise.all([
     Promise.all(
       versions.slice(0, 25).map(async (v) => {
         const r = await readAll((c) => P.listTransitions(v.policy_version_id, identity, 200, c), 400);
@@ -223,8 +233,17 @@ export async function loadPolicyDetail(
       }),
     ),
     cmp ? P.comparePolicyVersions(cmp.base, cmp.target, identity).then(settle) : Promise.resolve(null),
+    Promise.all(
+      accountingVersions.map(async (v) => {
+        const [version, impact] = await Promise.all([
+          P.getAccountingPolicyVersion(v.policy_version_id, identity).then(settle),
+          PRE_ACTIVE.has(v.version_status) ? P.getAccountingPolicyImpact(v.policy_version_id, identity).then(settle) : Promise.resolve(null),
+        ]);
+        return [v.policy_version_id, { version, impact }] as const;
+      }),
+    ),
   ]);
-  return { transitions, evaluations, attestations, testCases, certification: new Map(certs), comparison };
+  return { transitions, evaluations, attestations, testCases, certification: new Map(certs), comparison, accounting: new Map(accounting) };
 }
 
 export async function loadControlDetail(identity: SessionIdentity, control: P.ControlTestDefinition): Promise<ControlDetail> {
