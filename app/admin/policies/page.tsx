@@ -8,6 +8,7 @@ import { currentSession } from "@/lib/authz-inbox";
 import { explainPolicyError } from "@/lib/api/policies";
 import {
   BASE,
+  compareOf,
   filterOf,
   isFiltered,
   loadConsole,
@@ -58,11 +59,20 @@ export default async function PoliciesPage({ searchParams }: { searchParams: Pro
   const openId = query.id ?? (query.drawer !== "closed" ? shown[0]?.id : undefined);
   const open = openId ? model.rows.find((r) => r.id === openId) : undefined;
   const [policyDetail, controlDetail] = await Promise.all([
-    open?.policy ? loadPolicyDetail(identity, open.policy, open.versions ?? []) : undefined,
+    open?.policy ? loadPolicyDetail(identity, open.policy, open.versions ?? [], compareOf(query)) : undefined,
     open?.control ? loadControlDetail(identity, open.control) : undefined,
   ]);
   const drawer = open ? (
-    <RecordDrawer row={open} model={model} query={query} entities={data.entities} policyDetail={policyDetail} controlDetail={controlDetail} />
+    <RecordDrawer
+      row={open}
+      model={model}
+      query={query}
+      entities={data.entities}
+      policyDetail={policyDetail}
+      controlDetail={controlDetail}
+      viewer={identity.principalId}
+      asOf={data.asOf}
+    />
   ) : query.id ? (
     <MissingDrawer query={query} />
   ) : null;
@@ -129,7 +139,8 @@ export default async function PoliciesPage({ searchParams }: { searchParams: Pro
       </div>
 
       <ControlsFooter right="policy-svc · live data">
-        Required controls: maker–checker on every policy version · the suspender never reviews a suspension · policies and control tests are
+        Required controls: maker–checker on every policy version · the suspender never reviews a suspension · evaluable rules are certified
+        against their test suite before activation · every change names the version it was read at (If-Match) · policies and control tests are
         immutable (a change is a new version or test code) · every evaluation is filed as evidence · test results are attributed to their tester
       </ControlsFooter>
     </div>

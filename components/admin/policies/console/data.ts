@@ -35,9 +35,20 @@ export type Query = {
   new?: string;
   /** Control Reviews window: 6 or 12 months. */
   months?: string;
+  /** Version comparison in the History pane: base and target version ids (a plain GET form sets both). */
+  cb?: string;
+  ct?: string;
 };
 
-const KEYS: (keyof Query)[] = ["q", "domain", "status", "type", "eff", "entity", "due", "page", "size", "id", "pane", "drawer", "new", "months"];
+const KEYS: (keyof Query)[] = ["q", "domain", "status", "type", "eff", "entity", "due", "page", "size", "id", "pane", "drawer", "new", "months", "cb", "ct"];
+
+/** The two versions ?cb and ?ct name, when both look like ids and differ. */
+export function compareOf(q: Query): { base: string; target: string } | null {
+  const id = /^[0-9a-f-]{36}$/i;
+  const base = q.cb ?? "";
+  const target = q.ct ?? "";
+  return id.test(base) && id.test(target) && base !== target ? { base, target } : null;
+}
 
 export function queryOf(params: Record<string, string | string[] | undefined>): Query {
   const out: Query = {};
@@ -159,15 +170,31 @@ export type PolicyDetail = {
   transitions: Read<(P.VersionTransition & { version_number?: number })[]>;
   evaluations: Read<P.Evaluation[]>;
   attestations: Read<P.Attestation[]>;
+  /** The family's PDC-05 test suite (certified types only; null data otherwise). */
+  testCases: Read<P.TestCase[]>;
+  /** Certification state and waivers per live-able version (not superseded or retired). */
+  certification: Map<string, { state: Read<P.Certification>; waivers: Read<P.Waiver[]> }>;
+  /** The History pane's comparison, when ?cmp names two versions. */
+  comparison: Read<P.Comparison> | null;
 };
+
+/** Versions that can still move through the lifecycle, so certification matters for them. */
+const LIVE_ABLE = new Set(["DRAFT", "REVIEW", "APPROVED", "SCHEDULED", "ACTIVE", "SUSPENDED"]);
 
 export type ControlDetail = {
   effectiveness: Read<P.ControlEffectiveness>;
   attestations: Read<P.Attestation[]>;
 };
 
-export async function loadPolicyDetail(identity: SessionIdentity, family: P.PolicyFamily, versions: P.PolicyVersion[]): Promise<PolicyDetail> {
-  const [transitions, evaluations, attestations] = await Promise.all([
+export async function loadPolicyDetail(
+  identity: SessionIdentity,
+  family: P.PolicyFamily,
+  versions: P.PolicyVersion[],
+  cmp: { base: string; target: string } | null = null,
+): Promise<PolicyDetail> {
+  const certified = P.CERTIFIED_POLICY_TYPES.includes(family.policy_type);
+  const live = certified ? versions.filter((v) => LIVE_ABLE.has(v.version_status)).slice(0, 10) : [];
+  const [transitions, evaluations, attestations, testCases, certs, comparison] = await Promise.all([
     Promise.all(
       versions.slice(0, 25).map(async (v) => {
         const r = await readAll((c) => P.listTransitions(v.policy_version_id, identity, 200, c), 400);
@@ -183,8 +210,21 @@ export async function loadPolicyDetail(identity: SessionIdentity, family: P.Poli
       r.ok ? { data: r.data.items.filter((e) => e.policy_id === family.policy_id), error: null } : { data: null, error: r.error },
     ),
     P.listAttestations(identity, { subject_ref: family.policy_code }, 50).then((r) => (r.ok ? { data: r.data.items, error: null } : { data: null, error: r.error })),
+    certified
+      ? readAll((c) => P.listPolicyTestCases(family.policy_id, identity, 200, c), 400).then((r) => ({ data: r.data, error: r.error }))
+      : Promise.resolve<Read<P.TestCase[]>>({ data: null, error: null }),
+    Promise.all(
+      live.map(async (v) => {
+        const [state, waivers] = await Promise.all([
+          P.getPolicyVersionCertification(v.policy_version_id, identity).then(settle),
+          P.listPolicyTestWaivers(v.policy_version_id, identity, 100).then((r) => (r.ok ? { data: r.data.items, error: null } : { data: null, error: r.error })),
+        ]);
+        return [v.policy_version_id, { state, waivers }] as const;
+      }),
+    ),
+    cmp ? P.comparePolicyVersions(cmp.base, cmp.target, identity).then(settle) : Promise.resolve(null),
   ]);
-  return { transitions, evaluations, attestations };
+  return { transitions, evaluations, attestations, testCases, certification: new Map(certs), comparison };
 }
 
 export async function loadControlDetail(identity: SessionIdentity, control: P.ControlTestDefinition): Promise<ControlDetail> {

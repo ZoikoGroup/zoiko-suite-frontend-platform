@@ -26,8 +26,19 @@ import { person } from "@/lib/directory";
 import type { LegalEntity } from "@/lib/api/tenants";
 import * as P from "@/lib/api/policies";
 import { DOMAIN_LABEL, EFF_LABEL, EFF_TONE, STATUS_LABEL, STATUS_TONE, cadenceOf, effOfResult, type Model, type Row } from "./model";
-import { entityName, href, type ControlDetail, type PolicyDetail, type Query } from "./data";
+import { BASE, compareOf, entityName, href, type ControlDetail, type PolicyDetail, type Query } from "./data";
 import { RecordExecutionForm } from "./forms";
+import {
+  AttestationForm,
+  RedeliverForm,
+  RetireFamilyForm,
+  RevokeAttestationForm,
+  RunSuiteForm,
+  TestCaseForm,
+  VersionCommands,
+  WaiverApproveForm,
+  WaiverRequestForm,
+} from "./commands";
 
 /** Label (with its icon) in the first column, the value in the second — the mock's drawer list. */
 function Fact({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
@@ -195,6 +206,8 @@ export function RecordDrawer({
   entities,
   policyDetail,
   controlDetail,
+  viewer,
+  asOf,
 }: {
   row: Row;
   model: Model;
@@ -202,6 +215,10 @@ export function RecordDrawer({
   entities: Map<string, LegalEntity>;
   policyDetail?: PolicyDetail;
   controlDetail?: ControlDetail;
+  /** The signed-in principal: names the maker–checker hints, decides nothing. */
+  viewer: string;
+  /** When the page's reads were made (ms): every "now" in the drawer is this one. */
+  asOf: number;
 }) {
   const pane = paneOf(query);
   const at = (p: string) => href(query, { id: row.id, drawer: undefined, pane: p === "overview" ? undefined : p });
@@ -313,7 +330,9 @@ export function RecordDrawer({
         </dl>
       )}
 
-      {pane === "requirements" && p && <PolicyRequirements versions={row.versions ?? []} entities={entities} />}
+      {pane === "requirements" && p && (
+        <PolicyRequirements family={p} versions={row.versions ?? []} entities={entities} detail={policyDetail} viewer={viewer} asOf={asOf} />
+      )}
       {pane === "requirements" && c && (
         <dl>
           <Fact icon={<Link2 className="h-3.5 w-3.5" />} label="Control ref">{c.control_ref}</Fact>
@@ -325,46 +344,189 @@ export function RecordDrawer({
         </dl>
       )}
 
-      {pane === "evidence" && p && policyDetail && <PolicyEvidence detail={policyDetail} />}
-      {pane === "evidence" && c && controlDetail && <ControlEvidence row={row} detail={controlDetail} />}
+      {pane === "evidence" && p && policyDetail && <PolicyEvidence detail={policyDetail} subjectRef={p.policy_code} today={dayOf(asOf)} />}
+      {pane === "evidence" && c && controlDetail && <ControlEvidence row={row} detail={controlDetail} today={dayOf(asOf)} />}
 
-      {pane === "history" && p && policyDetail && <PolicyHistory row={row} detail={policyDetail} />}
+      {pane === "history" && p && policyDetail && <PolicyHistory row={row} detail={policyDetail} query={query} />}
       {pane === "history" && c && <ControlHistory row={row} />}
     </Shell>
   );
 }
 
-function PolicyRequirements({ versions, entities }: { versions: P.PolicyVersion[]; entities: Map<string, LegalEntity> }) {
-  if (!versions.length) return <Muted>No version has been drafted. A policy sets no rule until a version is drafted, approved and activated.</Muted>;
-  const sorted = [...versions].sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0) || b.created_at.localeCompare(a.created_at));
+/** YYYY-MM-DD of a read time, for form defaults. */
+function dayOf(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** PDC-05 certification states, as chips. */
+const CERT_CHIP: Record<P.Certification["status"], { label: string; tone: "success" | "warning" | "danger" | "neutral" | "info" }> = {
+  CERTIFIED: { label: "Certified", tone: "success" },
+  WAIVED: { label: "Certified (waived)", tone: "success" },
+  FAILED: { label: "Tests failing", tone: "danger" },
+  NOT_RUN: { label: "Not tested", tone: "warning" },
+  STALE: { label: "Re-test needed", tone: "warning" },
+  EXEMPT_NO_EVALUATOR: { label: "Exempt", tone: "neutral" },
+};
+
+function Certification({
+  version,
+  cert,
+  testCases,
+  defaultExpiry,
+}: {
+  version: P.PolicyVersion;
+  cert?: PolicyDetail["certification"] extends Map<string, infer V> ? V : never;
+  testCases: P.TestCase[];
+  defaultExpiry: string;
+}) {
+  if (!cert) return null;
+  const { state, waivers } = cert;
+  const failed = new Set(state.data?.unwaived_failed_test_case_ids ?? []);
+  const failing = testCases.filter((t) => failed.has(t.test_case_id));
+  const pending = (waivers.data ?? []).filter((w) => w.waiver_status === "REQUESTED");
   return (
-    <ul className="space-y-2 pt-1">
-      {sorted.map((v) => {
-        const threshold = P.formatThreshold(v.rule_payload);
-        return (
-          <li key={v.policy_version_id} className="rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[12.5px] font-semibold text-navy-950 dark:text-slate-100" title={v.policy_version_id}>
-                Version {v.version_number ?? "—"}
+    <div className="mt-2 space-y-2 rounded-md bg-slate-50 p-2 dark:bg-slate-800/40">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Certification</span>
+        {state.error ? (
+          <span className="text-[11px] text-rose-700 dark:text-rose-400">could not be read</span>
+        ) : state.data ? (
+          <span data-testid={`v${version.version_number}-cert`}>
+            <Badge tone={CERT_CHIP[state.data.status]?.tone ?? "neutral"} title={state.data.reason}>
+              {CERT_CHIP[state.data.status]?.label ?? state.data.status}
+            </Badge>
+          </span>
+        ) : null}
+      </div>
+      {state.data?.reason && <p className="text-[11px] text-slate-500 dark:text-slate-400">{state.data.reason}</p>}
+      <RunSuiteForm versionId={version.policy_version_id} versionNumber={version.version_number} />
+      {failing.map((t) => (
+        <WaiverRequestForm key={t.test_case_id} versionId={version.policy_version_id} testCaseId={t.test_case_id} testCode={t.test_code} defaultExpiry={defaultExpiry} />
+      ))}
+      {pending.map((w) => (
+        <div key={w.waiver_id} className="rounded border border-amber-200 p-2 text-[11.5px] dark:border-amber-500/30">
+          <p className="text-amber-800 dark:text-amber-300">
+            Waiver requested by {person(w.requested_by_principal_id).name} until {formatDate(w.expires_at.slice(0, 10))}: {w.justification}
+          </p>
+          <WaiverApproveForm waiverId={w.waiver_id} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PolicyRequirements({
+  family,
+  versions,
+  entities,
+  detail,
+  viewer,
+  asOf,
+}: {
+  family: P.PolicyFamily;
+  versions: P.PolicyVersion[];
+  entities: Map<string, LegalEntity>;
+  detail?: PolicyDetail;
+  viewer: string;
+  asOf: number;
+}) {
+  const certifiable = P.CERTIFIED_POLICY_TYPES.includes(family.policy_type);
+  const testCases = (detail?.testCases.data ?? []).filter((t) => t.test_status === "ACTIVE");
+  const sorted = [...versions].sort((a, b) => (b.version_number ?? 0) - (a.version_number ?? 0) || b.created_at.localeCompare(a.created_at));
+  const live = versions.some((v) => v.version_status === "ACTIVE" || v.version_status === "SCHEDULED");
+  return (
+    <div className="space-y-3 pt-1">
+      {!sorted.length && <Muted>No version has been drafted. A policy sets no rule until a version is drafted, approved and activated.</Muted>}
+      <ul className="space-y-2">
+        {sorted.map((v) => {
+          const threshold = P.formatThreshold(v.rule_payload);
+          return (
+            <li key={v.policy_version_id} data-testid={`version-${v.version_number}`} className="rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[12.5px] font-semibold text-navy-950 dark:text-slate-100" title={v.policy_version_id}>
+                  Version {v.version_number ?? "—"}
+                </p>
+                <span data-testid={`version-${v.version_number}-status`}>
+                  <VersionChip status={v.version_status} />
+                </span>
+              </div>
+              <p className="mt-1 text-[11.5px] text-slate-500 dark:text-slate-400">
+                {formatDate(v.effective_from)} – {v.effective_to ? formatDate(v.effective_to) : "open-ended"} ·{" "}
+                {v.legal_entity_id ? entityName(entities, v.legal_entity_id) : P.describeScope(v)}
               </p>
-              <VersionChip status={v.version_status} />
-            </div>
-            <p className="mt-1 text-[11.5px] text-slate-500 dark:text-slate-400">
-              {formatDate(v.effective_from)} – {v.effective_to ? formatDate(v.effective_to) : "open-ended"} ·{" "}
-              {v.legal_entity_id ? entityName(entities, v.legal_entity_id) : P.describeScope(v)}
-            </p>
-            {threshold && <p className="mt-1 text-[12px] text-navy-950 dark:text-slate-200">Approval needed above {threshold}</p>}
-            {v.rationale && <p className="mt-1 text-[11.5px] text-slate-600 dark:text-slate-300">{v.rationale}</p>}
-            <details className="mt-1">
-              <summary className="cursor-pointer text-[11px] font-medium text-navy-600 dark:text-navy-300">Rule payload</summary>
-              <pre className="mt-1 max-h-40 overflow-auto rounded bg-slate-50 p-2 text-[10.5px] text-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
-                {JSON.stringify(v.rule_payload, null, 2)}
-              </pre>
-            </details>
-          </li>
-        );
-      })}
-    </ul>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                Drafted by {person(v.created_by_principal_id).name}
+                {v.approved_by_principal_id && ` · approved by ${person(v.approved_by_principal_id).name}`}
+                {v.activated_by_principal_id && ` · activated by ${person(v.activated_by_principal_id).name}`}
+              </p>
+              {threshold && <p className="mt-1 text-[12px] text-navy-950 dark:text-slate-200">Approval needed above {threshold}</p>}
+              {v.rationale && <p className="mt-1 text-[11.5px] text-slate-600 dark:text-slate-300">{v.rationale}</p>}
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[11px] font-medium text-navy-600 dark:text-navy-300">Rule payload</summary>
+                <pre className="mt-1 max-h-40 overflow-auto rounded bg-slate-50 p-2 text-[10.5px] text-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                  {JSON.stringify(v.rule_payload, null, 2)}
+                </pre>
+              </details>
+              {certifiable && detail && (
+                <Certification
+                  version={v}
+                  cert={detail.certification.get(v.policy_version_id)}
+                  testCases={testCases}
+                  defaultExpiry={dayOf(asOf + 30 * 86_400_000)}
+                />
+              )}
+              <VersionCommands
+                viewer={viewer}
+                certifiable={certifiable}
+                v={{
+                  policyId: v.policy_id,
+                  versionId: v.policy_version_id,
+                  versionNumber: v.version_number,
+                  status: v.version_status,
+                  rowVersion: v.row_version ?? 1,
+                  effectiveFrom: v.effective_from,
+                  author: v.created_by_principal_id,
+                  suspender: v.suspended_by_principal_id,
+                  future: new Date(v.effective_from).getTime() > asOf,
+                }}
+              />
+            </li>
+          );
+        })}
+      </ul>
+
+      {certifiable && (
+        <Section title={`Test suite (${testCases.length})`}>
+          {detail?.testCases.error ? (
+            <Failed what="The test suite" error={detail.testCases.error} />
+          ) : !testCases.length ? (
+            <Muted>No test case yet. A version of this type is certified against the suite before it can go into force.</Muted>
+          ) : (
+            <ul className="mb-2 space-y-1">
+              {testCases.map((t) => (
+                <li key={t.test_case_id} className="flex items-center justify-between gap-2 rounded border border-slate-200 px-2 py-1.5 text-[11.5px] dark:border-slate-700">
+                  <span className="min-w-0">
+                    <span className="font-mono font-semibold text-navy-950 dark:text-slate-100">{t.test_code}</span>{" "}
+                    <span className="text-slate-500">{t.description}</span>
+                  </span>
+                  <span className="shrink-0 text-slate-500">
+                    {JSON.stringify(t.action_context)} → {t.expected_result}
+                    {t.mandatory ? "" : " · optional"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <TestCaseForm policyId={family.policy_id} />
+        </Section>
+      )}
+
+      {!family.retired_at && !live && (
+        <Section title="Retire this policy">
+          <RetireFamilyForm policyId={family.policy_id} />
+        </Section>
+      )}
+    </div>
   );
 }
 
@@ -383,13 +545,19 @@ function Attestations({ read }: { read: { data: P.Attestation[] | null; error: {
           <p className="text-[11px] text-slate-500">
             {person(a.signer_principal_id).name} ({a.signer_role}) · {formatDate(a.signed_at)}
           </p>
+          {a.revocation_reason && <p className="text-[11px] text-rose-700 dark:text-rose-400">Revoked: {a.revocation_reason}</p>}
+          {(a.attestation_status === "ACTIVE" || a.attestation_status === "CHALLENGED") && (
+            <div className="mt-1.5">
+              <RevokeAttestationForm attestationId={a.attestation_id} />
+            </div>
+          )}
         </li>
       ))}
     </ul>
   );
 }
 
-function PolicyEvidence({ detail }: { detail: PolicyDetail }) {
+function PolicyEvidence({ detail, subjectRef, today }: { detail: PolicyDetail; subjectRef: string; today: string }) {
   const ev = detail.evaluations;
   return (
     <div className="space-y-3">
@@ -408,9 +576,12 @@ function PolicyEvidence({ detail }: { detail: PolicyDetail }) {
                     {formatDateTime(e.evaluated_at)} · ledger {e.ledger_status?.toLowerCase() || "—"}
                   </span>
                 </span>
-                <Badge tone={e.result === "WITHIN_THRESHOLD" ? "success" : e.result === "APPROVAL_REQUIRED" ? "warning" : "neutral"}>
-                  {e.result === "WITHIN_THRESHOLD" ? "Within" : e.result === "APPROVAL_REQUIRED" ? "Approval" : e.result}
-                </Badge>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge tone={e.result === "WITHIN_THRESHOLD" ? "success" : e.result === "APPROVAL_REQUIRED" ? "warning" : "neutral"}>
+                    {e.result === "WITHIN_THRESHOLD" ? "Within" : e.result === "APPROVAL_REQUIRED" ? "Approval" : e.result}
+                  </Badge>
+                  {e.ledger_status === "FAILED" && <RedeliverForm evidenceId={e.evidence_id} />}
+                </span>
               </li>
             ))}
             {ev.data.length > 8 && <Muted>and {ev.data.length - 8} more in the latest 200 evaluations of this type.</Muted>}
@@ -419,12 +590,15 @@ function PolicyEvidence({ detail }: { detail: PolicyDetail }) {
       </Section>
       <Section title="Attestations">
         <Attestations read={detail.attestations} />
+        <div className="mt-2">
+          <AttestationForm subjectRef={subjectRef} today={today} />
+        </div>
       </Section>
     </div>
   );
 }
 
-function ControlEvidence({ row, detail }: { row: Row; detail: ControlDetail }) {
+function ControlEvidence({ row, detail, today }: { row: Row; detail: ControlDetail; today: string }) {
   const e = detail.effectiveness.data;
   const executions = row.executions ?? [];
   return (
@@ -477,12 +651,69 @@ function ControlEvidence({ row, detail }: { row: Row; detail: ControlDetail }) {
       </Section>
       <Section title="Attestations">
         <Attestations read={detail.attestations} />
+        <div className="mt-2">
+          <AttestationForm subjectRef={row.control?.control_ref ?? row.ref} today={today} />
+        </div>
       </Section>
     </div>
   );
 }
 
 type Event = { at: string; title: string; detail?: string; tone?: "ok" | "warn" | "bad" };
+
+function show(v: unknown): string {
+  if (v === undefined || v === null || v === "") return "—";
+  return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+/**
+ * GOV-05 ComparePolicyVersions: a plain GET form (?cb, ?ct), rendered on the
+ * server. Field changes (dates, scope, status) and payload changes (the rule).
+ */
+function Compare({ row, detail, query }: { row: Row; detail: PolicyDetail; query: Query }) {
+  const versions = [...(row.versions ?? [])].sort((a, b) => (a.version_number ?? 0) - (b.version_number ?? 0));
+  if (versions.length < 2) return null;
+  const picked = compareOf(query);
+  const label = (v: P.PolicyVersion) => `Version ${v.version_number ?? "?"} · ${VERSION_CHIP[v.version_status]?.label ?? v.version_status}`;
+  const keep = { ...query, cb: undefined, ct: undefined };
+  const c = detail.comparison;
+  return (
+    <Section title="Compare versions">
+      <form action={BASE} method="get" className="space-y-2" data-testid="compare-versions">
+        {Object.entries(keep).map(([k, v]) => (v ? <input key={k} type="hidden" name={k} value={v} /> : null))}
+        <div className="grid grid-cols-2 gap-2">
+          <select name="cb" aria-label="Base version" defaultValue={picked?.base ?? versions[versions.length - 2].policy_version_id} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-[12px] dark:border-slate-700 dark:bg-slate-900">
+            {versions.map((v) => (
+              <option key={v.policy_version_id} value={v.policy_version_id}>{label(v)}</option>
+            ))}
+          </select>
+          <select name="ct" aria-label="Target version" defaultValue={picked?.target ?? versions[versions.length - 1].policy_version_id} className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-[12px] dark:border-slate-700 dark:bg-slate-900">
+            {versions.map((v) => (
+              <option key={v.policy_version_id} value={v.policy_version_id}>{label(v)}</option>
+            ))}
+          </select>
+        </div>
+        <button type="submit" className={cn(OUTLINE, "w-full")}>Compare</button>
+      </form>
+      {c?.error && <Failed what="The comparison" error={c.error} />}
+      {c?.data && (
+        <div className="mt-2 space-y-1.5 text-[11.5px]" data-testid="comparison">
+          {c.data.same_content && <Muted>The two versions carry the same rule.</Muted>}
+          {c.data.payload_changes.map((ch) => (
+            <p key={`p-${ch.path}`} className="rounded border border-slate-200 px-2 py-1 dark:border-slate-700">
+              <span className="font-mono font-semibold">{ch.path}</span> {ch.change}: {show(ch.base)} → {show(ch.target)}
+            </p>
+          ))}
+          {c.data.field_changes.map((ch) => (
+            <p key={`f-${ch.field}`} className="text-slate-500">
+              {ch.field}: {show(ch.base)} → {show(ch.target)}
+            </p>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
 
 function Timeline({ items }: { items: Event[] }) {
   if (!items.length) return <Muted>Nothing has happened to this record yet.</Muted>;
@@ -507,7 +738,18 @@ function Timeline({ items }: { items: Event[] }) {
 
 const TONE_OF: Record<string, Event["tone"]> = { ACTIVE: "ok", APPROVED: "ok", SUSPENDED: "bad", RETIRED: "warn", REVIEW: "warn" };
 
-function PolicyHistory({ row, detail }: { row: Row; detail: PolicyDetail }) {
+function PolicyHistory({ row, detail, query }: { row: Row; detail: PolicyDetail; query: Query }) {
+  return (
+    <div className="space-y-3">
+      <Compare row={row} detail={detail} query={query} />
+      <Section title="Lifecycle">
+        <PolicyTimeline row={row} detail={detail} />
+      </Section>
+    </div>
+  );
+}
+
+function PolicyTimeline({ row, detail }: { row: Row; detail: PolicyDetail }) {
   if (detail.transitions.error) return <Failed what="The version history" error={detail.transitions.error} />;
   const items: Event[] = (detail.transitions.data ?? []).map((t) => ({
     at: t.occurred_at,

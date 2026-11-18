@@ -76,7 +76,23 @@ export type PolicyType = (typeof POLICY_TYPES)[number];
  */
 export const EVALUABLE_POLICY_TYPES: readonly string[] = ["APPROVAL_THRESHOLD"];
 
-export type VersionStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED" | "RETIRED";
+/**
+ * The types policy-svc certifies before activation (V-001 PDC-05, PDC-I-24):
+ * the ones it has an evaluator for. APPROVAL_THRESHOLD is evaluated, and
+ * SIGNATORY_MATRIX is resolved, here; the others report EXEMPT_NO_EVALUATOR.
+ */
+export const CERTIFIED_POLICY_TYPES: readonly string[] = ["APPROVAL_THRESHOLD", "SIGNATORY_MATRIX"];
+
+/** The GOV-05 version states. */
+export type VersionStatus =
+  | "DRAFT"
+  | "REVIEW"
+  | "APPROVED"
+  | "SCHEDULED"
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "SUPERSEDED"
+  | "RETIRED";
 
 /** Summary KPI row from GET /v1/policies/summary. */
 export type PolicySummary = {
@@ -439,24 +455,21 @@ export async function getEvaluation(
   );
 }
 
-/** Redeliver failed evidence (POST /v1/policy-evaluations/{evidence_id}/redeliver). */
+/**
+ * Re-queue evidence the ledger refused (POST /v1/policy-evaluations/{evidence_id}/redeliver).
+ * Only a FAILED row can be re-driven; the caller's full identity goes with it.
+ */
 export async function redeliverPolicyEvidence(
   evidenceId: string,
   reasonCode: string,
-  callerTenantId: string,
-  callerPrincipalId: string,
+  identity: Identity & { principalId: string },
   reason?: string,
 ): Promise<ApiWriteResult<Evaluation>> {
   return apiPost<Evaluation>(
     "policy",
     `/v1/policy-evaluations/${encodeURIComponent(evidenceId)}/redeliver`,
     { reason_code: reasonCode, reason },
-    {
-      identity: {
-        tenantId: callerTenantId,
-        principalId: callerPrincipalId,
-      },
-    },
+    { identity },
   );
 }
 
@@ -492,6 +505,13 @@ export type ApplicableScope = {
    * tenant is a 403.
    */
   callerTenantId: string;
+  /**
+   * The caller's full identity: principal, legal entity and the signed
+   * envelope. policy-svc authorizes every read (POLICY_READ) and, under
+   * POLICY_IDENTITY_VERIFY=enforce, refuses bare identity headers 401, so a
+   * read sent with the tenant alone is refused. Preferred over callerTenantId.
+   */
+  caller?: Identity;
 };
 
 /**
@@ -513,7 +533,7 @@ export async function listApplicablePolicyVersions(
       tenant_id: scope.tenantId,
       legal_entity_id: scope.legalEntityId,
     },
-    identity: { tenantId: scope.callerTenantId },
+    identity: scope.caller ?? { tenantId: scope.callerTenantId },
   });
 
   if (!result.ok) return result;
@@ -645,6 +665,12 @@ export type CreatePolicyVersionInput = {
    */
   callerLegalEntityId: string;
   policyVersionId?: string;
+  /**
+   * The caller's session identity, carried for its signed envelope. Rebuilding
+   * the identity from the three ids above dropped the envelope, and under
+   * POLICY_IDENTITY_VERIFY=enforce policy-svc answered every version draft 401.
+   */
+  caller?: Identity;
 };
 
 /**
@@ -670,6 +696,7 @@ export async function createPolicyVersion(
     },
     {
       identity: {
+        ...input.caller,
         principalId: input.principalId,
         tenantId: input.callerTenantId,
         legalEntityId: input.callerLegalEntityId,
@@ -679,15 +706,24 @@ export async function createPolicyVersion(
 }
 
 /**
- * Activate a DRAFT version, superseding whatever held its scope before.
+ * Activate an APPROVED version, superseding whatever held its scope before
+ * (or scheduling it, when its effective_from is in the future).
  *
- * The single write in this service that changes what gets enforced. Legal only
- * from DRAFT: activating an ACTIVE or SUPERSEDED version is a 409, because
- * re-activation would rewrite the version's own activation attribution.
+ * The single write in this service that changes what gets enforced. GOV-05:
+ * only an APPROVED version can go live (409 APPROVAL_REQUIRED otherwise), its
+ * author cannot activate it (403 SOD_CONFLICT), and an evaluable type must be
+ * certified against its family's test suite first (409 CERTIFICATION_REQUIRED).
+ * Activating a version already ACTIVE answers 200 and changes nothing.
  */
 export async function activatePolicyVersion(input: {
   policyId: string;
   versionId: string;
+  /**
+   * The version's row_version, read just before. policy-svc refuses a
+   * lifecycle command that names no version (428) and one that names a stale
+   * version (412): a command never applies to "whatever is there now".
+   */
+  expectedVersion: number;
   /**
    * The full caller identity, not just the principal.
    *
@@ -705,7 +741,9 @@ export async function activatePolicyVersion(input: {
     `/v1/policies/${encodeURIComponent(input.policyId)}/versions/${encodeURIComponent(
       input.versionId,
     )}/activate`,
-    { activated_by_principal_id: input.identity.principalId },
+    // activated_by_principal_id is not sent: policy-svc takes the activator
+    // from the authenticated principal and ignores the body field.
+    { expected_version: input.expectedVersion },
     { identity: input.identity },
   );
 }
@@ -1049,17 +1087,21 @@ export async function getAttestation(
   );
 }
 
+/**
+ * Revoke an attestation (ACTIVE or CHALLENGED → REVOKED; a second revocation
+ * is 409). Takes the caller's full identity: a material write carries the
+ * legal entity and the signed envelope, not just tenant and principal.
+ */
 export async function revokeAttestation(
   id: string,
-  callerTenantId: string,
-  callerPrincipalId: string,
+  identity: Identity & { principalId: string },
   reason?: string,
 ): Promise<ApiWriteResult<Attestation>> {
   return apiPost<Attestation>(
     "policy",
     `/v1/attestations/${encodeURIComponent(id)}/revoke`,
     { reason },
-    { identity: { tenantId: callerTenantId, principalId: callerPrincipalId } },
+    { identity },
   );
 }
 
@@ -1099,7 +1141,7 @@ export async function resolveEffectivePolicy(
       legal_entity_id: scope.legalEntityId,
       ...query,
     },
-    identity: { tenantId: scope.callerTenantId },
+    identity: scope.caller ?? { tenantId: scope.callerTenantId },
   });
 }
 
@@ -1119,7 +1161,7 @@ export async function explainPolicyResolution(
       legal_entity_id: scope.legalEntityId,
       ...query,
     },
-    identity: { tenantId: scope.callerTenantId },
+    identity: scope.caller ?? { tenantId: scope.callerTenantId },
   });
 }
 
@@ -1268,7 +1310,9 @@ export async function draftAccountingPolicy(
       rationale: input.rationale,
     },
     {
+      // Spread first so the signed envelope travels with the explicit ids.
       identity: {
+        ...input.identity,
         principalId: input.identity.principalId,
         tenantId: input.callerTenantId,
         legalEntityId: input.callerLegalEntityId,

@@ -237,15 +237,12 @@ export function CreateVersionForm({ defaultPolicyId }: { defaultPolicyId?: strin
             required
             className={FIELD}
           />
-          {/* This said "Starts applying — the date from which this limit is the
-              one that counts", which is not what the service does: it records
-              the date and never checks it, so a future date does not hold the
-              limit back. A label that promises date-gating is worse than no
-              label, because someone would use it to schedule a change. */}
+          {/* policy-svc gates on this date since GOV-05 (bitemporal resolution):
+              a version decides only inside its effective window, and activating
+              an approved version dated in the future schedules it instead. */}
           <p className={HINT}>
-            Recorded against the limit, but it does not delay anything — once brought into
-            force, the limit decides immediately even if this date is in the future. It is used
-            only to rank two limits of the same scope, where the later date wins.
+            The date this version starts to decide. A future date schedules it: once approved and
+            activated, it takes over on that date and not before.
           </p>
         </div>
         <div className="sm:col-span-2">
@@ -354,8 +351,9 @@ export function ActivateVersionForm() {
           {pending ? "Applying…" : "Bring it into force"}
         </Button>
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          Replaces whatever applies to the same scope today. It cannot be undone, and it is
-          recorded against your name.
+          Only an approved version can be brought into force, never by its author, and an
+          approval threshold must be certified against its test suite first. It replaces whatever
+          applies to the same scope, and it is recorded against your name.
         </p>
       </div>
 
