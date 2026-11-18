@@ -32,8 +32,10 @@ import {
   thresholdAmount,
   EVALUABLE_POLICY_TYPES,
   POLICY_TYPES,
+  createControlTestDefinition,
+  createControlTestExecution,
 } from "@/lib/api/policies";
-import type { EvaluateState, PolicyWriteState } from "./state";
+import type { ControlWriteState, EvaluateState, PolicyWriteState } from "./state";
 
 // Writes end in refresh(), not revalidatePath. Nothing on this route is cached
 // — cacheComponents is off and every panel reads cookies() for the session — so
@@ -442,4 +444,91 @@ export async function submitEvaluation(
     decisionId,
     message: "",
   };
+}
+
+// ── controls (doc7 §E3, §I3) ────────────────────────────────────────────────
+
+/** Define a control test: the methodology a control is tested by. Immutable once created. */
+export async function submitControlTest(_previous: ControlWriteState, formData: FormData): Promise<ControlWriteState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+  const field = (k: string) => String(formData.get(k) ?? "").trim();
+  const controlRef = field("control_ref");
+  const testCode = field("test_code");
+  const title = field("title");
+  const methodology = field("methodology");
+  if (!controlRef || !testCode || !title || !methodology) {
+    return { status: "error", message: "A control reference, test code, title and methodology are all required." };
+  }
+  const result = await createControlTestDefinition({
+    controlRef,
+    testCode,
+    title,
+    methodology,
+    sampleApproach: field("sample_approach") || undefined,
+    testFrequency: field("test_frequency") || undefined,
+    identity,
+  });
+  if (!result.ok) {
+    return {
+      status: result.error.status === 409 ? "conflict" : "error",
+      message:
+        result.error.status === 409
+          ? "A control test with that code already exists with a different definition. Definitions are immutable: choose a new test code for a changed methodology."
+          : explainPolicyError(result.error.message, { status: result.error.status }),
+    };
+  }
+  refresh();
+  return result.status === 201
+    ? { status: "created", message: `Control test ${testCode} is defined. Record its first test result from the control's Evidence tab.` }
+    : { status: "replayed", message: `Control test ${testCode} already existed with exactly these details; nothing was changed.` };
+}
+
+/** Record one test run of a control: the operating-effectiveness evidence. */
+export async function submitControlExecution(_previous: ControlWriteState, formData: FormData): Promise<ControlWriteState> {
+  let identity: SessionIdentity;
+  try {
+    identity = await requireIdentity();
+  } catch {
+    return EXPIRED;
+  }
+  const field = (k: string) => String(formData.get(k) ?? "").trim();
+  const definitionId = field("control_test_definition_id");
+  const periodStart = field("period_start");
+  const periodEnd = field("period_end");
+  const resultValue = field("result");
+  if (!definitionId || !periodStart || !periodEnd || !resultValue) {
+    return { status: "error", message: "The tested period and the result are required." };
+  }
+  if (periodEnd <= periodStart) {
+    return { status: "error", message: "The period must end after it starts." };
+  }
+  const evidenceRefs = field("evidence_refs")
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const result = await createControlTestExecution({
+    controlTestDefinitionId: definitionId,
+    periodStart: new Date(`${periodStart}T00:00:00Z`).toISOString(),
+    periodEnd: new Date(`${periodEnd}T23:59:59Z`).toISOString(),
+    result: resultValue,
+    sampleDescription: field("sample_description") || undefined,
+    procedureNotes: field("procedure_notes") || undefined,
+    exceptionsNoted: field("exceptions_noted") || undefined,
+    evidenceRefs: evidenceRefs.length ? evidenceRefs : undefined,
+    identity,
+    callerTenantId: identity.tenantId,
+  });
+  if (!result.ok) {
+    return {
+      status: result.error.status === 409 ? "conflict" : "error",
+      message: explainPolicyError(result.error.message, { status: result.error.status }),
+    };
+  }
+  refresh();
+  return { status: "created", message: `Test result ${resultValue} recorded for ${periodStart} – ${periodEnd}.` };
 }

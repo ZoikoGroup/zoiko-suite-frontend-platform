@@ -60,7 +60,7 @@ test("purchase-request decisions always send expected_version", () => {
 // so it vanished the moment it succeeded.
 test("open-voting confirmation is rendered once the resolution is OPEN", () => {
   const src = read("components/admin/legal/ResolutionActions.tsx");
-  const openBranch = src.slice(src.indexOf("// OPEN\n"));
+  const openBranch = src.slice(src.indexOf("// OPEN"));
   assert.ok(openBranch.length < src.length, "OPEN branch marker not found");
   assert.match(openBranch, /<ActionFeedback state=\{openState\} \/>/);
 });

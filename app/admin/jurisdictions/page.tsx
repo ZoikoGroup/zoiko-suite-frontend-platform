@@ -1,188 +1,108 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
+import { Download } from "lucide-react";
 import { PageHeader } from "@/components/admin/shared";
-import {
-  JurisdictionRegisterPanel,
-  RegisterJurisdictionForm,
-  RecordRuleForm,
-  RulePackExplorer,
-} from "@/components/admin/jurisdictions";
-import { listJurisdictions } from "@/lib/api/jurisdictions";
+import { ControlsFooter, RegisterCard } from "@/components/admin/console";
+import { SignInAgain } from "@/components/admin/authorization/kit";
+import { currentSession } from "@/lib/authz-inbox";
+import { BASE, TABS, loadJurisdictions, loadPacks, loadSources, tabHref, tabOf, type Ctx, type Query, type TabKey } from "@/components/admin/jurisdictions/console/data";
+import { JurisdictionKpis, JurisdictionPanels, ScopeChips } from "@/components/admin/jurisdictions/console/overview";
+import { RegistryActions, RegistryTab } from "@/components/admin/jurisdictions/console/registry";
+import { ProposeRule, RulesTab } from "@/components/admin/jurisdictions/console/rules";
+import { PacksActions, PacksTab } from "@/components/admin/jurisdictions/console/packs";
+import { ApplicabilityActions, ApplicabilityTab } from "@/components/admin/jurisdictions/console/applicability";
+import { SourcesActions, SourcesTab } from "@/components/admin/jurisdictions/console/sources";
+import { HistoryTab } from "@/components/admin/jurisdictions/console/history";
+import { RolloutsActions, RolloutsTab } from "@/components/admin/jurisdictions/console/rollouts";
+import { CalendarsActions, CalendarsTab } from "@/components/admin/jurisdictions/console/calendars";
+import { TermsActions, TermsTab } from "@/components/admin/jurisdictions/console/terms";
+import { ObligationsActions, ObligationsTab } from "@/components/admin/jurisdictions/console/obligations";
+import { RemediationActions, RemediationTab } from "@/components/admin/jurisdictions/console/remediation";
 
-export const metadata: Metadata = { title: "Jurisdictions | Zoiko Suite" };
+export const metadata: Metadata = { title: "Jurisdictions & Rules | Zoiko Suite" };
 
-function PanelSkeleton({ rows = 4 }: { rows?: number }) {
+export default async function JurisdictionsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams;
+  const query: Query = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
+  const tab = tabOf(query);
+  query.tab = tab === "registry" ? undefined : tab;
+
+  const current = await currentSession();
+  if (!current) {
+    return (
+      <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <SignInAgain returnTo={BASE} />
+      </div>
+    );
+  }
+  const ctx: Ctx = { identity: current.identity, me: current.identity.principalId };
+  const [jurisdictions, packs, sources] = await Promise.all([loadJurisdictions(ctx.identity), loadPacks(ctx.identity), loadSources(ctx.identity)]);
+  const jList = jurisdictions.data ?? [];
+
+  const counts: Partial<Record<TabKey, number>> = {
+    ...(jurisdictions.data ? { registry: jurisdictions.data.length } : {}),
+    ...(packs.data ? { packs: packs.data.length } : {}),
+    ...(sources.data ? { sources: sources.data.length } : {}),
+  };
+
+  const actions: Partial<Record<TabKey, React.ReactNode>> = {
+    registry: <RegistryActions jurisdictions={jList} />,
+    packs: <PacksActions />,
+    applicability: <ApplicabilityActions jurisdictions={jList} />,
+    sources: <SourcesActions ctx={ctx} jurisdictions={jList} />,
+    rollouts: <RolloutsActions />,
+    calendars: <CalendarsActions jurisdictions={jList} />,
+    terms: <TermsActions jurisdictions={jList} code={query.term?.trim().toUpperCase() || undefined} />,
+    obligations: <ObligationsActions jurisdictions={jList} />,
+    remediation: <RemediationActions />,
+  };
+
   return (
-    <div className="space-y-2">
-      {Array.from({ length: rows }).map((_, i) => (
-        <Skeleton key={i} className="h-12 w-full rounded-lg" />
-      ))}
-    </div>
-  );
-}
-
-/**
- * The forms need the register to offer real jurisdictions.
- *
- * A free-text UUID field is the alternative, and it is the same trap the
- * obligations page already documented: every value a human types comes back
- * 404, because this register is the thing that decides whether an id exists.
- * When the service is unreachable the selects are empty rather than absent —
- * the panel above says why, and a form offering nothing is more honest than one
- * offering a text box that cannot succeed.
- */
-async function JurisdictionForms() {
-  const result = await listJurisdictions();
-  const jurisdictions = result.ok ? result.data : [];
-  return (
-    <>
-      <Card className="mb-6">
-        <CardHeader>
-          <div>
-            <CardTitle>Resolve a rule pack</CardTitle>
-            <CardDescription>
-              What actually applies somewhere, at a date. Rules are collected from the jurisdiction
-              and every ancestor, then narrowed so exactly one wins per domain and code — the most
-              specific jurisdiction first, then the latest effective-from within it. The chain the
-              answer was assembled from is shown with it, because a governed decision has to be able
-              to explain its own basis afterwards.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <RulePackExplorer jurisdictions={jurisdictions} />
-        </CardContent>
-      </Card>
-
-      <Card className="mb-6">
-        <CardHeader>
-          <div>
-            <CardTitle>Register a jurisdiction</CardTitle>
-            <CardDescription>
-              Governed and platform-scoped: authorization-svc must grant JURISDICTION_CREATE on the
-              platform scope, not on a legal entity — &ldquo;GB&rdquo; is not owned by one. An
-              identical re-submission answers 200 and writes nothing; the same key with different
-              attributes is refused, because that redefines a jurisdiction other records are already
-              bound to.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <RegisterJurisdictionForm jurisdictions={jurisdictions} />
-        </CardContent>
-      </Card>
-
-      <Card className="mb-6">
-        <CardHeader>
-          <div>
-            <CardTitle>Record a rule</CardTitle>
-            <CardDescription>
-              An applicability rule attached to one jurisdiction. It resolves into that
-              jurisdiction&rsquo;s rule pack and into every jurisdiction nested inside it, unless one
-              of them declares the same code itself.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <RecordRuleForm jurisdictions={jurisdictions} />
-        </CardContent>
-      </Card>
-    </>
-  );
-}
-
-export default function JurisdictionsPage() {
-  return (
-    <div>
+    <div className="space-y-5">
       <PageHeader
         title="Jurisdictions & Rules"
-        description="The register every other service defers to for “which law applies here”. Jurisdictions nest, their rules are effective-dated, and legal drift is tracked separately from whether a rule is in force."
+        description="Govern jurisdiction coverage, authoritative sources, rule-pack versions, and applicability decisions across the organization."
+        actions={
+          <>
+            <a
+              href={`${BASE}/export`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-navy-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <Download className="h-4 w-4" />
+              Export registry
+            </a>
+            <ProposeRule jurisdictions={jList} defaultJurisdiction={query.jur} />
+          </>
+        }
       />
 
-      <Card className="mb-6">
-        <CardHeader>
-          <div>
-            <CardTitle>Jurisdiction register</CardTitle>
-            <CardDescription>
-              Every registered jurisdiction and how it nests. obligations-svc and
-              tenant-entity-registry-svc both validate against this register and fail closed, so an
-              id that does not resolve here resolves nowhere — and while this service is unreachable,
-              no obligation can be raised at all.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Suspense fallback={<PanelSkeleton />}>
-            <JurisdictionRegisterPanel />
-          </Suspense>
-        </CardContent>
-      </Card>
+      <JurisdictionKpis identity={ctx.identity} />
+      <JurisdictionPanels identity={ctx.identity} />
 
-      <Suspense fallback={<PanelSkeleton rows={6} />}>
-        <JurisdictionForms />
-      </Suspense>
+      <div className="space-y-2">
+        <ScopeChips identity={ctx.identity} />
+        <RegisterCard
+          active={tab}
+          tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: counts[t.key], href: tabHref(t.key) }))}
+          actions={actions[tab]}
+        >
+          {tab === "registry" && <RegistryTab query={query} ctx={ctx} />}
+          {tab === "rules" && <RulesTab query={query} ctx={ctx} />}
+          {tab === "packs" && <PacksTab query={query} ctx={ctx} />}
+          {tab === "applicability" && <ApplicabilityTab query={query} ctx={ctx} />}
+          {tab === "sources" && <SourcesTab query={query} ctx={ctx} />}
+          {tab === "history" && <HistoryTab query={query} ctx={ctx} />}
+          {tab === "rollouts" && <RolloutsTab query={query} ctx={ctx} />}
+          {tab === "calendars" && <CalendarsTab query={query} ctx={ctx} />}
+          {tab === "terms" && <TermsTab query={query} ctx={ctx} />}
+          {tab === "obligations" && <ObligationsTab query={query} ctx={ctx} />}
+          {tab === "remediation" && <RemediationTab query={query} ctx={ctx} />}
+        </RegisterCard>
+      </div>
 
-      <Card className="border-amber-200 dark:border-amber-500/30">
-        <CardHeader>
-          <div>
-            <CardTitle>What this register does not decide</CardTitle>
-            <CardDescription>
-              Recorded here because the panels above cannot show it, and a reader who assumes
-              otherwise would trust this service further than it can carry
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-3 text-sm text-slate-600 dark:text-slate-300">
-            <li className="flex gap-2.5">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-              <span>
-                <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Applicability, never amounts.
-                </strong>{" "}
-                A rule payload says who a rule applies to, how often they file, and which authority
-                it answers to. Thresholds, rates and bands belong to the Tax and Payroll services — a
-                figure recorded here would be a second copy of a number this register does not own,
-                and the two would drift apart silently.
-              </span>
-            </li>
-            <li className="flex gap-2.5">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-              <span>
-                <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Drift is asserted, not detected.
-                </strong>{" "}
-                Nothing watches legislation and marks a rule DRIFTED. Someone records it, with their
-                reason, and the history is append-only. A rule showing CURRENT means nobody has said
-                otherwise — not that it has been checked.
-              </span>
-            </li>
-            <li className="flex gap-2.5">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-              <span>
-                <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  A drifted rule is still in force.
-                </strong>{" "}
-                Legal drift and rule status are separate axes on purpose. A rule can be ACTIVE and
-                DRIFTED at once — still resolving into every pack, and known to have diverged from
-                the law it encodes. That combination is the thing worth looking for on this page.
-              </span>
-            </li>
-            <li className="flex gap-2.5">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
-              <span>
-                <strong className="font-medium text-slate-800 dark:text-slate-100">
-                  Reads are public; writes are not.
-                </strong>{" "}
-                Jurisdictions are PUBLIC-classified reference data, so the read endpoints take no
-                credential — that is deliberate, not a gap. Every mutation is authorized and fails
-                closed.
-              </span>
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
+      <ControlsFooter right="jurisdiction-rules-svc · live data">
+        Production controls: bitemporal effective dates · maker-checker on rules, sources, imports, calendars and packs · only signed packs deploy · source
+        provenance · tamper-evident outbox and decision evidence
+      </ControlsFooter>
     </div>
   );
 }

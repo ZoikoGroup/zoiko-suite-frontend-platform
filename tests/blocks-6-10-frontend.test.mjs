@@ -189,7 +189,12 @@ test("an expired or tampered session cannot loop between /login and /admin", () 
   for (const f of ["app/login/page.tsx", "app/page.tsx"]) {
     assert.match(read(f), /decodeSession\(cookieStore\.get\(SESSION_COOKIE\)\?\.value\)/, `${f} trusts a cookie it did not verify`);
   }
-  assert.match(read("proxy.ts"), /res\.cookies\.delete\(SESSION_COOKIE\)/);
+  // The redirect to /login drops a cookie that no longer opens a session, by
+  // deleting it or by setting it empty with maxAge 0 (proxy.ts toLogin).
+  assert.match(
+    read("proxy.ts"),
+    /\.cookies\.delete\(SESSION_COOKIE\)|\.cookies\.set\(SESSION_COOKIE,\s*"",\s*\{\s*maxAge:\s*0/,
+  );
 });
 
 test("compliance.ts has no dead reads against routes or shapes the services do not have", () => {

@@ -12,7 +12,7 @@
 // can correct and resend. Nothing here decides anything: the service does.
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { CheckCircle2, Clock, Fingerprint, KeyRound, LogIn, ShieldAlert, X, XCircle } from "lucide-react";
 import { beginPasskeyStepUpAction, finishPasskeyStepUpAction, stepUpAction } from "@/app/admin/account/actions";
@@ -53,6 +53,13 @@ export type ActionDialogProps = {
   children?: ReactNode;
   /** Shown above the buttons, e.g. "This takes effect only once approved." */
   footnote?: ReactNode;
+  /**
+   * The action does not refresh the page itself; the page is refreshed when
+   * the person closes a done or pending result. A command that only exists in
+   * one state (an "Activate" on a DRAFT) would otherwise be re-rendered away,
+   * taking its dialog and the result with it, the moment its action succeeds.
+   */
+  refreshOnClose?: boolean;
 };
 
 export function ActionDialog({
@@ -69,10 +76,12 @@ export function ActionDialog({
   reasons,
   children,
   footnote,
+  refreshOnClose = false,
 }: ActionDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<"form" | "verify" | "result">("form");
   const [result, setResult] = useState<AuthzResult | null>(null);
@@ -95,8 +104,10 @@ export function ActionDialog({
   }
 
   function close() {
+    const changed = refreshOnClose && (result?.status === "done" || result?.status === "pending");
     setOpen(false);
     reset();
+    if (changed) router.refresh();
   }
 
   function settle(r: AuthzResult) {

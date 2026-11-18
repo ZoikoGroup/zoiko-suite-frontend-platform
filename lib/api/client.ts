@@ -87,9 +87,18 @@ type GetOptions = EnvelopeOptions & {
   /** Query parameters. Undefined and empty values are dropped. */
   query?: Record<string, string | number | undefined>;
   identity?: Identity;
+  /**
+   * Called with the response headers of a successful read. API-3 services
+   * answer a record's version as its ETag; a console that sends If-Match on
+   * the next command reads it here (see lib/api/jurisdictions/core.ts).
+   */
+  onHeaders?: (headers: Headers) => void;
 };
 
-type WriteOptions = EnvelopeOptions & { identity?: Identity };
+type WriteOptions = EnvelopeOptions & { 
+  identity?: Identity;
+  extraHeaders?: Record<string, string>;
+};
 
 /**
  * GET a JSON resource from a backend service.
@@ -155,6 +164,7 @@ export async function apiGet<T>(
     };
   }
 
+  options.onHeaders?.(response.headers);
   try {
     return { ok: true, data: (await response.json()) as T };
   } catch {
@@ -293,6 +303,8 @@ async function apiWrite<T>(
 ): Promise<ApiWriteResult<T>> {
   const url = absoluteURL ? path : serviceUrl(service) + path;
 
+  const { extraHeaders, ...envelopeOptions } = options;
+
   let response: Response;
   try {
     response = await fetch(url, {
@@ -304,7 +316,8 @@ async function apiWrite<T>(
         // envelope carries an idempotency key (INV-08). DELETE included: it is
         // idempotent at the HTTP level but not at the accounting level, and the
         // registry's end-dating routes use it.
-        ...envelopeHeaders({ ...options, materialWrite: true }),
+        ...envelopeHeaders({ ...envelopeOptions, materialWrite: true }),
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
