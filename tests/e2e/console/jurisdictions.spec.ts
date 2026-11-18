@@ -11,7 +11,11 @@ const USERS = {
   maker: { email: "admin@zoikosuite.com", password: "Zoiko@Governance1" },
   checker: { email: "legal.counsel@zoikosuite.com", password: "Zoiko@Legal2026!" },
   third: { email: "tax.officer@zoikosuite.com", password: "Zoiko@Tax2026!" },
+  // A hotfix needs two independent approving reviewers besides the certifier,
+  // so a fourth person with JURISDICTION grants on the platform scope.
+  fourth: { email: "cfo@zoikosuite.com", password: "Zoiko@Finance2026!" },
 } as const;
+const FOURTH_ID = "55555555-5555-5555-5555-555555555555";
 type Who = keyof typeof USERS;
 
 const J = "/admin/jurisdictions";
@@ -108,6 +112,8 @@ async function run(page: Page, opts: { path?: string; button: string; row?: stri
       const hit =
         value === "__first__"
           ? options.find((o) => o.v)
+          : value === "__second__"
+            ? options.filter((o) => o.v)[1]
           : (options.find((o) => o.v === value) ?? options.find((o) => o.t === value) ?? options.find((o) => o.t.includes(value) || (o.v && o.v.includes(value))));
       expect(hit, `no option "${value}" in "${name}": ${options.map((o) => o.t).join(" | ")}`).toBeTruthy();
       await el.selectOption(hit!.v);
@@ -155,6 +161,7 @@ test.describe("Jurisdictions & Rules console (live)", () => {
   let maker: Page;
   let checker: Page;
   let third: Page;
+  let fourth: Page;
   const S: Record<string, string> = {};
 
   test.beforeAll(async ({ browser }) => {
@@ -164,10 +171,11 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     test.skip(/The jurisdiction register unavailable|could not be reached/.test(body), "jurisdiction-rules-svc is not reachable from this console");
     checker = await signIn(browser, "checker");
     third = await signIn(browser, "third");
+    fourth = await signIn(browser, "fourth");
   });
 
   test.afterAll(async () => {
-    for (const p of [maker, checker, third]) await p?.context().close();
+    for (const p of [maker, checker, third, fourth]) await p?.context().close();
   });
 
   test("a jurisdiction, and an import applied by a second person", async () => {
@@ -380,7 +388,8 @@ test.describe("Jurisdictions & Rules console (live)", () => {
         due("due-extension", "NEGATIVE", { period_end: "2026-09-30", extension_days: 1, extension_evidence_ref: `E2E-${RUN}` }, { outcome: "EXTENSION_NOT_PERMITTED" }),
       ],
     };
-    await must(maker, ["done"], { path: at("certification"), button: "Submit test bundle", fields: { bundle: JSON.stringify(bundle) } });
+    S.bundle = JSON.stringify(bundle);
+    await must(maker, ["done"], { path: at("certification"), button: "Submit test bundle", fields: { bundle: S.bundle } });
     const runResult = await must(maker, ["done"], { path: at("certification"), button: "Run tests" });
     expect(runResult.text).toMatch(/passed/);
     await open(maker, at("certification"));
@@ -426,6 +435,50 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     });
     expect(sub.text).toMatch(/^Submission registered as /);
     expect(sub.details["Submission id"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("a hotfix: two independent reviewers, then the incident commander's ring-order exception", async () => {
+    const v1 = "2026.11.1";
+    const hv = "2026.11.2";
+    const at = (ver: string, pane = "") => `${J}?tab=packs&id=${S.ref}&ver=${ver}${pane ? `&pane=${pane}` : ""}`;
+    // The released version also runs in the second ring: the known-good fallback there.
+    await must(maker, ["done"], { path: at(v1, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region } });
+
+    await must(maker, ["done"], {
+      path: `${J}?tab=packs&id=${S.ref}`,
+      button: "New version",
+      fields: { pack_version: hv, effective_from: "2026-01-01", jurisdiction_codes: CODE, regimes: "VAT", rule_modules: `${S.rid}\n${S.pid}`, calendar_modules: S.calV1, obligation_modules: S.oid },
+    });
+    await must(maker, ["done"], {
+      path: at(hv, "release"),
+      button: "Declare hotfix",
+      fields: { severity: "P0", incident_ref: `INC-E2E-${RUN}`, incident_commander: FOURTH_ID, rollback_target_version: v1, scope_summary: "Correct the reduced-rate threshold before the filing deadline" },
+    });
+    await must(maker, ["done"], { path: at(hv), button: "Submit for review" });
+    await must(maker, ["done"], { path: at(hv), button: "Compile" });
+    await must(maker, ["done"], { path: at(hv), button: "Sign" });
+    await must(maker, ["done"], { path: at(hv, "certification"), button: "Submit test bundle", fields: { bundle: S.bundle } });
+    expect((await must(maker, ["done"], { path: at(hv, "certification"), button: "Run tests" })).text).toMatch(/passed/);
+
+    // Enhanced review (JUR-NEG-14): one approving reviewer is not enough for a hotfix.
+    await must(checker, ["done"], { path: at(hv, "certification"), button: "Add review", fields: { role: "TAX", decision: "APPROVE", findings: "Threshold correction checked" } });
+    const early = await must(third, ["refused", "error"], { path: at(hv, "certification"), button: "Certify" });
+    expect(early.text).toMatch(/2 required|two independent|insufficient/i);
+    await must(fourth, ["done"], { path: at(hv, "certification"), button: "Add review", fields: { role: "LEGAL", decision: "APPROVE", findings: "Scope limited to the threshold" } });
+    await must(third, ["done"], { path: at(hv, "certification"), button: "Certify" });
+    await must(maker, ["done"], { path: at(hv), button: "Publish" });
+
+    // Ring order holds for a hotfix too; only its incident commander may take the exception.
+    const inOrder = await must(maker, ["refused", "error"], { path: at(hv, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region } });
+    expect(inOrder.text).toMatch(/previous_ring_not_deployed|previous ring/i);
+    const notIC = await must(maker, ["refused", "error"], { path: at(hv, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region, exception_reason: "Filing deadline in two hours" } });
+    expect(notIC.text).toMatch(/exception_requires_incident_commander|incident commander/i);
+    const byIC = await must(fourth, ["done"], { path: at(hv, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region, exception_reason: "Filing deadline in two hours" } });
+    expect(byIC.text).toMatch(/^Deployed to /);
+
+    await must(fourth, ["done"], { path: at(hv, "release"), button: "Record retrospective", fields: { note: "Root cause: threshold transcribed from the draft guidance. Added a boundary case at the threshold." } });
+    const released = await open(maker, at(hv, "release"));
+    expect(released).toMatch(/retrospective done/);
   });
 
   test("a negative answer is shown with its recorded decision", async () => {
