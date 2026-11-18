@@ -20,6 +20,7 @@ import { exportToCSV } from "@/lib/export";
 import type { TaxHealthResponse } from "@/app/api/backend/tax-health/route";
 import type { JurisdictionOptions } from "./jurisdiction-options";
 import { NewTaxRuleForm, DeterminationForm } from "./TaxRuleForms";
+import { PickList } from "@/components/admin/shared/PickList";
 
 // ── Modal shell ───────────────────────────────────────────────────────────────
 function ModalShell({
@@ -214,7 +215,20 @@ function FilingAssemblyPanel({ onClose, jurisdictions }: { onClose: () => void; 
                   ["due_date", "Due date", "date"],
                 ] as const).map(([k, label, type]) => (
                   <div key={k}>
-                    {k === "jurisdiction_id" ? (
+                    {k === "filing_type" ? (
+                      <>
+                        <label htmlFor="fil-filing_type" className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">{label}</label>
+                        <PickList
+                          id="fil-filing_type"
+                          name="filing_type"
+                          kind="evidence-domains"
+                          value={form.filing_type}
+                          onChange={(v) => setForm((f) => ({ ...f, filing_type: v }))}
+                          className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                          empty="No evidence requirement is defined for this entity."
+                        />
+                      </>
+                    ) : k === "jurisdiction_id" ? (
                       <JurisdictionSelect
                         id="fil-jurisdiction_id"
                         name="jurisdiction_id"

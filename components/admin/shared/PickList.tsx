@@ -25,9 +25,13 @@ type Props = {
   onChange?: (value: string) => void;
   /** Allow a value not in the list (kept as typed, e.g. a free category). */
   allowOther?: boolean;
+  /** Choose several (sent as repeated form values). */
+  multiple?: boolean;
+  /** Values selected at first (multiple only), e.g. the signed-in principal. */
+  initial?: string[];
 };
 
-export function PickList({ id, name, kind, className, required, blank = "Select…", empty = "Nothing to choose from yet", value, onChange, allowOther }: Props) {
+export function PickList({ id, name, kind, className, required, blank = "Select…", empty = "Nothing to choose from yet", value, onChange, allowOther, multiple, initial }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
 
   useEffect(() => {
@@ -41,6 +45,44 @@ export function PickList({ id, name, kind, className, required, blank = "Select�
   }, [kind]);
 
   const controlled = value !== undefined ? { value, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => onChange?.(e.target.value) } : { defaultValue: "" };
+
+  if (multiple) {
+    return (
+      <>
+        <select
+          id={id}
+          name={name}
+          multiple
+          required={required}
+          aria-required={required}
+          size={Math.min(6, Math.max(3, options?.ok ? options.items.length : 3))}
+          // Re-mounted once the options arrive so the initial selection applies to them.
+          key={options?.ok ? "loaded" : "loading"}
+          defaultValue={initial ?? []}
+          className={className}
+        >
+          {/* An initial value the register does not list (the signed-in principal,
+              taken from the session) is still offered, labelled as such. */}
+          {(initial ?? [])
+            .filter((v) => !(options?.ok && options.items.some((o) => o.value === v)))
+            .map((v) => (
+              <option key={v} value={v}>
+                You (signed in) · {v}
+              </option>
+            ))}
+          {options?.ok &&
+            options.items.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+        </select>
+        {options === null && <p className="mt-1 text-[11px] text-slate-400">Loading…</p>}
+        {options && !options.ok && <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">Could not be read: {options.error}</p>}
+        {options?.ok && options.items.length === 0 && <p className="mt-1 text-[11px] text-slate-400">{empty}</p>}
+      </>
+    );
+  }
 
   if (allowOther) {
     // A typed value is allowed; the list only suggests.

@@ -11,7 +11,7 @@
 import crypto from "node:crypto";
 import type { Browser, Locator, Page } from "@playwright/test";
 import { expect, test, type BrowserHealth } from "./browser-health";
-import { ID, TAG, TODAY, consoleApi, list, liveOnly, seed, sessionValue, signIn } from "./live";
+import { ID, TAG, TODAY, consoleApi, list, liveOnly, pickFromRegister, seed, seedClause, seedCounterparty, sessionValue, signIn } from "./live";
 
 liveOnly();
 
@@ -88,11 +88,14 @@ async function otherTenantSeesNone(
 // ── Block 6: legal ──────────────────────────────────────────────────────────
 
 test("legal: record an obligation; it is listed, a blank title is refused by the service, another tenant sees nothing", async ({ page, browser, browserHealth }) => {
+  // The source is picked from the clause register, never typed.
+  const clauseTitle = `ui obligation source ${TAG}`;
+  const clauseId = await seedClause(page.request, clauseTitle);
   await open(page, "/admin/legal");
   const form = formOf(page, "Record obligation");
   const title = `ui obligation ${TAG}`;
-  await form.locator("#obl-source-type").selectOption("CONTRACT");
-  await form.locator("#obl-source-id").fill(crypto.randomUUID());
+  await form.locator("#obl-source-type").selectOption("CLAUSE");
+  expect(await pickFromRegister(form.locator("#obl-source-id"), clauseTitle)).toBe(clauseId);
   await form.locator("#obl-risk").selectOption("HIGH");
   await form.locator("#obl-title").fill(title);
   await form.locator("#obl-due").fill("2026-12-31");
@@ -112,11 +115,12 @@ test("legal: record an obligation; it is listed, a blank title is refused by the
   const row = listed.find((o) => o.obligation_id === id);
   expect(row?.legal_entity_id).toBe(ID.entity);
   expect(row?.created_by).toBe(ID.principal);
+  expect(row?.source_id).toBe(clauseId);
 
   const again = formOf(page, "Record obligation");
   await skipBrowserValidation(again);
-  await again.locator("#obl-source-type").selectOption("CONTRACT");
-  await again.locator("#obl-source-id").fill(crypto.randomUUID());
+  await again.locator("#obl-source-type").selectOption("CLAUSE");
+  await pickFromRegister(again.locator("#obl-source-id"), clauseTitle);
   await again.locator("#obl-risk").selectOption("LOW");
   await again.locator("#obl-due").fill("2026-12-31");
   await again.locator("#obl-effective-from").fill(TODAY);
@@ -179,13 +183,21 @@ test("legal: propose a corporate action; it is listed, an unknown resolution is 
   await expect(page.getByText(id).first()).toBeVisible();
   expect(JSON.stringify(list((await consoleApi(page.request, "GET", "corporate-actions")).json, "corporate_actions"))).toContain(id);
 
+  // The form offers only PASSED resolutions of this entity; a fresh tenant has none.
   const again = formOf(page, "Propose action");
-  await again.locator("#ca-title").fill(`ui unauthorised action ${TAG}`);
-  await again.locator("#ca-type").selectOption("SHARE_ISSUANCE");
-  await again.locator("#ca-effective-date").fill("2026-12-01");
-  await again.locator("#ca-resolution").fill(crypto.randomUUID());
-  await again.getByRole("button", { name: "Propose action", exact: true }).click();
-  await expect(outcome(page, "resolution_id does not exist in board-resolutions-svc")).toBeVisible({ timeout: 15_000 });
+  const resolution = again.locator("#ca-resolution");
+  await expect(resolution.locator("option")).toHaveText(["None"], { timeout: 15_000 });
+  // And the service itself refuses a resolution it does not hold.
+  const refused = await seed(page.request, "corporate-actions-svc", "/v1/corporate-actions", {
+    legal_entity_id: ID.entity,
+    title: `ui unauthorised action ${TAG}`,
+    action_type: "SHARE_ISSUANCE",
+    effective_date: "2026-12-01",
+    resolution_id: crypto.randomUUID(),
+    created_by: ID.principal,
+  });
+  expect(refused.status).toBe(422);
+  expect(JSON.stringify(refused.json)).toContain("resolution_id does not exist in board-resolutions-svc");
 
   await otherTenantSeesNone(browser, browserHealth, "/admin/legal", [title, id], { endpoint: "corporate-actions", key: "corporate_actions" });
 });
@@ -215,6 +227,10 @@ test("tax GB journey: VAT rule for GB from the register, activated, then a GB/B2
   const stored = list((await consoleApi(page.request, "GET", "tax-rules")).json, "tax_rules").find((r) => r.rule_id === ruleId);
   expect(stored?.jurisdiction_id, "the rule is filed under the register's UUID, not a code").toBe(gb);
 
+  // The buyer is a counterparty of this entity, picked from the register.
+  const buyerName = `ui buyer ${TAG}`;
+  const buyerId = await seedCounterparty(page.request, buyerName);
+
   // 2. While it is DRAFT the service refuses a determination for want of an ACTIVE rule.
   const runDetermination = async (tx: string) => {
     await page.locator("#tax-action-evaluate").click();
@@ -226,7 +242,7 @@ test("tax GB journey: VAT rule for GB from the register, activated, then a GB/B2
     await modal.locator("#det-gross_amount").fill("1000");
     await modal.locator("#det-currency").fill("GBP");
     await modal.locator("#det-seller_party_id").fill(`seller-${TAG}`);
-    await modal.locator("#det-buyer_party_id").fill(`buyer-${TAG}`);
+    expect(await pickFromRegister(modal.locator("#det-buyer_party_id"), `${buyerName} (VENDOR)`)).toBe(buyerId);
     await modal.locator("#det-supply_date").fill(TODAY);
     await modal.locator("#det-product_classification").fill("GENERAL_GOODS");
     await modal.locator("#det-supply_kind").selectOption("GOODS");

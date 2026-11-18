@@ -10,6 +10,7 @@ import { ActionFeedback } from "./ActionFeedback";
 import { ResolutionSummary } from "./BoardSummary";
 import { describeResolutionStatus, type BoardResolution } from "@/lib/api/legal";
 import { formatDateTime } from "@/lib/format";
+import { PickList } from "@/components/admin/shared/PickList";
 
 /**
  * Voting actions for one resolution, following board-resolutions-svc:
@@ -109,6 +110,8 @@ export function ResolutionActions({
               <label htmlFor={`roster_${resolution.resolution_id}`} className={LABEL}>
                 Voter roster <span className={OPTIONAL}>(principal IDs, one per line)</span>
               </label>
+              {/* Typed: identity-context-svc has no route that lists principals, so
+                  there is no directory to choose voters from. */}
               <textarea
                 id={`roster_${resolution.resolution_id}`}
                 name="voter_principal_ids"
@@ -195,14 +198,9 @@ export function ResolutionActions({
           <input type="hidden" name="resolution_created_by" value={resolution.created_by} />
           <div>
             <label htmlFor={`minutes_${resolution.resolution_id}`} className={LABEL}>
-              Minutes document ID <span className={OPTIONAL}>(optional)</span>
+              Minutes document <span className={OPTIONAL}>(optional)</span>
             </label>
-            <input
-              id={`minutes_${resolution.resolution_id}`}
-              name="document_vault_id"
-              className={FIELD}
-              autoComplete="off"
-            />
+            <PickList id={`minutes_${resolution.resolution_id}`} name="document_vault_id" kind="documents" blank="None" className={FIELD} empty="No document of this entity in the vault." />
           </div>
           <Button type="submit" size="sm" loading={closePending}>
             {!closePending && <Gavel className="mr-1.5 h-4 w-4" aria-hidden="true" />}

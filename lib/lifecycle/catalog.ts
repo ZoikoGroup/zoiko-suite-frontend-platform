@@ -98,9 +98,9 @@ const CORPORATE = {
   "corporate-action.execute": {
     service: "corporateActions", serviceLabel: "corporate-actions-svc", method: "POST",
     path: "/v1/corporate-actions/{id}/execute", label: "Record execution", from: ["PROPOSED", "BOARD_APPROVED"],
-    actorFields: ["executed_by"],
+    actorFields: ["executed_by"], dynamicFields: ["document_vault_id"],
     note: "The service refuses execution by the person who proposed the action, and checks the required evidence.",
-    fields: [{ name: "document_vault_id", label: "Evidence document id (document vault)", kind: "text" }],
+    fields: [{ name: "document_vault_id", label: "Evidence document", kind: "select" }],
   },
   "counterparty.compliance": {
     service: "counterparty", serviceLabel: "counterparty-management-svc", method: "POST",
@@ -397,6 +397,35 @@ const INTELLIGENCE = {
 
 } satisfies Record<string, LifecycleActionSpec>;
 
+// ── Security (Block 9) ───────────────────────────────────────────────────────
+
+const siem = (path: string, label: string, from: readonly string[], extra: Partial<LifecycleActionSpec> = {}): LifecycleActionSpec => ({
+  service: "siemIntegration", serviceLabel: "siem-integration-svc", method: "POST",
+  path: `/v1/siem/exporters/{id}/${path}`, label, from, ...extra,
+});
+
+const SECURITY: Record<string, LifecycleActionSpec> = {
+  "siem.pause": siem("pause", "Pause", ["ACTIVE"], { note: "A paused exporter accepts no events until it is resumed." }),
+  "siem.resume": siem("resume", "Resume", ["PAUSED"]),
+  "siem.disable": siem("disable", "Disable", ["ACTIVE", "PAUSED"], { confirm: true, danger: true, note: "Disabling is final." }),
+  "carta.reevaluate": {
+    service: "carta", serviceLabel: "carta-svc", method: "POST",
+    path: "/v1/carta/assessments/{id}/reevaluate", label: "Re-evaluate", purposeContext: "security.access.evaluate",
+    note: "Scores the recorded context again with the current model and records a new assessment; this one is kept as it was.",
+  },
+};
+
+// ── Commercial: vendor profiles ──────────────────────────────────────────────
+
+const VENDOR: Record<string, LifecycleActionSpec> = {
+  "vendor-profile.approve": {
+    service: "vendorDueDiligence", serviceLabel: "vendor-due-diligence-svc", method: "POST",
+    path: "/v1/vendor-profiles/{id}/approve", label: "Approve vendor", from: ["PENDING"],
+    purposeContext: "vendor_due_diligence", confirm: true,
+    note: "Refused unless the counterparty's latest screening completed CLEAR.",
+  },
+};
+
 // ── Integration (Block 10) ───────────────────────────────────────────────────
 
 const bridge = (path: string, label: string, from: readonly string[], extra: Partial<LifecycleActionSpec> = {}): LifecycleActionSpec => ({
@@ -413,17 +442,22 @@ const INTEGRATION: Record<string, LifecycleActionSpec> = {
   "bridge.configure": {
     service: "connectivityBridge", serviceLabel: "connectivity-api-bridge-svc", method: "PATCH",
     path: "/v1/bridges/{id}", label: "Configure", from: ["DRAFT", "PENDING_APPROVAL", "ACTIVE", "DEGRADED", "SUSPENDED"],
-    version: "expected-version", listFields: ["scopes"], uuidFields: ["credential_ref"],
+    version: "expected-version", listFields: ["scopes"], dynamicFields: ["provider_profile", "credential_ref"],
     note: "Changing protected settings on an active, degraded, suspended or pending bridge returns it to DRAFT. Leave a field blank to keep it.",
     fields: [
       { name: "purpose", label: "Purpose", kind: "text", hint: "Lower-case identifier, 3 to 64 characters: letters, digits, . _ -" },
-      { name: "provider_key", label: "Provider profile key", kind: "text", hint: "A CERTIFIED external provider profile." },
-      { name: "provider_profile_version", label: "Provider profile version", kind: "number", step: "1", min: "1" },
+      { name: "provider_profile", label: "Provider profile", kind: "select", hint: "CERTIFIED external provider profiles." },
       { name: "destination_region", label: "Destination region", kind: "text", hint: "One of the profile's allowed regions." },
       { name: "sync_mode", label: "Sync mode", kind: "select", options: opts("PULL", "PUSH", "NONE") },
       { name: "scopes", label: "Scopes", kind: "text", hint: "Comma-separated, 1 to 32, within the profile's supported scopes." },
-      { name: "credential_ref", label: "Credential policy id", kind: "text", hint: "The secret-vault policy (a UUID). Leave blank for auth type NONE." },
+      { name: "credential_ref", label: "Credential policy", kind: "select", hint: "From secret-vault-integration-svc. Leave blank for auth type NONE." },
     ],
+    // The service takes the profile as provider_key and provider_profile_version.
+    shape: ({ provider_profile, ...rest }) => {
+      if (!provider_profile) return rest;
+      const [key, version] = String(provider_profile).split("@");
+      return { ...rest, provider_key: key, provider_profile_version: Number(version) };
+    },
   },
   "bridge.submit": bridge("submit", "Submit for approval", ["DRAFT"]),
   "bridge.approve": bridge("approve", "Approve", ["PENDING_APPROVAL"], {
@@ -479,5 +513,7 @@ export const LIFECYCLE_ACTIONS: Record<string, LifecycleActionSpec> = {
   ...TAX,
   ...COMMERCIAL,
   ...INTELLIGENCE,
+  ...SECURITY,
+  ...VENDOR,
   ...INTEGRATION,
 };

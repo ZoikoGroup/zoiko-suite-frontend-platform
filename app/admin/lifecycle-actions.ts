@@ -38,9 +38,9 @@ function statusOf(data: unknown): string | undefined {
   if (!data || typeof data !== "object") return undefined;
   const top = data as Record<string, unknown>;
   // Some services wrap the record, e.g. {exception_case: {...}, escalation_record: {...}}.
-  const wrapped = top.exception_case;
+  const wrapped = top.exception_case ?? top.assessment;
   const r = wrapped && typeof wrapped === "object" ? (wrapped as Record<string, unknown>) : top;
-  for (const k of ["status", "state", "case_status", "lifecycle_status", "resolution_status", "approval_status"]) {
+  for (const k of ["status", "state", "case_status", "lifecycle_status", "resolution_status", "approval_status", "due_diligence_status", "decision"]) {
     if (typeof r[k] === "string" && r[k]) return r[k] as string;
   }
   return undefined;
@@ -80,7 +80,7 @@ export async function runLifecycleAction(
       continue;
     }
     if (spec.dynamicFields?.includes(f.name)) {
-      if (!ID_RE.test(raw)) return { ok: false, message: `${f.label}: choose one from the list.` };
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,160}$/.test(raw)) return { ok: false, message: `${f.label}: choose one from the list.` };
       body[f.name] = raw;
       continue;
     }

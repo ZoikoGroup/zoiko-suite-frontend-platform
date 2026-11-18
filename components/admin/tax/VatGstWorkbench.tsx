@@ -25,6 +25,7 @@ import {
 } from "@/app/admin/tax/vat-actions";
 import { type LookupState } from "@/components/admin/shared/lookup";
 import type { VATReturn } from "@/lib/api/tax";
+import { PickList } from "@/components/admin/shared/PickList";
 
 const IDLE_ACTION: VatActionState = { status: "idle" };
 const IDLE_LOOKUP_VAT: LookupState<VATReturn> = { status: "idle", message: "" };
@@ -405,17 +406,18 @@ export function VatGstWorkbench({ initialReturns = [], jurisdictions }: { initia
             <form action={fileSubmit} className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="file-return-id" className={LABEL}>VAT Return ID</label>
-                  <input
+                  <label htmlFor="file-return-id" className={LABEL}>VAT return (DRAFT)</label>
+                  <PickList
                     id="file-return-id"
                     name="return_id"
+                    kind="draft-vat-returns"
                     value={targetReturnId}
-                    onChange={(e) => setTargetReturnId(e.target.value)}
-                    placeholder="vret-..."
-                    className={FIELD}
+                    onChange={setTargetReturnId}
                     required
+                    className={FIELD}
+                    empty="No DRAFT return yet: raise one in step 1."
                   />
-                  <p className={HINT}>Paste ID from Step 1 or select a Draft from the table below</p>
+                  <p className={HINT}>Or choose File on a DRAFT row in the table below.</p>
                 </div>
 
                 <div>

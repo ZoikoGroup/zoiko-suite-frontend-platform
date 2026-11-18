@@ -6,11 +6,20 @@ import { fetchPanelList } from "@/lib/panel-fetch";
 import { RowActions } from "@/components/admin/shared/RowActions";
 import { BridgeCreateForm } from "./IntegrationCreateForms";
 import type { BridgeEndpoint } from "@/lib/api/integration";
+import { loadPickList } from "@/app/admin/pick-lists";
+import type { FieldOption } from "@/components/admin/intelligence/create-state";
 
 export function BridgeConnectorPanel() {
   const [connections, setConnections] = useState<BridgeEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [profiles, setProfiles] = useState<FieldOption[]>([]);
+  const [policies, setPolicies] = useState<FieldOption[]>([]);
+  useEffect(() => {
+    void loadPickList("certified-profiles").then((o) => o.ok && setProfiles(o.items));
+    void loadPickList("secret-policies").then((o) => o.ok && setPolicies(o.items));
+  }, []);
 
   const fetchConnections = async () => {
     setLoading(true);
@@ -109,6 +118,7 @@ export function BridgeConnectorPanel() {
                   status={c.status}
                   version={c.version}
                   onDone={fetchConnections}
+                  fieldOptions={{ provider_profile: profiles, credential_ref: policies }}
                 />
               </div>
             </div>

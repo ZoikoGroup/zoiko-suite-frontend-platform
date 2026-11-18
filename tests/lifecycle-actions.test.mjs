@@ -30,6 +30,9 @@ function entries() {
   for (const m of CATALOG.matchAll(/"(bridge\.[\w-]+)": bridge\("([\w-]+)"/g)) {
     out.push([m[1], "connectivity-api-bridge-svc", "POST", `/v1/bridges/{id}/${m[2]}`]);
   }
+  for (const m of CATALOG.matchAll(/"(siem\.[\w-]+)": siem\("([\w-]+)"/g)) {
+    out.push([m[1], "siem-integration-svc", "POST", `/v1/siem/exporters/{id}/${m[2]}`]);
+  }
   for (const m of CATALOG.matchAll(/"(bank-connection\.[\w-]+)": bank\("([\w-]+)"/g)) {
     out.push([m[1], "banking-connector-svc", "POST", `/v1/banking/connections/{id}/${m[2]}`]);
   }

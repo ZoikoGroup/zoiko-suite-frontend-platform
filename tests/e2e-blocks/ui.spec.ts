@@ -6,7 +6,7 @@
 import crypto from "node:crypto";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./browser-health";
-import { ID, TAG, TODAY, consoleApi, liveOnly, seed, sessionValue, signIn } from "./live";
+import { ID, TAG, TODAY, consoleApi, liveOnly, pickFromRegister, pickJurisdictionGB, seed, seedCounterparty, sessionValue, signIn } from "./live";
 
 liveOnly();
 
@@ -119,12 +119,14 @@ test("seeded records render on their pages, and another tenant sees none of them
 // ── Block 6 workflows ───────────────────────────────────────────────────────
 
 test("legal: draft a contract from the header (Server Action) and open it", async ({ page }) => {
+  const cpName = `ui contract party ${TAG}`;
+  const cpId = await seedCounterparty(page.request, cpName);
   await open(page, "/admin/legal");
   await page.getByRole("button", { name: "Create Contract" }).click();
   const modal = modalOf(page, "Create Contract Draft");
   const title = `ui contract ${TAG}`;
   await modal.locator("#title").fill(title);
-  await modal.locator("#counterparty_id").fill(crypto.randomUUID());
+  expect(await pickFromRegister(modal.locator("#counterparty_id"), `${cpName} (VENDOR)`)).toBe(cpId);
   await modal.locator("#effective_from").fill(TODAY);
   await modal.locator("#total_value").fill("2500");
   await modal.getByRole("button", { name: "Draft contract" }).click();
@@ -152,7 +154,7 @@ test("legal: draft a clause from the header; it lands in review-pending DRAFT", 
   await page.getByRole("button", { name: "Draft Clause" }).click();
   const modal = modalOf(page, "Draft Clause");
   await modal.getByPlaceholder("Confidentiality Clause").fill(`ui header clause ${TAG}`);
-  await modal.locator("#clause-jurisdiction").fill("GB");
+  await pickJurisdictionGB(modal.locator("#clause-jurisdiction"));
   await modal.locator("#clause-effective-from").fill(TODAY);
   await modal.getByPlaceholder("Enter the clause text...").fill("Clause body from the UI test.");
   await modal.getByRole("button", { name: "Create Clause" }).click();
@@ -180,12 +182,15 @@ test("purchase request: raise, submit, refused to self-approve, approved by a se
   await expect(raised).toBeVisible({ timeout: 15_000 });
   const requestId = (await raised.textContent())!.match(/ID ([0-9a-f-]{36})/)![1];
 
+  // The requisition is picked from the register (DRAFT or awaiting approval), never typed.
+  await open(page, "/admin/purchase-requests");
   const decide = page.locator("form").filter({ has: page.getByRole("button", { name: "Submit for approval" }) });
-  await decide.locator("#pr-decide-request-id").fill(requestId);
+  expect(await pickFromRegister(decide.locator("#pr-decide-request-id"), `ui request ${TAG}`)).toBe(requestId);
   await decide.getByRole("button", { name: "Submit for approval" }).click();
   await expect(page.getByText(/PENDING_APPROVAL|submitted/i).first()).toBeVisible({ timeout: 15_000 });
 
-  await decide.locator("#pr-decide-request-id").fill(requestId);
+  await open(page, "/admin/purchase-requests");
+  expect(await pickFromRegister(decide.locator("#pr-decide-request-id"), `ui request ${TAG}`)).toBe(requestId);
   await decide.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText(/own request|yourself|independent|self/i).first()).toBeVisible({ timeout: 15_000 });
 
@@ -195,7 +200,7 @@ test("purchase request: raise, submit, refused to self-approve, approved by a se
   browserHealth.watch(p2);
   await p2.goto("/admin/purchase-requests");
   const decide2 = p2.locator("form").filter({ has: p2.getByRole("button", { name: "Submit for approval" }) });
-  await decide2.locator("#pr-decide-request-id").fill(requestId);
+  expect(await pickFromRegister(decide2.locator("#pr-decide-request-id"), `ui request ${TAG}`)).toBe(requestId);
   await decide2.getByRole("button", { name: "Approve" }).click();
   await expect(p2.getByText(/APPROVED|approved/).first()).toBeVisible({ timeout: 15_000 });
   await approver.close();
@@ -204,14 +209,18 @@ test("purchase request: raise, submit, refused to self-approve, approved by a se
 test("spend controls: set a limit, then a check against it is decided by the service", async ({ page }) => {
   await open(page, "/admin/commercial-ops");
   const limit = page.locator("form").filter({ has: page.getByRole("button", { name: "Set limit" }) });
+  // Categories are stored upper-case, as the services that match them send theirs.
+  const category = `UI-${TAG}`.toUpperCase();
   await limit.locator("#category").fill(`UI-${TAG}`);
   await limit.locator("#threshold_amount").fill("100");
   await limit.locator("#policy_currency_code").selectOption("GBP");
   await limit.getByRole("button", { name: "Set limit" }).click();
-  await expect(page.getByText(`UI-${TAG}`).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(category).first()).toBeVisible({ timeout: 15_000 });
 
+  // The check's category is picked from the limits in force.
+  await open(page, "/admin/commercial-ops");
   const check = page.locator("form").filter({ has: page.getByRole("button", { name: "Check this spend" }) });
-  await check.locator("#check_category").fill(`UI-${TAG}`);
+  await pickFromRegister(check.locator("#check_category"), category);
   await check.locator("#check_amount").fill("500");
   await check.locator("#check_currency_code").selectOption("GBP").catch(() => check.locator("#check_currency_code").fill("GBP"));
   await check.locator("#source_reference").fill(`ui-${TAG}`);
@@ -220,10 +229,12 @@ test("spend controls: set a limit, then a check against it is decided by the ser
 });
 
 test("vendor due diligence: a screening runs to an outcome (no envelope refusal)", async ({ page }) => {
+  const cpName = `UI Vendor party ${TAG}`;
+  const cpId = await seedCounterparty(page.request, cpName);
   await open(page, "/admin/commercial-ops");
   const form = page.locator("form").filter({ has: page.getByRole("button", { name: "Screen this counterparty" }) });
   await form.locator("#vendor_name").fill(`UI Vendor ${TAG}`);
-  await form.locator("#counterparty_id").fill(crypto.randomUUID());
+  expect(await pickFromRegister(form.locator("#counterparty_id"), `${cpName} (VENDOR)`)).toBe(cpId);
   await form.getByRole("button", { name: "Screen this counterparty" }).click();
   await expect(page.getByText(/envelope_incomplete|purpose_context/)).toHaveCount(0);
   await expect(page.getByText(/CLEARED|PASSED|FLAGGED|REJECTED|outcome/i).first()).toBeVisible({ timeout: 15_000 });
@@ -235,8 +246,11 @@ test("tax: assemble a filing — create, validate, then finalize or report the b
   await open(page, "/admin/tax");
   await page.locator("#tax-action-assemble").click();
   const modal = modalOf(page, "Assemble Filing");
-  await modal.locator("#fil-jurisdiction_id").fill("GB");
-  await modal.locator("#fil-filing_type").fill("VAT100");
+  await pickJurisdictionGB(modal.locator("#fil-jurisdiction_id"));
+  const filingType = modal.locator("#fil-filing_type");
+  const domains = await filingType.locator("option").evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
+  test.skip(domains.length === 0, "evidence-requirements-svc defines no filing domain on this stack");
+  await filingType.selectOption(domains.includes("VAT") ? "VAT" : domains[0]);
   await modal.locator("#fil-period_key").fill(`2026-UI-${TAG.slice(0, 4)}`);
   await modal.locator("#fil-due_date").fill("2026-12-07");
   await modal.locator("#fil-payload").fill('{"box1":10}');
@@ -246,7 +260,7 @@ test("tax: assemble a filing — create, validate, then finalize or report the b
 
 test("VAT: raise a return for the session's entity, then filing without evidence is refused", async ({ page }) => {
   await open(page, "/admin/tax");
-  await page.locator("#vat-jurisdiction").fill("GB");
+  await pickJurisdictionGB(page.locator("#vat-jurisdiction"));
   await page.locator("#vat-tax-reg").fill(`GB${TAG}`);
   await page.locator("#vat-period").fill(`2026-UI${TAG.slice(0, 3)}`);
   await page.locator("#vat-currency").selectOption("GBP");
@@ -263,7 +277,7 @@ test("compliance: create a filing requirement and run an evaluation from the hea
   await open(page, "/admin/compliance");
   await page.getByRole("button", { name: "New Filing Requirement" }).click();
   let modal = modalOf(page, "New Filing Requirement");
-  await modal.locator("#req-jurisdiction_id").fill("GB");
+  await pickJurisdictionGB(modal.locator("#req-jurisdiction_id"));
   await modal.locator("#req-filing_authority").fill("HMRC");
   await modal.locator("#req-filing_type").fill("VAT100");
   await modal.locator("#req-period_key").fill(`UI-${TAG}`);
@@ -274,7 +288,7 @@ test("compliance: create a filing requirement and run an evaluation from the hea
 
   await page.getByRole("button", { name: "Evaluate Compliance" }).click();
   modal = modalOf(page, "Evaluate Compliance");
-  await modal.locator("#eval-jurisdiction").fill("GB");
+  await pickJurisdictionGB(modal.locator("#eval-jurisdiction"));
   await modal.locator("#eval-domain").fill("TAX");
   for (const [k, v] of [["total_obligations", "3"], ["fulfilled_obligations", "2"], ["pending_obligations", "1"], ["overdue_obligations", "0"], ["open_exceptions", "0"]]) {
     await modal.locator(`#eval-${k}`).fill(v);

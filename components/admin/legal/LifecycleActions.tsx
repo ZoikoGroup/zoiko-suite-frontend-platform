@@ -29,6 +29,7 @@ import { IDLE_CONTRACT_STATE, CONTRACT_CURRENCIES } from "@/app/admin/legal/stat
 import type { ContractActionState } from "@/app/admin/legal/state";
 import { FIELD, LABEL, OPTIONAL } from "./field-styles";
 import { ActionFeedback } from "./ActionFeedback";
+import { PickList } from "@/components/admin/shared/PickList";
 
 type PanelName = "revise" | "approve" | "execute" | "amend" | "renew" | "terminate";
 
@@ -232,16 +233,15 @@ export function LifecycleActions({ contract }: { contract: Contract }) {
           <input type="hidden" name="submitted_by" value={contract.submitted_by ?? ""} />
           <div>
             <label htmlFor="governance_decision_id" className={LABEL}>
-              Governance decision ID{" "}
-              <span className={OPTIONAL}>(required — must be GRANTED for CONTRACT_APPROVE)</span>
+              Governance decision <span className={OPTIONAL}>(a GRANTED decision of this entity)</span>
             </label>
-            <input
+            <PickList
               id="governance_decision_id"
               name="governance_decision_id"
+              kind="granted-decisions"
               required
-              placeholder="Decision ID from the governance decision log"
               className={FIELD}
-              autoComplete="off"
+              empty="No GRANTED decision of this entity in the governance decision log."
             />
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -274,15 +274,9 @@ export function LifecycleActions({ contract }: { contract: Contract }) {
             </div>
             <div>
               <label htmlFor="document_vault_id" className={LABEL}>
-                Document vault ID <span className={OPTIONAL}>(optional)</span>
+                Executed document <span className={OPTIONAL}>(optional)</span>
               </label>
-              <input
-                id="document_vault_id"
-                name="document_vault_id"
-                placeholder="Reference to the executed PDF"
-                className={FIELD}
-                autoComplete="off"
-              />
+              <PickList id="document_vault_id" name="document_vault_id" kind="documents" blank="None" className={FIELD} empty="No document of this entity in the vault." />
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">

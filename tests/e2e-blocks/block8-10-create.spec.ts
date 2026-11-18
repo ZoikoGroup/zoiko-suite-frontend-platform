@@ -206,20 +206,6 @@ const CASES: Case[] = [
     refusal: /HTTP 400.*endpoint_url must be an absolute URL/,
   },
   {
-    name: "banking-connector: register a bank connection",
-    path: "/admin/integration",
-    title: "Register bank connection",
-    submit: "Register connection",
-    idLabel: "Connection ID",
-    listed: `Bank-ui-${TAG}`,
-    api: ["integration/banking", "connections", "bank_name"],
-    valid: [["Bank name", `Bank-ui-${TAG}`], ["BIC", "BARCGB22"], ["Account number", "12345678"], ["IBAN", "GB33BUKB20201555555555"], ["Currency", "GBP"], ["Account type", "CURRENT"]],
-    // banking-connector-svc checks only legal_entity_id and bank_name, both
-    // always sent; a missing BIC is refused by the form.
-    invalid: [["Bank name", `Bank-bad-${TAG}`], ["Account number", "1"], ["Currency", "GBP"]],
-    refusal: /BIC is required/,
-  },
-  {
     name: "hris-connector: register an HRIS integration",
     path: "/admin/integration",
     title: "Register HRIS integration",
@@ -253,8 +239,9 @@ const CASES: Case[] = [
     listed: `HMRC-ui-${TAG}`,
     api: ["tax-authority/interfaces", "tax_authority_interfaces", "authority_name"],
     valid: [["Jurisdiction", "GB"], ["Authority name", `HMRC-ui-${TAG}`]],
-    invalid: [["Jurisdiction", "GB"], ["Authority name", `HMRC-bad-${TAG}`], ["Provider key", `not-a-connector-${TAG}`]],
-    refusal: /HTTP 400.*connector_id must be the id of an approved connector/,
+    // A connector without a provider is refused before anything is sent.
+    invalid: [["Jurisdiction", "GB"], ["Authority name", `HMRC-bad-${TAG}`], ["Approved connector id", crypto.randomUUID()]],
+    refusal: /A connector or the EINVOICE adapter kind needs a provider/,
     status: /ACTIVE/,
   },
 ];
@@ -291,6 +278,27 @@ for (const c of CASES) {
     }
   });
 }
+
+// ── banking: a connection is requested for a treasury bank account ───────────
+
+test("banking-connector: the request form takes its account from treasury-svc and refuses none", async ({ page }) => {
+  await open(page, "/admin/integration");
+  const { box, form } = await openForm(page, "Request bank connection");
+  const account = field(form, "Bank account");
+  // The accounts are treasury-svc's for this entity. Where treasury-svc is not
+  // deployed (the zv stack) the form says so with its reason instead of offering any.
+  const options = await account.locator("option").count();
+  const unreadable = form.getByText(/treasury-svc accounts could not be read/);
+  if (options <= 1) {
+    await expect(unreadable.or(form.getByText(/No bank account is registered in treasury-svc/))).toBeVisible({ timeout: 15_000 });
+    test.info().annotations.push({ type: "blocked", description: "no treasury-svc bank account on this stack, so no connection can be requested" });
+  }
+  // With no account chosen nothing is sent.
+  await form.evaluate((f) => { (f as HTMLFormElement).noValidate = true; });
+  await fill(form, [["Bank name", `Bank-ui-${TAG}`]]);
+  await form.getByRole("button", { name: "Request connection", exact: true }).click();
+  await expect(box.getByRole("alert")).toContainText("Bank account is required");
+});
 
 // ── mTLS: the private key is shown once ───────────────────────────────────────
 

@@ -10,7 +10,7 @@
 import crypto from "node:crypto";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./browser-health";
-import { ID, TAG, TODAY, consoleApi, list, liveOnly, seed, sessionValue, signIn } from "./live";
+import { ID, TAG, TODAY, consoleApi, list, liveOnly, pickFromRegister, seed, seedCounterparty, sessionValue, signIn } from "./live";
 
 liveOnly();
 test.describe.configure({ mode: "serial" });
@@ -272,4 +272,122 @@ test("commercial forms pick counterparties and approved requisitions from their 
   await order.evaluate((el) => el.removeAttribute("required"));
   await page.getByRole("button", { name: "Issue purchase order" }).click();
   await expect(page.getByText("Choose the approved purchase request this order fulfils.")).toBeVisible();
+});
+
+test("SIEM exporter: paused, refused a second pause, resumed, then disabled for good", async ({ page, request }) => {
+  const created = await seed(request, "siem-integration-svc", "/v1/siem/exporters", {
+    legal_entity_id: ID.entity,
+    name: `zv exporter ${TAG}`,
+    platform: "SPLUNK",
+    endpoint_url: "https://siem.example.com/services/collector",
+  });
+  expect(created.status, JSON.stringify(created.json)).toBe(201);
+  const id = String(created.json?.id);
+
+  await open(page, "/admin/security");
+  let actions = row(page, id);
+  // ACTIVE offers Pause and Disable, not Resume.
+  await expect(actions.getByRole("button", { name: "Resume", exact: true })).toHaveCount(0);
+  await click(actions, "Pause");
+  await expectAccepted(actions, "PAUSED");
+
+  // A paused exporter accepts no events.
+  const stream = await seed(request, "siem-integration-svc", "/v1/siem/stream", {
+    exporter_id: id, source_service: "zv-e2e", event_type: "AUTH_FAILURE", severity: "HIGH", message: "while paused",
+  });
+  expect(stream.status).toBe(409);
+
+  await open(page, "/admin/security");
+  actions = row(page, id);
+  await click(actions, "Resume");
+  await expectAccepted(actions, "ACTIVE");
+
+  await open(page, "/admin/security");
+  actions = row(page, id);
+  await click(actions, "Disable");
+  await click(actions, "Confirm disable");
+  await expectAccepted(actions, "DISABLED");
+  await open(page, "/admin/security");
+  // Disabled is final: nothing more is offered.
+  await expect(row(page, id)).toHaveCount(0);
+});
+
+test("vendor profile: approval refused before a CLEAR screening, approved after it", async ({ page, request }) => {
+  const cpName = `zv approved vendor ${TAG}`;
+  const cpId = await seedCounterparty(request, cpName);
+
+  await open(page, "/admin/commercial-ops");
+  await page.getByRole("button", { name: "Register vendor profile" }).click();
+  const form = page.getByRole("form", { name: "Register vendor profile" });
+  expect(await pickFromRegister(form.getByLabel(/^\s*Counterparty/), `${cpName} (VENDOR)`)).toBe(cpId);
+  await form.getByLabel(/^\s*Vendor name/).fill(cpName);
+  await form.getByRole("button", { name: "Register vendor" }).click();
+  await expect(page.getByText("vendor-due-diligence-svc recorded it.")).toBeVisible({ timeout: 15_000 });
+
+  await open(page, "/admin/commercial-ops");
+  const profileRow = page.locator("#vendor-profiles tr").filter({ hasText: cpName });
+  let actions = profileRow.locator("[data-row-actions]");
+  await click(actions, "Approve vendor");
+  await click(actions, "Confirm approve vendor");
+  await expect(actions.getByRole("alert")).toContainText("HTTP 422");
+  await expect(actions.getByRole("alert")).toContainText("screening");
+
+  // Screen the counterparty (CLEAR for a name not on the screening list), then approve.
+  const check = await seed(request, "vendor-due-diligence-svc", "/v1/vendor-checks", {
+    legal_entity_id: ID.entity, counterparty_id: cpId, vendor_name: cpName, correlation_id: crypto.randomUUID(),
+  }, "vendor_due_diligence");
+  expect(check.status, JSON.stringify(check.json)).toBe(201);
+  expect((check.json?.check as Record<string, unknown> | undefined)?.risk_outcome).toBe("CLEAR");
+
+  await open(page, "/admin/commercial-ops");
+  actions = page.locator("#vendor-profiles tr").filter({ hasText: cpName }).locator("[data-row-actions]");
+  await click(actions, "Approve vendor");
+  await click(actions, "Confirm approve vendor");
+  await expectAccepted(actions, "CLEARED");
+  await open(page, "/admin/commercial-ops");
+  await expect(page.locator("#vendor-profiles tr").filter({ hasText: cpName })).toContainText("CLEARED");
+});
+
+test("CARTA: an assessment is re-evaluated into a new one, the original kept", async ({ page, request }) => {
+  const created = await seed(request, "carta-svc", "/v1/carta/evaluate", {
+    legal_entity_id: ID.entity,
+    context: { subject_id: ID.principal, subject_type: "USER", device_trust_level: 80, ip_address: "10.0.0.7", resource_sensitivity: "HIGH", action_requested: `READ_${TAG}`, time_of_day_hour: 10 },
+  }, "security.access.evaluate");
+  expect(created.status, JSON.stringify(created.json)).toBe(201);
+  const id = String(created.json?.id);
+
+  await open(page, "/admin/security");
+  const actions = row(page, id);
+  await click(actions, "Re-evaluate");
+  await expect(actions.getByRole("status")).toContainText(/now (ALLOW|STEP_UP_MFA|ISOLATE|DENY)/, { timeout: 15_000 });
+  // The original and the new assessment are both on record.
+  await open(page, "/admin/security");
+  await expect(page.getByText(`READ_${TAG}`)).toHaveCount(2, { timeout: 15_000 });
+});
+
+test("procurement case: opened, approval refused to its requester, approved by a second principal", async ({ page, context }) => {
+  const description = `zv procurement ${TAG}`;
+  await open(page, "/admin/commercial-ops");
+  const form = page.locator("form").filter({ has: page.getByRole("button", { name: "Open case" }) });
+  await form.locator("#case_description").fill(description);
+  await form.locator("#case_category").fill(`ZVCAT${TAG.slice(0, 4).toUpperCase()}`);
+  await form.locator("#case_amount").fill("250");
+  await form.getByRole("button", { name: "Open case" }).click();
+  await expect(page.getByText(description).first()).toBeVisible({ timeout: 15_000 });
+
+  // The case's own card in the procurement register.
+  const card = () => page.locator("div.p-4").filter({ hasText: description });
+  await open(page, "/admin/commercial-ops");
+  await expect(card()).toContainText("APPROVAL PENDING");
+  // The requester is told someone else must decide, and is offered no Approve.
+  await expect(card()).toContainText("You opened this case, so someone else has to approve or reject it.");
+  await expect(card().getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+
+  await context.clearCookies();
+  await signIn(context, sessionValue(ID.principal2));
+  await open(page, "/admin/commercial-ops");
+  await card().getByRole("button", { name: "Approve", exact: true }).click();
+  await open(page, "/admin/commercial-ops");
+  await expect(card()).toContainText("APPROVED", { timeout: 15_000 });
+  await expect(card().getByRole("button", { name: "Issue purchase order" })).toBeVisible();
 });

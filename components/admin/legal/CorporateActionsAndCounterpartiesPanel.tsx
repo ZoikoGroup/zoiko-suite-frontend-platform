@@ -6,6 +6,7 @@ import { listCorporateActions, listCounterparties, type CorporateAction, type Co
 import { RowActions } from "@/components/admin/shared/RowActions";
 import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 import { CreateCorporateActionForm, CreateCounterpartyForm } from "./LegalCreateForms";
+import { documentOptions, itemsOf } from "@/lib/form-options";
 
 export async function CorporateActionsAndCounterpartiesPanel() {
   const store = await cookies();
@@ -17,10 +18,11 @@ export async function CorporateActionsAndCounterpartiesPanel() {
 
   const identity = { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId };
 
-  const [actionsRes, counterpartyRes, jurisdictions] = await Promise.all([
+  const [actionsRes, counterpartyRes, jurisdictions, documents] = await Promise.all([
     listCorporateActions(identity),
     listCounterparties(identity),
     loadJurisdictionOptions(),
+    documentOptions({ ...identity, principalId: session.principalId, tenantId: session.tenantId }),
   ]);
   // Counterparty jurisdictions are register UUIDs; named from the register by id.
   const jurisdictionName = new Map(jurisdictions.ok ? jurisdictions.items.map((j) => [j.id, `${j.code} — ${j.name}`]) : []);
@@ -61,7 +63,7 @@ export async function CorporateActionsAndCounterpartiesPanel() {
                     <td className="px-4 py-3 text-xs font-semibold text-slate-700">{a.effective_date}</td>
                     <td className="px-4 py-3 text-xs font-medium text-indigo-600">{a.status}</td>
                     <td className="px-4 py-3">
-                      <RowActions actions={["corporate-action.execute"]} recordId={a.action_id} status={a.status} />
+                      <RowActions actions={["corporate-action.execute"]} recordId={a.action_id} status={a.status} fieldOptions={{ document_vault_id: itemsOf(documents) }} />
                     </td>
                   </tr>
                 ))}

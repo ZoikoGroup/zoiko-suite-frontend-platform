@@ -3,7 +3,7 @@
 // stack under a tenant generated for this run.
 
 import crypto from "node:crypto";
-import { test, type APIRequestContext, type BrowserContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type BrowserContext, type Locator } from "@playwright/test";
 
 export const LIVE = process.env.ZOIKO_LIVE_E2E === "1";
 /** Skips the file unless the live suite was asked for. */
@@ -98,4 +98,62 @@ export async function seed(
 export function list(json: Record<string, unknown> | null, key: string): Record<string, unknown>[] {
   const v = json?.[key];
   return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+}
+
+/**
+ * Pick GB in a jurisdiction <select>: the option whose label is GB's code and
+ * name, as jurisdiction-rules-svc registers it. Returns the value it sent (the
+ * register's UUID).
+ */
+export async function pickJurisdictionGB(select: Locator): Promise<string> {
+  const option = select.locator("option").filter({ hasText: /^GB — / });
+  await expect(option, "GB is in the jurisdiction register").toHaveCount(1, { timeout: 15_000 });
+  const value = (await option.getAttribute("value")) ?? "";
+  expect(value).toMatch(/^[0-9a-f-]{36}$/);
+  await select.selectOption(value);
+  return value;
+}
+
+/**
+ * Pick the option labelled `label` in a select whose choices are read from a
+ * register (PickList), once they have loaded. Returns the id it sent.
+ */
+export async function pickFromRegister(select: Locator, label: string | RegExp): Promise<string> {
+  const option = select.locator("option").filter({ hasText: label });
+  await expect(option, `the register offers ${label}`).toHaveCount(1, { timeout: 15_000 });
+  const value = (await option.getAttribute("value")) ?? "";
+  expect(value).not.toBe("");
+  await select.selectOption(value);
+  return value;
+}
+
+/** A counterparty of this run's entity, written through the gateway. */
+export async function seedCounterparty(request: APIRequestContext, name: string): Promise<string> {
+  const res = await seed(request, "counterparty-management-svc", "/v1/counterparties", {
+    legal_entity_id: ID.entity,
+    name,
+    counterparty_type: "VENDOR",
+    jurisdiction_id: crypto.randomUUID(),
+    effective_from: TODAY,
+    created_by: ID.principal,
+  }, "legal.counterparty.maintenance");
+  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  const body = res.json as Record<string, unknown>;
+  return String((body.counterparty as Record<string, unknown> | undefined)?.counterparty_id ?? body.counterparty_id);
+}
+
+/** A clause of this run's entity, written through the gateway. */
+export async function seedClause(request: APIRequestContext, title: string): Promise<string> {
+  const res = await seed(request, "clause-template-svc", "/v1/clauses", {
+    legal_entity_id: ID.entity,
+    title,
+    category: "CONFIDENTIALITY",
+    body: "Clause seeded by the live suite.",
+    jurisdiction_id: crypto.randomUUID(),
+    effective_from: TODAY,
+    created_by: ID.principal,
+  });
+  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  const body = res.json as Record<string, unknown>;
+  return String((body.clause as Record<string, unknown> | undefined)?.clause_id ?? body.clause_id);
 }

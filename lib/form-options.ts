@@ -57,14 +57,18 @@ export async function passedResolutionOptions(identity: SessionIdentity): Promis
   return ok(res.data.map((r) => ({ value: r.resolution_id, label: r.title })));
 }
 
-/** purchase-request-svc: requisitions in one status (e.g. APPROVED for an order). */
-export async function purchaseRequestOptions(identity: SessionIdentity, status: "APPROVED" | "PENDING_APPROVAL"): Promise<Options> {
-  const res = await listPurchaseRequests({ identity, legalEntityId: identity.legalEntityId, status });
+/** purchase-request-svc: requisitions in the given statuses (e.g. APPROVED for an order). */
+export async function purchaseRequestOptions(identity: SessionIdentity, ...statuses: string[]): Promise<Options> {
+  const res = await listPurchaseRequests({
+    identity,
+    legalEntityId: identity.legalEntityId,
+    ...(statuses.length === 1 ? { status: statuses[0] as never } : {}),
+  });
   if (!res.ok) return fail(res.error.message);
   return ok(
     res.data
-      .filter((r) => r.status === status)
-      .map((r) => ({ value: r.request_id, label: `${r.description} — ${r.amount} ${r.currency_code}` })),
+      .filter((r) => statuses.includes(r.status))
+      .map((r) => ({ value: r.request_id, label: `${r.description} — ${r.amount} ${r.currency_code} (${r.status})` })),
   );
 }
 
@@ -98,3 +102,91 @@ export async function spendCategoryOptions(identity: SessionIdentity): Promise<O
 export const itemsOf = (o: Options): FieldOption[] => (o.ok ? o.items : []);
 export const hintOf = (o: Options, service: string, empty: string): string | undefined =>
   !o.ok ? `${service} could not be read: ${o.error}` : o.items.length === 0 ? empty : undefined;
+
+// ── Supporting registers (documents, decisions, principals, evidence…) ───────
+
+type Rec = Record<string, unknown>;
+/** The rows of a list answer: a bare array, or the array under a known key. */
+function rowsOf(data: unknown, keys: string[]): Rec[] {
+  if (Array.isArray(data)) return data as Rec[];
+  const d = (data ?? {}) as Rec;
+  for (const k of keys) if (Array.isArray(d[k])) return d[k] as Rec[];
+  return [];
+}
+const str = (v: unknown) => (v === undefined || v === null ? "" : String(v));
+
+/** document-vault-svc: active documents of the entity (evidence, minutes, signed copies). */
+export async function documentOptions(identity: SessionIdentity): Promise<Options> {
+  const res = await apiGet<unknown>("documentVault", "/v1/documents/", { identity, query: { legal_entity_id: identity.legalEntityId, limit: 200 } });
+  if (!res.ok) return fail(res.error.message);
+  return ok(
+    rowsOf(res.data, ["documents", "items", "data"])
+      .filter((d) => !d.status || d.status === "ACTIVE" || d.status === "RETAINED")
+      .map((d) => ({ value: str(d.document_id), label: `${str(d.title) || str(d.document_id)}${d.document_type ? ` (${str(d.document_type)})` : ""}` })),
+  );
+}
+
+/** governance-decision-log-svc: decisions of the entity that granted the action. */
+export async function grantedDecisionOptions(identity: SessionIdentity): Promise<Options> {
+  const res = await apiGet<unknown>("governance", "/v1/decisions", { identity, query: { entity: identity.legalEntityId, limit: 200 } });
+  if (!res.ok) return fail(res.error.message);
+  const granted = /^(GRANTED|APPROVED|ALLOW|ALLOWED|AUTHORIZED|PERMITTED)$/i;
+  return ok(
+    rowsOf(res.data, ["decisions", "items", "data"])
+      .filter((d) => granted.test(str(d.outcome)))
+      .map((d) => ({ value: str(d.decision_id), label: `${str(d.action_type)} · ${str(d.outcome)} · ${str(d.decision_id).slice(0, 18)}` })),
+  );
+}
+
+/** identity-context-svc: active principals of the tenant (voters, owners). */
+export async function principalOptions(identity: SessionIdentity, excludeSelf = false): Promise<Options> {
+  const res = await apiGet<unknown>("identityContext", "/v1/principals", { identity, query: { "filter[status]": "ACTIVE", page_size: 200 } });
+  if (!res.ok) return fail(res.error.message);
+  return ok(
+    rowsOf(res.data, ["items", "principals", "data"])
+      .filter((p) => !excludeSelf || str(p.principal_id) !== identity.principalId)
+      .map((p) => ({ value: str(p.principal_id), label: `${str(p.display_name) || str(p.email) || str(p.principal_id)}${p.email ? ` <${str(p.email)}>` : ""}` })),
+  );
+}
+
+/** evidence-requirements-svc: the domain codes that carry filing requirements. */
+export async function evidenceDomainOptions(identity: SessionIdentity): Promise<Options> {
+  const res = await apiGet<unknown>("evidence", "/v1/evidence-requirements/", { identity, query: { legal_entity_id: identity.legalEntityId } });
+  if (!res.ok) return fail(res.error.message);
+  const codes = [...new Set(rowsOf(res.data, ["requirements", "items", "data"]).map((r) => str(r.domain_code)).filter(Boolean))].sort();
+  return ok(codes.map((c) => ({ value: c, label: c })));
+}
+
+/** vat-gst-svc: DRAFT returns of the entity, the ones that can be filed. */
+export async function draftVatReturnOptions(identity: SessionIdentity): Promise<Options> {
+  const res = await apiGet<unknown>("vatGst", "/v1/vat-returns", { identity, query: { legal_entity_id: identity.legalEntityId, status: "DRAFT" } });
+  if (!res.ok) return fail(res.error.message);
+  return ok(
+    rowsOf(res.data, ["vat_returns", "returns", "items", "data"])
+      .filter((r) => !r.status || r.status === "DRAFT")
+      .map((r) => ({ value: str(r.return_id), label: `${str(r.tax_period)} · ${str(r.tax_registration_number)} · ${str(r.return_id).slice(0, 18)}` })),
+  );
+}
+
+/** connectivity-api-bridge-svc: CERTIFIED external provider profiles, as key@version. */
+export async function certifiedProfileOptions(identity: SessionIdentity): Promise<Options> {
+  const res = await apiGet<unknown>("connectivityApiBridge", "/v1/external-profiles", { identity });
+  if (!res.ok) return fail(res.error.message);
+  return ok(
+    rowsOf(res.data, ["profiles", "items", "data"])
+      .filter((p) => p.status === "CERTIFIED")
+      .map((p) => ({ value: `${str(p.provider_key)}@${str(p.version)}`, label: `${str(p.provider_key)} v${str(p.version)} (${str(p.provider_type)})` })),
+  );
+}
+
+/** secret-vault-integration-svc: secret policies of the entity, for a credential reference. */
+export async function secretPolicyOptions(identity: SessionIdentity): Promise<Options> {
+  const res = await apiGet<unknown>("secretVault", "/v1/secret-policies", { identity, query: { legal_entity_id: identity.legalEntityId } });
+  if (!res.ok) return fail(res.error.message);
+  return ok(
+    rowsOf(res.data, ["secret_policies", "policies", "items", "data"]).map((p) => ({
+      value: str(p.secret_policy_id),
+      label: `${str(p.secret_path) || str(p.secret_policy_id)}${p.secret_class ? ` (${str(p.secret_class)})` : ""}`,
+    })),
+  );
+}

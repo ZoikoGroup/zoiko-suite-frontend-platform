@@ -16,6 +16,7 @@ import {
   Server,
   Bot
 } from "lucide-react";
+import { RowActions } from "@/components/admin/shared/RowActions";
 
 export type CartaDecision = "ALLOW" | "STEP_UP_MFA" | "ISOLATE" | "DENY";
 export type CartaRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -292,6 +293,9 @@ export function CartaAssessmentPanel() {
                       <p className="text-[11px] text-slate-500">
                         Action: <span className="font-mono text-slate-700 dark:text-slate-300">{item.context.action_requested}</span>
                       </p>
+                      <div className="mt-1.5">
+                        <RowActions actions={["carta.reevaluate"]} recordId={item.id} onDone={fetchAssessments} />
+                      </div>
                     </div>
                   </div>
 
