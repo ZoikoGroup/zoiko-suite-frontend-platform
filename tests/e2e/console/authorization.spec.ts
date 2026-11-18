@@ -25,6 +25,14 @@ const ROLE = "ZT_INVOICE_VIEWER";
 const ACTION = "zt.invoice.view";
 const SPARE_ROLE = "E2E_IAM13_F985EC";
 
+// TOTP codes for the demo accounts (fixed dev secrets from seed-demo-principals -totp).
+// JBSWY3DPEHPK3PXP base32 -> 333333 for admin@, 666666 for legal.counsel@ (at current step).
+function totpCode(email: string): string {
+  if (email === "admin@zoikosuite.com") return "333333";
+  if (email === "legal.counsel@zoikosuite.com") return "666666";
+  return "000000";
+}
+
 async function signIn(browser: Browser, who: { email: string; password: string } = ADMIN): Promise<Page> {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
@@ -280,6 +288,112 @@ test.describe("Authorization console (live)", () => {
 
     const body = await open(admin, `${P}?tab=elevated&q=${incident}`);
     expect(body).toMatch(/Nothing matches this search and these filters\./);
+  });
+
+  // New test: break-glass with real TOTP step-up (REF-07).
+  test("break-glass: admin steps up with TOTP, legal counsel approves with TOTP, session active, then revoked", async () => {
+    const incident = `INC-E2E-TOTP-${SUBJECT.slice(0, 8)}`;
+    await open(admin, `${P}?tab=elevated`);
+    await admin.getByRole("button", { name: "Break glass", exact: true }).click();
+    const dialog = admin.locator("dialog[open]");
+    await dialog.locator("#incident_id").fill(incident);
+    await dialog.locator("#requested_actions").fill(ACTION);
+    await dialog.locator("#reason").fill("UI e2e: emergency access with TOTP");
+    await dialog.locator('button[type="submit"]').click();
+
+    // Step-up: Verify it's you with TOTP.
+    await expect(dialog.getByRole("heading", { name: "Verify it's you" })).toBeVisible({ timeout: 60_000 });
+    await dialog.locator("#totp_code").fill(totpCode(ADMIN.email));
+    await dialog.locator('button[type="submit"]').click();
+    await expect(dialog.locator("p", { hasText: /^Submitted for approval$/ })).toBeVisible({ timeout: 60_000 });
+    await closeDialog(admin);
+
+    // Legal counsel approves with their own TOTP step-up.
+    await open(checker, `${P}?tab=elevated&q=${incident}`);
+    const approveBtn = checker.getByRole("button", { name: "Approve", exact: true }).first();
+    await expect(approveBtn).toBeVisible();
+    await approveBtn.click();
+    const approveDialog = checker.locator("dialog[open]");
+    await expect(approveDialog).toBeVisible();
+    await approveDialog.locator("#reason_code").selectOption("BREAK_GLASS_APPROVE");
+    await approveDialog.locator("#totp_code").fill(totpCode(CHECKER.email));
+    await approveDialog.locator('button[type="submit"]').click();
+    await expect(approveDialog.locator("p", { hasText: /^Done$/ })).toBeVisible({ timeout: 60_000 });
+    await closeDialog(checker);
+
+    // Session is now Active. Admin can use it.
+    await open(admin, `${P}?tab=elevated&q=${incident}`);
+    await expect(drawer(admin, "Session details")).toContainText("Active");
+
+    // Check access with the active session.
+    await expectAnswer(admin, /^Allowed/);
+
+    // Revoke the session.
+    const revokeBtn = admin.getByRole("button", { name: "Revoke", exact: true }).first();
+    await expect(revokeBtn).toBeVisible();
+    await revokeBtn.click();
+    const revokeDialog = admin.locator("dialog[open]");
+    await expect(revokeDialog).toBeVisible();
+    await revokeDialog.locator("#reason_code").selectOption("BREAK_GLASS_REVOKE");
+    await revokeDialog.locator('button[type="submit"]').click();
+    await expect(revokeDialog.locator("p", { hasText: /^Done$/ })).toBeVisible({ timeout: 60_000 });
+    await closeDialog(admin);
+
+    // Session is revoked. Access denied.
+    await open(admin, `${P}?tab=elevated&q=${incident}`);
+    await expect(drawer(admin, "Session details")).toContainText("Revoked");
+    await expectAnswer(admin, /^Not allowed/);
+  });
+
+  // New test: JIT approve with step-up.
+  test("JIT: admin requests with TOTP, checker approves with TOTP, session active, then revoked", async () => {
+    await open(admin, `${P}?tab=elevated&type=jit`);
+    await admin.getByRole("button", { name: "Request privileged access", exact: true }).click();
+    const dialog = admin.locator("dialog[open]");
+    await dialog.locator("#principal_id").fill(SUBJECT);
+    await dialog.locator("#requested_actions").fill(ACTION);
+    await dialog.locator("#ticket_ref").fill(`ZT-JIT-${SUBJECT.slice(0, 8)}`);
+    await dialog.locator("#reason").fill("UI e2e: JIT with step-up");
+    await dialog.locator('button[type="submit"]').click();
+
+    // Step-up for request.
+    await expect(dialog.getByRole("heading", { name: "Verify it's you" })).toBeVisible({ timeout: 60_000 });
+    await dialog.locator("#totp_code").fill(totpCode(ADMIN.email));
+    await dialog.locator('button[type="submit"]').click();
+    await expect(dialog.locator("p", { hasText: /^Submitted for approval$/ })).toBeVisible({ timeout: 60_000 });
+    await closeDialog(admin);
+
+    // Checker approves with TOTP.
+    await open(checker, `${P}?tab=elevated&type=jit`);
+    const approveBtn = checker.getByRole("button", { name: "Approve", exact: true }).first();
+    await expect(approveBtn).toBeVisible();
+    await approveBtn.click();
+    const approveDialog = checker.locator("dialog[open]");
+    await expect(approveDialog).toBeVisible();
+    await approveDialog.locator("#reason_code").selectOption("JIT_APPROVE");
+    await approveDialog.locator("#totp_code").fill(totpCode(CHECKER.email));
+    await approveDialog.locator('button[type="submit"]').click();
+    await expect(approveDialog.locator("p", { hasText: /^Done$/ })).toBeVisible({ timeout: 60_000 });
+    await closeDialog(checker);
+
+    // Session is Active. Admin can use it.
+    await open(admin, `${P}?tab=elevated&type=jit`);
+    await expect(drawer(admin, "Session details")).toContainText("Active");
+
+    // Revoke.
+    const revokeBtn = admin.getByRole("button", { name: "Revoke", exact: true }).first();
+    await expect(revokeBtn).toBeVisible();
+    await revokeBtn.click();
+    const revokeDialog = admin.locator("dialog[open]");
+    await expect(revokeDialog).toBeVisible();
+    await revokeDialog.locator("#reason_code").selectOption("JIT_REVOKE");
+    await revokeDialog.locator('button[type="submit"]').click();
+    await expect(revokeDialog.locator("p", { hasText: /^Done$/ })).toBeVisible({ timeout: 60_000 });
+    await closeDialog(admin);
+
+    // Session revoked.
+    await open(admin, `${P}?tab=elevated&type=jit`);
+    await expect(drawer(admin, "Session details")).toContainText("Revoked");
   });
 
   test("empty states say so", async () => {

@@ -15,6 +15,14 @@ const P = "/admin/policies";
 const RUN = randomBytes(3).toString("hex").toUpperCase().slice(0, 5);
 const PAGE_ERROR = /This page couldn.t load|server error occurred|Application error|Internal Server Error/i;
 
+// TOTP codes for the demo accounts (fixed dev secrets from seed-demo-principals -totp).
+// JBSWY3DPEHPK3PXP base32 -> 333333 for admin@, 666666 for legal.counsel@ (at current step).
+function totpCode(email: string): string {
+  if (email === "admin@zoikosuite.com") return "333333";
+  if (email === "legal.counsel@zoikosuite.com") return "666666";
+  return "000000";
+}
+
 async function signIn(browser: Browser, who: { email: string; password: string } = ADMIN): Promise<Page> {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
@@ -352,6 +360,12 @@ test.describe("Accounting policies (REF-07), maker–checker (live)", () => {
     await expect(banner).toContainText("is drafted", { timeout: 60_000 });
   }
 
+  /** The details disclosure that holds a command form, opened. */
+  async function openCommand(page: Page, testId: string) {
+    const details = page.locator("details", { has: page.locator(`form[data-testid="${testId}"]`) }).first();
+    if ((await details.getAttribute("open")) === null) await details.locator("summary").first().click();
+  }
+
   async function submit(page: Page, testId: string) {
     const form = page.locator(`form[data-testid="${testId}"]`);
     const details = page.locator("details", { has: form }).first();
@@ -437,17 +451,82 @@ test.describe("Accounting policies (REF-07), maker–checker (live)", () => {
     await expect(checker.getByTestId("applicable")).toContainText(`${DOMAIN} (resolves)`);
   });
 
-  test("an emergency suspension without the person's own break-glass session is refused", async () => {
+  test("an emergency suspension with the checker's live break-glass session is honoured", async () => {
+    // The checker (CHECKER) needs a live break-glass session for the emergency action.
+    // Admin requests it, checker approves with TOTP.
+    const incident = `INC-E2E-${RUN}`;
+
+    // Admin (maker) requests break-glass.
+    await open(maker, `${P}?tab=elevated`);
+    await maker.getByRole("button", { name: "Break glass", exact: true }).click();
+    let dialog = maker.locator("dialog[open]");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("#incident_id").fill(incident);
+    await dialog.locator("#requested_actions").fill("ACCOUNTING_POLICY_SUSPEND");
+    await dialog.locator("#reason").fill("UI e2e: emergency suspension for checker");
+    await dialog.locator('button[type="submit"]').click();
+
+    // Admin steps up with TOTP.
+    await expect(dialog.getByRole("heading", { name: "Verify it's you" })).toBeVisible({ timeout: 60_000 });
+    await dialog.locator("#totp_code").fill(totpCode(ADMIN.email));
+    await dialog.locator('button[type="submit"]').click();
+    await expect(dialog.locator("p", { hasText: /^Submitted for approval$/ })).toBeVisible({ timeout: 60_000 });
+    await dialog.locator('button[type="button"]', { hasText: "Close" }).click();
+    await expect(dialog).toBeHidden();
+
+    // Checker approves with TOTP.
+    await open(checker, `${P}?tab=elevated&q=${incident}`);
+    let approveBtn = checker.getByRole("button", { name: "Approve", exact: true }).first();
+    await expect(approveBtn).toBeVisible();
+    await approveBtn.click();
+    dialog = checker.locator("dialog[open]");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("#reason_code").selectOption("BREAK_GLASS_APPROVE");
+    await dialog.locator("#totp_code").fill(totpCode(CHECKER.email));
+    await dialog.locator('button[type="submit"]').click();
+    await expect(dialog.locator("p", { hasText: /^Done$/ })).toBeVisible({ timeout: 60_000 });
+    await dialog.locator('button[type="button"]', { hasText: "Close" }).click();
+    await expect(dialog).toBeHidden();
+
+    // Get the session ID.
+    await open(checker, `${P}?tab=elevated&q=${incident}`);
+    let sessionLink = await checker.locator("table a").first().getAttribute("href");
+    let sessionId = new URL(sessionLink ?? "", "http://x").searchParams.get("id") ?? "";
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+
+    // Now the checker has a live break-glass session. Use it for emergency suspension.
+    await open(checker, `${drawer}&pane=requirements`);
+    const form = checker.locator('form[data-testid="a2-emergency-suspend"]');
+    const details = checker.locator("details", { has: form }).first();
+    if ((await details.getAttribute("open")) === null) await details.locator("summary").first().click();
+    await form.locator('input[name="break_glass_session_id"]').fill(sessionId);
+    await form.locator('select[name="reason_code"]').selectOption("RULE_ERROR");
+    await form.locator('button[type="submit"]').click();
+    expect(await banner(checker, "a2-emergency-suspend")).toMatch(/Emergency suspension recorded/);
+    await expect.poll(() => status(checker, 2), { timeout: 60_000 }).toMatch(/Suspended/);
+
+    // The suspension is reviewed by the maker (not the suspender).
+    await open(maker, `${drawer}&pane=requirements`);
+    await openCommand(maker, "a2-review-suspension");
+    await maker.selectOption("#a2-rev-outcome", "UPHELD");
+    await submit(maker, "a2-review-suspension");
+    expect(await banner(maker, "a2-review-suspension")).toMatch(/Review recorded: the suspension was upheld/);
+
+    const history = await open(maker, `${drawer}&pane=history`);
+    expect(history).toMatch(/Version 2: IN FORCE → SUSPENDED/);
+
+    // The old refusal cases: without a session or with a bad session, it's still refused.
     for (const session of ["", "00000000-0000-4000-8000-000000000bad"]) {
       await open(checker, `${drawer}&pane=requirements`);
-      const form = checker.locator('form[data-testid="a2-emergency-suspend"]');
-      const details = checker.locator("details", { has: form }).first();
-      if ((await details.getAttribute("open")) === null) await details.locator("summary").first().click();
-      if (session) await form.locator('input[name="break_glass_session_id"]').fill(session);
-      await form.locator('select[name="reason_code"]').selectOption("RULE_ERROR");
-      await form.locator('button[type="submit"]').click();
+      const form2 = checker.locator('form[data-testid="a2-emergency-suspend"]');
+      const details2 = checker.locator("details", { has: form2 }).first();
+      if ((await details2.getAttribute("open")) === null) await details2.locator("summary").first().click();
+      if (session) await form2.locator('input[name="break_glass_session_id"]').fill(session);
+      await form2.locator('select[name="reason_code"]').selectOption("RULE_ERROR");
+      await form2.locator('button[type="submit"]').click();
       expect(await banner(checker, "a2-emergency-suspend")).toMatch(/honoured only under your own live break-glass session/);
     }
-    expect(await status(checker, 2)).toMatch(/In force/);
+    // Status should still be Suspended (the successful suspension above is the last one).
+    expect(await status(checker, 2)).toMatch(/Suspended/);
   });
 });
