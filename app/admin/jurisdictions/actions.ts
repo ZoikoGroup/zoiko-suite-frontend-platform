@@ -428,6 +428,11 @@ const COMMANDS: Record<string, Handler> = {
       effective_from: need(fd, "effective_from", "Effective from"),
       dependencies: (json(fd, "dependencies", "Dependencies", true) as J.PackManifest["dependencies"]) ?? [],
       rule_modules: list(fd, "rule_modules"),
+      // Wave 4: published calendar versions and obligation rules the version
+      // carries, so due dates resolve from the released pack. Sent only when
+      // named, so a rules-only manifest (and its digest) is unchanged.
+      ...(list(fd, "calendar_modules").length ? { calendar_modules: list(fd, "calendar_modules") } : {}),
+      ...(list(fd, "obligation_modules").length ? { obligation_modules: list(fd, "obligation_modules") } : {}),
       ...(num(fd, "source_register_version") !== undefined ? { source_register_version: num(fd, "source_register_version") } : {}),
     };
     return write(J.createPackVersion(ref, manifest, me), (v) => done(`Version ${v.version} of ${v.pack_ref} is DRAFT. Submit it for review, compile it, then certify, sign and publish.`, [{ label: "Manifest digest", value: short(v.manifest_digest) }]));
@@ -635,7 +640,12 @@ const COMMANDS: Record<string, Handler> = {
         { effectiveFrom: need(fd, "effective_from", "Effective from"), timezone: need(fd, "timezone", "A time zone"), weekendDays: list(fd, "weekend_days").map(Number), cutoffTime: opt(fd, "cutoff_time"), holidays: parseHolidays(text(fd, "holidays")) },
         me,
       ),
-      (v) => ({ status: "pending", message: `Version ${v.version} is DRAFT with ${(v.holidays ?? []).length} holiday(s). A second person publishes it.`, details: [{ label: "Content digest", value: short(v.content_digest) }] }),
+      (v) => ({
+        status: "pending",
+        message: `Version ${v.version} is DRAFT with ${(v.holidays ?? []).length} holiday(s). A second person publishes it.`,
+        // The version id is what a pack version's calendar modules name.
+        details: [{ label: "Version id", value: v.calendar_version_id }, { label: "Content digest", value: short(v.content_digest) }],
+      }),
     ),
   "calendar.sources": (fd, me) => write(J.setCalendarSources(need(fd, "id", "The calendar"), num(fd, "version") ?? 0, list(fd, "source_ids"), me), () => done("Sources recorded on the calendar version.")),
   "calendar.publish": (fd, me) => write(J.publishCalendarVersion(need(fd, "id", "The calendar"), num(fd, "version") ?? 0, me), (v) => done(`Version ${v.version} is published and in force from ${v.effective_from}. It cannot change; an amendment is a new version.`)),
@@ -741,7 +751,12 @@ const COMMANDS: Record<string, Handler> = {
         },
         me,
       ),
-      (o) => ({ status: "pending", message: `${o.obligation_code} v${o.rule_version} is DRAFT. Record its provenance, then a second person publishes it.` }),
+      (o) => ({
+        status: "pending",
+        message: `${o.obligation_code} v${o.rule_version} is DRAFT. Record its provenance, then a second person publishes it.`,
+        // The id is what a pack version's obligation modules name.
+        details: [{ label: "Obligation rule id", value: o.obligation_rule_id }],
+      }),
     ),
   "obligation.provenance": (fd, me) =>
     write(J.setObligationProvenance(need(fd, "id", "The obligation rule"), { regimeId: opt(fd, "regime_id"), interpretationId: opt(fd, "interpretation_id"), sourceIds: list(fd, "source_ids") }, me), () => done("Provenance recorded.")),
