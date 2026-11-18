@@ -46,6 +46,7 @@ import {
   openSupportSession,
   recomputeEffectiveAccess,
   requestSoDException,
+  resumeRoleAssignment,
   reviewSession,
   revokeDelegatedAuthority,
   revokeRoleAssignment,
@@ -56,6 +57,7 @@ import {
   setRoleActive,
   setSoDRuleActive,
   setWorkloadBindingActive,
+  suspendRoleAssignment,
   transitionSoDException,
   validateEntityScope,
   validateSoDConflicts,
@@ -138,6 +140,7 @@ function readReason(fd: FormData): CommandReason | string {
 
 type Command =
   | "assignment.approve" | "assignment.reject" | "assignment.revoke"
+  | "assignment.suspend" | "assignment.resume"
   | "role.retire" | "role.reactivate"
   | "bundle.retire" | "bundle.reactivate"
   | "sod_rule.retire" | "sod_rule.reactivate"
@@ -154,6 +157,8 @@ const DONE: Record<Command, string> = {
   "assignment.approve": "Approved. The grant is in force from now.",
   "assignment.reject": "Rejected. The request grants nothing.",
   "assignment.revoke": "Revoked. The grant ends on the next permission check.",
+  "assignment.suspend": "Suspended. The grant gives nothing from the next permission check, and stays on record.",
+  "assignment.resume": "Resumed. The grant is in force again from the next permission check.",
   "role.retire": "Role retired. Nobody holding it can use it until it is reactivated.",
   "role.reactivate": "Role reactivated. Everyone still assigned to it has its actions again.",
   "bundle.retire": "Permission set retired. The role no longer grants its actions.",
@@ -203,6 +208,10 @@ export async function commandAction(_prev: AuthzResult, fd: FormData): Promise<A
       if (verb === "revoke") {
         const endsAt = rfc3339(text(fd, "effective_to"));
         result = await revokeRoleAssignment({ identity, assignmentId: id, reason, effectiveTo: endsAt ?? undefined });
+      } else if (verb === "suspend") {
+        result = await suspendRoleAssignment({ identity, assignmentId: id, reason });
+      } else if (verb === "resume") {
+        result = await resumeRoleAssignment({ identity, assignmentId: id, reason });
       } else {
         result = await decideRoleAssignment({ identity, assignmentId: id, approve: verb === "approve", reason });
       }

@@ -23,15 +23,22 @@ import {
   SaveWorkloadDialog,
   SupportDialog,
 } from "@/components/admin/authorization/console/forms";
-import { grantsRegister } from "@/components/admin/authorization/console/grants";
+import { GrantsAsOf, grantsRegister, type GrantsExtra } from "@/components/admin/authorization/console/grants";
 import { limitsRegister } from "@/components/admin/authorization/console/limits";
 import { AuthorizationKpis, AuthorizationPanels } from "@/components/admin/authorization/console/overview";
 import { RegisterView, href, type Ctx, type Query, type RegisterSpec } from "@/components/admin/authorization/console/register";
+import { rolesRegister } from "@/components/admin/authorization/console/roles";
 import { conditionsRegister, sodRegister } from "@/components/admin/authorization/console/rules";
-import { allSessions, sessionsRegister } from "@/components/admin/authorization/console/sessions";
+import { allSessions, sessionKindOf, sessionsRegister } from "@/components/admin/authorization/console/sessions";
 import { SessionChip } from "@/components/admin/authorization/console/SessionChip";
 import { workloadsRegister } from "@/components/admin/authorization/console/workloads";
-import { needsAttention } from "@/lib/api/authorization";
+import {
+  getAssignmentsAsOf,
+  getSessionActivity,
+  listAssignmentSuspensions,
+  listPermissionBundles,
+  needsAttention,
+} from "@/lib/api/authorization";
 import { currentSession } from "@/lib/authz-inbox";
 
 export const metadata: Metadata = { title: "Authorization | Zoiko Suite" };
@@ -39,6 +46,7 @@ export const metadata: Metadata = { title: "Authorization | Zoiko Suite" };
 /** The registers, in the order a reviewer works through them. */
 const TABS = [
   { key: "grants", label: "Role grants" },
+  { key: "roles", label: "Roles" },
   { key: "approvals", label: "Approvals" },
   { key: "sod", label: "Duty conflicts" },
   { key: "conditions", label: "Conditions" },
@@ -64,6 +72,8 @@ function count(data: AuthzData, tab: TabKey): number | null | undefined {
   switch (tab) {
     case "grants":
       return data.assignments.error ? null : data.assignments.rows.length;
+    case "roles":
+      return data.roles.error ? null : data.roles.rows.length;
     case "approvals":
       return data.approvals.length;
     case "sod":
@@ -83,10 +93,45 @@ function count(data: AuthzData, tab: TabKey): number | null | undefined {
   }
 }
 
+/**
+ * The instant an "as of" link asks for, as RFC 3339. A datetime-local value
+ * has no zone and is read in the server's zone, as every console date is.
+ */
+function asOfInstant(raw: string | undefined): string | null | "invalid" {
+  if (!raw) return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? "invalid" : d.toISOString();
+}
+
+/** One grant's suspensions and the as-of view, read only when the URL asks. */
+async function grantsExtra(ctx: Ctx, query: Query): Promise<GrantsExtra> {
+  const extra: GrantsExtra = {};
+  const at = asOfInstant(query.as_of);
+  if (at === "invalid") {
+    extra.asOf = {
+      at: query.as_of ?? "",
+      read: { rows: [], error: { kind: "malformed", status: 400, message: "That date and time could not be read. Choose it again." } },
+    };
+  } else if (at) {
+    const r = await getAssignmentsAsOf(ctx.identity, { asOf: at });
+    extra.asOf = { at, read: r.ok ? { rows: r.data.assignments ?? [], error: null } : { rows: [], error: r.error } };
+  }
+  if (query.id && query.pane === "suspensions") {
+    const r = await listAssignmentSuspensions(ctx.identity, query.id);
+    extra.suspensions = r.ok ? { rows: r.data ?? [], error: null } : { rows: [], error: r.error };
+  }
+  return extra;
+}
+
 async function registerFor(tab: TabKey, data: AuthzData, ctx: Ctx, query: Query): Promise<RegisterSpec | null> {
   switch (tab) {
     case "grants":
-      return grantsRegister(data, ctx);
+      return grantsRegister(data, ctx, await grantsExtra(ctx, query));
+    case "roles": {
+      if (!query.id || query.pane !== "permissions") return rolesRegister(data, ctx);
+      const r = await listPermissionBundles(ctx.identity, query.id);
+      return rolesRegister(data, ctx, r.ok ? { rows: r.data ?? [], error: null } : { rows: [], error: r.error });
+    }
     case "approvals":
       return approvalsRegister(data);
     case "sod":
@@ -95,8 +140,10 @@ async function registerFor(tab: TabKey, data: AuthzData, ctx: Ctx, query: Query)
       return conditionsRegister(data, ctx);
     case "limits":
       return limitsRegister(data, ctx);
-    case "elevated":
-      return sessionsRegister(data, ctx);
+    case "elevated": {
+      const kind = query.id && query.pane === "activity" ? sessionKindOf(data, query.id) : null;
+      return sessionsRegister(data, ctx, kind && query.id ? await getSessionActivity(ctx.identity, kind, query.id) : null);
+    }
     case "delegations":
       return delegationsRegister(data, ctx);
     case "decisions":
@@ -109,8 +156,10 @@ async function registerFor(tab: TabKey, data: AuthzData, ctx: Ctx, query: Query)
 }
 
 /** The commands that create records in the open register, right of the tabs. */
-function tabActions(tab: TabKey, data: AuthzData): ReactNode {
+function tabActions(tab: TabKey, data: AuthzData, query: Query): ReactNode {
   switch (tab) {
+    case "grants":
+      return <GrantsAsOf value={query.as_of} />;
     case "sod":
       return (
         <>
@@ -201,7 +250,7 @@ export default async function AuthorizationPage({
           <RegisterCard
             active={tab}
             tabs={TABS.map((t) => ({ key: t.key, label: t.label, count: count(data, t.key), href: href({ tab: t.key }) }))}
-            actions={tabActions(tab, data)}
+            actions={tabActions(tab, data, query)}
           >
             {spec ? (
               <RegisterView spec={spec} query={query} />
