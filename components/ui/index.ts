@@ -4,3 +4,7 @@ export { Badge } from "./Badge";
 export { Skeleton } from "./Skeleton";
 export { Logo } from "./Logo";
 export { StatCard, type StatTone } from "./StatCard";
+export { Input } from "./Input";
+export { Textarea } from "./Textarea";
+export { Label } from "./Label";
+export { Select, SelectGroup, SelectTrigger, SelectContent, SelectValue, SelectItem } from "./Select";

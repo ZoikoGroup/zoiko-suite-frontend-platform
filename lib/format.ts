@@ -30,6 +30,29 @@ export function formatMoney(
 }
 
 /**
+ * Format a plain number with locale-aware grouping (e.g., "1,234").
+ */
+export function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-GB").format(value);
+}
+
+/**
+ * Format a duration (in seconds) as a human-readable string.
+ * e.g., 3661 -> "1h 1m 1s"
+ */
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+  return parts.join(" ");
+}
+
+/**
  * A calendar date or a timestamp, rendered as a date.
  *
  * Values from a Postgres DATE column arrive as "YYYY-MM-DD" and are formatted in
