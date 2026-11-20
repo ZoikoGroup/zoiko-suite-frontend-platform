@@ -27,7 +27,7 @@ export async function VatGstReturnsPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const result = await listVATReturns(identity);
+  const [result, jurisdictions] = await Promise.all([listVATReturns(identity), loadJurisdictionOptions()]);
 
   if (!result.ok) {
     return (
@@ -43,6 +43,5 @@ export async function VatGstReturnsPanel() {
   const vatReturns: VATReturn[] = result.ok ? result.data : [];
   const sorted = [...vatReturns].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  const jurisdictions = await loadJurisdictionOptions();
   return <VatGstWorkbench initialReturns={sorted} jurisdictions={jurisdictions} />;
 }

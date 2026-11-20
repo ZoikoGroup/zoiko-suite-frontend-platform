@@ -43,6 +43,8 @@ export type LifecycleActionSpec = {
   uuidFields?: readonly string[];
   /** Fields that must be given together or not at all, the first not after the second. */
   pairedDates?: readonly (readonly [string, string])[];
+  /** A check on the reader's values before anything is sent; a message refuses the action. Pure. */
+  validate?: (body: Record<string, unknown>) => string | null;
   /** Body reshaping the service needs (e.g. nesting a reference), applied last. Pure. */
   shape?: (body: Record<string, unknown>) => Record<string, unknown>;
   /** X-Purpose-Context, for services that refuse a write without one. */

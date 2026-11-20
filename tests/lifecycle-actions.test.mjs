@@ -81,7 +81,9 @@ test("catalog routes are /v1 service routes and carry no identity", () => {
 test("the Server Action looks actions up in the catalog and takes identity from the session", () => {
   assert.match(ACTION, /^"use server";/);
   assert.match(ACTION, /Object\.prototype\.hasOwnProperty\.call\(LIFECYCLE_ACTIONS, actionKey\)/);
-  assert.match(ACTION, /decodeSession\(store\.get\(SESSION_COOKIE\)\?\.value\)/);
+  // The shared check, which refuses a session without tenant, principal or legal entity.
+  assert.match(ACTION, /import \{ sessionIdentity \} from "@\/app\/admin\/intelligence\/create-support";/);
+  assert.match(ACTION, /const identity = await sessionIdentity\(\);\s*if \(!identity\) return \{ ok: false/);
   assert.match(ACTION, /if \(!ID_RE\.test\(recordId\)\)/);
   assert.match(ACTION, /body\[f\] = identity\.principalId/, "actor fields must be the session's principal");
   // The body is built only from the catalog's field names.

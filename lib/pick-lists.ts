@@ -1,8 +1,8 @@
-"use server";
-
-// Pick-lists for client forms, read on the server as the signed-in session.
-// The kind is checked against a fixed set; each reads the register that
-// issues the ids (see lib/form-options.ts).
+// Pick-lists for client forms, read on the server as the signed-in session and
+// served by GET /api/pick-lists/<kind>. The kind is checked against a fixed
+// set; each reads the register that issues the ids (see lib/form-options.ts).
+// A GET route rather than a Server Action: the browser loads several lists in
+// parallel, where Server Actions run one at a time and hold up form submits.
 
 import { sessionIdentity } from "@/app/admin/intelligence/create-support";
 import {
@@ -23,28 +23,32 @@ import {
   type Options,
 } from "@/lib/form-options";
 
-export type PickListKind =
-  | "counterparties"
-  | "contracts"
-  | "clauses"
-  | "passed-resolutions"
-  | "vendor-profiles"
-  | "spend-categories"
-  | "approved-requests"
-  | "pending-requests"
-  | "open-requests"
-  | "documents"
-  | "granted-decisions"
-  | "principals"
-  | "other-principals"
-  | "evidence-domains"
-  | "draft-vat-returns"
-  | "certified-profiles"
-  | "secret-policies";
+export const PICK_LIST_KINDS = [
+  "counterparties",
+  "contracts",
+  "clauses",
+  "passed-resolutions",
+  "vendor-profiles",
+  "spend-categories",
+  "open-requests",
+  "documents",
+  "granted-decisions",
+  "principals",
+  "other-principals",
+  "evidence-domains",
+  "draft-vat-returns",
+  "certified-profiles",
+  "secret-policies",
+] as const;
 
-export async function loadPickList(kind: PickListKind): Promise<Options> {
+export type PickListKind = (typeof PICK_LIST_KINDS)[number];
+
+export const isPickListKind = (k: string): k is PickListKind => (PICK_LIST_KINDS as readonly string[]).includes(k);
+
+/** The options for `kind`, or null when there is no complete session. */
+export async function loadPickList(kind: PickListKind): Promise<Options | null> {
   const identity = await sessionIdentity();
-  if (!identity) return { ok: false, error: "Your session has expired — sign in again." };
+  if (!identity) return null;
   switch (kind) {
     case "counterparties":
       return counterpartyOptions(identity);
@@ -58,10 +62,6 @@ export async function loadPickList(kind: PickListKind): Promise<Options> {
       return vendorProfileOptions(identity);
     case "spend-categories":
       return spendCategoryOptions(identity);
-    case "approved-requests":
-      return purchaseRequestOptions(identity, "APPROVED");
-    case "pending-requests":
-      return purchaseRequestOptions(identity, "PENDING_APPROVAL");
     case "open-requests":
       return purchaseRequestOptions(identity, "DRAFT", "PENDING_APPROVAL");
     case "documents":
@@ -80,7 +80,5 @@ export async function loadPickList(kind: PickListKind): Promise<Options> {
       return certifiedProfileOptions(identity);
     case "secret-policies":
       return secretPolicyOptions(identity);
-    default:
-      return { ok: false, error: "Unknown list." };
   }
 }

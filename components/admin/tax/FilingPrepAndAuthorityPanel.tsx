@@ -19,6 +19,7 @@ import { sessionIdentity, expired, missing, invalid, text, toState, show } from 
 import { apiGet, type Identity } from "@/lib/api/client";
 import { loadJurisdictionOptions, type JurisdictionOptions } from "./jurisdiction-options";
 import { registerAuthorityInterface } from "@/lib/api/tax-authority";
+import { isUuid } from "@/lib/api/tenants";
 
 // ── Authority interface registration ──
 // Records the interface in tax-authority-interface-svc for the session's legal
@@ -80,7 +81,7 @@ async function registerAuthorityInterfaceAction(previous: CreateState, fd: FormD
   const connector = text(fd, "connector_id");
   // tax-authority-interface-svc: a provider needs an approved connector; a
   // connector or EINVOICE kind without a provider is refused.
-  if (provider && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(connector)) {
+  if (provider && !isUuid(connector)) {
     return invalid(previous, fd, "A provider needs the approved connector's id (a UUID).");
   }
   if (!provider && (connector || kind === "EINVOICE")) {

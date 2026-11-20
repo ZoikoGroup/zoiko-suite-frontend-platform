@@ -6,7 +6,6 @@ import { fetchPanelList } from "@/lib/panel-fetch";
 import { RowActions } from "@/components/admin/shared/RowActions";
 import { BridgeCreateForm } from "./IntegrationCreateForms";
 import type { BridgeEndpoint } from "@/lib/api/integration";
-import { loadPickList } from "@/app/admin/pick-lists";
 import type { FieldOption } from "@/components/admin/intelligence/create-state";
 
 export function BridgeConnectorPanel() {
@@ -16,9 +15,21 @@ export function BridgeConnectorPanel() {
 
   const [profiles, setProfiles] = useState<FieldOption[]>([]);
   const [policies, setPolicies] = useState<FieldOption[]>([]);
+  const [optionErrors, setOptionErrors] = useState<string[]>([]);
   useEffect(() => {
-    void loadPickList("certified-profiles").then((o) => o.ok && setProfiles(o.items));
-    void loadPickList("secret-policies").then((o) => o.ok && setPolicies(o.items));
+    // The Configure form's choices; a register that cannot be read is named, not hidden.
+    const load = async (kind: string, label: string, set: (o: FieldOption[]) => void) => {
+      try {
+        const res = await fetch(`/api/pick-lists/${kind}`, { cache: "no-store" });
+        const body = (await res.json().catch(() => null)) as { ok: boolean; items?: FieldOption[]; error?: string } | null;
+        if (body?.ok && body.items) set(body.items);
+        else setOptionErrors((e) => [...e, `${label} could not be read: ${body?.error ?? `HTTP ${res.status}`}`]);
+      } catch {
+        setOptionErrors((e) => [...e, `${label} could not be loaded.`]);
+      }
+    };
+    void load("certified-profiles", "Provider profiles (connectivity-api-bridge-svc)", setProfiles);
+    void load("secret-policies", "Credential policies (secret-vault-integration-svc)", setPolicies);
   }, []);
 
   const fetchConnections = async () => {
@@ -120,6 +131,9 @@ export function BridgeConnectorPanel() {
                   onDone={fetchConnections}
                   fieldOptions={{ provider_profile: profiles, credential_ref: policies }}
                 />
+                {optionErrors.map((m) => (
+                  <p key={m} className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">{m}</p>
+                ))}
               </div>
             </div>
           ))}

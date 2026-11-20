@@ -4,33 +4,20 @@
 
 import { CloudOff } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
-import { apiGet } from "@/lib/api/client";
 import { sessionIdentity } from "@/app/admin/intelligence/create-support";
-import { counterpartyOptions, hintOf, itemsOf } from "@/lib/form-options";
+import { counterpartyOptions, hintOf, itemsOf, readVendorProfiles } from "@/lib/form-options";
+import { formatDateTime } from "@/lib/format";
 import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordForm";
 import type { FieldSpec } from "@/components/admin/intelligence/create-state";
 import { RowActions } from "@/components/admin/shared/RowActions";
 import { createVendorProfileAction } from "@/app/admin/commercial-ops/vendor-profile-actions";
 
-type VendorProfile = {
-  vendor_profile_id: string;
-  counterparty_id: string;
-  vendor_name: string;
-  vendor_status: string;
-  due_diligence_status: string;
-  risk_rating: string;
-  approved_at?: string | null;
-  approved_by?: string | null;
-};
 
 export async function VendorProfilesSection() {
   const identity = await sessionIdentity();
   if (!identity) return null;
   const [res, counterparties] = await Promise.all([
-    apiGet<VendorProfile[] | null>("vendorDueDiligence", "/v1/vendor-profiles", {
-      identity,
-      query: { legal_entity_id: identity.legalEntityId },
-    }),
+    readVendorProfiles(identity),
     counterpartyOptions(identity),
   ]);
   const fields: FieldSpec[] = [
@@ -44,7 +31,7 @@ export async function VendorProfilesSection() {
     },
     { name: "vendor_name", label: "Vendor name", kind: "text", required: true },
   ];
-  const profiles = res.ok ? res.data ?? [] : [];
+  const profiles = res.ok ? res.data : [];
   const nameOf = new Map(itemsOf(counterparties).map((o) => [o.value, o.label]));
 
   return (
@@ -82,7 +69,7 @@ export async function VendorProfilesSection() {
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500">{nameOf.get(p.counterparty_id) ?? p.counterparty_id}</td>
                   <td className="px-4 py-3 text-xs font-medium">{p.due_diligence_status}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{p.approved_at ? new Date(p.approved_at).toLocaleString() : "—"}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{p.approved_at ? formatDateTime(p.approved_at) : "—"}</td>
                   <td className="px-4 py-3 min-w-[160px]">
                     <RowActions actions={["vendor-profile.approve"]} recordId={p.vendor_profile_id} status={p.approved_at ? "APPROVED" : p.due_diligence_status} />
                   </td>

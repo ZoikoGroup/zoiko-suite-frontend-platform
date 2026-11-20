@@ -108,17 +108,20 @@ export function ResolutionActions({
             {hidden}
             <div>
               <label htmlFor={`roster_${resolution.resolution_id}`} className={LABEL}>
-                Voter roster <span className={OPTIONAL}>(principal IDs, one per line)</span>
+                Voter roster <span className={OPTIONAL}>(everyone entitled to vote)</span>
               </label>
-              {/* Typed: identity-context-svc has no route that lists principals, so
-                  there is no directory to choose voters from. */}
-              <textarea
+              {/* From identity-context-svc's principal directory (GET /v1/principals).
+                  Where the directory cannot be read (it is absent from some builds)
+                  the field becomes a one-per-line list of principal IDs. */}
+              <PickList
                 id={`roster_${resolution.resolution_id}`}
                 name="voter_principal_ids"
+                kind="principals"
+                multiple
                 required
-                rows={3}
-                defaultValue={currentPrincipalId ?? ""}
+                initial={currentPrincipalId ? [currentPrincipalId] : []}
                 className={FIELD}
+                empty="No active principal in this tenant's directory."
               />
             </div>
             <div className="max-w-40">

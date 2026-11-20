@@ -74,8 +74,8 @@ export async function StatusAndEscalationPanel() {
     loadJurisdictionOptions(),
   ]);
 
-  if (!evalRes.ok) return <PanelEmptyState icon={CloudOff} tone="warning" label="compliance-status-svc unavailable" hint={evalRes.error.message} />;
-
+  // Each section reports its own failed read: a failed evaluations read must not
+  // hide the gaps and exceptions, which come from separate reads.
   const evaluations: ComplianceEvaluation[] = evalRes.ok ? evalRes.data : [];
   const exceptions: EscalatedException[] = excRes.ok ? excRes.data : [];
 
@@ -103,7 +103,9 @@ export async function StatusAndEscalationPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Compliance Status Evaluations ({evaluations.length})
         </h3>
-        {evaluations.length === 0 ? (
+        {!evalRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="compliance-status-svc evaluations could not be read" hint={evalRes.error.message} />
+        ) : evaluations.length === 0 ? (
           <PanelEmptyState icon={ShieldCheck} label="No status evaluations recorded" hint="Evaluations from compliance-status-svc will appear here." />
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">

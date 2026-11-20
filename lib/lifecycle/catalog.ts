@@ -452,6 +452,11 @@ const INTEGRATION: Record<string, LifecycleActionSpec> = {
       { name: "scopes", label: "Scopes", kind: "text", hint: "Comma-separated, 1 to 32, within the profile's supported scopes." },
       { name: "credential_ref", label: "Credential policy", kind: "select", hint: "From secret-vault-integration-svc. Leave blank for auth type NONE." },
     ],
+    // A profile is offered as key@version; anything else is refused before sending.
+    validate: ({ provider_profile }) =>
+      provider_profile === undefined || /^[a-z0-9][a-z0-9._-]{2,79}@[1-9][0-9]{0,5}$/.test(String(provider_profile))
+        ? null
+        : "Provider profile: choose one from the list.",
     // The service takes the profile as provider_key and provider_profile_version.
     shape: ({ provider_profile, ...rest }) => {
       if (!provider_profile) return rest;

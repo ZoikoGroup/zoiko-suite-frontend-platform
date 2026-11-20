@@ -22,7 +22,7 @@ export async function CorporateActionsAndCounterpartiesPanel() {
     listCorporateActions(identity),
     listCounterparties(identity),
     loadJurisdictionOptions(),
-    documentOptions({ ...identity, principalId: session.principalId, tenantId: session.tenantId }),
+    documentOptions(identity),
   ]);
   // Counterparty jurisdictions are register UUIDs; named from the register by id.
   const jurisdictionName = new Map(jurisdictions.ok ? jurisdictions.items.map((j) => [j.id, `${j.code} — ${j.name}`]) : []);

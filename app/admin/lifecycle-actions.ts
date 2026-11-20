@@ -9,9 +9,9 @@
 // the fields the catalog lists for the action. A refusal is returned in the
 // service's own words with its HTTP status.
 
-import { cookies } from "next/headers";
 import { refresh } from "next/cache";
-import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
+import { sessionIdentity } from "@/app/admin/intelligence/create-support";
+import { isUuid } from "@/lib/api/tenants";
 import { apiDelete, apiPatch, apiPost, apiPut, type ApiWriteResult } from "@/lib/api/client";
 import { LIFECYCLE_ACTIONS } from "@/lib/lifecycle/catalog";
 import type { LifecycleResult } from "@/lib/lifecycle/types";
@@ -19,19 +19,9 @@ import type { LifecycleResult } from "@/lib/lifecycle/types";
 // Ids are UUIDs or service-generated keys; anything else would let a value
 // change the route, so it is refused before a request is built.
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-async function sessionIdentity(): Promise<SessionIdentity | null> {
-  const store = await cookies();
-  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
-  if (!session?.email) return null;
-  return {
-    principalId: session.principalId,
-    tenantId: session.tenantId,
-    legalEntityId: session.legalEntityId,
-    envelopeJwt: session.envelopeJwt,
-  };
-}
+// A date and time with its offset, as the row form sends it (converted from the
+// reader's local time in the browser, so the server's timezone plays no part).
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 
 /** The status the service reports on the record it returned, under its usual names. */
 function statusOf(data: unknown): string | undefined {
@@ -58,8 +48,9 @@ export async function runLifecycleAction(
   if (!ID_RE.test(recordId)) return { ok: false, message: "The record id is not valid." };
   if (spec.path.includes("{sub}") && !(subId && ID_RE.test(subId))) return { ok: false, message: "Choose the item this action applies to." };
 
+  // The shared check: a session must carry tenant, principal and legal entity.
   const identity = await sessionIdentity();
-  if (!identity) return { ok: false, message: "Your session has expired — sign in again." };
+  if (!identity) return { ok: false, message: "Your session has expired or is incomplete — sign in again." };
 
   const body: Record<string, unknown> = {};
   let evidenceRefs: string[] | undefined;
@@ -84,15 +75,16 @@ export async function runLifecycleAction(
       body[f.name] = raw;
       continue;
     }
-    if (spec.uuidFields?.includes(f.name) && !UUID_RE.test(raw)) return { ok: false, message: `${f.label} must be a UUID.` };
+    if (spec.uuidFields?.includes(f.name) && !isUuid(raw)) return { ok: false, message: `${f.label} must be a UUID.` };
     if (spec.listFields?.includes(f.name)) {
       body[f.name] = raw.split(/[\n,]/).map((v) => v.trim()).filter(Boolean);
       continue;
     }
     if (f.kind === "datetime-local") {
-      const d = new Date(raw);
-      if (Number.isNaN(d.getTime())) return { ok: false, message: `${f.label} must be a date and time.` };
-      body[f.name] = d.toISOString();
+      if (!ISO_WITH_OFFSET.test(raw) || Number.isNaN(new Date(raw).getTime())) {
+        return { ok: false, message: `${f.label} must be a date and time.` };
+      }
+      body[f.name] = new Date(raw).toISOString();
       continue;
     }
     if (f.kind === "select" && f.options && !f.options.some((o) => o.value === raw)) {
@@ -120,6 +112,8 @@ export async function runLifecycleAction(
     }
     body[f.name] = raw;
   }
+  const invalidReason = spec.validate?.(body);
+  if (invalidReason) return { ok: false, message: invalidReason };
   Object.assign(body, spec.fixed ?? {});
   if (spec.idField) body[spec.idField] = recordId;
   for (const [a, b] of spec.pairedDates ?? []) {

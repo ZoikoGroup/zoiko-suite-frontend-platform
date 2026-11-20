@@ -126,6 +126,9 @@ function readFailed(error: { kind: string; status?: number; message: string }) {
   return NextResponse.json({ error: error.kind, message: error.message }, { status: error.status ?? 502 });
 }
 
+/** Finance reads that must carry the session's legal entity (see the GET handler). */
+const ENTITY_SCOPED_FINANCE_READS = new Set(["journals", "fiscal-periods", "ar-invoices", "ap-invoices", "intercompany/entries"]);
+
 const UNAUTHENTICATED = () =>
   NextResponse.json({ error: "unauthenticated", message: "Sign in to use this API." }, { status: 401 });
 
@@ -225,6 +228,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   }
 
   // ── Finance Domain ─────────────────────────────────────────────────────────
+  // These reads are entity-scoped. Without a legal entity in the session they
+  // would go out unfiltered, and intercompany-accounting-svc skips its
+  // authorization check when no entity is given: refuse instead (fail closed).
+  if (ENTITY_SCOPED_FINANCE_READS.has(endpoint) && !identity.legalEntityId) {
+    return NextResponse.json(
+      { error: "legal_entity_required", message: "Your session has no legal entity, so this entity-scoped read is refused." },
+      { status: 403 },
+    );
+  }
   // Read by the Finance process timeline. Each is scoped to the session's legal
   // entity where the service supports it, and `status` is passed through for the
   // services that filter on it (the service rejects an unknown value with 400).
@@ -277,7 +289,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   }
   if (endpoint === "intercompany/entries") {
     // Both directions: an entity's intercompany position is the entries where it
-    // is the source and where it is the target. Always filtered — the service
+    // is the source and where it is the target. Always filtered: the guard above
+    // refuses the read when the session has no legal entity, because the service
     // skips its authorization check when neither entity is given.
     const [asSource, asTarget] = await Promise.all([
       listIntercompanyEntries(identity, { sourceEntityId: identity.legalEntityId }),

@@ -411,6 +411,7 @@ export function VatGstWorkbench({ initialReturns = [], jurisdictions }: { initia
                     id="file-return-id"
                     name="return_id"
                     kind="draft-vat-returns"
+                    reloadKey={JSON.stringify(createState)}
                     value={targetReturnId}
                     onChange={setTargetReturnId}
                     required

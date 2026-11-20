@@ -9,15 +9,16 @@
 // nothing is filled in instead.
 
 import { apiGet, type Identity } from "@/lib/api/client";
-import { listCounterparties, listClauses, listBoardResolutions, listObligations } from "@/lib/api/legal";
+import { listCounterparties, listClauses, listBoardResolutions } from "@/lib/api/legal";
 import { listContracts } from "@/lib/api/legal";
 import { listPurchaseRequests } from "@/lib/api/purchase-requests";
 import { listSpendPolicies } from "@/lib/api/spend-controls";
 import type { FieldOption } from "@/components/admin/intelligence/create-state";
+import { cache } from "react";
 
 export type Options = { ok: true; items: FieldOption[] } | { ok: false; error: string };
 
-type SessionIdentity = Identity & { principalId: string; tenantId: string; legalEntityId?: string };
+type SessionIdentity = Identity & { principalId: string; tenantId: string; legalEntityId?: string; envelopeJwt?: string };
 
 const ok = (items: FieldOption[]): Options => ({ ok: true, items });
 const fail = (error: string): Options => ({ ok: false, error });
@@ -43,13 +44,6 @@ export async function clauseOptions(identity: SessionIdentity): Promise<Options>
   return ok(res.data.map((c) => ({ value: c.clause_id, label: `${c.title} (${c.status})` })));
 }
 
-/** obligation-tracking-svc: obg-… ids. */
-export async function obligationOptions(identity: SessionIdentity): Promise<Options> {
-  const res = await listObligations(identity);
-  if (!res.ok) return fail(res.error.message);
-  return ok(res.data.map((o) => ({ value: o.obligation_id, label: `${o.title} (${o.status})` })));
-}
-
 /** board-resolutions-svc: PASSED resolutions only, the ones a corporate action may cite. */
 export async function passedResolutionOptions(identity: SessionIdentity): Promise<Options> {
   const res = await listBoardResolutions(identity, { status: "PASSED" });
@@ -72,16 +66,42 @@ export async function purchaseRequestOptions(identity: SessionIdentity, ...statu
   );
 }
 
-type VendorProfile = { vendor_profile_id: string; vendor_name: string; due_diligence_status?: string; risk_rating?: string };
+/** A vendor profile as vendor-due-diligence-svc lists it. */
+export type VendorProfile = {
+  vendor_profile_id: string;
+  counterparty_id: string;
+  vendor_name: string;
+  vendor_status: string;
+  due_diligence_status: string;
+  risk_rating: string;
+  approved_at?: string | null;
+  approved_by?: string | null;
+};
 
-/** vendor-due-diligence-svc: vendor profiles (plain UUIDs). The list is a bare array. */
+/**
+ * vendor-due-diligence-svc's profiles for the entity (a bare array). Read once
+ * per request (React cache, keyed by the identity's values) and shared by the
+ * pick-lists and the vendor-profile register.
+ */
+const readVendorProfilesCached = cache(
+  async (tenantId: string, principalId: string, legalEntityId: string, envelopeJwt?: string) => {
+    const res = await apiGet<VendorProfile[] | { vendor_profiles?: VendorProfile[] } | null>("vendorDueDiligence", "/v1/vendor-profiles", {
+      identity: { tenantId, principalId, legalEntityId, envelopeJwt },
+      query: { legal_entity_id: legalEntityId },
+    });
+    if (!res.ok) return res;
+    return { ok: true as const, data: Array.isArray(res.data) ? res.data : res.data?.vendor_profiles ?? [] };
+  },
+);
+
+export const readVendorProfiles = (identity: SessionIdentity) =>
+  readVendorProfilesCached(identity.tenantId, identity.principalId, identity.legalEntityId ?? "", identity.envelopeJwt);
+
+/** vendor-due-diligence-svc: vendor profiles (plain UUIDs). */
 export async function vendorProfileOptions(identity: SessionIdentity): Promise<Options> {
-  const res = await apiGet<VendorProfile[] | { vendor_profiles?: VendorProfile[] } | null>("vendorDueDiligence", "/v1/vendor-profiles", {
-    identity,
-    query: { legal_entity_id: identity.legalEntityId },
-  });
+  const res = await readVendorProfiles(identity);
   if (!res.ok) return fail(res.error.message);
-  const rows = Array.isArray(res.data) ? res.data : res.data?.vendor_profiles ?? [];
+  const rows = res.data;
   return ok(
     rows.map((v) => ({
       value: v.vendor_profile_id,

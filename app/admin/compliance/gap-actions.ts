@@ -5,12 +5,12 @@
 // The legal entity is the session's; the jurisdiction is picked from the
 // register by id. A refusal is returned as the service gave it.
 
+import { isUuid } from "@/lib/api/tenants";
 import { refresh } from "next/cache";
 import { createComplianceGap } from "@/lib/api/compliance";
 import type { CreateState } from "@/components/admin/intelligence/create-state";
 import { sessionIdentity, expired, missing, invalid, text, toState, show } from "@/app/admin/intelligence/create-support";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
 export async function createComplianceGapAction(previous: CreateState, fd: FormData): Promise<CreateState> {
@@ -23,7 +23,7 @@ export async function createComplianceGapAction(previous: CreateState, fd: FormD
     ["gap_type", "Gap type"],
   ]);
   if (absent) return absent;
-  if (!UUID_RE.test(text(fd, "jurisdiction_id"))) return invalid(previous, fd, "Choose a jurisdiction from the register.");
+  if (!isUuid(text(fd, "jurisdiction_id"))) return invalid(previous, fd, "Choose a jurisdiction from the register.");
   const severity = text(fd, "severity");
   if (severity && !SEVERITIES.includes(severity)) return invalid(previous, fd, "Choose a severity.");
 

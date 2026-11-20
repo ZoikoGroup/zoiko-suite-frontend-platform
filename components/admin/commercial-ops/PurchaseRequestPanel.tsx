@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { CloudOff, ClipboardList, ShieldAlert, Hourglass, ThumbsUp, ThumbsDown } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession, toIdentity } from "@/lib/auth";
 import {
   listPurchaseRequests,
   summariseRequests,
@@ -69,11 +69,8 @@ export async function PurchaseRequestPanel({
     );
   }
 
-  const sessionIdentity = {
-    principalId: session.principalId,
-    tenantId: session.tenantId,
-    legalEntityId: session.legalEntityId,
-  };
+  // toIdentity carries the gateway envelope as well as tenant, principal and entity.
+  const sessionIdentity = toIdentity(session);
   const [result, vendors] = await Promise.all([
     listPurchaseRequests({ identity: sessionIdentity, status, legalEntityId }),
     vendorProfileOptions(sessionIdentity),

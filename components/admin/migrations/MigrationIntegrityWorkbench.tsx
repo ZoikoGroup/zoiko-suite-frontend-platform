@@ -11,6 +11,7 @@ import {
 } from "@/app/admin/migrations/actions";
 import type { MigrationJob, IntegrityCheck, AuditEntry } from "@/lib/api/migration-integrity";
 import { FIELD, LABEL, HINT, BANNER_SUCCESS, BANNER_ERROR, BANNER_WARNING } from "@/components/admin/shared/form";
+import { PickList } from "@/components/admin/shared/PickList";
 
 // Jobs are read and written as the signed-in session's tenant and legal
 // entity; the server actions take no identity from this component. The
@@ -407,15 +408,17 @@ export function MigrationIntegrityWorkbench() {
                   <label htmlFor="exception-owner" className={LABEL}>
                     Exception owner (principal ID) <span className="text-rose-500">*</span>
                   </label>
-                  <input
+                  <PickList
                     id="exception-owner"
-                    type="text"
+                    name="exception_owner_id"
+                    kind="other-principals"
+                    allowOther
                     required
                     value={exceptionOwnerId}
-                    onChange={(e) => setExceptionOwnerId(e.target.value)}
+                    onChange={setExceptionOwnerId}
                     className={`${FIELD} font-mono text-xs`}
                   />
-                  <p className={HINT}>Runs as your session&apos;s tenant and legal entity.</p>
+                  <p className={HINT}>Another principal (suggested from the tenant&apos;s directory where it can be read). Runs as your session&apos;s tenant and legal entity.</p>
                 </div>
 
                 <div>

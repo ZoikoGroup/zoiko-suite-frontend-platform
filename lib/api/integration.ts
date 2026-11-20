@@ -178,7 +178,6 @@ export async function createBridge(
   return apiPost<BridgeEndpoint>("connectivityApiBridge", "/v1/bridges", { ...body, legal_entity_id: identity.legalEntityId }, { identity, purposeContext: "integration.bridge.register" });
 }
 
-/** The service answers with the account number and IBAN; the console does not display them. */
 /**
  * Request a bank connection (BNK-02, POST /v1/banking/connections/request).
  * banking-connector-svc checks the account against treasury-svc and records

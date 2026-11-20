@@ -112,7 +112,11 @@ export function RowActions({ actions, recordId, status, version, subId, onDone, 
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
             const values: Record<string, string> = {};
-            for (const f of openSpec.fields ?? []) values[f.name] = String(fd.get(f.name) ?? "");
+            for (const f of openSpec.fields ?? []) {
+              const raw = String(fd.get(f.name) ?? "");
+              // The reader's local date and time, converted here where their timezone is known.
+              values[f.name] = f.kind === "datetime-local" && raw && !Number.isNaN(new Date(raw).getTime()) ? new Date(raw).toISOString() : raw;
+            }
             send(open, values);
           }}
           className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40"

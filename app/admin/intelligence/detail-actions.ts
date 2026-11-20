@@ -5,6 +5,7 @@
 // reconciliation-intelligence-svc returns them only on GET /{id}. Identity is
 // the session's. (Migration audit entries are decided on /admin/migrations.)
 
+import { isUuid } from "@/lib/api/tenants";
 import { apiGet } from "@/lib/api/client";
 import { sessionIdentity } from "./create-support";
 
@@ -19,13 +20,12 @@ export type JobDetail =
   | { ok: true; version?: number; items: JobItem[] }
   | { ok: false; message: string };
 
-const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Raw = Record<string, unknown>;
 const str = (v: unknown) => (v === undefined || v === null ? "" : String(v));
 
 export async function readReconciliationItems(jobId: string): Promise<JobDetail> {
-  if (!ID_RE.test(jobId)) return { ok: false, message: "The job id is not valid." };
+  if (!isUuid(jobId)) return { ok: false, message: "The job id is not valid." };
   const identity = await sessionIdentity();
   if (!identity) return { ok: false, message: "Your session has expired — sign in again." };
 
