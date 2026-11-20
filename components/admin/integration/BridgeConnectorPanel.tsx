@@ -15,21 +15,22 @@ export function BridgeConnectorPanel() {
 
   const [profiles, setProfiles] = useState<FieldOption[]>([]);
   const [policies, setPolicies] = useState<FieldOption[]>([]);
-  const [optionErrors, setOptionErrors] = useState<string[]>([]);
+  // Shown on the Configure form's field when it is opened, not on every row at rest.
+  const [optionErrors, setOptionErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     // The Configure form's choices; a register that cannot be read is named, not hidden.
-    const load = async (kind: string, label: string, set: (o: FieldOption[]) => void) => {
+    const load = async (kind: string, field: string, label: string, set: (o: FieldOption[]) => void) => {
       try {
         const res = await fetch(`/api/pick-lists/${kind}`, { cache: "no-store" });
         const body = (await res.json().catch(() => null)) as { ok: boolean; items?: FieldOption[]; error?: string } | null;
         if (body?.ok && body.items) set(body.items);
-        else setOptionErrors((e) => [...e, `${label} could not be read: ${body?.error ?? `HTTP ${res.status}`}`]);
+        else setOptionErrors((e) => ({ ...e, [field]: `${label} could not be read: ${body?.error ?? `HTTP ${res.status}`}` }));
       } catch {
-        setOptionErrors((e) => [...e, `${label} could not be loaded.`]);
+        setOptionErrors((e) => ({ ...e, [field]: `${label} could not be loaded.` }));
       }
     };
-    void load("certified-profiles", "Provider profiles (connectivity-api-bridge-svc)", setProfiles);
-    void load("secret-policies", "Credential policies (secret-vault-integration-svc)", setPolicies);
+    void load("certified-profiles", "provider_profile", "Provider profiles (connectivity-api-bridge-svc)", setProfiles);
+    void load("secret-policies", "credential_ref", "Credential policies (secret-vault-integration-svc)", setPolicies);
   }, []);
 
   const fetchConnections = async () => {
@@ -130,10 +131,8 @@ export function BridgeConnectorPanel() {
                   version={c.version}
                   onDone={fetchConnections}
                   fieldOptions={{ provider_profile: profiles, credential_ref: policies }}
+                  fieldErrors={optionErrors}
                 />
-                {optionErrors.map((m) => (
-                  <p key={m} className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">{m}</p>
-                ))}
               </div>
             </div>
           ))}

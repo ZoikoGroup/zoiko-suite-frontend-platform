@@ -31,6 +31,8 @@ type Props = {
   onDone?: () => void;
   /** Options for the catalog's dynamic fields, read by the page from a live list. */
   fieldOptions?: Record<string, FieldOption[]>;
+  /** Why a dynamic field has no options (its register could not be read), shown on that field. */
+  fieldErrors?: Record<string, string>;
 };
 
 const BTN =
@@ -48,7 +50,7 @@ function loadReleases(): Promise<string[]> {
   return releasesPromise;
 }
 
-export function RowActions({ actions, recordId, status, version, subId, onDone, fieldOptions }: Props) {
+export function RowActions({ actions, recordId, status, version, subId, onDone, fieldOptions, fieldErrors }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [result, setResult] = useState<LifecycleResult | null>(null);
@@ -173,8 +175,10 @@ export function RowActions({ actions, recordId, status, version, subId, onDone, 
                   ) : (
                     <input id={id} name={f.name} type={f.kind} step={f.step} min={f.min} max={f.max} placeholder={f.placeholder} aria-required={f.required} autoComplete="off" className={FIELD} />
                   )}
-                  {fieldOptions && f.name in fieldOptions && fieldOptions[f.name].length === 0 && (
-                    <p className={HINT}>Nothing to choose from yet.</p>
+                  {fieldErrors?.[f.name] ? (
+                    <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">{fieldErrors[f.name]}</p>
+                  ) : (
+                    fieldOptions && f.name in fieldOptions && fieldOptions[f.name].length === 0 && <p className={HINT}>Nothing to choose from yet.</p>
                   )}
                   {f.hint && <p className={HINT}>{f.hint}</p>}
                 </div>
