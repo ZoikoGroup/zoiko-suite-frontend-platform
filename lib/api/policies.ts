@@ -33,6 +33,24 @@ import { formatMoney } from "../format";
 import { humanizeCode, humanizeKey } from "../humanize";
 
 /**
+ * Who a read is made as. A bare tenant id is still accepted, but policy-svc
+ * authorizes every read (401 without X-Principal-Id), so console pages pass the
+ * session identity: principal, tenant and the signed envelope.
+ */
+export type Caller = string | Identity;
+
+function who(caller: Caller): Identity {
+  return typeof caller === "string" ? { tenantId: caller } : caller;
+}
+
+/** Paged list response (API-4). */
+export type PagedList<T> = {
+  items: T[];
+  next_cursor?: string;
+  page_size: number;
+};
+
+/**
  * Policy types the console offers.
  *
  * The column is a VARCHAR tag and the service adds new types by data, never by
@@ -59,6 +77,37 @@ export type PolicyType = (typeof POLICY_TYPES)[number];
 export const EVALUABLE_POLICY_TYPES: readonly string[] = ["APPROVAL_THRESHOLD"];
 
 export type VersionStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED" | "RETIRED";
+
+/** Summary KPI row from GET /v1/policies/summary. */
+export type PolicySummary = {
+  tenant_id: string;
+  as_of: string;
+  policy_families: number;
+  versions_draft: number;
+  versions_in_review: number;
+  versions_approved: number;
+  versions_scheduled: number;
+  versions_active: number;
+  versions_suspended: number;
+  suspensions_awaiting_review: number;
+  evaluations_24h: number;
+  evaluations_approval_required_24h: number;
+  evidence_pending: number;
+  evidence_failed: number;
+  control_test_definitions: number;
+  control_tests_failing: number;
+  attestations_active: number;
+  attestations_revoked: number;
+};
+
+/** Get the console KPI summary. */
+export async function getPolicySummary(
+  caller: Caller,
+): Promise<ApiResult<PolicySummary>> {
+  return apiGet<PolicySummary>("policy", "/v1/policies/summary", {
+    identity: who(caller),
+  });
+}
 
 /** Wire shape. Field names match the Go json tags exactly. */
 export type Policy = {
@@ -87,11 +136,345 @@ export type PolicyVersion = {
   activated_at: string | null;
   created_at: string;
   created_by_principal_id: string;
+  // Lifecycle provenance (GOV-05). Older payloads may omit them.
+  /** GLOBAL | TENANT | LEGAL_ENTITY, derived from the two ids above. */
+  scope_type?: string;
+  version_number?: number;
+  source?: string;
+  rationale?: string;
+  artifact_digest?: string;
+  known_from?: string;
+  row_version?: number;
+  submitted_by_principal_id?: string;
+  submitted_at?: string;
+  approved_by_principal_id?: string;
+  approved_at?: string;
+  approval_reference?: string;
+  withdrawn_at?: string;
+  superseded_at?: string;
+  superseded_by_version_id?: string;
+  suspended_by_principal_id?: string;
+  suspension_reviewed_by_principal_id?: string;
+  suspension_reviewed_at?: string;
+  suspension_review_outcome?: string;
 };
 
 /** A version plus its owning policy's code, as returned by the applicable-set
  *  read. Saves a second round trip when building a rule basis. */
 export type ApplicablePolicyVersion = PolicyVersion & { policy_code: string };
+
+/** Policy register: platform families and the caller tenant's own. */
+export type PolicyFamily = Policy & {
+  tenant_id: string | null;
+  policy_status: string;
+  versioning_mode: string;
+  record_version: number;
+  retired_by_principal_id?: string;
+  retired_at?: string;
+  retirement_reason?: string;
+};
+
+export type PolicyPage = PagedList<PolicyFamily>;
+
+/** Version register across every visible family. */
+export type PolicyVersionPage = PagedList<PolicyVersion>;
+
+/** Evaluation evidence register. */
+export type Evaluation = {
+  evidence_id: string;
+  tenant_id: string;
+  decision_id: string;
+  legal_entity_id: string;
+  policy_type: string;
+  requested_by_principal_id: string;
+  input_fingerprint: string;
+  action_context: unknown;
+  as_of: string;
+  known_at: string;
+  result: string;
+  outcome: string;
+  policy_id: string;
+  policy_version_id: string;
+  policy_code: string;
+  artifact_digest: string;
+  rule_basis: string;
+  selected_rule_ids: string[];
+  evaluator_version: string;
+  correlation_id: string;
+  causation_id: string;
+  request_id: string;
+  evaluated_at: string;
+  ledger_status: string;
+};
+
+export type EvaluationPage = PagedList<Evaluation>;
+
+/** Control test definition register. */
+export type ControlTestDefinition = {
+  control_test_definition_id: string;
+  tenant_id: string | null;
+  control_ref: string;
+  test_code: string;
+  title: string;
+  methodology: string;
+  sample_approach?: string;
+  test_frequency?: string;
+  design_status: string;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export type ControlTestDefinitionPage = PagedList<ControlTestDefinition>;
+
+/** Attestation register. */
+export type Attestation = {
+  attestation_id: string;
+  tenant_id: string | null;
+  statement: string;
+  statement_version: string;
+  subject_ref: string;
+  period_start: string;
+  period_end: string;
+  signer_principal_id: string;
+  signer_role: string;
+  signed_at: string;
+  evidence_refs: string[];
+  expires_at?: string;
+  attestation_status: string;
+  revocation_reason?: string;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export type AttestationPage = PagedList<Attestation>;
+
+/** Policy register (GET /v1/policy-families). */
+export async function listPolicyFamilies(
+  caller: Caller,
+  filters?: { policy_type?: string; scope?: "TENANT" | "GLOBAL"; policy_status?: string },
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<PolicyPage>> {
+  const query: Record<string, string> = {};
+  if (filters?.policy_type) query["filter[policy_type]"] = filters.policy_type;
+  if (filters?.scope) query["filter[scope]"] = filters.scope;
+  if (filters?.policy_status) query["filter[policy_status]"] = filters.policy_status;
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<PolicyPage>("policy", "/v1/policy-families", {
+    query,
+    identity: who(caller),
+  });
+}
+
+/** Version register (GET /v1/policy-versions). */
+export async function listPolicyVersions(
+  caller: Caller,
+  filters?: { policy_id?: string; policy_type?: string; version_status?: string; legal_entity_id?: string },
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<PolicyVersionPage>> {
+  const query: Record<string, string> = {};
+  if (filters?.policy_id) query["filter[policy_id]"] = filters.policy_id;
+  if (filters?.policy_type) query["filter[policy_type]"] = filters.policy_type;
+  if (filters?.version_status) query["filter[version_status]"] = filters.version_status;
+  if (filters?.legal_entity_id) query["filter[legal_entity_id]"] = filters.legal_entity_id;
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<PolicyVersionPage>("policy", "/v1/policy-versions", {
+    query,
+    identity: who(caller),
+  });
+}
+
+/** Evaluation evidence register (GET /v1/policy-evaluations). */
+export async function listEvaluations(
+  caller: Caller,
+  filters?: { policy_type?: string; result?: string; legal_entity_id?: string; decision_id?: string; policy_version_id?: string },
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<EvaluationPage>> {
+  const query: Record<string, string> = {};
+  if (filters?.policy_type) query["filter[policy_type]"] = filters.policy_type;
+  if (filters?.result) query["filter[result]"] = filters.result;
+  if (filters?.legal_entity_id) query["filter[legal_entity_id]"] = filters.legal_entity_id;
+  if (filters?.decision_id) query["filter[decision_id]"] = filters.decision_id;
+  if (filters?.policy_version_id) query["filter[policy_version_id]"] = filters.policy_version_id;
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<EvaluationPage>("policy", "/v1/policy-evaluations", {
+    query,
+    identity: who(caller),
+  });
+}
+
+/** Control test definition register (GET /v1/control-test-definitions). */
+export async function listControlTestDefinitions(
+  caller: Caller,
+  filters?: { control_ref?: string; design_status?: string },
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<ControlTestDefinitionPage>> {
+  const query: Record<string, string> = {};
+  if (filters?.control_ref) query["filter[control_ref]"] = filters.control_ref;
+  if (filters?.design_status) query["filter[design_status]"] = filters.design_status;
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<ControlTestDefinitionPage>("policy", "/v1/control-test-definitions", {
+    query,
+    identity: who(caller),
+  });
+}
+
+/** Attestation register (GET /v1/attestations). */
+export async function listAttestations(
+  caller: Caller,
+  filters?: { subject_ref?: string; attestation_status?: string; signer_principal_id?: string },
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<AttestationPage>> {
+  const query: Record<string, string> = {};
+  if (filters?.subject_ref) query["filter[subject_ref]"] = filters.subject_ref;
+  if (filters?.attestation_status) query["filter[attestation_status]"] = filters.attestation_status;
+  if (filters?.signer_principal_id) query["filter[signer_principal_id]"] = filters.signer_principal_id;
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<AttestationPage>("policy", "/v1/attestations", {
+    query,
+    identity: who(caller),
+  });
+}
+
+/** Single policy family (GET /v1/policies/{policy_id}). */
+export async function getPolicy(
+  policyId: string,
+  caller: Caller,
+): Promise<ApiResult<Policy>> {
+  return apiGet<Policy>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}`,
+    { identity: who(caller) },
+  );
+}
+
+/** Single policy version (GET /v1/policy-versions/{version_id}). */
+export async function getPolicyVersionByID(
+  versionId: string,
+  caller: Caller,
+  callerLegalEntityId?: string,
+): Promise<ApiResult<PolicyVersion>> {
+  return apiGet<PolicyVersion>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}`,
+    { identity: { ...who(caller), ...(callerLegalEntityId ? { legalEntityId: callerLegalEntityId } : {}) } },
+  );
+}
+
+/** Compare two versions (GET /v1/policy-versions/compare). */
+export type Comparison = {
+  base: PolicyVersion;
+  target: PolicyVersion;
+  same_content: boolean;
+  field_changes: { field: string; base: unknown; target: unknown }[];
+  payload_changes: { path: string; change: "added" | "removed" | "changed"; base: unknown; target: unknown }[];
+};
+
+export async function comparePolicyVersions(
+  baseVersionId: string,
+  targetVersionId: string,
+  caller: Caller,
+): Promise<ApiResult<Comparison>> {
+  return apiGet<Comparison>("policy", "/v1/policy-versions/compare", {
+    query: { base: baseVersionId, target: targetVersionId },
+    identity: who(caller),
+  });
+}
+
+/** Version transitions (GET /v1/policy-versions/{version_id}/transitions). */
+export type VersionTransition = {
+  transition_id: string;
+  policy_version_id: string;
+  from_status: string | null;
+  to_status: string;
+  actor_id: string;
+  reason: string;
+  approval_reference?: string;
+  correlation_id: string;
+  occurred_at: string;
+};
+
+export type VersionTransitionPage = PagedList<VersionTransition>;
+
+export async function listTransitions(
+  versionId: string,
+  caller: Caller,
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<VersionTransitionPage>> {
+  const query: Record<string, string> = {};
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<VersionTransitionPage>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}/transitions`,
+    { query, identity: who(caller) },
+  );
+}
+
+/** Single evaluation evidence (GET /v1/policy-evaluations/{evidence_id}). */
+export async function getEvaluation(
+  evidenceId: string,
+  caller: Caller,
+): Promise<ApiResult<Evaluation>> {
+  return apiGet<Evaluation>(
+    "policy",
+    `/v1/policy-evaluations/${encodeURIComponent(evidenceId)}`,
+    { identity: who(caller) },
+  );
+}
+
+/** Redeliver failed evidence (POST /v1/policy-evaluations/{evidence_id}/redeliver). */
+export async function redeliverPolicyEvidence(
+  evidenceId: string,
+  reasonCode: string,
+  callerTenantId: string,
+  callerPrincipalId: string,
+  reason?: string,
+): Promise<ApiWriteResult<Evaluation>> {
+  return apiPost<Evaluation>(
+    "policy",
+    `/v1/policy-evaluations/${encodeURIComponent(evidenceId)}/redeliver`,
+    { reason_code: reasonCode, reason },
+    {
+      identity: {
+        tenantId: callerTenantId,
+        principalId: callerPrincipalId,
+      },
+    },
+  );
+}
+
+/** Retire a policy family (POST /v1/policies/{policy_id}/retire). */
+export async function retirePolicyFamily(
+  policyId: string,
+  reasonCode: string,
+  reason: string | undefined,
+  expectedVersion: number | undefined,
+  identity: Identity,
+): Promise<ApiWriteResult<Policy>> {
+  return apiPost<Policy>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/retire`,
+    { reason_code: reasonCode, reason, expected_version: expectedVersion },
+    { identity },
+  );
+}
 
 export type ApplicableScope = {
   policyType: string;
@@ -162,12 +545,12 @@ export async function listPolicyVersionHistory(
    * the service returns this tenant's versions plus any global ones, so a read
    * with no tenant would have no defined answer even if it were allowed.
    */
-  callerTenantId: string,
+  caller: Caller,
 ): Promise<ApiResult<PolicyVersion[]>> {
   const result = await apiGet<PolicyVersion[]>(
     "policy",
     `/v1/policies/${encodeURIComponent(policyId)}/versions`,
-    { identity: { tenantId: callerTenantId } },
+    { identity: who(caller) },
   );
 
   if (!result.ok) return result;
@@ -327,6 +710,104 @@ export async function activatePolicyVersion(input: {
   );
 }
 
+/** Submit a version for review (POST /v1/policies/{policy_id}/versions/{version_id}/submit-review). */
+export async function submitPolicyVersionForReview(
+  policyId: string,
+  versionId: string,
+  expectedVersion: number | undefined,
+  identity: Identity & { principalId: string },
+): Promise<ApiWriteResult<PolicyVersion>> {
+  return apiPost<PolicyVersion>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(versionId)}/submit-review`,
+    { expected_version: expectedVersion },
+    { identity },
+  );
+}
+
+/** Approve a version (POST /v1/policies/{policy_id}/versions/{version_id}/approve). */
+export async function approvePolicyVersion(
+  policyId: string,
+  versionId: string,
+  expectedVersion: number | undefined,
+  approvalReference?: string,
+  identity?: Identity & { principalId: string },
+): Promise<ApiWriteResult<PolicyVersion>> {
+  return apiPost<PolicyVersion>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(versionId)}/approve`,
+    { expected_version: expectedVersion, approval_reference: approvalReference },
+    { identity: identity! },
+  );
+}
+
+/** Schedule a version (POST /v1/policies/{policy_id}/versions/{version_id}/schedule). */
+export async function schedulePolicyVersion(
+  policyId: string,
+  versionId: string,
+  expectedVersion: number | undefined,
+  identity: Identity & { principalId: string },
+): Promise<ApiWriteResult<PolicyVersion>> {
+  return apiPost<PolicyVersion>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(versionId)}/schedule`,
+    { expected_version: expectedVersion },
+    { identity },
+  );
+}
+
+/** Suspend a version (POST /v1/policies/{policy_id}/versions/{version_id}/suspend). */
+export async function suspendPolicyVersion(
+  policyId: string,
+  versionId: string,
+  expectedVersion: number | undefined,
+  reasonCode: string,
+  identity: Identity & { principalId: string },
+  reason?: string,
+): Promise<ApiWriteResult<PolicyVersion>> {
+  return apiPost<PolicyVersion>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(versionId)}/suspend`,
+    { expected_version: expectedVersion, reason_code: reasonCode, reason },
+    { identity },
+  );
+}
+
+/** Retire a version (POST /v1/policies/{policy_id}/versions/{version_id}/retire). */
+export async function retirePolicyVersion(
+  policyId: string,
+  versionId: string,
+  expectedVersion: number | undefined,
+  reasonCode: string,
+  identity: Identity & { principalId: string },
+  reason?: string,
+): Promise<ApiWriteResult<PolicyVersion>> {
+  return apiPost<PolicyVersion>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(versionId)}/retire`,
+    { expected_version: expectedVersion, reason_code: reasonCode, reason },
+    { identity },
+  );
+}
+
+/** Review a suspension (POST /v1/policies/{policy_id}/versions/{version_id}/review-suspension). */
+export async function reviewPolicyVersionSuspension(
+  policyId: string,
+  versionId: string,
+  expectedVersion: number | undefined,
+  reasonCode: string,
+  outcome: "UPHELD" | "OVERTURNED",
+  identity: Identity & { principalId: string },
+  reason?: string,
+): Promise<ApiWriteResult<PolicyVersion>> {
+  return apiPost<PolicyVersion>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(versionId)}/review-suspension`,
+    { expected_version: expectedVersion, reason_code: reasonCode, reason, outcome },
+    { identity },
+  );
+}
+
 export type EvaluateResult = {
   /** For APPROVAL_THRESHOLD: WITHIN_THRESHOLD or APPROVAL_REQUIRED. */
   result: string;
@@ -375,6 +856,958 @@ export async function evaluatePolicy(
       decision_id: input.decisionId,
     },
     { identity: input.identity, correlationId: input.decisionId },
+  );
+}
+
+// ─── Control Test Definitions ────────────────────────────────────────────────
+
+export type CreateControlTestDefinitionInput = {
+  controlRef: string;
+  testCode: string;
+  title: string;
+  methodology: string;
+  sampleApproach?: string;
+  testFrequency?: string;
+  controlTestDefinitionId?: string;
+  identity: Identity;
+};
+
+export async function createControlTestDefinition(
+  input: CreateControlTestDefinitionInput,
+): Promise<ApiWriteResult<ControlTestDefinition>> {
+  return apiPost<ControlTestDefinition>(
+    "policy",
+    "/v1/control-test-definitions",
+    {
+      control_ref: input.controlRef,
+      test_code: input.testCode,
+      title: input.title,
+      methodology: input.methodology,
+      sample_approach: input.sampleApproach,
+      test_frequency: input.testFrequency,
+      ...(input.controlTestDefinitionId ? { control_test_definition_id: input.controlTestDefinitionId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function getControlTestDefinition(
+  id: string,
+  caller: Caller,
+): Promise<ApiResult<ControlTestDefinition>> {
+  return apiGet<ControlTestDefinition>(
+    "policy",
+    `/v1/control-test-definitions/${encodeURIComponent(id)}`,
+    { identity: who(caller) },
+  );
+}
+
+// ─── Control Test Executions ────────────────────────────────────────────────
+
+export type CreateControlTestExecutionInput = {
+  controlTestDefinitionId: string;
+  periodStart: string;
+  periodEnd: string;
+  populationDescription?: string;
+  sampleDescription?: string;
+  procedureNotes?: string;
+  evidenceRefs?: string[];
+  result: string;
+  exceptionsNoted?: string;
+  reviewerPrincipalId?: string;
+  controlTestExecutionId?: string;
+  identity: Identity & { principalId: string };
+  callerTenantId: string;
+};
+
+export type ControlTestExecution = {
+  control_test_execution_id: string;
+  tenant_id: string | null;
+  control_test_definition_id: string;
+  period_start: string;
+  period_end: string;
+  population_description?: string;
+  sample_description?: string;
+  procedure_notes?: string;
+  evidence_refs: string[];
+  tester_principal_id: string;
+  result: string;
+  exceptions_noted?: string;
+  reviewer_principal_id?: string;
+  reviewed_at?: string;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export type ControlTestExecutionPage = PagedList<ControlTestExecution>;
+
+export async function createControlTestExecution(
+  input: CreateControlTestExecutionInput,
+): Promise<ApiWriteResult<ControlTestExecution>> {
+  return apiPost<ControlTestExecution>(
+    "policy",
+    `/v1/control-test-definitions/${encodeURIComponent(input.controlTestDefinitionId)}/executions`,
+    {
+      period_start: input.periodStart,
+      period_end: input.periodEnd,
+      population_description: input.populationDescription,
+      sample_description: input.sampleDescription,
+      procedure_notes: input.procedureNotes,
+      evidence_refs: input.evidenceRefs,
+      result: input.result,
+      exceptions_noted: input.exceptionsNoted,
+      reviewer_principal_id: input.reviewerPrincipalId,
+      ...(input.controlTestExecutionId ? { control_test_execution_id: input.controlTestExecutionId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function listControlTestExecutions(
+  definitionId: string,
+  caller: Caller,
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<ControlTestExecutionPage>> {
+  const query: Record<string, string> = {};
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<ControlTestExecutionPage>(
+    "policy",
+    `/v1/control-test-definitions/${encodeURIComponent(definitionId)}/executions`,
+    { query, identity: who(caller) },
+  );
+}
+
+// ─── Control Effectiveness ──────────────────────────────────────────────────
+
+export type ControlEffectiveness = {
+  control_ref: string;
+  design_status: string;
+  operating_effectiveness: string;
+  as_of: string;
+  latest_execution_id: string;
+};
+
+export async function getControlEffectiveness(
+  controlRef: string,
+  caller: Caller,
+): Promise<ApiResult<ControlEffectiveness>> {
+  return apiGet<ControlEffectiveness>(
+    "policy",
+    `/v1/controls/${encodeURIComponent(controlRef)}/effectiveness`,
+    { identity: who(caller) },
+  );
+}
+
+// ─── Attestations ────────────────────────────────────────────────────────────
+
+export type CreateAttestationInput = {
+  statement: string;
+  statementVersion: string;
+  subjectRef: string;
+  periodStart: string;
+  periodEnd: string;
+  signerRole: string;
+  evidenceRefs?: string[];
+  expiresAt?: string;
+  attestationId?: string;
+  identity: Identity & { principalId: string };
+  callerTenantId: string;
+};
+
+export async function createAttestation(
+  input: CreateAttestationInput,
+): Promise<ApiWriteResult<Attestation>> {
+  return apiPost<Attestation>(
+    "policy",
+    "/v1/attestations",
+    {
+      statement: input.statement,
+      statement_version: input.statementVersion,
+      subject_ref: input.subjectRef,
+      period_start: input.periodStart,
+      period_end: input.periodEnd,
+      signer_role: input.signerRole,
+      evidence_refs: input.evidenceRefs,
+      expires_at: input.expiresAt,
+      ...(input.attestationId ? { attestation_id: input.attestationId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function getAttestation(
+  id: string,
+  caller: Caller,
+): Promise<ApiResult<Attestation>> {
+  return apiGet<Attestation>(
+    "policy",
+    `/v1/attestations/${encodeURIComponent(id)}`,
+    { identity: who(caller) },
+  );
+}
+
+export async function revokeAttestation(
+  id: string,
+  callerTenantId: string,
+  callerPrincipalId: string,
+  reason?: string,
+): Promise<ApiWriteResult<Attestation>> {
+  return apiPost<Attestation>(
+    "policy",
+    `/v1/attestations/${encodeURIComponent(id)}/revoke`,
+    { reason },
+    { identity: { tenantId: callerTenantId, principalId: callerPrincipalId } },
+  );
+}
+
+// ─── Resolution & Explain ────────────────────────────────────────────────────
+
+export type Resolution = {
+  status: "RESOLVED" | "NOT_APPLICABLE" | "CONFLICTED";
+  as_of: string;
+  known_at: string;
+  selected?: ApplicablePolicyVersion;
+  conflicting?: ApplicablePolicyVersion[];
+  trace?: {
+    policy_version_id: string;
+    policy_id: string;
+    policy_code: string;
+    version_number: number;
+    scope_type: string;
+    version_status: string;
+    governs: boolean;
+    reason: string;
+  }[];
+};
+
+export async function resolveEffectivePolicy(
+  scope: ApplicableScope,
+  asOf?: string,
+  knownAt?: string,
+): Promise<ApiResult<Resolution>> {
+  const query: Record<string, string> = {};
+  if (asOf) query.as_of = asOf;
+  if (knownAt) query.known_at = knownAt;
+
+  return apiGet<Resolution>("policy", "/v1/policies/resolve", {
+    query: {
+      policy_type: scope.policyType,
+      tenant_id: scope.tenantId,
+      legal_entity_id: scope.legalEntityId,
+      ...query,
+    },
+    identity: { tenantId: scope.callerTenantId },
+  });
+}
+
+export async function explainPolicyResolution(
+  scope: ApplicableScope,
+  asOf?: string,
+  knownAt?: string,
+): Promise<ApiResult<Resolution>> {
+  const query: Record<string, string> = {};
+  if (asOf) query.as_of = asOf;
+  if (knownAt) query.known_at = knownAt;
+
+  return apiGet<Resolution>("policy", "/v1/policies/explain", {
+    query: {
+      policy_type: scope.policyType,
+      tenant_id: scope.tenantId,
+      legal_entity_id: scope.legalEntityId,
+      ...query,
+    },
+    identity: { tenantId: scope.callerTenantId },
+  });
+}
+
+// ─── Accounting Policies (REF-07) ────────────────────────────────────────────
+
+export type ImpactAnalysis = {
+  summary: string;
+  affected_periods: "FUTURE_ONLY" | "OPEN_PERIODS";
+  closed_history_unchanged: boolean;
+  retroactive_justification?: string;
+  notes?: string;
+};
+
+export type RuleMapping = {
+  ref_kind: string;
+  ref: string;
+  ref_version: string;
+  rationale: string;
+  maps_to?: string;
+  depends_on_version_id?: string;
+};
+
+export type DraftAccountingPolicyInput = {
+  policyDomain: string;
+  framework: string;
+  bookId?: string;
+  jurisdictionId?: string;
+  legalEntityId?: string;
+  semanticVersion: string;
+  precedence: number;
+  frameworkSource: string;
+  policyTextRef: string;
+  ruleMappings?: RuleMapping[];
+  impactAnalysis: ImpactAnalysis;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  rationale: string;
+  identity: Identity;
+  callerTenantId: string;
+  callerLegalEntityId?: string;
+};
+
+export type AccountingApplicability = {
+  policy_id: string;
+  policy_domain: string;
+  framework: string;
+  book_id?: string;
+  jurisdiction_id?: string;
+  created_at: string;
+};
+
+export type AccountingVersionDetails = {
+  semantic_version: string;
+  precedence: number;
+  framework_source: string;
+  policy_text_ref: string;
+  impact_analysis: ImpactAnalysis;
+};
+
+export type AccountingPolicyVersion = PolicyVersion & {
+  policy_code: string;
+  applicability: AccountingApplicability;
+  details: AccountingVersionDetails;
+  rule_mappings: RuleMapping[];
+};
+
+export type AccountingPin = {
+  policy_id: string;
+  policy_version_id: string;
+  version_number: number;
+  semantic_version: string;
+  artifact_digest: string;
+  row_version: number;
+};
+
+export type AccountingVersionSummary = {
+  pin: AccountingPin;
+  policy_domain: string;
+  framework: string;
+  book_id?: string;
+  jurisdiction_id?: string;
+  legal_entity_id?: string;
+  scope_type: string;
+  precedence: number;
+  version_status: string;
+  effective_from: string;
+  effective_to?: string;
+};
+
+export type AccountingResolution = {
+  status: "RESOLVED" | "NOT_APPLICABLE" | "CONFLICTED";
+  blocks_calculation: boolean;
+  policy_domain: string;
+  as_of: string;
+  known_at: string;
+  pin?: AccountingPin;
+  selected?: AccountingVersionSummary;
+  conflicting?: AccountingVersionSummary[];
+  trace?: {
+    policy_version_id: string;
+    policy_id: string;
+    policy_code: string;
+    version_number: number;
+    scope_type: string;
+    version_status: string;
+    governs: boolean;
+    reason: string;
+    policy_domain: string;
+    book_id?: string;
+    jurisdiction_id?: string;
+    semantic_version: string;
+    precedence: number;
+  }[];
+};
+
+export type ResolvedAccountingPolicy = {
+  status: "RESOLVED";
+  blocks_calculation: false;
+  policy_domain: string;
+  as_of: string;
+  known_at: string;
+  pin: AccountingPin;
+  policy: AccountingPolicyVersion;
+};
+
+export async function draftAccountingPolicy(
+  input: DraftAccountingPolicyInput,
+): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  return apiPost<AccountingPolicyVersion>(
+    "policy",
+    "/v1/accounting-policies",
+    {
+      policy_domain: input.policyDomain,
+      framework: input.framework,
+      book_id: input.bookId,
+      jurisdiction_id: input.jurisdictionId,
+      legal_entity_id: input.legalEntityId,
+      semantic_version: input.semanticVersion,
+      precedence: input.precedence,
+      framework_source: input.frameworkSource,
+      policy_text_ref: input.policyTextRef,
+      rule_mappings: input.ruleMappings,
+      impact_analysis: input.impactAnalysis,
+      effective_from: input.effectiveFrom,
+      effective_to: input.effectiveTo,
+      rationale: input.rationale,
+    },
+    {
+      identity: {
+        principalId: input.identity.principalId,
+        tenantId: input.callerTenantId,
+        legalEntityId: input.callerLegalEntityId,
+      },
+    },
+  );
+}
+
+export async function listApplicableAccountingPolicies(
+  identity: Identity,
+  policyDomain?: string,
+  bookId?: string,
+  jurisdictionId?: string,
+  legalEntityId?: string,
+  asOf?: string,
+  knownAt?: string,
+): Promise<ApiResult<{ as_of: string; known_at: string; policies: AccountingResolution[] }>> {
+  const query: Record<string, string> = {};
+  if (policyDomain) query.policy_domain = policyDomain;
+  if (bookId) query.book_id = bookId;
+  if (jurisdictionId) query.jurisdiction_id = jurisdictionId;
+  if (legalEntityId) query.legal_entity_id = legalEntityId;
+  if (asOf) query.as_of = asOf;
+  if (knownAt) query.known_at = knownAt;
+
+  return apiGet<{ as_of: string; known_at: string; policies: AccountingResolution[] }>(
+    "policy",
+    "/v1/accounting-policies",
+    { query, identity },
+  );
+}
+
+export async function resolveAccountingPolicy(
+  identity: Identity,
+  policyDomain: string,
+  bookId?: string,
+  jurisdictionId?: string,
+  legalEntityId?: string,
+  asOf?: string,
+  knownAt?: string,
+): Promise<ApiResult<ResolvedAccountingPolicy>> {
+  const query: Record<string, string> = { policy_domain: policyDomain };
+  if (bookId) query.book_id = bookId;
+  if (jurisdictionId) query.jurisdiction_id = jurisdictionId;
+  if (legalEntityId) query.legal_entity_id = legalEntityId;
+  if (asOf) query.as_of = asOf;
+  if (knownAt) query.known_at = knownAt;
+
+  return apiGet<ResolvedAccountingPolicy>("policy", "/v1/accounting-policies/resolve", {
+    query,
+    identity,
+  });
+}
+
+export async function explainAccountingResolution(
+  identity: Identity,
+  policyDomain: string,
+  bookId?: string,
+  jurisdictionId?: string,
+  legalEntityId?: string,
+  asOf?: string,
+  knownAt?: string,
+): Promise<ApiResult<AccountingResolution>> {
+  const query: Record<string, string> = { policy_domain: policyDomain };
+  if (bookId) query.book_id = bookId;
+  if (jurisdictionId) query.jurisdiction_id = jurisdictionId;
+  if (legalEntityId) query.legal_entity_id = legalEntityId;
+  if (asOf) query.as_of = asOf;
+  if (knownAt) query.known_at = knownAt;
+
+  return apiGet<AccountingResolution>("policy", "/v1/accounting-policies/explain", {
+    query,
+    identity,
+  });
+}
+
+export async function getAccountingPolicyVersion(
+  versionId: string,
+  identity: Identity,
+): Promise<ApiResult<AccountingPolicyVersion>> {
+  return apiGet<AccountingPolicyVersion>(
+    "policy",
+    `/v1/accounting-policies/versions/${encodeURIComponent(versionId)}`,
+    { identity },
+  );
+}
+
+export type AccountingLifecycleInput = {
+  versionId: string;
+  expectedVersion?: number;
+  reasonCode?: string;
+  reason?: string;
+  approvalReference?: string;
+  outcome?: "UPHELD" | "OVERTURNED";
+  supersedesVersionId?: string;
+  breakGlassSessionId?: string;
+  identity: Identity & { principalId: string };
+};
+
+async function accountingLifecycle(
+  route: "submit-review" | "approve" | "activate" | "supersede" | "emergency-suspend" | "review-suspension",
+  input: AccountingLifecycleInput,
+): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  const body: Record<string, unknown> = {};
+  if (input.expectedVersion !== undefined) body.expected_version = input.expectedVersion;
+  if (input.reasonCode) body.reason_code = input.reasonCode;
+  if (input.reason) body.reason = input.reason;
+  if (input.approvalReference) body.approval_reference = input.approvalReference;
+  if (input.outcome) body.outcome = input.outcome;
+  if (input.supersedesVersionId) body.supersedes_version_id = input.supersedesVersionId;
+
+  const headers: Record<string, string> = {};
+  if (input.breakGlassSessionId) headers["X-Break-Glass-Session-Id"] = input.breakGlassSessionId;
+
+  return apiPost<AccountingPolicyVersion>(
+    "policy",
+    `/v1/accounting-policies/versions/${encodeURIComponent(input.versionId)}/${route}`,
+    body,
+    { identity: input.identity, extraHeaders: headers },
+  );
+}
+
+export async function submitAccountingPolicy(input: AccountingLifecycleInput): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  return accountingLifecycle("submit-review", input);
+}
+
+export async function approveAccountingPolicyVersion(input: AccountingLifecycleInput): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  return accountingLifecycle("approve", input);
+}
+
+export async function activateAccountingPolicyVersion(input: AccountingLifecycleInput): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  return accountingLifecycle("activate", input);
+}
+
+export async function supersedeAccountingPolicyVersion(input: AccountingLifecycleInput): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  return accountingLifecycle("supersede", input);
+}
+
+export async function emergencySuspendAccountingPolicy(input: AccountingLifecycleInput): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  return accountingLifecycle("emergency-suspend", input);
+}
+
+export async function reviewAccountingPolicySuspension(input: AccountingLifecycleInput): Promise<ApiWriteResult<AccountingPolicyVersion>> {
+  return accountingLifecycle("review-suspension", input);
+}
+
+export type ImpactVersionRef = {
+  policy_version_id: string;
+  policy_id: string;
+  policy_domain: string;
+  semantic_version: string;
+  version_status: string;
+  precedence: number;
+  book_id?: string;
+  jurisdiction_id?: string;
+  legal_entity_id?: string;
+  effective_from: string;
+  effective_to?: string;
+};
+
+export type AccountingImpact = {
+  version: AccountingPolicyVersion;
+  retroactive: boolean;
+  would_supersede?: ImpactVersionRef;
+  predecessor_governs_until?: string;
+  pending_schedule?: ImpactVersionRef;
+  ambiguous_with: ImpactVersionRef[];
+  depended_on_by: ImpactVersionRef[];
+  activation_blockers: string[];
+};
+
+export async function getAccountingPolicyImpact(
+  versionId: string,
+  identity: Identity,
+): Promise<ApiResult<AccountingImpact>> {
+  return apiGet<AccountingImpact>(
+    "policy",
+    `/v1/accounting-policies/versions/${encodeURIComponent(versionId)}/impact`,
+    { identity },
+  );
+}
+
+// ─── PDC-05 Certification & Simulation ─────────────────────────────────────
+
+export type TestCase = {
+  test_case_id: string;
+  policy_id: string;
+  tenant_id: string;
+  test_code: string;
+  layer: "UNIT" | "BOUNDARY" | "REGRESSION";
+  mandatory: boolean;
+  description: string;
+  action_context: unknown;
+  expected_result: string;
+  test_status: "ACTIVE" | "RETIRED";
+  created_at: string;
+  created_by_principal_id: string;
+  retired_at?: string;
+  retired_by_principal_id?: string;
+};
+
+export type TestCasePage = PagedList<TestCase>;
+
+export type CaseResult = {
+  test_case_id: string;
+  test_code: string;
+  mandatory: boolean;
+  expected: string;
+  actual: string;
+  error?: string;
+  passed: boolean;
+};
+
+export type TestRun = {
+  test_run_id: string;
+  tenant_id: string;
+  policy_id: string;
+  policy_version_id: string;
+  artifact_digest: string;
+  suite_hash: string;
+  evaluator_version: string;
+  run_status: "PASS" | "FAIL";
+  case_count: number;
+  failed_count: number;
+  static_findings: string[];
+  results: CaseResult[];
+  run_by_principal_id: string;
+  run_at: string;
+};
+
+export type TestRunPage = PagedList<TestRun>;
+
+export type Certification = {
+  policy_version_id: string;
+  status: "CERTIFIED" | "WAIVED" | "FAILED" | "NOT_RUN" | "STALE" | "EXEMPT_NO_EVALUATOR";
+  suite_hash: string;
+  test_run_id?: string;
+  unwaived_failed_test_case_ids: string[];
+  reason?: string;
+};
+
+export type Waiver = {
+  waiver_id: string;
+  tenant_id: string;
+  policy_version_id: string;
+  test_case_id: string;
+  reason_code: string;
+  justification: string;
+  expires_at: string;
+  waiver_status: "REQUESTED" | "APPROVED" | "REVOKED";
+  requested_by_principal_id: string;
+  requested_at: string;
+  approved_by_principal_id?: string;
+  approved_at?: string;
+  revoked_by_principal_id?: string;
+  revoked_at?: string;
+  revocation_reason?: string;
+};
+
+export type WaiverPage = PagedList<Waiver>;
+
+export type SimulationRun = {
+  simulation_id: string;
+  tenant_id: string;
+  policy_type: string;
+  candidate_version_id: string;
+  baseline_version_id?: string;
+  sim_status: "COMPLETE" | "PARTIAL" | "FAILED";
+  corpus_from: string;
+  corpus_to: string;
+  corpus_limit: number;
+  corpus_size: number;
+  changed_count: number;
+  error_count: number;
+  requested_by_principal_id: string;
+  created_at: string;
+  completed_at?: string;
+};
+
+export type SimulationDiff = {
+  evaluation_id: string;
+  decision_id: string;
+  baseline_result: string;
+  candidate_result: string;
+  candidate_error?: string;
+};
+
+export type SimulationDiffPage = PagedList<SimulationDiff>;
+
+export async function createPolicyTestCase(
+  policyId: string,
+  input: {
+    testCode: string;
+    layer: "UNIT" | "BOUNDARY" | "REGRESSION";
+    mandatory?: boolean;
+    description: string;
+    actionContext: unknown;
+    expectedResult: string;
+    testCaseId?: string;
+    identity: Identity & { principalId: string };
+  },
+): Promise<ApiWriteResult<TestCase>> {
+  return apiPost<TestCase>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/test-cases`,
+    {
+      test_code: input.testCode,
+      layer: input.layer,
+      mandatory: input.mandatory ?? true,
+      description: input.description,
+      action_context: input.actionContext,
+      expected_result: input.expectedResult,
+      ...(input.testCaseId ? { test_case_id: input.testCaseId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function listPolicyTestCases(
+  policyId: string,
+  identity: Identity,
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<TestCasePage>> {
+  const query: Record<string, string> = {};
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<TestCasePage>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/test-cases`,
+    { query, identity },
+  );
+}
+
+export async function retirePolicyTestCase(
+  policyId: string,
+  testCaseId: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiWriteResult<TestCase>> {
+  return apiPost<TestCase>(
+    "policy",
+    `/v1/policies/${encodeURIComponent(policyId)}/test-cases/${encodeURIComponent(testCaseId)}/retire`,
+    {},
+    { identity },
+  );
+}
+
+export async function runPolicyTestSuite(
+  versionId: string,
+  identity: Identity & { principalId: string },
+  testRunId?: string,
+): Promise<ApiWriteResult<TestRun>> {
+  return apiPost<TestRun>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}/test-runs`,
+    { ...(testRunId ? { test_run_id: testRunId } : {}) },
+    { identity },
+  );
+}
+
+export async function listPolicyTestRuns(
+  versionId: string,
+  identity: Identity,
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<TestRunPage>> {
+  const query: Record<string, string> = {};
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<TestRunPage>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}/test-runs`,
+    { query, identity },
+  );
+}
+
+export async function getPolicyTestRun(
+  testRunId: string,
+  identity: Identity,
+): Promise<ApiResult<TestRun>> {
+  return apiGet<TestRun>(
+    "policy",
+    `/v1/policy-test-runs/${encodeURIComponent(testRunId)}`,
+    { identity },
+  );
+}
+
+export async function getPolicyVersionCertification(
+  versionId: string,
+  identity: Identity,
+): Promise<ApiResult<Certification>> {
+  return apiGet<Certification>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}/certification`,
+    { identity },
+  );
+}
+
+export async function requestPolicyTestWaiver(
+  versionId: string,
+  input: {
+    testCaseId: string;
+    reasonCode: string;
+    justification: string;
+    expiresAt: string;
+    waiverId?: string;
+    identity: Identity & { principalId: string };
+  },
+): Promise<ApiWriteResult<Waiver>> {
+  return apiPost<Waiver>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}/waivers`,
+    {
+      test_case_id: input.testCaseId,
+      reason_code: input.reasonCode,
+      justification: input.justification,
+      expires_at: input.expiresAt,
+      ...(input.waiverId ? { waiver_id: input.waiverId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function listPolicyTestWaivers(
+  versionId: string,
+  identity: Identity,
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<WaiverPage>> {
+  const query: Record<string, string> = {};
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<WaiverPage>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}/waivers`,
+    { query, identity },
+  );
+}
+
+export async function approvePolicyTestWaiver(
+  waiverId: string,
+  identity: Identity & { principalId: string },
+): Promise<ApiWriteResult<Waiver>> {
+  return apiPost<Waiver>(
+    "policy",
+    `/v1/policy-waivers/${encodeURIComponent(waiverId)}/approve`,
+    {},
+    { identity },
+  );
+}
+
+export async function revokePolicyTestWaiver(
+  waiverId: string,
+  identity: Identity & { principalId: string },
+  reason?: string,
+): Promise<ApiWriteResult<Waiver>> {
+  return apiPost<Waiver>(
+    "policy",
+    `/v1/policy-waivers/${encodeURIComponent(waiverId)}/revoke`,
+    { reason },
+    { identity },
+  );
+}
+
+export async function simulatePolicyVersion(
+  input: {
+    candidateVersionId: string;
+    tenantId?: string;
+    baselineVersionId?: string;
+    corpusFrom?: string;
+    corpusTo?: string;
+    corpusLimit?: number;
+    simulationId?: string;
+    identity: Identity & { principalId: string };
+  },
+): Promise<ApiWriteResult<SimulationRun>> {
+  return apiPost<SimulationRun>(
+    "policy",
+    "/v1/simulations",
+    {
+      candidate_version_id: input.candidateVersionId,
+      ...(input.tenantId ? { tenant_id: input.tenantId } : {}),
+      ...(input.baselineVersionId ? { baseline_version_id: input.baselineVersionId } : {}),
+      ...(input.corpusFrom ? { corpus_from: input.corpusFrom } : {}),
+      ...(input.corpusTo ? { corpus_to: input.corpusTo } : {}),
+      ...(input.corpusLimit !== undefined ? { corpus_limit: input.corpusLimit } : {}),
+      ...(input.simulationId ? { simulation_id: input.simulationId } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
+export async function getPolicySimulation(
+  simulationId: string,
+  identity: Identity,
+): Promise<ApiResult<SimulationRun>> {
+  return apiGet<SimulationRun>(
+    "policy",
+    `/v1/simulations/${encodeURIComponent(simulationId)}`,
+    { identity },
+  );
+}
+
+export async function listPolicySimulationDifferences(
+  simulationId: string,
+  identity: Identity,
+  pageSize?: number,
+  cursor?: string,
+): Promise<ApiResult<SimulationDiffPage>> {
+  const query: Record<string, string> = {};
+  if (pageSize) query.page_size = String(pageSize);
+  if (cursor) query.cursor = cursor;
+
+  return apiGet<SimulationDiffPage>(
+    "policy",
+    `/v1/simulations/${encodeURIComponent(simulationId)}/differences`,
+    { query, identity },
+  );
+}
+
+export async function draftPolicyRollback(
+  versionId: string,
+  input: {
+    rationale: string;
+    effectiveFrom?: string;
+    identity: Identity & { principalId: string };
+  },
+): Promise<ApiWriteResult<PolicyVersion>> {
+  return apiPost<PolicyVersion>(
+    "policy",
+    `/v1/policy-versions/${encodeURIComponent(versionId)}/rollback-draft`,
+    {
+      rationale: input.rationale,
+      ...(input.effectiveFrom ? { effective_from: input.effectiveFrom } : {}),
+    },
+    { identity: input.identity },
   );
 }
 

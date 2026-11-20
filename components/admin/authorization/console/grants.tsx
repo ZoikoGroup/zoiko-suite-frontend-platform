@@ -89,8 +89,8 @@ export function grantsRegister(data: AuthzData, ctx: Ctx): RegisterSpec {
         state === "pending" ? (
           mine(a.assigned_by, a.principal_id, ctx.me) ? null : (
             <>
-              <Command command="assignment.reject" id={id} label="Reject" title="Reject this grant" reasons="reject" tone="danger" />
-              <Command command="assignment.approve" id={id} label="Approve" title="Approve this grant" description="It is in force from the moment you approve it." reasons="approve" tone="accent" />
+              <Command command="assignment.reject" id={id} label="Reject" title="Reject this grant" reasons="reject" version={a.version} tone="danger" />
+              <Command command="assignment.approve" id={id} label="Approve" title="Approve this grant" description="It is in force from the moment you approve it." reasons="approve" version={a.version} tone="accent" />
             </>
           )
         ) : state === "live" || state === "scheduled" ? (
@@ -105,6 +105,7 @@ export function grantsRegister(data: AuthzData, ctx: Ctx): RegisterSpec {
               title="Revoke this grant"
               description="The grant ends on the next permission check, or at the time you choose. The record is kept."
               reasons="end"
+              version={a.version}
               tone="danger"
               withEndDate
             />

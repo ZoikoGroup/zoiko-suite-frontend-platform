@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession, toIdentity } from "@/lib/auth";
 import { PieChart } from "lucide-react";
 import { getDecisionStats } from "@/lib/api/governance";
 import { PanelEmptyState } from "@/components/admin/shared";
@@ -12,11 +12,9 @@ import { ApprovalOutcomesChart } from "./ApprovalOutcomesChart";
 export async function ApprovalOutcomesPanel() {
   const store = await cookies();
   const session = decodeSession(store.get(SESSION_COOKIE)?.value);
-  const identity = {
-    principalId: session?.principalId,
-    tenantId: session?.tenantId,
-    legalEntityId: session?.legalEntityId,
-  };
+  // The full session identity, signed envelope included: the governance
+  // ledger runs IDENTITY_VERIFY=require and refuses bare identity headers.
+  const identity = session ? toIdentity(session) : undefined;
   const stats = await getDecisionStats(14, identity);
 
   if (!stats.ok) {

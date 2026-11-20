@@ -386,7 +386,7 @@ const DOMAIN_1_IDENTITY: typeof SECONDARY_NAV = [
 const DOMAIN_2_GOVERNANCE: typeof SECONDARY_NAV = [
   { label: "Jurisdictions & Rules", href: "/admin/jurisdictions", icon: Globe2 },       // jurisdiction-rules-svc
   { label: "Governance Log", href: "/admin/governance", icon: ScrollText },             // governance-decision-log-svc
-  { label: "Policies", href: "/admin/policies", icon: Gavel },                          // policy-svc
+  { label: "Policies & Controls", href: "/admin/policies", icon: Gavel },               // policy-svc
   { label: "Obligations", href: "/admin/obligations", icon: ClipboardList },            // obligations-svc
   { label: "Authorization", href: "/admin/authorization", icon: LockKeyhole },          // authorization-svc
   { label: "Workflows & Approvals", href: "/admin/workflows", icon: Workflow },         // workflow-svc

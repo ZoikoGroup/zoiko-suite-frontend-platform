@@ -171,7 +171,7 @@ export function CreatePolicyForm() {
   );
 }
 
-export function CreateVersionForm() {
+export function CreateVersionForm({ defaultPolicyId }: { defaultPolicyId?: string } = {}) {
   const [state, action, pending] = useActionState<PolicyWriteState, FormData>(
     submitPolicyVersion,
     IDLE_POLICY_WRITE,
@@ -187,6 +187,7 @@ export function CreateVersionForm() {
           <input
             id="version_policy_id"
             name="policy_id"
+            defaultValue={defaultPolicyId}
             required
             placeholder="e.g. 4f8c21ba-90d7-4e13-8a55-c7b02e6d41f9"
             className={`${FIELD} font-mono text-xs`}

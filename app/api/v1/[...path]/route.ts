@@ -63,7 +63,7 @@ import {
   evaluateCompliance,
 } from "@/lib/api/compliance";
 
-import { listEvidenceRequirements } from "@/lib/api/evidence";
+import { listEvidenceRequirements, readAll } from "@/lib/api/evidence";
 import { listFeatureFlags, listConfigEntries } from "@/lib/api/configuration";
 import { listDelegations, getDelegation } from "@/lib/api/delegations";
 import { listLeases, listApplicableSecretPolicyVersions, listSecretAudit } from "@/lib/api/secret-vault";
@@ -318,10 +318,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
 
   // ── Evidence Domain ────────────────────────────────────────────────────────
   if (endpoint === "evidence/requirements") {
-    const tenantId = identity.tenantId;
-    const res = await listEvidenceRequirements({ tenantId }, { ...identity, tenantId });
+    // The session's own tenant (resolveIdentity requires one); a failed read is
+    // reported, not shown as an empty register.
+    const res = await readAll((page) => listEvidenceRequirements(identity, {}, page));
     if (!res.ok) return readFailed(res.error);
-    return NextResponse.json({ requirements: res.data });
+    return NextResponse.json({ requirements: res.data.rows });
   }
 
   // ── Configuration / Service Inputs ─────────────────────────────────────────

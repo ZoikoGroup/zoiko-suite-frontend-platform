@@ -54,9 +54,9 @@ export function workloadsRegister(data: AuthzData): RegisterSpec {
           status={b.active_flag ? ACTIVE : INACTIVE}
           actions={
             b.active_flag ? (
-              <Command command="workload.deactivate" id={id} label="Deactivate" title="Deactivate this binding" reasons="change" tone="danger" />
+              <Command command="workload.deactivate" id={id} label="Deactivate" title="Deactivate this binding" reasons="change" version={b.version} tone="danger" />
             ) : (
-              <Command command="workload.reactivate" id={id} label="Reactivate" title="Reactivate this binding" reasons="restore" tone="accent" />
+              <Command command="workload.reactivate" id={id} label="Reactivate" title="Reactivate this binding" reasons="restore" version={b.version} tone="accent" />
             )
           }
         >
