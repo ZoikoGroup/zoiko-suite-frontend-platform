@@ -12,6 +12,8 @@ import {
   listPolicyChangeApprovals,
   listUseCases,
   listModelReleases,
+  listAIRuns,
+  type AIRun,
   type RiskClassificationRecord,
   type ModelProviderRecord,
   type AutomationPolicyRecord,
@@ -38,7 +40,7 @@ export default async function AIGovernancePage() {
   if (!current) redirect("/login");
   const { identity } = current;
 
-  const [useCases, providers, releases, risk, policies, actions, approvals] = await Promise.all([
+  const [useCases, providers, releases, risk, policies, actions, approvals, runs] = await Promise.all([
     listUseCases(identity),
     listModelProviders(identity),
     listModelReleases(identity),
@@ -46,13 +48,14 @@ export default async function AIGovernancePage() {
     listAutomationPolicies(identity),
     listAutomationActions(identity),
     listPolicyChangeApprovals(identity),
+    listAIRuns(identity),
   ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="AI Governance & Safety Controls"
-        description="AI use cases, model providers and releases, action risk classifications and automation policies, read live from ai-governance-svc with your session. AI runs are read by id only: the service has no endpoint that lists them."
+        description="AI use cases and runs, model providers and releases, action risk classifications and automation policies, read live from ai-governance-svc with your session."
       />
 
       <AiGovernanceInteractivePanel />
@@ -74,6 +77,22 @@ export default async function AIGovernancePage() {
       />
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <RegisterCard<AIRun>
+          title="AI runs"
+          description="Recorded runs with their model, prompt version and uncertainty, newest first."
+          service={SERVICE}
+          read={runs}
+          rowKey={(r) => r.ai_run_id}
+          emptyLabel="No AI run is recorded"
+          columns={[
+            { header: "Run type", cell: (r) => humanizeCode(r.run_type) },
+            { header: "Model", cell: (r) => r.model_id },
+            { header: "Prompt", cell: (r) => r.prompt_version },
+            { header: "Uncertainty", cell: (r) => <Badge tone={r.uncertainty_state && r.uncertainty_state !== "NONE" ? "warning" : "neutral"}>{humanizeCode(r.uncertainty_state || "NONE")}</Badge> },
+            { header: "Recorded", cell: (r) => formatDateTime(r.created_at) },
+          ]}
+        />
+
         <RegisterCard<ModelProviderRecord>
           title="Model providers"
           description="Provider registrations, data region and DPA status."

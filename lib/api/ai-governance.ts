@@ -2,18 +2,23 @@
 
 import { apiGet, apiPost, type ApiResult, type Identity } from "./client";
 
+/** An AI run as ai-governance-svc records it (internal/domain/types.go AIRun). */
 export type AIRun = {
-  run_id: string;
+  ai_run_id: string;
   tenant_id?: string;
-  legal_entity_id?: string;
-  model_provider: string;
-  model_name: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_estimate_usd: number;
-  guardrail_status: "PASSED" | "FLAGGED" | "BLOCKED";
-  purpose: string;
-  created_at?: string;
+  run_type: string;
+  model_id: string;
+  prompt_version: string;
+  tool_version?: string;
+  source_refs?: string[];
+  evidence_refs?: string[];
+  confidence?: number | null;
+  limitation?: string;
+  uncertainty_state?: string;
+  recommended_action?: string;
+  audit_id: string;
+  created_at: string;
+  created_by_principal_id: string;
 };
 
 export type ActionRiskClassification = {
@@ -215,6 +220,9 @@ async function listRegister<T>(path: string, key: string, identity?: Identity): 
 
 export const listRiskClassifications = (identity?: Identity) =>
   listRegister<RiskClassificationRecord>("/v1/action-risk-classifications", "action_risk_classifications", identity);
+/** The tenant's AI runs, newest first (GET /v1/ai-runs). */
+export const listAIRuns = (identity?: Identity) => listRegister<AIRun>("/v1/ai-runs", "ai_runs", identity);
+
 export const listModelProviders = (identity?: Identity) =>
   listRegister<ModelProviderRecord>("/v1/model-providers", "model_providers", identity);
 export const listAutomationPolicies = (identity?: Identity) =>

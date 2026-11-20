@@ -78,6 +78,7 @@ import {
 } from "@/lib/api/security-trust";
 import {
   createAIRun,
+  listAIRuns,
   setActionRiskClassification,
   registerModelProvider,
   listRiskClassifications,
@@ -397,11 +398,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   // Read from ai-governance-svc with the session. It has no endpoint that lists
   // AI runs (only GET /v1/ai-runs/{id}), so that read answers 501.
   if (endpoint === "ai-governance/runs") {
-    // ai-governance-svc has no endpoint that lists AI runs (a run is read by id).
-    return NextResponse.json(
-      { error: "not_supported", message: "ai-governance-svc does not list AI runs; read a run by id." },
-      { status: 501 },
-    );
+    const res = await listAIRuns(identity);
+    if (!res.ok) return NextResponse.json({ error: res.error.kind, message: res.error.message }, { status: res.error.status ?? 502 });
+    return NextResponse.json({ runs: res.data });
   }
   if (endpoint === "ai-governance/risk-classifications") {
     const res = await listRiskClassifications(identity);
