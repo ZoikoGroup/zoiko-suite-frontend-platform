@@ -10,6 +10,7 @@ import { ActionFeedback } from "./ActionFeedback";
 import { ResolutionSummary } from "./BoardSummary";
 import { describeResolutionStatus, type BoardResolution } from "@/lib/api/legal";
 import { formatDateTime } from "@/lib/format";
+import { PickList } from "@/components/admin/shared/PickList";
 
 /**
  * Voting actions for one resolution, following board-resolutions-svc:
@@ -107,15 +108,20 @@ export function ResolutionActions({
             {hidden}
             <div>
               <label htmlFor={`roster_${resolution.resolution_id}`} className={LABEL}>
-                Voter roster <span className={OPTIONAL}>(principal IDs, one per line)</span>
+                Voter roster <span className={OPTIONAL}>(everyone entitled to vote)</span>
               </label>
-              <textarea
+              {/* From identity-context-svc's principal directory (GET /v1/principals).
+                  Where the directory cannot be read (it is absent from some builds)
+                  the field becomes a one-per-line list of principal IDs. */}
+              <PickList
                 id={`roster_${resolution.resolution_id}`}
                 name="voter_principal_ids"
+                kind="principals"
+                multiple
                 required
-                rows={3}
-                defaultValue={currentPrincipalId ?? ""}
+                initial={currentPrincipalId ? [currentPrincipalId] : []}
                 className={FIELD}
+                empty="No active principal in this tenant's directory."
               />
             </div>
             <div className="max-w-40">
@@ -195,14 +201,9 @@ export function ResolutionActions({
           <input type="hidden" name="resolution_created_by" value={resolution.created_by} />
           <div>
             <label htmlFor={`minutes_${resolution.resolution_id}`} className={LABEL}>
-              Minutes document ID <span className={OPTIONAL}>(optional)</span>
+              Minutes document <span className={OPTIONAL}>(optional)</span>
             </label>
-            <input
-              id={`minutes_${resolution.resolution_id}`}
-              name="document_vault_id"
-              className={FIELD}
-              autoComplete="off"
-            />
+            <PickList id={`minutes_${resolution.resolution_id}`} name="document_vault_id" kind="documents" blank="None" className={FIELD} empty="No document of this entity in the vault." />
           </div>
           <Button type="submit" size="sm" loading={closePending}>
             {!closePending && <Gavel className="mr-1.5 h-4 w-4" aria-hidden="true" />}

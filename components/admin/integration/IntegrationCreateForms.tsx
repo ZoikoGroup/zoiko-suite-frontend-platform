@@ -12,6 +12,7 @@ import { FIELD, LABEL, BANNER_ERROR } from "@/components/admin/shared/form";
 import {
   createBridgeAction,
   createBankConnectionAction,
+  loadBankAccounts,
   createHrisIntegrationAction,
   createDataFeedAction,
   createEnvelopeAction,
@@ -20,7 +21,7 @@ import {
   transitionSignatureProfileAction,
   type ProfileResult,
 } from "@/app/admin/integration/actions";
-import type { SignatureProfile } from "@/lib/api/integration";
+import type { SignatureProfile, TreasuryBankAccount } from "@/lib/api/integration";
 
 type OnCreated = { onCreated?: () => void };
 
@@ -29,7 +30,7 @@ const BRIDGE_FIELDS: FieldSpec[] = [
   { name: "provider_name", label: "Provider name", kind: "text", required: true },
   { name: "protocol", label: "Protocol", kind: "text", required: true, hint: "e.g. REST, GRAPHQL, GRPC, WEBHOOK" },
   { name: "endpoint_url", label: "Endpoint URL", kind: "url", required: true, hint: "An absolute URL; the service refuses anything else." },
-  { name: "auth_type", label: "Auth type", kind: "text", required: true, hint: "e.g. OAUTH2, API_KEY" },
+  { name: "auth_type", label: "Auth type", kind: "select", required: true, options: opts("NONE", "API_KEY", "OAUTH2", "MTLS", "BASIC", "HMAC") },
 ];
 
 export function BridgeCreateForm({ onCreated }: OnCreated) {
@@ -45,30 +46,54 @@ export function BridgeCreateForm({ onCreated }: OnCreated) {
   );
 }
 
-const BANK_FIELDS: FieldSpec[] = [
-  { name: "bank_name", label: "Bank name", kind: "text", required: true },
-  { name: "bic", label: "BIC", kind: "text", required: true },
-  { name: "account_number", label: "Account number", kind: "text", required: true },
-  { name: "iban", label: "IBAN", kind: "text" },
-  { name: "currency", label: "Currency", kind: "text", required: true, hint: "ISO 4217 code of the account." },
-  { name: "account_type", label: "Account type", kind: "text", hint: "e.g. CURRENT, SAVINGS" },
-];
+/** The request form, with the account picked from treasury-svc's accounts for the entity. */
+function bankFields(accounts: TreasuryBankAccount[] | null, error: string | null): FieldSpec[] {
+  return [
+    {
+      name: "bank_account_id",
+      label: "Bank account",
+      kind: "select",
+      required: true,
+      options: (accounts ?? []).map((a) => ({
+        value: a.bank_account_id,
+        label: `${a.account_name} · ${a.masked_account_number} · ${a.currency_code} (${a.account_status})`,
+      })),
+      hint: error
+        ? `treasury-svc accounts could not be read: ${error}`
+        : accounts && accounts.length === 0
+          ? "No bank account is registered in treasury-svc for this entity yet."
+          : "From treasury-svc; banking-connector-svc checks it before recording the request.",
+    },
+    { name: "bank_name", label: "Bank name", kind: "text", required: true },
+    { name: "provider_ref", label: "Provider reference", kind: "text", hint: "The open-banking provider's reference, if known." },
+    { name: "region", label: "Region", kind: "text" },
+    { name: "requested_scope", label: "Requested scope", kind: "text", hint: "Comma-separated, e.g. accounts, balances, transactions." },
+  ];
+}
 
 export function BankConnectionCreateForm({ onCreated }: OnCreated) {
+  const [accounts, setAccounts] = useState<TreasuryBankAccount[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    void loadBankAccounts().then((res) => {
+      if (res.ok) setAccounts(res.accounts);
+      else setError(res.message);
+    });
+  }, []);
   return (
     <CreateRecordForm
-      title="Register bank connection"
-      description="banking-connector-svc records the connection. No bank API is called: no adapter is configured. Account details are not shown back here."
-      fields={BANK_FIELDS}
+      title="Request bank connection"
+      description="banking-connector-svc records the request as REQUESTED for a treasury bank account. No bank API is called; authorization and activation follow on the connection."
+      fields={bankFields(accounts, error)}
       action={createBankConnectionAction}
-      submitLabel="Register connection"
+      submitLabel="Request connection"
       onCreated={onCreated}
     />
   );
 }
 
 const HRIS_FIELDS: FieldSpec[] = [
-  { name: "provider_name", label: "Provider name", kind: "text", required: true },
+  { name: "provider_name", label: "Provider", kind: "select", required: true, options: opts("WORKDAY", "SUCCESSFACTORS", "ADP", "GENERIC_HRIS"), hint: "The HRIS adapter is chosen by this name." },
   { name: "sync_type", label: "Sync type", kind: "text", required: true, hint: "e.g. EMPLOYEES" },
   { name: "direction", label: "Direction", kind: "text", required: true, hint: "e.g. INBOUND, OUTBOUND" },
   { name: "api_endpoint", label: "API endpoint", kind: "url", required: true },

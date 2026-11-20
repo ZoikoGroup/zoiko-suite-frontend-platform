@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { listJurisdictions, type Jurisdiction } from "@/lib/api/jurisdictions";
 import { TaxRuleRowActions } from "./TaxRuleForms";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { CloudOff, Percent, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
@@ -225,7 +226,7 @@ export async function TaxRulesAndDeterminationPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Tx ID", "Source", "Rule", "Supply", "Place of supply", "Gross", "Taxable", "Calculated Tax", "Rate", "Status"].map((h) => (
+                  {["Tx ID", "Source", "Rule", "Supply", "Place of supply", "Gross", "Taxable", "Calculated Tax", "Rate", "Status", "Actions"].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400"
@@ -325,6 +326,9 @@ export async function TaxRulesAndDeterminationPanel() {
                       >
                         {d.status}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 min-w-[160px]">
+                      <RowActions actions={["tax-determination.override"]} recordId={d.determination_id} status={d.status} />
                     </td>
                   </tr>
                 ))}

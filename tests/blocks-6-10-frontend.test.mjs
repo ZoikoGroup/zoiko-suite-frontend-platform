@@ -171,17 +171,26 @@ const BACKEND = process.env.ZOIKO_BACKEND_DIR ?? path.resolve(ROOT, "..", "zoiko
 const svc = (name, rel) => path.join(BACKEND, "services", name, "internal", rel);
 const HAS_BACKEND = fs.existsSync(svc("tax-authority-interface-svc", "handler/authority.go"));
 const backend = (name, rel) => fs.readFileSync(svc(name, rel), "utf8");
+/** Every non-test .go file in one internal/<dir> of a service (files move between versions). */
+const backendDir = (name, dir) =>
+  fs
+    .readdirSync(svc(name, dir))
+    .filter((f) => f.endsWith(".go") && !f.endsWith("_test.go"))
+    .map((f) => fs.readFileSync(path.join(svc(name, dir), f), "utf8"))
+    .join("\n");
 const skipBackend = HAS_BACKEND ? false : `no Blocks 6-10 backend checkout at ${BACKEND}`;
 
 test("backend: the routes and fields the fixed clients rely on exist", { skip: skipBackend }, () => {
   assert.match(backend("tax-authority-interface-svc", "handler/authority.go"), /r\.Get\("\/health"/);
   assert.match(backend("filing-preparation-svc", "domain/types.go"), /ValidatedBy\s+string\s+`json:"validated_by"`/);
   assert.match(backend("filing-preparation-svc", "domain/types.go"), /FinalizedBy string `json:"finalized_by"`/);
-  assert.match(backend("corporate-tax-svc", "handler/handler.go"), /"corporate_tax_returns"/);
+  // Listed under "corporate_tax_returns" or as a bare array; the client reads both.
+  assert.match(backend("corporate-tax-svc", "handler/handler.go"), /"corporate_tax_returns"|func \(h \*Handler\) List\([\s\S]*?writeJSON\(w, http\.StatusOK, returns\)/);
+  assert.match(read("lib/api/tax.ts"), /Array\.isArray\(d\) \? d : d\.corporate_tax_returns \?\? \[\]/);
   assert.match(backend("withholding-tax-svc", "handler/handler.go"), /"withholding_tax_obligations"/);
   assert.match(backend("vendor-due-diligence-svc", "envelope/contract.go"), /PurposeContext:\s+RequiredOnWrite/);
   assert.match(backend("counterparty-management-svc", "envelope/contract.go"), /PurposeContext:\s+RequiredOnWrite/);
-  assert.match(backend("migration-integrity-svc", "domain/requests.go"), /remediation_evidence_ref is required/);
+  assert.match(backendDir("migration-integrity-svc", "domain"), /remediation_evidence_ref is required/);
   assert.match(backend("tax-determination-svc", "handler/handler.go"), /seller_party_id is required/);
 });
 

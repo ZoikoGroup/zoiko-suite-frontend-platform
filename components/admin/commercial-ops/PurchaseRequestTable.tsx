@@ -3,6 +3,8 @@ import { CopyableId } from "@/components/admin/shared";
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
+import { RowActions } from "@/components/admin/shared/RowActions";
+import type { FieldOption } from "@/components/admin/intelligence/create-state";
 import {
   describeRequestStatus,
   formatRequestAmount,
@@ -19,7 +21,14 @@ import {
  * A rejection shows its reason inline rather than behind a lookup — a refusal
  * whose reason is one click away reads as an unexplained refusal.
  */
-export function PurchaseRequestTable({ requests }: { requests: PurchaseRequest[] }) {
+export function PurchaseRequestTable({
+  requests,
+  vendorProfiles = [],
+}: {
+  requests: PurchaseRequest[];
+  /** Vendor profiles from vendor-due-diligence-svc, for Convert to purchase order. */
+  vendorProfiles?: FieldOption[];
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[52rem] border-collapse text-left">
@@ -42,6 +51,9 @@ export function PurchaseRequestTable({ requests }: { requests: PurchaseRequest[]
             </th>
             <th scope="col" className={HEAD}>
               Request ID
+            </th>
+            <th scope="col" className={HEAD}>
+              Actions
             </th>
           </tr>
         </thead>
@@ -107,6 +119,15 @@ export function PurchaseRequestTable({ requests }: { requests: PurchaseRequest[]
                 </td>
                 <td className={cn(CELL, "text-slate-500 dark:text-slate-400")}>
                   <CopyableId value={request.request_id} className="text-xs" />
+                </td>
+                <td className={cn(CELL, "min-w-[160px]")}>
+                  <RowActions
+                    actions={["purchase-request.convert", "purchase-request.cancel"]}
+                    recordId={request.request_id}
+                    status={request.status}
+                    version={request.version}
+                    fieldOptions={{ vendor_profile_id: vendorProfiles }}
+                  />
                 </td>
               </tr>
             );

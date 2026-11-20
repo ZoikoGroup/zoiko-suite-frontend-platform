@@ -16,6 +16,7 @@ import {
   Server,
   Bot
 } from "lucide-react";
+import { RowActions } from "@/components/admin/shared/RowActions";
 
 export type CartaDecision = "ALLOW" | "STEP_UP_MFA" | "ISOLATE" | "DENY";
 export type CartaRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -94,7 +95,9 @@ export function CartaAssessmentPanel() {
   });
   const ctxComplete =
     ctx.subject_id.trim() && ctx.subject_type && ctx.device_trust_level !== "" && ctx.ip_address.trim() &&
-    ctx.resource_sensitivity && ctx.action_requested.trim() && ctx.time_of_day_hour !== "";
+    ctx.resource_sensitivity && ctx.action_requested.trim() && ctx.time_of_day_hour !== "" &&
+    // carta-svc decodes both as integers; a decimal is refused.
+    Number.isInteger(Number(ctx.device_trust_level)) && Number.isInteger(Number(ctx.time_of_day_hour));
 
   // Only carta-svc's own assessments are shown. There is no sample data: an
   // empty list or a failed read is shown as it is.
@@ -223,7 +226,7 @@ export function CartaAssessmentPanel() {
             <option value="SERVICE_ACCOUNT">Service account</option>
             <option value="BOT">Bot</option>
           </select>
-          <input aria-label="Device trust level (0-100)" placeholder="Device trust 0-100" type="number" min={0} max={100} value={ctx.device_trust_level} onChange={(e) => setCtx({ ...ctx, device_trust_level: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
+          <input aria-label="Device trust level (0-100)" placeholder="Device trust 0-100" type="number" step={1} min={0} max={100} value={ctx.device_trust_level} onChange={(e) => setCtx({ ...ctx, device_trust_level: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
           <input aria-label="IP address" placeholder="IP address" value={ctx.ip_address} onChange={(e) => setCtx({ ...ctx, ip_address: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
           <select aria-label="Resource sensitivity" value={ctx.resource_sensitivity} onChange={(e) => setCtx({ ...ctx, resource_sensitivity: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800">
             <option value="">Sensitivity…</option>
@@ -233,7 +236,7 @@ export function CartaAssessmentPanel() {
             <option value="RESTRICTED">Restricted</option>
           </select>
           <input aria-label="Action requested" placeholder="Action requested" value={ctx.action_requested} onChange={(e) => setCtx({ ...ctx, action_requested: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
-          <input aria-label="Hour of day (0-23)" placeholder="Hour 0-23" type="number" min={0} max={23} value={ctx.time_of_day_hour} onChange={(e) => setCtx({ ...ctx, time_of_day_hour: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
+          <input aria-label="Hour of day (0-23)" placeholder="Hour 0-23" type="number" step={1} min={0} max={23} value={ctx.time_of_day_hour} onChange={(e) => setCtx({ ...ctx, time_of_day_hour: e.target.value })} className="rounded border border-slate-200 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800" />
           <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
             <input type="checkbox" checked={ctx.is_known_location} onChange={(e) => setCtx({ ...ctx, is_known_location: e.target.checked })} />
             Known location
@@ -290,6 +293,9 @@ export function CartaAssessmentPanel() {
                       <p className="text-[11px] text-slate-500">
                         Action: <span className="font-mono text-slate-700 dark:text-slate-300">{item.context.action_requested}</span>
                       </p>
+                      <div className="mt-1.5">
+                        <RowActions actions={["carta.reevaluate"]} recordId={item.id} onDone={fetchAssessments} />
+                      </div>
                     </div>
                   </div>
 

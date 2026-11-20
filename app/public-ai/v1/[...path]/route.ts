@@ -26,10 +26,9 @@ async function pass(request: Request, ctx: { params: Promise<{ path: string[] }>
       headers: forwardHeaders(request.headers),
       body: body || undefined,
       cache: "no-store",
-      // The visitor's Stop aborts this request; the service then cancels the
-      // model call (Doc 05 §12) and still records the turn, so the next
-      // question is accepted and a retry with the same key replays it.
-      signal: AbortSignal.any([request.signal, AbortSignal.timeout(20_000)]),
+      // The visitor's Stop aborts this request; the abort reaches the
+      // service, which cancels the model call (Doc 05 §12).
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(4_000)]),
     });
   } catch (err) {
     // Method and route pattern only: the path can carry a session id.

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Lightbulb, RefreshCw } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { RecommendationRequestForm } from "./IntelligenceCreateForms";
 import type { Recommendation } from "@/lib/api/intelligence";
 
@@ -94,6 +95,20 @@ export function DecisionSupportPanel() {
                   <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
                     Confidence: {Math.round(r.confidence_score * 100)}%
                   </span>
+                </div>
+                <div className="mt-2">
+                  <RowActions
+                    actions={["recommendation.accept", "recommendation.reject", "recommendation.expire", "recommendation.supersede"]}
+                    recordId={r.recommendation_id}
+                    status={r.status}
+                    version={r.version}
+                    onDone={load}
+                    fieldOptions={{
+                      replacement_recommendation_id: recommendations
+                        .filter((o) => o.recommendation_id !== r.recommendation_id && o.status === "REVIEW_REQUIRED")
+                        .map((o) => ({ value: o.recommendation_id, label: `${o.action_type}: ${o.recommended_action} (${o.subject_reference})` })),
+                    }}
+                  />
                 </div>
               </div>
             ))}

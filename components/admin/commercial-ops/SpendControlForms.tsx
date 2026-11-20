@@ -16,6 +16,7 @@ import {
   type SpendPolicyActionState,
 } from "@/app/admin/commercial-ops/state";
 import { SPEND_PERIODS } from "@/lib/api/spend-controls";
+import { PickList } from "@/components/admin/shared/PickList";
 
 const POLICY_TONE: Record<SpendPolicyActionState["status"], BannerTone> = {
   idle: "neutral",
@@ -238,15 +239,7 @@ export function SpendCheckForm() {
           <label htmlFor="check_category" className={LABEL}>
             Category
           </label>
-          <input
-            id="check_category"
-            name="check_category"
-            required
-            list="spend-categories"
-            placeholder="PROCUREMENT"
-            className={FIELD}
-            autoComplete="off"
-          />
+          <PickList id="check_category" name="check_category" kind="spend-categories" required className={FIELD} empty="No spend limit in force: set one first." />
         </div>
 
         <div>

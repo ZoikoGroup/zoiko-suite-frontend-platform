@@ -2,7 +2,21 @@ import { cookies } from "next/headers";
 import { CloudOff, ShieldCheck, FileCheck, AlertTriangle, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listFilingRequirements, listComplianceEvaluations, listEscalatedExceptions, type FilingRequirement, type ComplianceEvaluation, type EscalatedException } from "@/lib/api/compliance";
+import {
+  listFilingRequirements,
+  listComplianceEvaluations,
+  listComplianceGaps,
+  listEscalatedExceptions,
+  type FilingRequirement,
+  type ComplianceEvaluation,
+  type ComplianceGap,
+  type EscalatedException,
+} from "@/lib/api/compliance";
+import { RowActions } from "@/components/admin/shared/RowActions";
+import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordForm";
+import { opts, type FieldSpec } from "@/components/admin/intelligence/create-state";
+import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
+import { createComplianceGapAction } from "@/app/admin/compliance/gap-actions";
 
 export async function FilingTrackerPanel() {
   const store = await cookies();
@@ -53,12 +67,35 @@ export async function StatusAndEscalationPanel() {
   if (!session) return <PanelEmptyState icon={ShieldAlert} tone="warning" label="No active session" hint="Sign in to view compliance status & escalations." />;
 
   const identity = { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId };
-  const [evalRes, excRes] = await Promise.all([listComplianceEvaluations(identity), listEscalatedExceptions(identity)]);
+  const [evalRes, excRes, gapRes, jurisdictions] = await Promise.all([
+    listComplianceEvaluations(identity),
+    listEscalatedExceptions(identity),
+    listComplianceGaps(identity),
+    loadJurisdictionOptions(),
+  ]);
 
-  if (!evalRes.ok) return <PanelEmptyState icon={CloudOff} tone="warning" label="compliance-status-svc unavailable" hint={evalRes.error.message} />;
-
+  // Each section reports its own failed read: a failed evaluations read must not
+  // hide the gaps and exceptions, which come from separate reads.
   const evaluations: ComplianceEvaluation[] = evalRes.ok ? evalRes.data : [];
   const exceptions: EscalatedException[] = excRes.ok ? excRes.data : [];
+
+  const gaps: ComplianceGap[] = gapRes.ok ? gapRes.data : [];
+  const gapFields: FieldSpec[] = [
+    {
+      name: "jurisdiction_id",
+      label: "Jurisdiction",
+      kind: "select",
+      required: true,
+      options: jurisdictions.ok ? jurisdictions.items.map((j) => ({ value: j.id, label: `${j.code} — ${j.name}` })) : [],
+      hint: jurisdictions.ok ? undefined : `The jurisdiction register could not be read: ${jurisdictions.error}`,
+    },
+    { name: "domain_name", label: "Compliance domain", kind: "text", required: true },
+    { name: "gap_type", label: "Gap type", kind: "text", required: true },
+    { name: "severity", label: "Severity", kind: "select", options: opts("LOW", "MEDIUM", "HIGH", "CRITICAL") },
+    { name: "source_reference", label: "Source reference", kind: "text" },
+    { name: "description", label: "Description", kind: "textarea" },
+    { name: "remediation_plan", label: "Remediation plan", kind: "textarea" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -66,7 +103,9 @@ export async function StatusAndEscalationPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Compliance Status Evaluations ({evaluations.length})
         </h3>
-        {evaluations.length === 0 ? (
+        {!evalRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="compliance-status-svc evaluations could not be read" hint={evalRes.error.message} />
+        ) : evaluations.length === 0 ? (
           <PanelEmptyState icon={ShieldCheck} label="No status evaluations recorded" hint="Evaluations from compliance-status-svc will appear here." />
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
@@ -95,6 +134,52 @@ export async function StatusAndEscalationPanel() {
         )}
       </div>
 
+      <div className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+          Compliance Gaps ({gaps.length})
+        </h3>
+        <CreateRecordForm
+          title="Record a compliance gap"
+          description="compliance-status-svc opens the gap as OPEN for your legal entity."
+          fields={gapFields}
+          action={createComplianceGapAction}
+          submitLabel="Record gap"
+        />
+        {!gapRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="compliance-status-svc gaps could not be read" hint={gapRes.error.message} />
+        ) : gaps.length === 0 ? (
+          <PanelEmptyState icon={ShieldCheck} label="No compliance gaps recorded" hint="Gaps recorded in compliance-status-svc will appear here." />
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-800/60">
+                <tr>
+                  {["Gap", "Domain", "Severity", "Status", "Actions"].map((h) => (
+                    <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {gaps.map((g) => (
+                  <tr key={g.gap_id}>
+                    <td className="px-4 py-3 text-xs font-medium text-slate-800 dark:text-slate-200">
+                      {g.gap_type}
+                      <span className="block font-mono text-[10px] font-normal text-slate-400">{g.gap_id}</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{g.domain_name}</td>
+                    <td className="px-4 py-3 text-xs">{g.severity}</td>
+                    <td className="px-4 py-3 text-xs font-medium">{g.status}</td>
+                    <td className="px-4 py-3 min-w-[160px]">
+                      <RowActions actions={["compliance-gap.resolve"]} recordId={g.gap_id} status={g.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Escalated Exceptions ({exceptions.length})
@@ -108,7 +193,7 @@ export async function StatusAndEscalationPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Type", "Linked to", "Severity", "Status"].map((h) => (
+                  {["Type", "Linked to", "Severity", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -122,6 +207,9 @@ export async function StatusAndEscalationPanel() {
                     </td>
                     <td className="px-4 py-3 text-xs font-bold text-red-500">{ex.severity_level}</td>
                     <td className="px-4 py-3 text-xs font-medium text-slate-600">{ex.case_status}</td>
+                    <td className="px-4 py-3 min-w-[160px]">
+                      <RowActions actions={["exception.escalate", "exception.resolve"]} recordId={ex.exception_case_id} status={ex.case_status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

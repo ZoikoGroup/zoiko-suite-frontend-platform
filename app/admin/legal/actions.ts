@@ -703,7 +703,8 @@ export async function openVoting(
 
   const resolutionId = String(formData.get("resolution_id") ?? "").trim();
   const title = String(formData.get("resolution_title") ?? "").trim();
-  const rosterRaw = String(formData.get("voter_principal_ids") ?? "");
+  // A multi-select sends one value per chosen principal; the typed fallback one value with lines.
+  const rosterRaw = formData.getAll("voter_principal_ids").map(String).join("\n");
   const quorumRaw = String(formData.get("quorum_threshold") ?? "").trim();
 
   if (!resolutionId) return boardFail("It is not clear which resolution this applies to. Reload the page and try again.");

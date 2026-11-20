@@ -29,6 +29,7 @@ import {
 import type { TaxRule, TaxDetermination } from "@/lib/api/tax";
 import type { JurisdictionOptions } from "./jurisdiction-options";
 import { JurisdictionSelect, jurisdictionsUsable, jurisdictionLabel } from "./JurisdictionSelect";
+import { PickList } from "@/components/admin/shared/PickList";
 
 /** The jurisdiction's code and name, or its id when the register does not list it. */
 export function jurisdictionNamer(options: JurisdictionOptions) {
@@ -248,7 +249,7 @@ export function DeterminationForm({ jurisdictions }: { jurisdictions: Jurisdicti
     ["gross_amount", "Gross amount", "number"],
     ["currency", "Currency (ISO 4217)"],
     ["seller_party_id", "Seller party ID"],
-    ["buyer_party_id", "Buyer party ID"],
+    ["buyer_party_id", "Buyer (counterparty)"],
     ["supply_date", "Supply date", "date"],
     ["product_classification", "Product classification"],
   ];
@@ -269,16 +270,21 @@ export function DeterminationForm({ jurisdictions }: { jurisdictions: Jurisdicti
           {textFields.map(([k, label, type]) => (
             <div key={k}>
               <label htmlFor={`det-${k}`} className={LABEL}>{label}</label>
-              <input
-                id={`det-${k}`}
-                name={k}
-                type={type ?? "text"}
-                required
-                {...(type === "number" ? { min: "0", step: "any" } : {})}
-                {...(k === "currency" ? { maxLength: 3, pattern: "[A-Za-z]{3}" } : {})}
-                className={FIELD}
-                autoComplete="off"
-              />
+              {k === "buyer_party_id" ? (
+                // The buyer is a counterparty of the entity, picked from counterparty-management-svc.
+                <PickList id="det-buyer_party_id" name="buyer_party_id" kind="counterparties" required className={FIELD} empty="No counterparty yet." />
+              ) : (
+                <input
+                  id={`det-${k}`}
+                  name={k}
+                  type={type ?? "text"}
+                  required
+                  {...(type === "number" ? { min: "0", step: "any" } : {})}
+                  {...(k === "currency" ? { maxLength: 3, pattern: "[A-Za-z]{3}" } : {})}
+                  className={FIELD}
+                  autoComplete="off"
+                />
+              )}
             </div>
           ))}
           <div>

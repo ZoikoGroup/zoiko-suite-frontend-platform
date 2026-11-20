@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { BarChart2, RefreshCw } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { ReportDefinitionCreateForm } from "./IntelligenceCreateForms";
 import type { ReportDefinition } from "@/lib/api/intelligence";
 
@@ -88,6 +89,15 @@ export function ReportingOrchestrationPanel() {
                 <p className="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">
                   {r.report_type.replace(/_/g, " ")} · {r.output_format} · Created by {r.created_by} · {new Date(r.created_at).toLocaleDateString()}
                 </p>
+                <div className="mt-2">
+                  <RowActions
+                    actions={["report-definition.validate", "report-definition.activate", "report-definition.pause", "report-definition.deprecate", "report-definition.run"]}
+                    recordId={r.id}
+                    status={r.status}
+                    version={r.version}
+                    onDone={load}
+                  />
+                </div>
               </div>
             ))}
           </div>

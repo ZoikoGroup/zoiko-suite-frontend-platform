@@ -3,8 +3,10 @@ import { CloudOff, Briefcase, Building2, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listCorporateActions, listCounterparties, type CorporateAction, type Counterparty } from "@/lib/api/legal";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 import { CreateCorporateActionForm, CreateCounterpartyForm } from "./LegalCreateForms";
+import { documentOptions, itemsOf } from "@/lib/form-options";
 
 export async function CorporateActionsAndCounterpartiesPanel() {
   const store = await cookies();
@@ -16,10 +18,11 @@ export async function CorporateActionsAndCounterpartiesPanel() {
 
   const identity = { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId };
 
-  const [actionsRes, counterpartyRes, jurisdictions] = await Promise.all([
+  const [actionsRes, counterpartyRes, jurisdictions, documents] = await Promise.all([
     listCorporateActions(identity),
     listCounterparties(identity),
     loadJurisdictionOptions(),
+    documentOptions(identity),
   ]);
   // Counterparty jurisdictions are register UUIDs; named from the register by id.
   const jurisdictionName = new Map(jurisdictions.ok ? jurisdictions.items.map((j) => [j.id, `${j.code} — ${j.name}`]) : []);
@@ -44,7 +47,7 @@ export async function CorporateActionsAndCounterpartiesPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Action Title", "Type", "Effective Date", "Status"].map((h) => (
+                  {["Action Title", "Type", "Effective Date", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -59,6 +62,9 @@ export async function CorporateActionsAndCounterpartiesPanel() {
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{a.action_type}</td>
                     <td className="px-4 py-3 text-xs font-semibold text-slate-700">{a.effective_date}</td>
                     <td className="px-4 py-3 text-xs font-medium text-indigo-600">{a.status}</td>
+                    <td className="px-4 py-3">
+                      <RowActions actions={["corporate-action.execute"]} recordId={a.action_id} status={a.status} fieldOptions={{ document_vault_id: itemsOf(documents) }} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -82,7 +88,7 @@ export async function CorporateActionsAndCounterpartiesPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Name", "Type", "Jurisdiction", "Risk", "Compliance"].map((h) => (
+                  {["Name", "Type", "Jurisdiction", "Risk", "Compliance", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -98,6 +104,9 @@ export async function CorporateActionsAndCounterpartiesPanel() {
                     <td className="px-4 py-3 text-xs">{jurisdictionName.get(cp.jurisdiction_id) ?? cp.jurisdiction_id}</td>
                     <td className="px-4 py-3 text-xs font-bold text-amber-600">{cp.risk_category}</td>
                     <td className="px-4 py-3 text-xs font-medium text-emerald-600">{cp.compliance_status}</td>
+                    <td className="px-4 py-3">
+                      <RowActions actions={["counterparty.compliance"]} recordId={cp.counterparty_id} status={cp.compliance_status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

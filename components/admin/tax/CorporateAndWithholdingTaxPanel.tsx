@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { CloudOff, Landmark, ShieldAlert, ShieldCheck } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import {
   listCorporateTaxReturns,
@@ -201,6 +202,7 @@ export async function CorporateAndWithholdingTaxPanel() {
 
                 {/* Waterfall */}
                 <TaxWaterfall ret={c} />
+                <RowActions actions={["corporate-tax.submit", "corporate-tax.assess"]} recordId={c.return_id} status={c.status} />
               </div>
             ))}
           </div>
@@ -236,6 +238,7 @@ export async function CorporateAndWithholdingTaxPanel() {
                     "Withheld Amount",
                     "Treaty",
                     "Status",
+                    "Actions",
                   ].map((h) => (
                     <th
                       key={h}
@@ -296,6 +299,9 @@ export async function CorporateAndWithholdingTaxPanel() {
                           </p>
                         )}
                       </div>
+                    </td>
+                    <td className="px-4 py-3 min-w-[160px]">
+                      <RowActions actions={["withholding.remit", "withholding.cancel"]} recordId={w.obligation_id} status={w.status} />
                     </td>
                   </tr>
                 ))}

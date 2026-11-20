@@ -41,6 +41,13 @@ import {
 import { draftContract } from "@/lib/api/contracts";
 
 
+import { listJournals } from "@/lib/api/general-ledger";
+import { listFiscalPeriods } from "@/lib/api/financial-close";
+import { listCustomerInvoices } from "@/lib/api/accounts-receivable";
+import { listVendorInvoices } from "@/lib/api/accounts-payable";
+import { listStatementLines } from "@/lib/api/bank-reconciliation";
+import { listIntercompanyEntries } from "@/lib/api/intercompany";
+
 import { listPurchaseOrders, listSpendLimits } from "@/lib/api/commercial-ops";
 import { issuePurchaseOrder } from "@/lib/api/purchase-orders";
 import { listPurchaseRequests } from "@/lib/api/purchase-requests";
@@ -118,6 +125,9 @@ async function resolveIdentity(req: NextRequest): Promise<Required<CallerIdentit
 function readFailed(error: { kind: string; status?: number; message: string }) {
   return NextResponse.json({ error: error.kind, message: error.message }, { status: error.status ?? 502 });
 }
+
+/** Finance reads that must carry the session's legal entity (see the GET handler). */
+const ENTITY_SCOPED_FINANCE_READS = new Set(["journals", "fiscal-periods", "ar-invoices", "ap-invoices", "intercompany/entries"]);
 
 const UNAUTHENTICATED = () =>
   NextResponse.json({ error: "unauthenticated", message: "Sign in to use this API." }, { status: 401 });
@@ -215,6 +225,83 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   // board-resolutions-svc GET /v1/resolutions -> { resolutions, total, limit, offset }.
   if (endpoint === "resolutions") {
     return listResponse("resolutions", await listBoardResolutions(identity));
+  }
+
+  // ── Finance Domain ─────────────────────────────────────────────────────────
+  // These reads are entity-scoped. Without a legal entity in the session they
+  // would go out unfiltered, and intercompany-accounting-svc skips its
+  // authorization check when no entity is given: refuse instead (fail closed).
+  if (ENTITY_SCOPED_FINANCE_READS.has(endpoint) && !identity.legalEntityId) {
+    return NextResponse.json(
+      { error: "legal_entity_required", message: "Your session has no legal entity, so this entity-scoped read is refused." },
+      { status: 403 },
+    );
+  }
+  // Read by the Finance process timeline. Each is scoped to the session's legal
+  // entity where the service supports it, and `status` is passed through for the
+  // services that filter on it (the service rejects an unknown value with 400).
+  if (endpoint === "journals") {
+    return listResponse(
+      "journals",
+      await listJournals({
+        identity,
+        legalEntityId: identity.legalEntityId,
+        status: status as Parameters<typeof listJournals>[0]["status"],
+        limit: LIST_PAGE,
+      }),
+      LIST_PAGE,
+    );
+  }
+  if (endpoint === "fiscal-periods") {
+    return listResponse(
+      "fiscal_periods",
+      await listFiscalPeriods({ identity, legalEntityId: identity.legalEntityId }),
+    );
+  }
+  if (endpoint === "ar-invoices") {
+    return listResponse(
+      "invoices",
+      await listCustomerInvoices({ identity, legalEntityId: identity.legalEntityId, limit: LIST_PAGE }),
+      LIST_PAGE,
+    );
+  }
+  if (endpoint === "ap-invoices") {
+    return listResponse(
+      "invoices",
+      await listVendorInvoices({
+        identity,
+        legalEntityId: identity.legalEntityId,
+        status: status as Parameters<typeof listVendorInvoices>[0]["status"],
+      }),
+    );
+  }
+  if (endpoint === "bank-reconciliation/statement-lines") {
+    // bank-reconciliation-svc has no legal-entity filter; it is tenant-scoped.
+    return listResponse(
+      "statement_lines",
+      await listStatementLines({
+        identity,
+        status: status as Parameters<typeof listStatementLines>[0]["status"],
+        limit: LIST_PAGE,
+      }),
+      LIST_PAGE,
+    );
+  }
+  if (endpoint === "intercompany/entries") {
+    // Both directions: an entity's intercompany position is the entries where it
+    // is the source and where it is the target. Always filtered: the guard above
+    // refuses the read when the session has no legal entity, because the service
+    // skips its authorization check when neither entity is given.
+    const [asSource, asTarget] = await Promise.all([
+      listIntercompanyEntries(identity, { sourceEntityId: identity.legalEntityId }),
+      listIntercompanyEntries(identity, { targetEntityId: identity.legalEntityId }),
+    ]);
+    if (!asSource.ok) return listResponse("entries", asSource);
+    if (!asTarget.ok) return listResponse("entries", asTarget);
+    const byId = new Map(
+      [...(asSource.data ?? []), ...(asTarget.data ?? [])].map((e) => [e.intercompany_entry_id, e]),
+    );
+    return listResponse("entries", { ok: true, data: [...byId.values()] });
   }
 
   // ── Commercial Ops Domain ──────────────────────────────────────────────────

@@ -15,6 +15,7 @@ import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordFo
 import { opts, type FieldSpec } from "@/components/admin/intelligence/create-state";
 import { createSiemExporterAction, sendSiemTestEventAction, loadSiemExporters, loadSiemEvents } from "@/app/admin/security/actions";
 import { SIEM_NO_DELIVERY, siemStatusText } from "./siem-caveat";
+import { RowActions } from "@/components/admin/shared/RowActions";
 
 const SEVERITY_BADGES: Record<string, string> = {
   CRITICAL: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 border-red-200 dark:border-red-900",
@@ -154,6 +155,9 @@ export function SiemIntegrationPanel() {
                     <p className="font-mono text-[11px] text-slate-400">
                       {x.endpoint_url} (not contacted) · {x.id}
                     </p>
+                    <div className="my-1.5">
+                      <RowActions actions={["siem.pause", "siem.resume", "siem.disable"]} recordId={x.id} status={x.status} onDone={fetchExporters} />
+                    </div>
                     <p className="text-[11px] text-slate-600 dark:text-slate-300" data-field="events-recorded">
                       Events recorded: <span className="font-semibold">{x.events_sent}</span>
                       <span className="text-slate-400"> (the service&apos;s events_sent; none was sent)</span>

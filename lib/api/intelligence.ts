@@ -40,6 +40,8 @@ export type Anomaly = {
   expected_value: number;
   description: string;
   status: AnomalyStatus;
+  /** Optimistic-concurrency version; sent back as If-Match. */
+  version?: number;
   assurance_state: string;
   detected_at: string;
   created_at: string;
@@ -103,6 +105,8 @@ export type RiskScore = {
   requires_human_review: boolean;
   review_status: string;
   status: string;
+  /** Optimistic-concurrency version; sent back as If-Match. */
+  version?: number;
   evaluated_at: string;
   created_at: string;
 };

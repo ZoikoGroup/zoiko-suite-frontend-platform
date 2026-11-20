@@ -30,10 +30,6 @@ const ROUTE = read("app/api/v1/[...path]/route.ts");
  */
 const KNOWN_UNMAPPED = [
   "audit/events",
-  // Finance pages (outside Blocks 6-10), reported, not yet mapped:
-  "cash-positions",
-  "fiscal-periods",
-  "journal-entries",
   "benefits/plans",
   "compensation/structures",
   "employees",
@@ -57,6 +53,7 @@ function sourceFiles() {
   };
   walk(path.join(ROOT, "components"));
   walk(path.join(ROOT, "app", "admin"));
+  files.push(path.join(ROOT, "lib", "finance-timeline-counts.ts"));
   return files;
 }
 
@@ -71,6 +68,9 @@ function browserPaths() {
     if (/fetch\(`\/api\/v1\/\$\{(ep|path)\}/.test(src)) {
       for (const m of src.matchAll(/\[\s*"([a-z][a-z0-9/-]*(?:\?[^"]*)?)"\s*,\s*"[a-z-]+"\s*\]/g)) add(m[1]);
     }
+    if (f.endsWith("finance-timeline-counts.ts")) {
+      for (const m of src.matchAll(/path:\s*"([a-z][^"]*)"/g)) add(m[1]);
+    }
   }
   return out;
 }
@@ -82,8 +82,12 @@ test("every browser /api/v1 path has a proxy handler (apart from the known gaps)
   assert.deepEqual(unmapped, []);
 });
 
-test("the reported Legal 404 is resolved", () => {
-  assert.ok(handled.has("resolutions"), "resolutions has no handler");
+test("the four reported 404s are resolved", () => {
+  for (const p of ["resolutions", "fiscal-periods", "journals"]) assert.ok(handled.has(p), `${p} has no handler`);
+  const paths = browserPaths();
+  // The browser no longer asks for the two names no service serves.
+  assert.equal(paths.has("journal-entries"), false);
+  assert.equal(paths.has("cash-positions"), false);
 });
 
 test("the proxy refuses requests without a session instead of using a demo identity", () => {
@@ -105,6 +109,15 @@ test("AI governance reads are the service's, with no hardcoded examples", () => 
     ROUTE.indexOf(`endpoint === "ai-governance/risk-classifications"`),
   );
   assert.match(runs, /status: 501/);
+});
+
+test("health probes use the same registry key as each domain's own client", () => {
+  const health = read("lib/api/health.ts");
+  const keyOf = (domain) => health.match(new RegExp(`\\b${domain}: \\[\\s*\\{[^}]*key: "(\\w+)"`))?.[1];
+  assert.equal(keyOf("delegations"), "delegatedAuthority");
+  assert.match(read("lib/api/delegations.ts"), /apiGet<[^>]+>\("delegatedAuthority"/);
+  assert.equal(keyOf("evidence"), "evidence");
+  assert.match(read("lib/api/evidence.ts"), /apiGet<[^>]+>\(\s*"evidence"/);
 });
 
 test("KNOWN_UNMAPPED lists only paths that are still unmapped", () => {
@@ -134,6 +147,12 @@ const UPSTREAM = [
     client: ["lib/api/general-ledger.ts", '"/v1/journals"'],
     service: "general-ledger-svc",
     registers: [/r\.Route\("\/v1\/journals"/, /r\.Get\("\/", h\.ListJournals\)/],
+  },
+  {
+    name: "treasury-svc GET /v1/treasury/positions (legal_entity_id required)",
+    client: ["lib/api/finance.ts", "/v1/treasury/positions?"],
+    service: "treasury-svc",
+    registers: [/r\.Route\("\/v1\/treasury"/, /r\.Get\("\/positions", h\.GetCashPositions\)/, /"legal_entity_id is required"/],
   },
   {
     name: "accounts-receivable-svc GET /v1/invoices",
@@ -196,7 +215,7 @@ for (const u of UPSTREAM) {
 }
 
 test(
-  "ai-governance-svc still has no AI-run list (why /ai-governance/runs is illustrative)",
+  "ai-governance-svc still has no AI-run list (why /ai-governance/runs answers 501)",
   { skip: HAS_BACKEND ? false : `no backend checkout at ${BACKEND}` },
   () => {
     const src = serviceSource("ai-governance-svc");
