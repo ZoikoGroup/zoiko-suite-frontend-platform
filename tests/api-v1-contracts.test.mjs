@@ -103,14 +103,12 @@ test("AI governance reads are the service's, with no hardcoded examples", () => 
     assert.ok(at > 0, `${ep} handler missing`);
     assert.doesNotMatch(ROUTE.slice(at, at + 600), /illustrative|run_id: "run-/, `${ep} answers hardcoded rows`);
   }
-  // The run list is the service's own (GET /v1/ai-runs), and a failed read keeps its status.
+  // The service has no AI-run list, so that read is refused rather than invented.
   const runs = ROUTE.slice(
     ROUTE.indexOf(`endpoint === "ai-governance/runs"`),
     ROUTE.indexOf(`endpoint === "ai-governance/risk-classifications"`),
   );
-  assert.match(runs, /listAIRuns\(identity\)/);
-  assert.match(runs, /status: res\.error\.status/);
-  assert.doesNotMatch(runs, /status: 501/);
+  assert.match(runs, /status: 501/);
 });
 
 test("health probes use the same registry key as each domain's own client", () => {
@@ -217,12 +215,12 @@ for (const u of UPSTREAM) {
 }
 
 test(
-  "ai-governance-svc lists AI runs (GET /v1/ai-runs), which /ai-governance/runs reads",
+  "ai-governance-svc still has no AI-run list (why /ai-governance/runs answers 501)",
   { skip: HAS_BACKEND ? false : `no backend checkout at ${BACKEND}` },
   () => {
     const src = serviceSource("ai-governance-svc");
     const block = src.slice(src.indexOf('r.Route("/v1/ai-runs"'), src.indexOf('r.Route("/v1/action-risk-classifications"'));
     assert.ok(block.length > 0);
-    assert.match(block, /r\.Get\("\/", h\.ListAIRuns\)/, "the console reads a run list the service must serve");
+    assert.doesNotMatch(block, /r\.Get\("\/", /, "a run list now exists: wire /ai-governance/runs to it and drop the examples");
   },
 );

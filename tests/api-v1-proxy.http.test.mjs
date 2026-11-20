@@ -222,14 +222,11 @@ test("an unreachable service is a 502, not an empty list", { skip }, async () =>
   assert.equal(body.kind, "unreachable");
 });
 
-test("AI governance answers no hardcoded examples; the AI-run list is the service's", { skip }, async () => {
+test("AI governance answers no hardcoded examples; the missing AI-run list is a 501", { skip }, async () => {
   for (const ep of ["ai-governance/runs", "ai-governance/risk-classifications", "ai-governance/model-providers"]) {
     const body = await (await get(ep)).json().catch(() => ({}));
     assert.equal(body.illustrative, undefined, ep);
     assert.doesNotMatch(JSON.stringify(body), /run-ai-00/, ep);
   }
-  // Without a reachable service the read fails with its own status; it is never a 501 or an invented list.
-  const runs = await get("ai-governance/runs");
-  assert.notEqual(runs.status, 501);
-  if (runs.ok) assert.ok(Array.isArray((await runs.json()).runs));
+  assert.equal((await get("ai-governance/runs")).status, 501);
 });
