@@ -8,7 +8,8 @@
 // service's: its new status, or its refusal with the HTTP status. Nothing is
 // changed on screen until the list is read again.
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
+import { actionAvailable } from "@/lib/lifecycle/availability";
 import { Loader2 } from "lucide-react";
 import { runLifecycleAction } from "@/app/admin/lifecycle-actions";
 import { LIFECYCLE_ACTIONS } from "@/lib/lifecycle/catalog";
@@ -37,16 +38,38 @@ const BTN =
 const BTN_NORMAL = `${BTN} border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200`;
 const BTN_DANGER = `${BTN} border-rose-200 bg-white text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:bg-slate-800 dark:text-rose-300`;
 
+// The backend releases this deployment serves, read once per page load.
+let releasesPromise: Promise<string[]> | null = null;
+function loadReleases(): Promise<string[]> {
+  releasesPromise ??= fetch("/api/lifecycle/availability", { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : { releases: [] }))
+    .then((b: { releases?: string[] }) => (Array.isArray(b.releases) ? b.releases : []))
+    .catch(() => []);
+  return releasesPromise;
+}
+
 export function RowActions({ actions, recordId, status, version, subId, onDone, fieldOptions }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [result, setResult] = useState<LifecycleResult | null>(null);
   const [pending, startTransition] = useTransition();
   const slug = useId();
+  const [releases, setReleases] = useState<string[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadReleases().then((r) => {
+      if (live) setReleases(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const available = actions.filter((key) => {
     const spec = LIFECYCLE_ACTIONS[key];
     if (!spec) return false;
+    // An action the backend may not serve is hidden until the deployment says it does.
+    if (spec.backendRelease && !actionAvailable(spec, releases ?? [])) return false;
     return !spec.from || (status ? spec.from.includes(status) : false);
   });
   if (available.length === 0 && !result) return null;

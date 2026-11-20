@@ -15,6 +15,7 @@ import { isUuid } from "@/lib/api/tenants";
 import { apiDelete, apiPatch, apiPost, apiPut, type ApiWriteResult } from "@/lib/api/client";
 import { LIFECYCLE_ACTIONS } from "@/lib/lifecycle/catalog";
 import type { LifecycleResult } from "@/lib/lifecycle/types";
+import { actionAvailable, enabledBackendReleases } from "@/lib/lifecycle/availability";
 
 // Ids are UUIDs or service-generated keys; anything else would let a value
 // change the route, so it is refused before a request is built.
@@ -45,6 +46,9 @@ export async function runLifecycleAction(
 ): Promise<LifecycleResult> {
   const spec = Object.prototype.hasOwnProperty.call(LIFECYCLE_ACTIONS, actionKey) ? LIFECYCLE_ACTIONS[actionKey] : undefined;
   if (!spec) return { ok: false, message: `Unknown action ${actionKey}.` };
+  if (!actionAvailable(spec, enabledBackendReleases())) {
+    return { ok: false, message: `${spec.label} is not available: ${spec.serviceLabel} in this deployment does not serve it.` };
+  }
   if (!ID_RE.test(recordId)) return { ok: false, message: "The record id is not valid." };
   if (spec.path.includes("{sub}") && !(subId && ID_RE.test(subId))) return { ok: false, message: "Choose the item this action applies to." };
 

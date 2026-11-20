@@ -47,6 +47,12 @@ export type LifecycleActionSpec = {
   validate?: (body: Record<string, unknown>) => string | null;
   /** Body reshaping the service needs (e.g. nesting a reference), applied last. Pure. */
   shape?: (body: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * The backend release that serves this action's route, when backend main does
+   * not. The action is offered and sent only where ZOIKO_BACKEND_RELEASES
+   * includes it (lib/lifecycle/availability.ts).
+   */
+  backendRelease?: "blocks-6-10-final";
   /** X-Purpose-Context, for services that refuse a write without one. */
   purposeContext?: string;
   /** The record statuses the service accepts this action from. Absent: always shown. */

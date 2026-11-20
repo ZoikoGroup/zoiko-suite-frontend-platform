@@ -96,7 +96,9 @@ test("the Server Action looks actions up in the catalog and takes identity from 
 test("the row buttons send through the Server Action only", () => {
   const src = read("components/admin/shared/RowActions.tsx");
   assert.match(src, /runLifecycleAction\(/);
-  assert.doesNotMatch(src, /fetch\(/);
+  // The only request of their own is the read of which backend releases are served.
+  const fetches = [...src.matchAll(/fetch\(([^,)]*)/g)].map((m) => m[1].trim());
+  assert.deepEqual(fetches, ['"/api/lifecycle/availability"'], `unexpected requests: ${fetches.join(", ")}`);
 });
 
 // ── Backend routes, read from the service source ─────────────────────────────
@@ -144,3 +146,59 @@ for (const [key, service, method, p] of entries()) {
     },
   );
 }
+
+// ── Actions offered without a release tag must be served by backend main ─────
+
+// Backend main checkout (ZOIKO_BACKEND_MAIN_DIR, default ../zoiko-be-latest).
+const BACKEND_MAIN = path.resolve(process.env.ZOIKO_BACKEND_MAIN_DIR ?? path.join(ROOT, "..", "zoiko-be-latest"));
+
+function gated(key) {
+  if (/^siem\./.test(key)) return /const siem = [\s\S]{0,300}backendRelease: "blocks-6-10-final"/.test(CATALOG);
+  const at = CATALOG.indexOf(`"${key}": {`);
+  if (at < 0) return false;
+  const end = CATALOG.indexOf("\n  },", at);
+  return /backendRelease: "blocks-6-10-final"/.test(CATALOG.slice(at, end));
+}
+
+function mainSource(service) {
+  const dir = path.join(BACKEND_MAIN, "services", service, "internal");
+  if (!fs.existsSync(dir)) return null;
+  let src = "";
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".go") && !e.name.endsWith("_test.go")) src += fs.readFileSync(p, "utf8");
+    }
+  };
+  walk(dir);
+  return src;
+}
+
+const HAS_MAIN = fs.existsSync(path.join(BACKEND_MAIN, "services", "forecasting-svc"));
+
+for (const [key, service, method, p] of entries()) {
+  test(
+    `${key} is served by backend main, or tagged with the release that serves it`,
+    { skip: HAS_MAIN ? false : `no backend main checkout at ${BACKEND_MAIN}` },
+    () => {
+      if (gated(key)) return;
+      const src = mainSource(service);
+      assert.ok(src, `${service} not found in backend main`);
+      const segs = p.split("/").filter(Boolean);
+      const last = segs[segs.length - 1];
+      const served = /^\{\w+\}$/.test(last)
+        ? new RegExp(`${verb(method)}\\("[^"]*\\{\\w+\\}"`).test(src) ||
+          new RegExp(`Route\\("/\\{\\w+\\}", func\\(r chi\\.Router\\) \\{[\\s\\S]{0,400}?r\\.${verb(method)}\\("/"`).test(src)
+        : new RegExp(`${verb(method)}\\((\\w+\\+)?"[^"]*/${last.replace(/[-]/g, "\\-")}"`).test(src);
+      assert.ok(served, `${key}: backend main does not serve ${method} ${p}; tag it with backendRelease or add the route to main`);
+    },
+  );
+}
+
+test("tagged actions are refused by the Server Action and hidden by the row buttons unless enabled", () => {
+  assert.match(ACTION, /if \(!actionAvailable\(spec, enabledBackendReleases\(\)\)\) \{\s*return \{ ok: false/);
+  const rows = read("components/admin/shared/RowActions.tsx");
+  assert.match(rows, /if \(spec\.backendRelease && !actionAvailable\(spec, releases \?\? \[\]\)\) return false;/);
+  assert.match(read("lib/lifecycle/availability.ts"), /process\.env\.ZOIKO_BACKEND_RELEASES/);
+});

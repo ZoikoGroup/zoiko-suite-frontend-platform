@@ -48,6 +48,8 @@ export default defineConfig({
         timeout: 120_000,
         env: {
           ZOIKO_USE_GATEWAY: "true",
+          // The zv stack is built from the Blocks 6-10 backend (fix/blocks-6-10-final).
+          ZOIKO_BACKEND_RELEASES: "blocks-6-10-final",
           ZOIKO_GATEWAY_URL: GATEWAY,
           ZOIKO_SERVICECTL: "false",
           ZOIKO_API_TIMEOUT_MS: "10000",
