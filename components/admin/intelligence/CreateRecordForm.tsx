@@ -12,6 +12,7 @@
 import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { Plus, X, Loader2 } from "lucide-react";
 import { FIELD, LABEL, HINT, OPTIONAL, BANNER_SUCCESS, BANNER_ERROR } from "@/components/admin/shared/form";
+import { PickList } from "@/components/admin/shared/PickList";
 import { IDLE, type CreateState, type FieldSpec } from "./create-state";
 
 type Props = {
@@ -84,7 +85,17 @@ export function CreateRecordForm({ title, description, fields, action, submitLab
                   <label htmlFor={id} className={LABEL}>
                     {f.label} {!f.required && <span className={OPTIONAL}>(optional)</span>}
                   </label>
-                  {f.kind === "select" ? (
+                  {f.pickList ? (
+                    <PickList
+                      id={id}
+                      name={f.name}
+                      kind={f.pickList}
+                      allowOther={f.allowOther}
+                      required={f.required}
+                      defaultValue={initial}
+                      className={FIELD}
+                    />
+                  ) : f.kind === "select" ? (
                     <select id={id} name={f.name} defaultValue={initial} aria-required={f.required} className={FIELD}>
                       <option value="">Select…</option>
                       {f.options?.map((o) => (

@@ -2,6 +2,8 @@
 // fields. Pure types and constants: imported by the Server Actions and by the
 // client form alike.
 
+import type { PickListKind } from "@/lib/pick-lists";
+
 /** One label/value pair of the record the service returned. */
 export type RecordField = [label: string, value: string];
 
@@ -43,6 +45,10 @@ export type FieldSpec = {
   step?: string;
   min?: string;
   max?: string;
+  /** Pick the value from another service's register (GET /api/pick-lists/<kind>). */
+  pickList?: PickListKind;
+  /** With pickList: a value the register does not offer may still be entered. */
+  allowOther?: boolean;
 };
 
 /** Options from enum values, shown as they are sent. */

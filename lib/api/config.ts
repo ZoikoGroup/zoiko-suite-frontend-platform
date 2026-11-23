@@ -87,6 +87,7 @@ const DEFAULTS = {
   withholdingTax:             "http://127.0.0.1:8129",  // withholding-tax-svc
   filingPreparation:          "http://127.0.0.1:8130",  // filing-preparation-svc
   evidence:                   "http://127.0.0.1:8130",  // evidence-requirements-svc (same host)
+  evidenceManifest:           "http://127.0.0.1:8095",  // evidence-manifest-svc
   filingTracker:              "http://127.0.0.1:8151",  // filing-tracker-svc
   complianceStatus:           "http://127.0.0.1:8152",  // compliance-status-svc
   exceptionEscalation:        "http://127.0.0.1:8133",  // exception-escalation-svc
@@ -220,6 +221,7 @@ const GATEWAY_PREFIX: Record<ServiceName, string> = {
   withholdingTax:             "/withholding-tax-svc",
   filingPreparation:          "/filing-preparation-svc",
   evidence:                   "/evidence-requirements-svc",
+  evidenceManifest:           "/evidence-manifest-svc",
   filingTracker:              "/filing-tracker-svc",
   complianceStatus:           "/compliance-status-svc",
   exceptionEscalation:        "/exception-escalation-svc",

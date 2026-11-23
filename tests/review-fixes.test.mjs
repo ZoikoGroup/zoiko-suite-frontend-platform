@@ -79,3 +79,25 @@ test("a failed compliance evaluations read does not hide gaps and exceptions", (
 test("panels that call the gateway carry the session envelope (toIdentity)", () => {
   assert.match(read("components/admin/commercial-ops/PurchaseRequestPanel.tsx"), /toIdentity\(session\)/);
 });
+
+test("the evidence manifest and the reconciliation run are picked from their registers", () => {
+  const lib = read("lib/pick-lists.ts");
+  assert.match(lib, /"evidence-manifests",/);
+  assert.match(lib, /"reconciliation-runs",/);
+  assert.match(lib, /case "evidence-manifests":\s*return evidenceManifestOptions\(identity\);/);
+  assert.match(lib, /case "reconciliation-runs":\s*return reconciliationRunOptions\(identity\);/);
+  // Filing preparation: a PickList over evidence-manifest-svc, not a text box.
+  const tax = read("components/admin/tax/TaxActionHeader.tsx");
+  assert.match(tax, /name="evidence_manifest_ref"\s*kind="evidence-manifests"/);
+  assert.doesNotMatch(tax, /<input id="fil-evidence"/);
+  // Reconciliation intelligence: suggestions from bank-reconciliation-svc.
+  assert.match(
+    read("components/admin/intelligence/IntelligenceCreateForms.tsx"),
+    /name: "bank_reconciliation_run_id"[^}]*pickList: "reconciliation-runs", allowOther: true/,
+  );
+  assert.match(read("components/admin/intelligence/CreateRecordForm.tsx"), /f\.pickList \? \(\s*<PickList/);
+  // evidence-manifest-svc is a registered service, routed by the gateway like the others.
+  const cfg = read("lib/api/config.ts");
+  assert.match(cfg, /evidenceManifest:\s+"http:\/\/127\.0\.0\.1:8095",\s+\/\/ evidence-manifest-svc/);
+  assert.match(cfg, /evidenceManifest:\s+"\/evidence-manifest-svc",/);
+});

@@ -210,3 +210,56 @@ export async function secretPolicyOptions(identity: SessionIdentity): Promise<Op
     })),
   );
 }
+
+/**
+ * evidence-manifest-svc: the entity's GENERATED manifests, the ones a filing
+ * can cite (a generated manifest is immutable; a pending or failed one is not
+ * evidence). GET /v1/evidence-manifests answers a bare array.
+ */
+export async function evidenceManifestOptions(identity: SessionIdentity): Promise<Options> {
+  if (!identity.legalEntityId) return fail("your session has no legal entity");
+  const res = await apiGet<unknown>("evidenceManifest", "/v1/evidence-manifests", { identity, query: { legal_entity_id: identity.legalEntityId, limit: 200 } });
+  if (!res.ok) return fail(res.error.message);
+  return ok(
+    rowsOf(res.data, ["manifests", "items", "data"])
+      .filter((m) => m.status === "GENERATED")
+      .map((m) => ({
+        value: str(m.manifest_id),
+        label: `${str(m.scenario_type) || "Manifest"} · ${str(m.generated_at || m.requested_at).slice(0, 10)} · ${str(m.manifest_id).slice(0, 18)}`,
+      })),
+  );
+}
+
+/** How far back the reconciliation-run suggestions reach. */
+const RUN_LOOKBACK_DAYS = 365;
+
+/**
+ * bank-reconciliation-svc: runs reconciliation-intelligence-svc can analyze.
+ * The service has no run list; GET /v1/reconciliation-runs/period-status names,
+ * per bank account of the entity, the latest run and the latest certified run
+ * with a statement date in the period. Those are offered for the past year;
+ * an older run's id can still be entered (the field allows a free value).
+ */
+export async function reconciliationRunOptions(identity: SessionIdentity, today = new Date()): Promise<Options> {
+  if (!identity.legalEntityId) return fail("your session has no legal entity");
+  const end = today.toISOString().slice(0, 10);
+  const start = new Date(today.getTime() - RUN_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const res = await apiGet<unknown>("bankReconciliation", "/v1/reconciliation-runs/period-status", {
+    identity,
+    query: { legal_entity_id: identity.legalEntityId, period_start: start, period_end: end },
+  });
+  if (!res.ok) return fail(res.error.message);
+  const accounts = rowsOf(res.data, ["accounts"]);
+  const seen = new Set<string>();
+  const items: FieldOption[] = [];
+  for (const a of accounts) {
+    for (const key of ["latest_run", "latest_certified"] as const) {
+      const run = a[key] as Rec | undefined;
+      const runId = str(run?.run_id);
+      if (!runId || seen.has(runId)) continue;
+      seen.add(runId);
+      items.push({ value: runId, label: `Account ${str(a.bank_account_id).slice(0, 8)} · ${str(run?.statement_date)} · ${str(run?.status)} · ${runId.slice(0, 8)}` });
+    }
+  }
+  return ok(items);
+}

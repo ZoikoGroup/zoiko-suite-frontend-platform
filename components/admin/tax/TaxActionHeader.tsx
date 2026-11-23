@@ -256,8 +256,19 @@ function FilingAssemblyPanel({ onClose, jurisdictions }: { onClose: () => void; 
                 <textarea id="fil-payload" rows={4} value={form.payload_data} onChange={set("payload_data")} className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700 font-mono" />
               </div>
               <div>
-                <label htmlFor="fil-evidence" className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">Evidence manifest reference (optional)</label>
-                <input id="fil-evidence" type="text" value={form.evidence_manifest_ref} onChange={set("evidence_manifest_ref")} className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                <label htmlFor="fil-evidence" className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">Evidence manifest (optional)</label>
+                {/* evidence-manifest-svc's GENERATED manifests of the entity. filing-preparation-svc
+                    stores the reference unchecked, so it is picked, not typed. */}
+                <PickList
+                  id="fil-evidence"
+                  name="evidence_manifest_ref"
+                  kind="evidence-manifests"
+                  blank="None"
+                  empty="No generated evidence manifest for this entity yet."
+                  value={form.evidence_manifest_ref}
+                  onChange={(v) => setForm((f) => ({ ...f, evidence_manifest_ref: v }))}
+                  className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                />
               </div>
               {error && (
                 <div className="flex items-center gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-500/20 dark:bg-red-500/10">
