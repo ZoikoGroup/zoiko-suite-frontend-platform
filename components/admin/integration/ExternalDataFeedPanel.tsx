@@ -6,6 +6,7 @@ import { fetchPanelList } from "@/lib/panel-fetch";
 import { RowActions } from "@/components/admin/shared/RowActions";
 import { DataFeedCreateForm } from "./IntegrationCreateForms";
 import type { ExternalDataFeedSubscription } from "@/lib/api/integration";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 export function ExternalDataFeedPanel() {
   const [feeds, setFeeds] = useState<ExternalDataFeedSubscription[]>([]);
@@ -37,6 +38,7 @@ export function ExternalDataFeedPanel() {
 
   return (
     <div className="space-y-4">
+      <ProviderStatusNote service="external-data-feed-svc" />
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>Data feed subscriptions (no provider is called; events are pushed in)</span>

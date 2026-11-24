@@ -5,6 +5,7 @@ import { Users2, RefreshCw, CheckCircle2, ArrowRightLeft } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
 import { HrisIntegrationCreateForm } from "./IntegrationCreateForms";
 import type { HrisIntegration } from "@/lib/api/integration";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 export function HrisConnectorPanel() {
   const [connections, setConnections] = useState<HrisIntegration[]>([]);
@@ -53,6 +54,7 @@ export function HrisConnectorPanel() {
 
   return (
     <div className="space-y-4">
+      <ProviderStatusNote service="hris-connector-svc" />
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>HRIS integrations (no live HRIS adapter configured)</span>

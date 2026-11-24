@@ -20,6 +20,7 @@ import { apiGet, type Identity } from "@/lib/api/client";
 import { loadJurisdictionOptions, type JurisdictionOptions } from "./jurisdiction-options";
 import { registerAuthorityInterface } from "@/lib/api/tax-authority";
 import { isUuid } from "@/lib/api/tenants";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 // ── Authority interface registration ──
 // Records the interface in tax-authority-interface-svc for the session's legal
@@ -317,6 +318,9 @@ export async function FilingPrepAndAuthorityPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Tax Authority Connections ({interfaces.length})
         </h3>
+        <div className="mb-3">
+          <ProviderStatusNote service="tax-authority-interface-svc" />
+        </div>
         <div className="mb-3">
           <CreateRecordForm
             title="Register authority interface"

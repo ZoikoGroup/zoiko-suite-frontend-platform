@@ -6,6 +6,7 @@ import { fetchPanelList } from "@/lib/panel-fetch";
 import { RowActions } from "@/components/admin/shared/RowActions";
 import { BankConnectionCreateForm } from "./IntegrationCreateForms";
 import type { BankConnection } from "@/lib/api/integration";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 // banking-connector-svc has no sync operation and no real bank adapter yet:
 // statements arrive through POST /v1/banking/statements/ingest, and /refresh
@@ -37,6 +38,7 @@ export function BankingConnectorPanel() {
 
   return (
     <div className="space-y-4">
+      <ProviderStatusNote service="banking-connector-svc" />
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>Bank connections (recorded; no live bank adapter)</span>
