@@ -1,119 +1,199 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import { Suspense } from "react";
+import { cookies } from "next/headers";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader } from "@/components/admin/shared";
-import { ControlsFooter, RegisterCard } from "@/components/admin/console";
-import { SignInAgain } from "@/components/admin/authorization/kit";
-import { RegisterView, type Query, type RegisterSpec } from "@/components/admin/authorization/console/register";
-import { SessionChip } from "@/components/admin/authorization/console/SessionChip";
-import { loadWorkflow, type WorkflowData } from "@/components/admin/workflow/console/data";
-import { pendingRegister } from "@/components/admin/workflow/console/pending";
-import { instancesRegister } from "@/components/admin/workflow/console/instances";
-import { definitionsRegister } from "@/components/admin/workflow/console/definitions";
-import { auditEngagementsRegister } from "@/components/admin/workflow/console/audit";
-import { formsRegister } from "@/components/admin/workflow/console/forms";
-import { casesRegister } from "@/components/admin/workflow/console/cases";
-import { stateMachinesRegister } from "@/components/admin/workflow/console/stateMachines";
-import { WorkflowKpis, WorkflowPanels } from "@/components/admin/workflow/console/overview";
-import { StartWorkflowDialog, DefineWorkflowDialog } from "@/components/admin/workflow/console/forms";
-import { href, type WorkflowCtx } from "@/components/admin/workflow/console/shared";
-import { needsAttention } from "@/lib/api/authorization";
-import { currentSession } from "@/lib/authz-inbox";
+import {
+  DecideWorkflowForm,
+  DefineWorkflowForm,
+  DefinitionCommandForm,
+  LifecycleForm,
+  StartWorkflowForm,
+  VerifyReleaseForm,
+  WorkflowLookup,
+} from "@/components/admin/workflow/WorkflowForms";
+import { DefinitionsPanel, PendingApprovalsPanel } from "@/components/admin/workflow/WorkflowPanels";
+import { SESSION_COOKIE, decodeSession, toIdentity } from "@/lib/auth";
+import { listPendingApprovals, listWorkflowDefinitions } from "@/lib/api/workflow";
 
 export const metadata: Metadata = { title: "Workflows & Approvals | Zoiko Suite" };
 
-const TABS = [
-  { key: "pending", label: "Pending Approvals" },
-  { key: "instances", label: "Instances" },
-  { key: "definitions", label: "Definitions" },
-  { key: "audit", label: "Audit Engagements" },
-  { key: "forms", label: "Forms" },
-  { key: "cases", label: "Cases" },
-  { key: "state-machines", label: "State Machines" },
-] as const;
-
-type TabKey = typeof TABS[number]["key"];
-
-async function Page() {
-  const session = await currentSession();
-  if (!session) return <SignInAgain />;
-
-  const { identity } = session;
-  const data = await loadWorkflow(identity);
-  const ctx: WorkflowCtx = { me: identity.principalId, canManage: true, legalEntityId: identity.legalEntityId };
-
+function PanelSkeleton({ rows = 4 }: { rows?: number }) {
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Governance › Workflows & Approvals"
-        description="Multi-stage approvals for actions that need more than one person. An approval adds to authorization — it never replaces it. The initiator never decides. Nobody decides two stages. A service account never decides."
-        actions={
-          <>
-            <StartWorkflowDialog legalEntityId={identity.legalEntityId} />
-            <DefineWorkflowDialog legalEntityId={identity.legalEntityId} />
-          </>
-        }
-      />
-
-      <SessionChip identity={identity} attention={needsAttention(identity)} />
-
-      <WorkflowKpis pending={data.pending.rows} instances={data.instances.rows} />
-      <WorkflowPanels pending={data.pending.rows} instances={data.instances.rows} />
-
-      <div className="border-t border-slate-100 pt-6 dark:border-slate-800">
-        <RegisterView<TabKey, WorkflowData, WorkflowCtx>
-          data={data}
-          ctx={ctx}
-          tabs={TABS}
-          count={(data, tab) => {
-            switch (tab) {
-              case "pending": return data.pending.error ? null : data.pending.rows.length;
-              case "instances": return data.instances.error ? null : data.instances.rows.length;
-              case "definitions": return data.definitions.error ? null : data.definitions.rows.length;
-              case "audit": return 0;
-              case "forms": return 0;
-              case "cases": return 0;
-              case "state-machines": return 0;
-              default: return undefined;
-            }
-          }}
-          registerFor={(tab, data, ctx) => {
-            switch (tab) {
-              case "pending": return pendingRegister(data, ctx);
-              case "instances": return instancesRegister(data, ctx);
-              case "definitions": return definitionsRegister(data, ctx);
-              case "audit": return auditEngagementsRegister(data, ctx);
-              case "forms": return formsRegister(data, ctx);
-              case "cases": return casesRegister(data, ctx);
-              case "state-machines": return stateMachinesRegister(data, ctx);
-              default: return null;
-            }
-          }}
-          tabActions={(tab, legalEntityId) => {
-            switch (tab) {
-              case "pending":
-                return <StartWorkflowDialog legalEntityId={legalEntityId} />;
-              case "definitions":
-                return <DefineWorkflowDialog legalEntityId={legalEntityId} />;
-              default:
-                return null;
-            }
-          }}
-          baseHref={BASE}
-          firstProblem={(data) => data.pending.error || data.instances.error || data.definitions.error}
-        />
-      </div>
-
-      <ControlsFooter
-        items={[
-          { label: "The initiator never decides their own workflow", tone: "info" },
-          { label: "Nobody decides two stages of the same workflow", tone: "warning" },
-          { label: "A service account or system principal never decides", tone: "danger" },
-          { label: "Every decision checked against authorization-svc with workflow_type, approver_role, stage_order", tone: "info" },
-          { label: "Policy/authority changes re-check pending approvers and escalate if needed", tone: "warning" },
-        ]}
-      />
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, i) => (
+        <Skeleton key={i} className="h-12 w-full rounded-lg" />
+      ))}
     </div>
   );
 }
 
-export default Page;
+async function sessionIdentity() {
+  const store = await cookies();
+  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session?.principalId) return null;
+  return toIdentity(session);
+}
+
+async function Pending() {
+  const identity = await sessionIdentity();
+  if (!identity) return null;
+  return <PendingApprovalsPanel result={await listPendingApprovals(identity)} />;
+}
+
+/**
+ * The start form and both definition panels need the definition list; read it
+ * once so the route picker and the register cannot disagree about what exists.
+ */
+async function Operate() {
+  const identity = await sessionIdentity();
+  if (!identity) return null;
+  const definitions = await listWorkflowDefinitions(identity);
+  const list = definitions.ok ? (definitions.data ?? []) : [];
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Start a workflow</CardTitle>
+          <CardDescription>
+            Opens an approval for something that needs one. You will not be able to approve it
+            yourself, and nobody can decide more than one of its stages.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StartWorkflowForm
+            legalEntityId={identity.legalEntityId}
+            idempotencyKey={crypto.randomUUID()}
+            definitions={list}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Decide the current stage</CardTitle>
+          <CardDescription>
+            As the stage&rsquo;s named approver, a delegate of that approver, a holder of its role, or
+            the person it was escalated to. Each decision is checked against authorization-svc and
+            recorded in the governance decision log.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DecideWorkflowForm idempotencyKey={crypto.randomUUID()} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Escalate, cancel, reopen or invalidate</CardTitle>
+          <CardDescription>
+            Changes to a workflow other than a decision. Each needs its own WORKFLOW_* grant.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LifecycleForm idempotencyKey={crypto.randomUUID()} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Can this approval still be released against?</CardTitle>
+          <CardDescription>
+            An approval covers the subject as it was when approved. Give the subject&rsquo;s
+            fingerprint as it is now; if it changed, the approval does not cover it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <VerifyReleaseForm />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Workflow definitions</CardTitle>
+          <CardDescription>
+            Versioned routes a workflow can start from. A running workflow keeps the route it started
+            with, so changing a definition never changes a decision already in progress. Listing and
+            changing them needs WORKFLOW_READ and WORKFLOW_DEFINE at platform scope.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <DefinitionsPanel result={definitions} />
+
+          <div className="border-t border-slate-100 pt-6 dark:border-slate-800">
+            <h3 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">
+              Register a definition
+            </h3>
+            <DefineWorkflowForm />
+          </div>
+
+          {list.length > 0 && (
+            <div className="border-t border-slate-100 pt-6 dark:border-slate-800">
+              <h3 className="mb-3 text-sm font-semibold text-slate-800 dark:text-slate-200">
+                Activate, suspend, retire or supersede
+              </h3>
+              <DefinitionCommandForm definitions={list} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+export default function WorkflowsPage() {
+  return (
+    <div className="mx-auto max-w-7xl space-y-8 p-6">
+      <PageHeader
+        title="Workflows & Approvals"
+        description="Multi-stage approvals for actions that need more than one person. An approval adds to authorization — it never replaces it."
+      />
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
+        <p>
+          <strong className="text-slate-900 dark:text-slate-100">Three rules hold whatever anyone&rsquo;s grants say.</strong>{" "}
+          The person who started a workflow never decides it. Nobody decides two stages of the same
+          workflow. A service account never decides one — a person has to.
+        </p>
+        <p className="mt-2">
+          A workflow past its deadline expires on its own; a stage past its deadline escalates. When a
+          policy or an approver&rsquo;s authority changes, pending approvals are re-checked, and one whose
+          approver may no longer approve is escalated rather than left waiting.
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Waiting for a decision</CardTitle>
+          <CardDescription>
+            Pending and escalated workflows in your tenant. Listing them needs WORKFLOW_READ at platform
+            scope; without it you can still open any workflow you started or are due to decide.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<PanelSkeleton />}>
+            <Pending />
+          </Suspense>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>View a workflow</CardTitle>
+          <CardDescription>
+            Its stages, where it stands, and the full approval trail — who acted, on whose authority,
+            and the governance record each decision was filed under.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <WorkflowLookup />
+        </CardContent>
+      </Card>
+
+      <Suspense fallback={<PanelSkeleton rows={8} />}>
+        <Operate />
+      </Suspense>
+    </div>
+  );
+}

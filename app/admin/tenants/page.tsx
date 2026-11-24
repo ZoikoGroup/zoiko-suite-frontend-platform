@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { cookies } from "next/headers";
-import { Building2, Layers } from "lucide-react";
+import { Building2, FileText, GitBranch, Globe, Layers, Merge, ShieldCheck, Users } from "lucide-react";
 import {
+  Badge,
   Card,
   CardHeader,
   CardTitle,
@@ -61,34 +62,25 @@ import {
   listTenantHostBindings,
   listTenantLifecycleHistory,
   getRegistrySummary,
+  type RegistrySummary,
+  type TenantLifecycleEvent,
+  type TenantHostBinding,
+  type LegalEntityProfileVersion,
+  type EntityRegistryConflict,
   listApprovalRequests,
-  getApprovalRequest,
-  approveApprovalRequest,
-  rejectApprovalRequest,
   type ApprovalRequest,
-  type ApproveRequestBody,
-  type RejectRequestBody,
   listOwnershipRelationships,
   getOwnershipGraph,
-  getControlChain,
   type OwnershipRelationship,
-  type ControlChain,
   listParties,
-  getParty,
-  type Party,
   type PartySummary,
   listResolutionCases,
-  getMergeHistory,
   type ResolutionCase,
   listTaxIdentityBundles,
-  getTaxIdentityBundle,
   type TaxIdentityBundle,
-  type TaxIdentityBundleDetail,
   listResidencyPolicies,
-  getResidencyPolicy,
   getTenantResidencyRegion,
   type ResidencyPolicy,
-  createResidencyPolicy,
 } from "@/lib/api/tenants-org";
 
 export const metadata: Metadata = { title: "Tenants & Entities | Zoiko Suite" };
@@ -672,9 +664,7 @@ async function ApprovalsPanel() {
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 text-sm">
-                      <Badge variant={a.status === "PENDING" ? "secondary" : "default"}>
-                        {a.status}
-                      </Badge>
+                      <Badge tone={a.status === "PENDING" ? "info" : "neutral"}>{a.status}</Badge>
                       <span className="text-slate-500 dark:text-slate-400">{a.command_name}</span>
                       <span className="text-slate-400">|</span>
                       <span className="font-mono text-xs">{a.subject_type}:{a.subject_id.slice(0, 8)}…</span>
@@ -686,47 +676,13 @@ async function ApprovalsPanel() {
                       Fingerprint: {a.payload_fingerprint}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={async () => {
-                        const res = await approveApprovalRequest(
-                          a.approval_request_id,
-                          { payload_fingerprint: a.payload_fingerprint, correlation_id: crypto.randomUUID() },
-                          identity
-                        );
-                        if (!res.ok) alert(res.error.message);
-                        else window.location.reload();
-                      }}
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={async () => {
-                        const reason = prompt("Rejection reason (required):");
-                        if (!reason) return;
-                        const res = await rejectApprovalRequest(
-                          a.approval_request_id,
-                          { payload_fingerprint: a.payload_fingerprint, decision_note: reason, correlation_id: crypto.randomUUID() },
-                          identity
-                        );
-                        if (!res.ok) alert(res.error.message);
-                        else window.location.reload();
-                      }}
-                    >
-                      Reject
-                    </Button>
-                  </div>
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
-)
-    );
+      )}
+    </div>
   );
 }
 
@@ -774,7 +730,7 @@ async function OwnershipControlPanel() {
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-sm">
-                        <Badge variant={r.status === "ACTIVE" ? "success" : "default"}>{r.status}</Badge>
+                        <Badge tone={r.status === "ACTIVE" ? "success" : "neutral"}>{r.status}</Badge>
                         <span className="font-mono text-xs">
                           {r.parent_legal_entity_id.slice(0, 8)}… → {r.child_legal_entity_id.slice(0, 8)}…
                         </span>
@@ -825,88 +781,6 @@ async function OwnershipControlPanel() {
           </div>
         </div>
       )}
-
-      <div className="border-t border-slate-200 pt-6 dark:border-slate-800">
-        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
-          SoD Validation
-        </h3>
-        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
-          Validate a proposed ownership relationship against segregation-of-duties rules before submitting.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Parent Legal Entity ID
-            </label>
-            <input
-              id="sod_parent"
-              type="text"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-              placeholder="uuid"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Child Legal Entity ID
-            </label>
-            <input
-              id="sod_child"
-              type="text"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-              placeholder="uuid"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Ownership %
-            </label>
-            <input
-              id="sod_ownership"
-              type="number"
-              min="0"
-              max="100"
-              step="0.01"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-              placeholder="60"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Voting %
-            </label>
-            <input
-              id="sod_voting"
-              type="number"
-              min="0"
-              max="100"
-              step="0.01"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-              placeholder="60"
-            />
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              const res = await validateSoD(
-                {
-                  parent_legal_entity_id: (document.getElementById("sod_parent") as HTMLInputElement).value,
-                  child_legal_entity_id: (document.getElementById("sod_child") as HTMLInputElement).value,
-                  relationship_kind: "OWNERSHIP",
-                  ownership_pct: parseFloat((document.getElementById("sod_ownership") as HTMLInputElement).value),
-                  voting_pct: parseFloat((document.getElementById("sod_voting") as HTMLInputElement).value),
-                },
-                identity
-              );
-              if (!res.ok) alert(res.error.message);
-              else alert(res.data.allowed ? "ALLOWED" : `BLOCKED: ${res.data.violations.join(", ")}`);
-            }}
-          >
-            Validate SoD
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -924,7 +798,7 @@ async function PartiesPanel() {
     listResolutionCases(identity, "open"),
   ]);
 
-  const partiesData = partiesResult.ok ? partiesResult.data : null;
+  const parties: PartySummary[] = partiesResult.ok ? partiesResult.data.items : [];
   const cases = unwrapList(casesResult, "cases") as ResolutionCase[];
 
   return (
@@ -940,7 +814,7 @@ async function PartiesPanel() {
             hint={partiesResult.error.message}
             tone="warning"
           />
-        ) : partiesData?.items.length === 0 ? (
+        ) : parties.length === 0 ? (
           <PanelEmptyState
             icon={Users}
             label="No parties"
@@ -949,14 +823,14 @@ async function PartiesPanel() {
           />
         ) : (
           <div className="space-y-2">
-            {partiesData.items.map((p: PartySummary) => (
+            {parties.map((p) => (
               <Card key={p.party_id} className="border-slate-200 dark:border-slate-700">
                 <CardContent className="p-4">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-sm">
-                        <Badge variant="default">{p.party_kind}</Badge>
-                        <Badge variant="secondary">{p.source_class}</Badge>
+                        <Badge tone="neutral">{p.party_kind}</Badge>
+                        <Badge tone="info">{p.source_class}</Badge>
                         <span className="font-medium">{p.legal_name}</span>
                         <span className="text-slate-400">|</span>
                         <span className="text-xs">v{p.current_version}</span>
@@ -999,120 +873,19 @@ async function PartiesPanel() {
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-sm">
-                        <Badge variant={c.status === "OPEN" ? "secondary" : "default"}>{c.status}</Badge>
-                        <Badge variant="outline">{c.case_type}</Badge>
+                        <Badge tone={c.status === "OPEN" ? "info" : "neutral"}>{c.status}</Badge>
+                        <Badge tone="neutral">{c.case_type}</Badge>
                         <span className="font-mono text-xs">{c.case_id.slice(0, 8)}…</span>
                         <span className="text-slate-400">|</span>
                         <span>Candidates: {c.candidate_party_ids.length}</span>
                       </div>
                     </div>
-                    {c.status === "OPEN" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={async () => {
-                          const decision = prompt(`Decision for ${c.case_id} (MERGE/SPLIT/DISMISS):`);
-                          if (!decision) return;
-                          let survivor = "";
-                          let newParties = "";
-                          if (decision === "MERGE") {
-                            survivor = prompt("Survivor party ID:");
-                            if (!survivor) return;
-                          } else if (decision === "SPLIT") {
-                            newParties = prompt("New party IDs (comma-separated):");
-                            if (!newParties) return;
-                          }
-                          const res = await decideResolutionCase(
-                            c.case_id,
-                            {
-                              decision: decision as any,
-                              survivor_party_id: survivor || undefined,
-                              new_party_ids: newParties ? newParties.split(",").map(s => s.trim()) : undefined,
-                              reason: prompt("Reason:") || "",
-                              correlation_id: crypto.randomUUID(),
-                            },
-                            identity
-                          );
-                          if (!res.ok) alert(res.error.message);
-                          else window.location.reload();
-                        }}
-                      >
-                        Decide
-                      </Button>
-                    )}
                   </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
-      </div>
-
-      <div className="border-t border-slate-200 pt-6 dark:border-slate-800">
-        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
-          Create Party (Match-First)
-        </h3>
-        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
-          Search for existing parties before creating. If a match is found, it will be shown.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Legal Name
-            </label>
-            <input
-              id="party_legal_name"
-              type="text"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-              placeholder="John Smith"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Party Kind
-            </label>
-            <select
-              id="party_kind"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-            >
-              <option value="LEGAL_ENTITY">LEGAL_ENTITY</option>
-              <option value="NATURAL_PERSON">NATURAL_PERSON</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Source Class
-            </label>
-            <select
-              id="party_source_class"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-            >
-              <option value="AUTHORITY_REGISTRY">AUTHORITY_REGISTRY</option>
-              <option value="AUTHORITY_DOCUMENT">AUTHORITY_DOCUMENT</option>
-              <option value="SELF_DECLARED">SELF_DECLARED</option>
-            </select>
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <Button
-            variant="primary"
-            onClick={async () => {
-              const res = await createParty(
-                {
-                  legal_name: (document.getElementById("party_legal_name") as HTMLInputElement).value,
-                  party_kind: (document.getElementById("party_kind") as HTMLSelectElement).value,
-                  source_class: (document.getElementById("party_source_class") as HTMLSelectElement).value,
-                  correlation_id: crypto.randomUUID(),
-                },
-                identity
-              );
-              if (!res.ok) alert(res.error.message);
-              else window.location.reload();
-            }}
-          >
-            Create Party
-          </Button>
-        </div>
       </div>
     </div>
   );
@@ -1165,10 +938,10 @@ async function TaxIdentityBundlesPanel() {
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-sm">
-                        <Badge variant={b.data_classification === "RESTRICTED" || b.data_classification === "CONFIDENTIAL" ? "destructive" : "default"}>
+                        <Badge tone={b.data_classification === "RESTRICTED" || b.data_classification === "CONFIDENTIAL" ? "danger" : "neutral"}>
                           {b.data_classification}
                         </Badge>
-                        <Badge variant="secondary">{b.status}</Badge>
+                        <Badge tone="info">{b.status}</Badge>
                         <span className="font-mono text-xs">{b.jurisdiction_id}</span>
                         <span className="text-slate-400">|</span>
                         <span>Valid from {new Date(b.effective_from).toLocaleDateString()}</span>
@@ -1177,17 +950,6 @@ async function TaxIdentityBundlesPanel() {
                         {b.tax_identity_bundle_id}
                       </p>
                     </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={async () => {
-                        const res = await getTaxIdentityBundle(b.tax_identity_bundle_id, identity, true);
-                        if (!res.ok) alert(res.error.message);
-                        else alert(JSON.stringify(res.data, null, 2));
-                      }}
-                    >
-                      View Details
-                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1241,11 +1003,11 @@ async function ResidencyPanel() {
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-sm">
-                        <Badge variant={p.active_flag ? "success" : "default"}>
+                        <Badge tone={p.active_flag ? "success" : "neutral"}>
                           {p.active_flag ? "Active" : "Inactive"}
                         </Badge>
-                        <Badge variant="secondary">{p.residency_mode}</Badge>
-                        <Badge variant="outline">{p.conflict_resolution_mode}</Badge>
+                        <Badge tone="info">{p.residency_mode}</Badge>
+                        <Badge tone="neutral">{p.conflict_resolution_mode}</Badge>
                         <span className="font-mono text-xs">{p.residency_region_id}</span>
                       </div>
                       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -1284,13 +1046,9 @@ async function ResidencyPanel() {
               <Card key={r.residency_region_id} className="border-slate-200 dark:border-slate-700">
                 <CardContent className="p-4">
                   <div className="flex flex-wrap items-center gap-4">
-                    <Badge variant={r.sovereign_flag ? "success" : "default"}>
-                      {r.sovereign_flag ? "Sovereign" : "Standard"}
-                    </Badge>
-                    <Badge variant="outline">{r.cloud_provider}</Badge>
+                    <Badge tone="info">{r.region_code}</Badge>
                     <span className="font-mono text-xs">{r.residency_region_id}</span>
                     <span className="text-slate-500 dark:text-slate-400">{r.region_name}</span>
-                    <span className="text-slate-500 dark:text-slate-400">{r.country_code}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -1314,7 +1072,7 @@ async function ResidencyPanel() {
           <Card className="border-slate-200 dark:border-slate-700">
             <CardContent className="p-4">
               <div className="flex items-center gap-4">
-                <Badge variant="success">{tenantRegionResult.data.region_code}</Badge>
+                <Badge tone="success">{tenantRegionResult.data.region_code}</Badge>
                 <span className="text-sm text-slate-500 dark:text-slate-400">
                   This is the region the ingress layer will route this tenant&apos;s traffic to.
                 </span>
@@ -1323,104 +1081,12 @@ async function ResidencyPanel() {
           </Card>
         )}
       </div>
-
-      <div className="border-t border-slate-200 pt-6 dark:border-slate-800">
-        <h3 className="mb-3 text-sm font-medium text-slate-900 dark:text-slate-100">
-          Create Residency Policy
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Policy Name
-            </label>
-            <input
-              id="rp_name"
-              type="text"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-              placeholder="EU Data Residency"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Policy Code
-            </label>
-            <input
-              id="rp_code"
-              type="text"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-              placeholder="EU-RESIDENCY"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Residency Mode
-            </label>
-            <select
-              id="rp_mode"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-            >
-              <option value="STRICT">STRICT</option>
-              <option value="PREFER">PREFER</option>
-              <option value="DENY">DENY</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Conflict Resolution
-            </label>
-            <select
-              id="rp_conflict"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-            >
-              <option value="REJECT">REJECT</option>
-              <option value="QUEUE">QUEUE</option>
-              <option value="LOG">LOG</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              Residency Region
-            </label>
-            <select
-              id="rp_region"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800"
-            >
-              {regionsResult.ok && regionsResult.data.map((r: ResidencyRegion) => (
-                <option key={r.residency_region_id} value={r.residency_region_id}>
-                  {r.residency_region_id} — {r.region_name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <Button
-            variant="primary"
-            onClick={async () => {
-              const res = await createResidencyPolicy(
-                {
-                  tenant_id: identity.tenantId!,
-                  policy_name: (document.getElementById("rp_name") as HTMLInputElement).value,
-                  policy_code: (document.getElementById("rp_code") as HTMLInputElement).value,
-                  residency_mode: (document.getElementById("rp_mode") as HTMLSelectElement).value as any,
-                  conflict_resolution_mode: (document.getElementById("rp_conflict") as HTMLSelectElement).value as any,
-                  residency_region_id: (document.getElementById("rp_region") as HTMLSelectElement).value,
-                  active_flag: true,
-                  correlation_id: crypto.randomUUID(),
-                },
-                identity
-              );
-              if (!res.ok) alert(res.error.message);
-              else window.location.reload();
-            }}
-          >
-            Create Policy
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }
+
+/**
+ * Entity hierarchy.
  *
  * The registry exposes relationships only per entity, so the full graph costs
  * one read per entity. That is bounded here, and the bound is stated rather than

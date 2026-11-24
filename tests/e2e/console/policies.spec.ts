@@ -476,7 +476,7 @@ test.describe("Accounting policies (REF-07), maker–checker (live)", () => {
 
     // Checker approves with TOTP.
     await open(checker, `${P}?tab=elevated&q=${incident}`);
-    let approveBtn = checker.getByRole("button", { name: "Approve", exact: true }).first();
+    const approveBtn = checker.getByRole("button", { name: "Approve", exact: true }).first();
     await expect(approveBtn).toBeVisible();
     await approveBtn.click();
     dialog = checker.locator("dialog[open]");
@@ -490,8 +490,8 @@ test.describe("Accounting policies (REF-07), maker–checker (live)", () => {
 
     // Get the session ID.
     await open(checker, `${P}?tab=elevated&q=${incident}`);
-    let sessionLink = await checker.locator("table a").first().getAttribute("href");
-    let sessionId = new URL(sessionLink ?? "", "http://x").searchParams.get("id") ?? "";
+    const sessionLink = await checker.locator("table a").first().getAttribute("href");
+    const sessionId = new URL(sessionLink ?? "", "http://x").searchParams.get("id") ?? "";
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
 
     // Now the checker has a live break-glass session. Use it for emergency suspension.
