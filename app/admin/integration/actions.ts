@@ -12,7 +12,9 @@
 import { refresh } from "next/cache";
 import {
   createBridge,
-  createBankConnection,
+  requestBankConnection,
+  listTreasuryBankAccounts,
+  type TreasuryBankAccount,
   createHrisIntegration,
   createDataFeedSubscription,
   createEsignatureEnvelope,
@@ -58,28 +60,32 @@ export async function createBankConnectionAction(previous: CreateState, fd: Form
   const identity = await sessionIdentity();
   if (!identity) return expired(previous, fd);
   const refusal = missing(previous, fd, [
+    ["bank_account_id", "Bank account"],
     ["bank_name", "Bank name"],
-    ["bic", "BIC"],
-    ["account_number", "Account number"],
-    ["currency", "Currency"],
   ]);
   if (refusal) return refusal;
-  const res = await createBankConnection(identity, {
+  const scope = text(fd, "requested_scope").split(/[\n,]/).map((v) => v.trim()).filter(Boolean);
+  const res = await requestBankConnection(identity, {
+    bank_account_id: text(fd, "bank_account_id"),
     bank_name: text(fd, "bank_name"),
-    bic: text(fd, "bic"),
-    account_number: text(fd, "account_number"),
-    iban: text(fd, "iban") || undefined,
-    currency: text(fd, "currency"),
-    account_type: text(fd, "account_type") || undefined,
+    provider_ref: text(fd, "provider_ref") || undefined,
+    region: text(fd, "region") || undefined,
+    requested_scope: scope.length ? scope : undefined,
   });
   if (res.ok) refresh();
-  // Account number and IBAN are not echoed back to the page.
   return toState(previous, fd, res, "banking-connector-svc", (c) => [
     ["Connection ID", show(c.connection_id)],
     ["Status", show(c.status)],
-    ["Bank", `${show(c.bank_name)} (${show(c.bic)})`],
-    ["Currency", show(c.currency)],
+    ["Bank", show(c.bank_name)],
   ]);
+}
+
+/** treasury-svc bank accounts, for the connection form's account select. */
+export async function loadBankAccounts(): Promise<{ ok: true; accounts: TreasuryBankAccount[] } | { ok: false; message: string }> {
+  const identity = await sessionIdentity();
+  if (!identity) return { ok: false, message: SESSION_EXPIRED };
+  const res = await listTreasuryBankAccounts(identity);
+  return res.ok ? { ok: true, accounts: res.data } : { ok: false, message: res.error.message };
 }
 
 export async function createHrisIntegrationAction(previous: CreateState, fd: FormData): Promise<CreateState> {

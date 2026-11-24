@@ -2,8 +2,21 @@ import { cookies } from "next/headers";
 import { AlertTriangle, CloudOff, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listObligations, type Obligation } from "@/lib/api/legal";
+import { listClauses, listObligations, type Obligation } from "@/lib/api/legal";
 import { CreateObligationForm } from "./LegalCreateForms";
+import { RowActions } from "@/components/admin/shared/RowActions";
+
+const OBLIGATION_ACTIONS = [
+  "obligation.validate",
+  "obligation.schedule",
+  "obligation.mark-due",
+  "obligation.mark-in-progress",
+  "obligation.complete",
+  "obligation.waive",
+  "obligation.dispute",
+  "obligation.record-breach",
+  "obligation.supersede",
+] as const;
 
 const STATUS_COLORS: Record<string, string> = {
   PLANNED: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
@@ -58,7 +71,8 @@ export async function ObligationTrackingPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const result = await listObligations(identity);
+  const [result, clausesRes] = await Promise.all([listObligations(identity), listClauses(identity)]);
+  const clauseChoices = clausesRes.ok ? clausesRes.data.map((c) => ({ value: c.clause_id, label: `${c.title} (${c.status})` })) : [];
 
   if (!result.ok) {
     return (
@@ -106,7 +120,7 @@ export async function ObligationTrackingPanel() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 dark:bg-slate-800/60">
               <tr>
-                {["Title", "Type", "Risk", "Due", "Status"].map((h) => (
+                {["Title", "Type", "Risk", "Due", "Status", "Actions"].map((h) => (
                   <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                 ))}
               </tr>
@@ -151,6 +165,19 @@ export async function ObligationTrackingPanel() {
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS_COLORS[o.status] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`}>
                         {(o.status || "—").replace(/_/g, " ")}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 min-w-[180px]">
+                      <RowActions
+                        actions={OBLIGATION_ACTIONS}
+                        recordId={o.obligation_id}
+                        status={o.status}
+                        fieldOptions={{
+                          source_clause_id: clauseChoices,
+                          superseded_by: obligations
+                            .filter((x) => x.obligation_id !== o.obligation_id && OPEN_STATUSES.has(x.status))
+                            .map((x) => ({ value: x.obligation_id, label: `${x.title} (${x.status})` })),
+                        }}
+                      />
                     </td>
                   </tr>
                 );

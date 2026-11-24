@@ -11,6 +11,7 @@
 // error and refuse to submit: a hardcoded alias table is exactly what produced
 // rules under ids no other service recognised.
 
+import { cache } from "react";
 import { listJurisdictions } from "@/lib/api/jurisdictions";
 
 export type JurisdictionOption = {
@@ -24,7 +25,11 @@ export type JurisdictionOptions =
   | { ok: true; items: JurisdictionOption[] }
   | { ok: false; error: string };
 
-export async function loadJurisdictionOptions(): Promise<JurisdictionOptions> {
+/**
+ * Read once per request (React cache): the page and its panels share the
+ * answer instead of each calling jurisdiction-rules-svc.
+ */
+export const loadJurisdictionOptions = cache(async (): Promise<JurisdictionOptions> => {
   const res = await listJurisdictions();
   if (!res.ok) return { ok: false, error: res.error.message };
   return {
@@ -36,4 +41,4 @@ export async function loadJurisdictionOptions(): Promise<JurisdictionOptions> {
       active: j.active_flag,
     })),
   };
-}
+});

@@ -317,7 +317,9 @@ export type CorporateTaxReturn = {
   updated_at: string;
 };
 
-type CorporateTaxResponse = { corporate_tax_returns?: CorporateTaxReturn[]; total: number };
+type CorporateTaxResponse =
+  | { corporate_tax_returns?: CorporateTaxReturn[]; total: number }
+  | CorporateTaxReturn[];
 
 export async function listCorporateTaxReturns(
   identity?: Identity,
@@ -334,9 +336,9 @@ export async function listCorporateTaxReturns(
     base,
     "corporate-tax-svc",
     identity,
-    // corporate-tax-svc lists under corporate_tax_returns; reading `returns`
-    // made every register empty.
-    (d) => d.corporate_tax_returns ?? [],
+    // corporate-tax-svc lists under corporate_tax_returns (fix/blocks-6-10-final)
+    // or as a bare array (backend main); reading `returns` made every register empty.
+    (d) => (Array.isArray(d) ? d : d.corporate_tax_returns ?? []),
   );
 }
 
@@ -521,6 +523,36 @@ export async function listTaxAuthorityInterfaces(
     "tax-authority-interface-svc",
     identity,
     (d) => d.interfaces ?? [],
+  );
+}
+
+/** A filing as tax-authority-interface-svc lists it (GET /v1/tax-authority/filings). */
+export type TaxAuthorityFiling = {
+  submission_id: string;
+  interface_id?: string;
+  filing_type?: string;
+  tax_period?: string;
+  tax_amount?: number;
+  status: string;
+  ack_reference?: string;
+  submitted_at?: string;
+};
+
+type TaxAuthorityFilingsResponse = { submissions?: TaxAuthorityFiling[]; total: number };
+
+export async function listTaxAuthorityFilings(
+  identity?: Identity
+): Promise<ApiResult<TaxAuthorityFiling[]>> {
+  const base = taxAuthorityUrl();
+  const url = new URL(`${base}/v1/tax-authority/filings`);
+  if (identity?.legalEntityId) url.searchParams.set("legal_entity_id", identity.legalEntityId);
+
+  return fetchDomainService<TaxAuthorityFilingsResponse, TaxAuthorityFiling[]>(
+    url.toString(),
+    base,
+    "tax-authority-interface-svc",
+    identity,
+    (d) => d.submissions ?? [],
   );
 }
 

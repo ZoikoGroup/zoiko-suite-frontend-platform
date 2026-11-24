@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { GitMerge, RefreshCw } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
+import { ReconciliationItems } from "./ReconciliationItems";
 import { ReconciliationCreateForm } from "./IntelligenceCreateForms";
 import type { ReconciliationJob } from "@/lib/api/intelligence";
 
@@ -80,6 +82,7 @@ export function ReconciliationIntelligencePanel() {
                 <th className="pb-2 font-medium">Source</th>
                 <th className="pb-2 font-medium">Status</th>
                 <th className="pb-2 font-medium text-right">Unmatched</th>
+                <th className="pb-2 pl-3 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -97,6 +100,10 @@ export function ReconciliationIntelligencePanel() {
                       ? `${r.unmatched_count} of ${r.total_processed_count}`
                       : <span className="text-emerald-600 dark:text-emerald-400">0 of {r.total_processed_count}</span>
                     }
+                  </td>
+                  <td className="py-2 pl-3 min-w-[180px] space-y-1">
+                    <RowActions actions={["reconciliation.archive"]} recordId={r.id} status={r.status} version={r.version} onDone={load} />
+                    {r.unmatched_count > 0 && <ReconciliationItems jobId={r.id} onDone={load} />}
                   </td>
                 </tr>
               ))}

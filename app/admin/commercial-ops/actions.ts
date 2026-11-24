@@ -135,7 +135,13 @@ export async function issueOrder(
   // Checked here as well as by the service: these are uuid columns, and a
   // malformed id fails in the driver and comes back as a 503 that reads like an
   // outage rather than a typo.
-  if (purchaseRequestId && !isUuid(purchaseRequestId)) {
+  // Required in practice: without an approved requisition purchase-order-svc
+  // reads the correlation id as a procurement case and refuses the order (422
+  // PO_APPROVAL_REQUIRED). Orders from a procurement case are issued from the case.
+  if (!purchaseRequestId) {
+    return { status: "error", message: "Choose the approved purchase request this order fulfils." };
+  }
+  if (!isUuid(purchaseRequestId)) {
     return { status: "error", message: "Purchase request ID must be a UUID." };
   }
   if (vendorProfileId && !isUuid(vendorProfileId)) {
@@ -620,7 +626,10 @@ export async function setSpendPolicy(
     return EXPIRED_SPEND_POLICY;
   }
 
-  const category = String(formData.get("category") ?? "").trim();
+  // Upper-cased: spend-controls-svc matches categories exactly, and
+  // purchase-request-svc and procurement cases send theirs upper-case, so a
+  // lower-case limit would never govern them.
+  const category = String(formData.get("category") ?? "").trim().toUpperCase();
   const period = String(formData.get("period") ?? "").trim();
   const currencyCode = String(formData.get("policy_currency_code") ?? "").trim();
   const thresholdRaw = String(formData.get("threshold_amount") ?? "").trim();
@@ -745,7 +754,7 @@ export async function submitSpendCheckAction(
     return EXPIRED_SPEND_CHECK;
   }
 
-  const category = String(formData.get("check_category") ?? "").trim();
+  const category = String(formData.get("check_category") ?? "").trim().toUpperCase();
   const currencyCode = String(formData.get("check_currency_code") ?? "").trim();
   const amountRaw = String(formData.get("check_amount") ?? "").trim();
   const sourceReference = String(formData.get("source_reference") ?? "").trim();

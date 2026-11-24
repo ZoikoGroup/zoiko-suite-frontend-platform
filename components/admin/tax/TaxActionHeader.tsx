@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
+import { JurisdictionSelect } from "./JurisdictionSelect";
 import {
   Plus,
   Calculator,
@@ -19,6 +20,7 @@ import { exportToCSV } from "@/lib/export";
 import type { TaxHealthResponse } from "@/app/api/backend/tax-health/route";
 import type { JurisdictionOptions } from "./jurisdiction-options";
 import { NewTaxRuleForm, DeterminationForm } from "./TaxRuleForms";
+import { PickList } from "@/components/admin/shared/PickList";
 
 // ── Modal shell ───────────────────────────────────────────────────────────────
 function ModalShell({
@@ -100,7 +102,7 @@ type FilingResult = {
  * it always failed. Validation consults evidence-requirements-svc and may
  * leave the draft BLOCKED, which is reported rather than finalized.
  */
-function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
+function FilingAssemblyPanel({ onClose, jurisdictions }: { onClose: () => void; jurisdictions: JurisdictionOptions }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FilingResult | null>(null);
@@ -207,14 +209,45 @@ function FilingAssemblyPanel({ onClose }: { onClose: () => void }) {
             <div className="p-5 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 {([
-                  ["jurisdiction_id", "Jurisdiction ID", "text"],
+                  ["jurisdiction_id", "Jurisdiction", "text"],
                   ["filing_type", "Filing type", "text"],
                   ["period_key", "Period", "text"],
                   ["due_date", "Due date", "date"],
                 ] as const).map(([k, label, type]) => (
                   <div key={k}>
-                    <label htmlFor={`fil-${k}`} className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">{label}</label>
-                    <input id={`fil-${k}`} type={type} value={form[k]} onChange={set(k)} className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                    {k === "filing_type" ? (
+                      <>
+                        <label htmlFor="fil-filing_type" className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">{label}</label>
+                        <PickList
+                          id="fil-filing_type"
+                          name="filing_type"
+                          kind="evidence-domains"
+                          // filing-preparation-svc accepts any filing type; the evidence
+                          // requirement domains are offered as the known ones.
+                          allowOther
+                          value={form.filing_type}
+                          onChange={(v) => setForm((f) => ({ ...f, filing_type: v }))}
+                          className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                          empty="No evidence requirement is defined for this entity."
+                        />
+                      </>
+                    ) : k === "jurisdiction_id" ? (
+                      <JurisdictionSelect
+                        id="fil-jurisdiction_id"
+                        name="jurisdiction_id"
+                        label={label}
+                        options={jurisdictions}
+                        value={form.jurisdiction_id}
+                        onChange={(v) => setForm((f) => ({ ...f, jurisdiction_id: v }))}
+                        labelClassName="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1"
+                        className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700"
+                      />
+                    ) : (
+                      <>
+                        <label htmlFor={`fil-${k}`} className="block text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">{label}</label>
+                        <input id={`fil-${k}`} type={type} value={form[k]} onChange={set(k)} className="w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700" />
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -392,7 +425,7 @@ export function TaxActionHeader({ jurisdictions }: { jurisdictions: Jurisdiction
       {/* Overlay portals */}
       {modal === "new-rule" && <NewRuleModal jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
       {modal === "determination" && <DeterminationWizard jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
-      {modal === "filing" && <FilingAssemblyPanel onClose={() => setModal(null)} />}
+      {modal === "filing" && <FilingAssemblyPanel jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         {/* Top toolbar */}

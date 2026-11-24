@@ -2,25 +2,73 @@ import { cookies } from "next/headers";
 import { CloudOff, FileCheck, ShieldAlert, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listFilingDrafts, listTaxAuthorityInterfaces, type FilingDraft, type TaxAuthorityInterface } from "@/lib/api/tax";
+import {
+  listFilingDrafts,
+  listTaxAuthorityFilings,
+  listTaxAuthorityInterfaces,
+  type FilingDraft,
+  type TaxAuthorityFiling,
+  type TaxAuthorityInterface,
+} from "@/lib/api/tax";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { SubmissionHealthButton } from "./TestConnectionButton";
 import { refresh } from "next/cache";
 import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordForm";
-import type { CreateState, FieldSpec } from "@/components/admin/intelligence/create-state";
-import { sessionIdentity, expired, missing, text, toState, show } from "@/app/admin/intelligence/create-support";
+import { opts, type CreateState, type FieldSpec } from "@/components/admin/intelligence/create-state";
+import { sessionIdentity, expired, missing, invalid, text, toState, show } from "@/app/admin/intelligence/create-support";
+import { apiGet, type Identity } from "@/lib/api/client";
+import { loadJurisdictionOptions, type JurisdictionOptions } from "./jurisdiction-options";
 import { registerAuthorityInterface } from "@/lib/api/tax-authority";
+import { isUuid } from "@/lib/api/tenants";
 
 // ── Authority interface registration ──
 // Records the interface in tax-authority-interface-svc for the session's legal
 // entity. It does not connect to the authority: submissions stay PENDING while
 // the authority adapter is off.
 
-const AUTHORITY_FIELDS: FieldSpec[] = [
-  { name: "jurisdiction", label: "Jurisdiction", kind: "text", required: true, hint: "e.g. GB" },
-  { name: "authority_name", label: "Authority name", kind: "text", required: true },
-  { name: "protocol", label: "Protocol", kind: "text" },
-  { name: "provider_key", label: "Provider key", kind: "text", hint: "Only an approved connector's key; the service refuses any other. Blank: no adapter is bound." },
-];
+/** The interface form, with the jurisdiction and provider picked from their registers. */
+function authorityFields(jurisdictions: JurisdictionOptions, providers: ProviderKeys): FieldSpec[] {
+  return [
+    {
+      name: "jurisdiction",
+      label: "Jurisdiction",
+      kind: "select",
+      required: true,
+      // The interface stores the jurisdiction code (e.g. GB), not the register id.
+      options: jurisdictions.ok ? jurisdictions.items.map((j) => ({ value: j.code, label: `${j.code} — ${j.name}` })) : [],
+      hint: jurisdictions.ok ? undefined : `The jurisdiction register could not be read: ${jurisdictions.error}`,
+    },
+    { name: "authority_name", label: "Authority name", kind: "text", required: true },
+    { name: "protocol", label: "Protocol", kind: "text" },
+    {
+      name: "provider_key",
+      label: "Authority provider",
+      kind: "select",
+      options: providers.ok ? providers.keys.map((k) => ({ value: k, label: k })) : [],
+      hint: providers.ok
+        ? providers.keys.length
+          ? "Blank: no adapter is bound and nothing is sent to the authority."
+          : "No certified provider profile yet; the interface is registered without an adapter."
+        : `Provider profiles could not be read (${providers.error}); the interface is registered without an adapter.`,
+    },
+    { name: "adapter_kind", label: "Adapter kind", kind: "select", options: opts("TAX", "EINVOICE"), hint: "Only with a provider. Blank: TAX." },
+    { name: "connector_id", label: "Approved connector id", kind: "text", hint: "Required with a provider: the approved integration connector (a UUID)." },
+  ];
+}
+
+type ProviderKeys = { ok: true; keys: string[] } | { ok: false; error: string };
+
+/** Certified provider profiles from tax-authority-interface-svc; 503 while the authority adapter is off. */
+async function loadProviderKeys(identity: Identity): Promise<ProviderKeys> {
+  const res = await apiGet<{ profiles?: { provider_key: string; status: string }[] }>(
+    "taxAuthorityInterface",
+    "/v1/tax-authority/provider-profiles",
+    { identity },
+  );
+  if (!res.ok) return { ok: false, error: res.error.message };
+  const keys = [...new Set((res.data?.profiles ?? []).filter((p) => p.status === "CERTIFIED").map((p) => p.provider_key))].sort();
+  return { ok: true, keys };
+}
 
 async function registerAuthorityInterfaceAction(previous: CreateState, fd: FormData): Promise<CreateState> {
   "use server";
@@ -28,11 +76,25 @@ async function registerAuthorityInterfaceAction(previous: CreateState, fd: FormD
   if (!identity) return expired(previous, fd);
   const refusal = missing(previous, fd, [["jurisdiction", "Jurisdiction"], ["authority_name", "Authority name"]]);
   if (refusal) return refusal;
+  const provider = text(fd, "provider_key");
+  const kind = text(fd, "adapter_kind");
+  const connector = text(fd, "connector_id");
+  // tax-authority-interface-svc: a provider needs an approved connector; a
+  // connector or EINVOICE kind without a provider is refused.
+  if (provider && !isUuid(connector)) {
+    return invalid(previous, fd, "A provider needs the approved connector's id (a UUID).");
+  }
+  if (!provider && (connector || kind === "EINVOICE")) {
+    return invalid(previous, fd, "A connector or the EINVOICE adapter kind needs a provider.");
+  }
+  if (kind && kind !== "TAX" && kind !== "EINVOICE") return invalid(previous, fd, "Choose an adapter kind.");
   const res = await registerAuthorityInterface(identity, {
     jurisdiction: text(fd, "jurisdiction"),
     authority_name: text(fd, "authority_name"),
     protocol: text(fd, "protocol") || undefined,
-    provider_key: text(fd, "provider_key") || undefined,
+    provider_key: provider || undefined,
+    adapter_kind: provider && kind ? kind : undefined,
+    connector_id: provider ? connector : undefined,
   });
   if (res.ok) refresh();
   return toState(previous, fd, res, "tax-authority-interface-svc", (i) => [
@@ -149,9 +211,12 @@ export async function FilingPrepAndAuthorityPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const [draftsRes, authorityRes] = await Promise.all([
+  const [draftsRes, authorityRes, filingsRes, jurisdictionOptions, providerKeys] = await Promise.all([
     listFilingDrafts(identity),
     listTaxAuthorityInterfaces(identity),
+    listTaxAuthorityFilings(identity),
+    loadJurisdictionOptions(),
+    loadProviderKeys(identity),
   ]);
 
   // Each section reports its own failed read. Only "unreachable" used to be
@@ -256,7 +321,7 @@ export async function FilingPrepAndAuthorityPanel() {
           <CreateRecordForm
             title="Register authority interface"
             description="tax-authority-interface-svc records the interface. Nothing is sent to the authority: submissions stay PENDING while its adapter is off."
-            fields={AUTHORITY_FIELDS}
+            fields={authorityFields(jurisdictionOptions, providerKeys)}
             action={registerAuthorityInterfaceAction}
             submitLabel="Register interface"
           />
@@ -337,6 +402,50 @@ export async function FilingPrepAndAuthorityPanel() {
           </div>
         )}
       </div>
+
+      <AuthorityFilings result={filingsRes} />
+    </div>
+  );
+}
+
+/** Filings held by tax-authority-interface-svc, with the transitions it accepts. */
+function AuthorityFilings({ result }: { result: Awaited<ReturnType<typeof listTaxAuthorityFilings>> }) {
+  const filings: TaxAuthorityFiling[] = result.ok ? result.data : [];
+  return (
+    <div>
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+        Authority Filings ({filings.length})
+      </h3>
+      {!result.ok ? (
+        <PanelEmptyState icon={CloudOff} tone="warning" label="tax-authority-interface-svc filings could not be read" hint={result.error.message} />
+      ) : filings.length === 0 ? (
+        <PanelEmptyState icon={FileCheck} label="No filings" hint="Filings prepared in tax-authority-interface-svc will appear here." />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800/60">
+              <tr>
+                {["Filing", "Type", "Period", "Status", "Actions"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filings.map((f) => (
+                <tr key={f.submission_id}>
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-600 dark:text-slate-300">{f.submission_id}</td>
+                  <td className="px-4 py-3 text-xs">{f.filing_type || "—"}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{f.tax_period || "—"}</td>
+                  <td className="px-4 py-3 text-xs font-medium">{f.status}</td>
+                  <td className="px-4 py-3 min-w-[160px]">
+                    <RowActions actions={["tax-filing.validate", "tax-filing.submit", "tax-filing.poll"]} recordId={f.submission_id} status={f.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

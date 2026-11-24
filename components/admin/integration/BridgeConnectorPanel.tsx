@@ -3,13 +3,35 @@
 import { useState, useEffect } from "react";
 import { Network, RefreshCw, CheckCircle2 } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { BridgeCreateForm } from "./IntegrationCreateForms";
 import type { BridgeEndpoint } from "@/lib/api/integration";
+import type { FieldOption } from "@/components/admin/intelligence/create-state";
 
 export function BridgeConnectorPanel() {
   const [connections, setConnections] = useState<BridgeEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [profiles, setProfiles] = useState<FieldOption[]>([]);
+  const [policies, setPolicies] = useState<FieldOption[]>([]);
+  // Shown on the Configure form's field when it is opened, not on every row at rest.
+  const [optionErrors, setOptionErrors] = useState<Record<string, string>>({});
+  useEffect(() => {
+    // The Configure form's choices; a register that cannot be read is named, not hidden.
+    const load = async (kind: string, field: string, label: string, set: (o: FieldOption[]) => void) => {
+      try {
+        const res = await fetch(`/api/pick-lists/${kind}`, { cache: "no-store" });
+        const body = (await res.json().catch(() => null)) as { ok: boolean; items?: FieldOption[]; error?: string } | null;
+        if (body?.ok && body.items) set(body.items);
+        else setOptionErrors((e) => ({ ...e, [field]: `${label} could not be read: ${body?.error ?? `HTTP ${res.status}`}` }));
+      } catch {
+        setOptionErrors((e) => ({ ...e, [field]: `${label} could not be loaded.` }));
+      }
+    };
+    void load("certified-profiles", "provider_profile", "Provider profiles (connectivity-api-bridge-svc)", setProfiles);
+    void load("secret-policies", "credential_ref", "Credential policies (secret-vault-integration-svc)", setPolicies);
+  }, []);
 
   const fetchConnections = async () => {
     setLoading(true);
@@ -100,6 +122,17 @@ export function BridgeConnectorPanel() {
                     {c.status}
                   </span>
                 </div>
+              </div>
+              <div className="mt-2">
+                <RowActions
+                  actions={["bridge.configure", "bridge.submit", "bridge.approve", "bridge.reject", "bridge.activate", "bridge.suspend", "bridge.revoke", "bridge.archive"]}
+                  recordId={c.bridge_id}
+                  status={c.status}
+                  version={c.version}
+                  onDone={fetchConnections}
+                  fieldOptions={{ provider_profile: profiles, credential_ref: policies }}
+                  fieldErrors={optionErrors}
+                />
               </div>
             </div>
           ))}

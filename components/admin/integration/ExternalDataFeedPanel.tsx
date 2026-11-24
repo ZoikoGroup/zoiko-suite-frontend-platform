@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Radio, RefreshCw, CheckCircle2 } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { DataFeedCreateForm } from "./IntegrationCreateForms";
 import type { ExternalDataFeedSubscription } from "@/lib/api/integration";
 
@@ -104,6 +105,9 @@ export function ExternalDataFeedPanel() {
                     {f.status}
                   </span>
                 </div>
+              </div>
+              <div className="mt-2">
+                <RowActions actions={["feed.ingest-event"]} recordId={f.feed_id} status={f.status} onDone={fetchFeeds} />
               </div>
             </div>
           ))}

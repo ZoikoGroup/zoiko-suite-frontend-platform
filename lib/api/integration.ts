@@ -178,17 +178,43 @@ export async function createBridge(
   return apiPost<BridgeEndpoint>("connectivityApiBridge", "/v1/bridges", { ...body, legal_entity_id: identity.legalEntityId }, { identity, purposeContext: "integration.bridge.register" });
 }
 
-/** The service answers with the account number and IBAN; the console does not display them. */
-export async function createBankConnection(
+/**
+ * Request a bank connection (BNK-02, POST /v1/banking/connections/request).
+ * banking-connector-svc checks the account against treasury-svc and records
+ * the connection REQUESTED; authorization, activation and the rest follow as
+ * row actions. (The older POST /v1/banking/connections wrote a CONNECTED row
+ * that none of those transitions accepts.)
+ */
+export async function requestBankConnection(
   identity: Identity,
-  body: { bank_name: string; bic: string; account_number: string; iban?: string; currency: string; account_type?: string },
+  body: { bank_account_id: string; bank_name: string; provider_ref?: string; region?: string; requested_scope?: string[] },
 ) {
-  return apiPost<BankConnection & { account_type?: string }>(
+  return apiPost<BankConnection>(
     "bankingConnector",
-    "/v1/banking/connections",
-    compact({ ...body, legal_entity_id: identity.legalEntityId }),
+    "/v1/banking/connections/request",
+    compact({ ...body, legal_entity_id: identity.legalEntityId, correlation_id: crypto.randomUUID() }),
     { identity, purposeContext: "integration.banking.connection" },
   );
+}
+
+/** A treasury-svc bank account (BNK-01), as a connection's account. */
+export type TreasuryBankAccount = {
+  bank_account_id: string;
+  account_name: string;
+  masked_account_number: string;
+  bank_identifier: string;
+  currency_code: string;
+  account_status: string;
+};
+
+/** treasury-svc's accounts for the session's entity (GET /v1/treasury/accounts, a bare array). */
+export async function listTreasuryBankAccounts(identity: Identity) {
+  const res = await apiGet<TreasuryBankAccount[] | null>("treasury", "/v1/treasury/accounts", {
+    identity,
+    query: { legal_entity_id: identity.legalEntityId },
+  });
+  if (!res.ok) return res;
+  return { ok: true as const, data: res.data ?? [] };
 }
 
 export async function createHrisIntegration(

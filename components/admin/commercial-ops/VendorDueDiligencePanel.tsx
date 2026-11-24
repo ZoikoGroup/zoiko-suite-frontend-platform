@@ -9,6 +9,7 @@ import {
   explainVendorDDError,
 } from "@/lib/api/vendor-due-diligence";
 import { VendorCheckTable } from "./VendorCheckTable";
+import { VendorProfilesSection } from "./VendorProfilesSection";
 
 const TILE =
   "flex items-center gap-3 rounded-lg border border-slate-200 px-3.5 py-3 dark:border-slate-800";
@@ -186,6 +187,8 @@ export async function VendorDueDiligencePanel({
           plural="screening checks"
         />
       )}
+
+      <VendorProfilesSection />
     </div>
   );
 }

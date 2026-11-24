@@ -15,7 +15,14 @@ import type { TaxAuthorityInterface } from "./tax";
 
 export async function registerAuthorityInterface(
   identity: Identity,
-  body: { jurisdiction: string; authority_name: string; protocol?: string; provider_key?: string },
+  body: {
+    jurisdiction: string;
+    authority_name: string;
+    protocol?: string;
+    provider_key?: string;
+    adapter_kind?: string;
+    connector_id?: string;
+  },
 ) {
   // An interface belongs to the session's legal entity; without one there is
   // nothing to register it for.
@@ -29,6 +36,8 @@ export async function registerAuthorityInterface(
   };
   if (body.protocol) payload.protocol = body.protocol;
   if (body.provider_key) payload.provider_key = body.provider_key;
+  if (body.adapter_kind) payload.adapter_kind = body.adapter_kind;
+  if (body.connector_id) payload.connector_id = body.connector_id;
   return apiPost<TaxAuthorityInterface>("taxAuthorityInterface", "/v1/tax-authority/interfaces", payload, {
     identity,
     purposeContext: "tax_compliance",

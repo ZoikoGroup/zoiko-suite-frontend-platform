@@ -186,6 +186,65 @@ export async function evaluateCompliance(
   );
 }
 
+// ─── 2b. Compliance gaps (compliance-status-svc, /v1/compliance-status/gaps) ──
+
+export type ComplianceGapStatus = "OPEN" | "IN_REMEDIATION" | "RESOLVED" | "DISMISSED";
+
+/** Wire shape of a compliance gap. */
+export type ComplianceGap = {
+  gap_id: string;
+  legal_entity_id: string;
+  jurisdiction_id: string;
+  domain_name: string;
+  gap_type: string;
+  severity: string;
+  status: ComplianceGapStatus | string;
+  description?: string;
+  remediation_plan?: string;
+  source_reference?: string;
+  created_at?: string;
+};
+
+export async function listComplianceGaps(identity?: Identity): Promise<ApiResult<ComplianceGap[]>> {
+  const res = await apiGet<{ compliance_gaps?: ComplianceGap[] | null }>(
+    "complianceStatus",
+    "/v1/compliance-status/gaps",
+    { identity, ...(identity?.legalEntityId ? { query: { legal_entity_id: identity.legalEntityId } } : {}) },
+  );
+  if (!res.ok) return res;
+  return { ok: true, data: res.data?.compliance_gaps ?? [] };
+}
+
+export type CreateComplianceGapInput = {
+  identity: WriteIdentity & { legalEntityId: string };
+  jurisdictionId: string;
+  domainName: string;
+  gapType: string;
+  severity?: string;
+  description?: string;
+  remediationPlan?: string;
+  sourceReference?: string;
+};
+
+/** Record a gap; the service opens it as OPEN. The legal entity is the session's. */
+export async function createComplianceGap(input: CreateComplianceGapInput): Promise<ApiWriteResult<ComplianceGap>> {
+  return apiPost<ComplianceGap>(
+    "complianceStatus",
+    "/v1/compliance-status/gaps",
+    {
+      legal_entity_id: input.identity.legalEntityId,
+      jurisdiction_id: input.jurisdictionId,
+      domain_name: input.domainName,
+      gap_type: input.gapType,
+      ...(input.severity ? { severity: input.severity } : {}),
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.remediationPlan ? { remediation_plan: input.remediationPlan } : {}),
+      ...(input.sourceReference ? { source_reference: input.sourceReference } : {}),
+    },
+    { identity: input.identity },
+  );
+}
+
 // ─── 3. Exception Escalation (exception-escalation-svc, /v1/exception-escalation) ─
 
 export type ExceptionSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";

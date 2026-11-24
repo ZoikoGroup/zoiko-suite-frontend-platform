@@ -7,7 +7,7 @@
 // Each form shows the record the service returned, and the panel below it
 // re-renders with the new row (the actions end in refresh()).
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui";
 import { FIELD, HINT, LABEL, OPTIONAL } from "@/components/admin/shared/form";
 import {
@@ -20,6 +20,7 @@ import type { Obligation, Counterparty, CorporateAction } from "@/lib/api/legal"
 import type { JurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 import { JurisdictionSelect, jurisdictionsUsable } from "@/components/admin/tax/JurisdictionSelect";
 import { RecordRows, WriteFeedback, jurisdictionNamer } from "@/components/admin/tax/TaxRuleForms";
+import { PickList } from "@/components/admin/shared/PickList";
 
 // The services' declared values (lib/api/legal.ts exports the same lists, but
 // that module is server-only).
@@ -63,14 +64,39 @@ function Input({ id, name, label, type = "text", optional, hint }: { id: string;
 /** Record a contract-derived obligation (obligation-tracking-svc). */
 export function CreateObligationForm() {
   const [state, action, pending] = useActionState<LegalCreateState<Obligation>, FormData>(createObligationAction, IDLE_LEGAL_CREATE);
+  const [sourceType, setSourceType] = useState<(typeof SOURCE_TYPES)[number]>("CONTRACT");
   const o = state.record;
   return (
     <div className={BOX}>
       <h4 className={TITLE}>Record an obligation</h4>
       <form action={action} className="space-y-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Select id="obl-source-type" name="source_type" label="Source" values={SOURCE_TYPES} />
-          <Input id="obl-source-id" name="source_id" label="Source contract or clause ID" />
+          <div>
+            <label htmlFor="obl-source-type" className={LABEL}>Source</label>
+            <select
+              id="obl-source-type"
+              name="source_type"
+              value={sourceType}
+              onChange={(e) => setSourceType(e.target.value as (typeof SOURCE_TYPES)[number])}
+              className={FIELD}
+            >
+              {SOURCE_TYPES.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="obl-source-id" className={LABEL}>{sourceType === "CLAUSE" ? "Source clause" : "Source contract"}</label>
+            <PickList
+              key={sourceType}
+              id="obl-source-id"
+              name="source_id"
+              kind={sourceType === "CLAUSE" ? "clauses" : "contracts"}
+              required
+              className={FIELD}
+              empty={sourceType === "CLAUSE" ? "No clause yet." : "No contract yet."}
+            />
+          </div>
           <Select id="obl-risk" name="risk_level" label="Risk level" values={RISK_LEVELS} />
           <div className="sm:col-span-2">
             <Input id="obl-title" name="title" label="Title" />
@@ -172,13 +198,11 @@ export function CreateCorporateActionForm() {
           <Select id="ca-type" name="action_type" label="Action type" values={ACTION_TYPES} />
           <Input id="ca-effective-date" name="effective_date" label="Effective date" type="date" />
           <div className="sm:col-span-2">
-            <Input
-              id="ca-resolution"
-              name="resolution_id"
-              label="Authorising board resolution ID"
-              optional
-              hint="When given, corporate-actions-svc checks it is a PASSED resolution of this entity."
-            />
+            <label htmlFor="ca-resolution" className={LABEL}>
+              Authorising board resolution <span className={OPTIONAL}>(optional)</span>
+            </label>
+            <PickList id="ca-resolution" name="resolution_id" kind="passed-resolutions" blank="None" className={FIELD} empty="No PASSED resolution of this entity yet." />
+            <p className={HINT}>Only PASSED resolutions of your entity; corporate-actions-svc checks it.</p>
           </div>
           <div className="sm:col-span-3">
             <Input id="ca-description" name="description" label="Description" optional />

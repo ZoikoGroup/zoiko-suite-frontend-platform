@@ -6,6 +6,7 @@ import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { issueOrder } from "@/app/admin/commercial-ops/actions";
 import { IDLE_ORDER_STATE, CURRENCIES, type OrderActionState } from "@/app/admin/commercial-ops/state";
+import type { Options } from "@/lib/form-options";
 
 const FEEDBACK = {
   created: {
@@ -41,7 +42,29 @@ function feedbackFor(state: OrderActionState) {
   return null;
 }
 
-export function IssueOrderForm() {
+type Props = {
+  /** APPROVED requisitions from purchase-request-svc. */
+  approvedRequests: Options;
+  /** Vendor profiles from vendor-due-diligence-svc. */
+  vendorProfiles: Options;
+};
+
+/** A select's options, or the reason there are none. */
+function Choices({ options, empty }: { options: Options; empty: string }) {
+  if (!options.ok) return <option value="" disabled>{`Could not be read: ${options.error}`}</option>;
+  if (options.items.length === 0) return <option value="" disabled>{empty}</option>;
+  return (
+    <>
+      {options.items.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </>
+  );
+}
+
+export function IssueOrderForm({ approvedRequests, vendorProfiles }: Props) {
   const [state, action, pending] = useActionState<OrderActionState, FormData>(
     issueOrder,
     IDLE_ORDER_STATE,
@@ -84,30 +107,22 @@ export function IssueOrderForm() {
 
         <div>
           <label htmlFor="purchase_request_id" className={LABEL}>
-            Purchase request ID{" "}
-            <span className="font-normal text-slate-400">(optional, UUID)</span>
+            Approved purchase request
           </label>
-          <input
-            id="purchase_request_id"
-            name="purchase_request_id"
-            placeholder="Verified as APPROVED before issue"
-            className={FIELD}
-            autoComplete="off"
-          />
+          <select id="purchase_request_id" name="purchase_request_id" defaultValue="" required className={FIELD}>
+            <option value="">Select…</option>
+            <Choices options={approvedRequests} empty="No approved purchase request yet" />
+          </select>
         </div>
 
         <div>
           <label htmlFor="vendor_profile_id" className={LABEL}>
-            Vendor profile ID{" "}
-            <span className="font-normal text-slate-400">(optional, UUID)</span>
+            Vendor profile <span className="font-normal text-slate-400">(optional)</span>
           </label>
-          <input
-            id="vendor_profile_id"
-            name="vendor_profile_id"
-            placeholder="Leave blank for unlinked spend"
-            className={FIELD}
-            autoComplete="off"
-          />
+          <select id="vendor_profile_id" name="vendor_profile_id" defaultValue="" className={FIELD}>
+            <option value="">None: unlinked spend</option>
+            <Choices options={vendorProfiles} empty="No vendor profile yet" />
+          </select>
         </div>
       </div>
 

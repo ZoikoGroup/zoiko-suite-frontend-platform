@@ -33,7 +33,7 @@ export type FieldOption = { value: string; label: string };
 export type FieldSpec = {
   name: string;
   label: string;
-  kind: "text" | "number" | "date" | "select" | "checkbox" | "textarea" | "password" | "hidden" | "url" | "email";
+  kind: "text" | "number" | "date" | "datetime-local" | "select" | "checkbox" | "textarea" | "password" | "hidden" | "url" | "email";
   required?: boolean;
   options?: FieldOption[];
   hint?: string;
@@ -41,6 +41,8 @@ export type FieldSpec = {
   /** Only for a value that is genuinely the caller's (e.g. the sender's own name) or a hidden reference. */
   initial?: string;
   step?: string;
+  min?: string;
+  max?: string;
 };
 
 /** Options from enum values, shown as they are sent. */

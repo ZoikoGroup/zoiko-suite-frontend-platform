@@ -11,6 +11,8 @@
 // always-green dots and a static all-clear.
 
 import { useState } from "react";
+import { JurisdictionSelect } from "@/components/admin/tax/JurisdictionSelect";
+import type { JurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 import { Plus, ShieldCheck, CheckCircle2, X, Loader2 } from "lucide-react";
 
 const FIELD = "w-full rounded-lg border border-slate-200 p-2 text-xs dark:bg-slate-800 dark:border-slate-700";
@@ -81,7 +83,7 @@ function ErrorLine({ error }: { error: string | null }) {
   );
 }
 
-function NewRequirementModal({ onClose }: { onClose: () => void }) {
+function NewRequirementModal({ onClose, jurisdictions }: { onClose: () => void; jurisdictions: JurisdictionOptions }) {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,15 +125,30 @@ function NewRequirementModal({ onClose }: { onClose: () => void }) {
           <ErrorLine error={error} />
           <div className="grid grid-cols-2 gap-3">
             {([
-              ["jurisdiction_id", "Jurisdiction ID", "text"],
+              ["jurisdiction_id", "Jurisdiction", "text"],
               ["filing_authority", "Filing authority", "text"],
               ["filing_type", "Filing type", "text"],
               ["period_key", "Period", "text"],
               ["due_date", "Due date", "date"],
             ] as const).map(([k, label, type]) => (
               <div key={k}>
-                <label htmlFor={`req-${k}`} className={LABEL}>{label}</label>
-                <input id={`req-${k}`} type={type} value={form[k]} onChange={set(k)} className={FIELD} />
+                {k === "jurisdiction_id" ? (
+                  <JurisdictionSelect
+                    id="req-jurisdiction_id"
+                    name="jurisdiction_id"
+                    label={label}
+                    options={jurisdictions}
+                    value={form.jurisdiction_id}
+                    onChange={(v) => setForm((f) => ({ ...f, jurisdiction_id: v }))}
+                    labelClassName={LABEL}
+                    className={FIELD}
+                  />
+                ) : (
+                  <>
+                    <label htmlFor={`req-${k}`} className={LABEL}>{label}</label>
+                    <input id={`req-${k}`} type={type} value={form[k]} onChange={set(k)} className={FIELD} />
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -152,7 +169,7 @@ function NewRequirementModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function EvaluateComplianceModal({ onClose }: { onClose: () => void }) {
+function EvaluateComplianceModal({ onClose, jurisdictions }: { onClose: () => void; jurisdictions: JurisdictionOptions }) {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -214,8 +231,16 @@ function EvaluateComplianceModal({ onClose }: { onClose: () => void }) {
           <ErrorLine error={error} />
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="eval-jurisdiction" className={LABEL}>Jurisdiction ID</label>
-              <input id="eval-jurisdiction" type="text" value={form.jurisdiction_id} onChange={set("jurisdiction_id")} className={FIELD} />
+              <JurisdictionSelect
+                id="eval-jurisdiction"
+                name="jurisdiction_id"
+                label="Jurisdiction"
+                options={jurisdictions}
+                value={form.jurisdiction_id}
+                onChange={(v) => setForm((f) => ({ ...f, jurisdiction_id: v }))}
+                labelClassName={LABEL}
+                className={FIELD}
+              />
             </div>
             <div>
               <label htmlFor="eval-domain" className={LABEL}>Domain</label>
@@ -245,13 +270,13 @@ function EvaluateComplianceModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function ComplianceActionHeader() {
+export function ComplianceActionHeader({ jurisdictions }: { jurisdictions: JurisdictionOptions }) {
   const [modal, setModal] = useState<"create" | "evaluate" | null>(null);
 
   return (
     <>
-      {modal === "create" && <NewRequirementModal onClose={() => setModal(null)} />}
-      {modal === "evaluate" && <EvaluateComplianceModal onClose={() => setModal(null)} />}
+      {modal === "create" && <NewRequirementModal jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
+      {modal === "evaluate" && <EvaluateComplianceModal jurisdictions={jurisdictions} onClose={() => setModal(null)} />}
 
       <div className="rounded-xl border border-slate-200 bg-white/90 backdrop-blur-md shadow-sm dark:border-slate-800 dark:bg-slate-900/90 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { ShieldCheck, RefreshCw } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { RiskScoreCreateForm } from "./IntelligenceCreateForms";
 import type { RiskScore } from "@/lib/api/intelligence";
 
@@ -100,6 +101,11 @@ export function RiskScoringPanel() {
                   <p className="text-[10px] text-slate-400 dark:text-slate-500">
                     Evaluated {new Date(sc.evaluated_at).toLocaleString()}
                   </p>
+                  <div className="flex flex-wrap gap-3">
+                    {/* review follows review_status; archive follows the score's status. */}
+                    <RowActions actions={["risk-score.review", "risk-score.review-escalated"]} recordId={sc.id} status={sc.review_status} version={sc.version} onDone={load} />
+                    <RowActions actions={["risk-score.archive"]} recordId={sc.id} status={sc.status} version={sc.version} onDone={load} />
+                  </div>
                 </div>
               );
             })}

@@ -25,6 +25,7 @@ import {
   CURRENCIES,
   type RequestActionState,
 } from "@/app/admin/purchase-requests/state";
+import { PickList } from "@/components/admin/shared/PickList";
 
 const FEEDBACK = {
   created: {
@@ -216,15 +217,9 @@ export function DecideRequestForm() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="pr-decide-request-id" className={LABEL}>
-            Purchase request ID <span className="font-normal text-slate-400">(UUID)</span>
+            Purchase request <span className="font-normal text-slate-400">(draft or awaiting approval)</span>
           </label>
-          <input
-            id="pr-decide-request-id"
-            name="request_id"
-            required
-            className={`${FIELD} font-mono text-xs`}
-            autoComplete="off"
-          />
+          <PickList id="pr-decide-request-id" name="request_id" kind="open-requests" required className={FIELD} empty="No requisition is in draft or awaiting approval." />
         </div>
         <div>
           <label htmlFor="pr-reason" className={LABEL}>

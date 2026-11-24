@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Building2, RefreshCw, ArrowRightLeft, CheckCircle2 } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
+import { RowActions } from "@/components/admin/shared/RowActions";
 import { BankConnectionCreateForm } from "./IntegrationCreateForms";
 import type { BankConnection } from "@/lib/api/integration";
 
@@ -115,6 +116,14 @@ export function BankingConnectorPanel() {
                     Sync
                   </button>
                 </div>
+              </div>
+              <div className="mt-2">
+                <RowActions
+                  actions={["bank-connection.complete-authorization", "bank-connection.activate", "bank-connection.reconnect", "bank-connection.reconsent", "bank-connection.suspend", "bank-connection.revoke"]}
+                  recordId={b.connection_id}
+                  status={b.status}
+                  onDone={fetchBanks}
+                />
               </div>
             </div>
           ))}

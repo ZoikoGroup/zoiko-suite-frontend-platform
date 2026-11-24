@@ -99,6 +99,8 @@ export function CreateRecordForm({ title, description, fields, action, submitLab
                       name={f.name}
                       type={f.kind}
                       step={f.step}
+                      min={f.min}
+                      max={f.max}
                       // A secret is never echoed back into the form.
                       defaultValue={f.kind === "password" ? undefined : initial}
                       placeholder={f.placeholder}
