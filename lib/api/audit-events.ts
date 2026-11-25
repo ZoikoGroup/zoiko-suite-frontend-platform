@@ -31,8 +31,16 @@
 // X-Tenant-Id is still mandatory on every route (401 tenant_required without
 // it) — it scopes which tenant's events/archives come back, even though the
 // permission check itself is platform-wide.
+//
+// getAuditEvents/verifyAuditChain/ingestAuditEvent below are an older, simpler
+// surface over the same two routes (GET /v1/events, POST /v1/events/verify),
+// kept because app/admin/overview/executive-dashboard/page.tsx and
+// app/admin/audit-events/actions.ts already depend on their shapes. listEvents
+// (with full filters) and verifyEventsChain are the richer replacements used
+// by this page's own filter bar and verify panel.
 
 import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
+import { parseEventListResponse, parseVerifyResponse, type AuditEventCounts } from "./audit-event-summary";
 
 /** Wire shape from the backend. Field names match the Go json tags exactly. */
 export type AuditEvent = {
@@ -62,6 +70,111 @@ export type AuditEvent = {
   previous_hash: string;
   metadata?: Record<string, unknown>;
 };
+
+export type AuditEventSummary = AuditEventCounts;
+
+// There used to be a FALLBACK_AUDIT_EVENTS list here: six invented events with
+// named principals and synthetic SHA-256 hashes, returned whenever the service
+// could not be read, with a summary claiming the chain was verified and a
+// throughput of 142/min. On success the summary still hardcoded
+// hashChainVerified: true and 180/min. None of it came from a service. A failed
+// read is now an error, and every figure in the summary is the service's own.
+
+/**
+ * Read one page of audit events from audit-event-store-svc.
+ *
+ * The service requires X-Principal-Id and X-Tenant-Id and checks
+ * AUDIT_EVENT_READ, so the caller's session identity is mandatory.
+ */
+export async function getAuditEvents(
+  identity: Identity,
+): Promise<
+  { ok: true; data: AuditEvent[]; summary: AuditEventSummary } | { ok: false; error: string }
+> {
+  const res = await apiGet<unknown>("auditEventStore", "/v1/events", { identity });
+  if (!res.ok) return { ok: false, error: res.error.message };
+
+  const parsed = parseEventListResponse<AuditEvent>(res.data);
+  if (!parsed.ok) return parsed;
+  return { ok: true, data: parsed.events, summary: parsed.summary };
+}
+
+/**
+ * Ask the service to verify the audit hash chain.
+ *
+ * Throws when no verdict could be obtained. It used to answer `verified: true`
+ * when the service was unreachable, and to treat any response that did not say
+ * `false` as intact, so an outage read as "no tampering detected".
+ */
+export async function verifyAuditChain(identity: Identity): Promise<{
+  verified: boolean;
+  timestamp: string;
+  checkedEvents: number;
+}> {
+  const res = await apiPost<unknown>(
+    "auditEventStore",
+    "/v1/events/verify",
+    {},
+    {
+      identity,
+      // Live-verified bug fix: this service's §4 policy (internal/envelope/
+      // contract.go) requires purpose_context on every material write, and
+      // verify is a POST despite reading nothing back that the caller wrote
+      // (Policy.materialWrite() keys off HTTP method, not semantics). Without
+      // this, the call used to come back 400 envelope_incomplete and this
+      // function would throw "canonical input contract violated: ..." instead
+      // of ever reaching the chain check.
+      purposeContext: "AUDIT_CHAIN_VERIFY",
+    },
+  );
+  if (!res.ok) throw new Error(res.error.message);
+
+  const parsed = parseVerifyResponse(res.data);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return { verified: parsed.verified, timestamp: parsed.timestamp, checkedEvents: parsed.checkedEvents };
+}
+
+// ─── Write: Ingest Audit Event ────────────────────────────────────────────────
+
+export type IngestAuditEventInput = {
+  event_type?: string;
+  source_module?: string;
+  actor?: string;
+  action: string;
+  resource: string;
+  outcome?: string;
+  details?: string;
+};
+
+/**
+ * POST a new audit event to audit-event-store-svc.
+ *
+ * Used by the service-inputs manual test console to record that a test run
+ * was executed, leaving a tamper-evident trace in the audit log chain.
+ *
+ * Unverified against the live service (unlike every write above it): it sends
+ * no identity and posts to /v1/events, a route this service's own
+ * RegisterRoutes does not register (only GET /v1/events exists) — so this call
+ * likely 404s today. Left as-is since nothing currently calls it; flagging
+ * here rather than silently fixing a route nobody has exercised yet.
+ */
+export async function ingestAuditEvent(
+  body: IngestAuditEventInput,
+): Promise<{ ok: boolean; eventId?: string; error?: string }> {
+  const res = await apiPost<{ event_id?: string; id?: string }>(
+    "auditEventStore",
+    "/v1/events",
+    body,
+  );
+
+  if (!res.ok) {
+    return { ok: false, error: res.error.message };
+  }
+
+  return { ok: true, eventId: res.data.event_id ?? res.data.id };
+}
+
+// ─── Richer read surface: filters, pagination, full-chain verify, archives ──
 
 export type QueryEventsResult = {
   events: AuditEvent[];

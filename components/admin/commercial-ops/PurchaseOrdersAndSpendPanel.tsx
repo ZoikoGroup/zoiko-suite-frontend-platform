@@ -39,7 +39,7 @@ export async function PurchaseOrdersAndSpendPanel() {
     listSpendLimits(identity),
   ]);
 
-  if (!poRes.ok && poRes.error.kind === "unreachable") {
+  if (!poRes.ok) {
     return <PanelEmptyState icon={CloudOff} tone="warning" label="purchase-order-svc unavailable" hint={poRes.error.message} />;
   }
 

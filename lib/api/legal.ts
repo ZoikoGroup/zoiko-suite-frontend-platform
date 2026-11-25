@@ -6,8 +6,8 @@
 // - corporate-actions-svc (8123)
 // - counterparty-management-svc (8124)
 
-import { type ApiResult, type ApiWriteResult, type Identity, apiPost } from "./client";
-import { serviceUrl } from "./config";
+import { type ApiResult, type ApiWriteResult, type Identity, apiGet, apiPost, apiPut } from "./client";
+import { serviceUrl, type ServiceName } from "./config";
 
 // Each of these previously built its own URL from a raw env var, bypassing the
 // central registry in config.ts — so ZOIKO_USE_GATEWAY had no effect on this
@@ -42,34 +42,10 @@ function counterpartyManagementUrl(): string {
 
 // ─── 1. Contract Lifecycle ───────────────────────────────────────────────────
 
-export type ContractType = "VENDOR" | "EMPLOYMENT" | "NDA" | "MSA" | "SLA" | "PARTNERSHIP" | "OTHER";
-export type ContractStatus = "DRAFT" | "PENDING_APPROVAL" | "ACTIVE" | "EXPIRED" | "TERMINATED" | "SUSPENDED";
-
-export type Contract = {
-  contract_id: string;
-  tenant_id: string;
-  legal_entity_id: string;
-  contract_type: ContractType;
-  title: string;
-  description?: string;
-  counterparty_id: string;
-  counterparty_name: string;
-  status: ContractStatus;
-  version: number;
-  effective_from: string;
-  effective_to?: string;
-  signed_at?: string;
-  signed_by?: string;
-  terminated_at?: string;
-  terminated_by?: string;
-  termination_note?: string;
-  currency: string;
-  total_value: number;
-  document_vault_id?: string;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-};
+// One wire type for contracts, owned by contracts.ts, so the two readers of
+// contract-lifecycle-svc cannot disagree about its statuses again.
+import type { Contract, ContractStatus, ContractType } from "./contracts";
+export type { Contract, ContractStatus, ContractType } from "./contracts";
 
 type ContractsResponse = { contracts: Contract[]; total: number };
 
@@ -99,8 +75,10 @@ export type Clause = {
   title: string;
   category: string;
   body: string;
-  is_standard: boolean;
+  version: number;
   jurisdiction_id: string;
+  effective_from: string;
+  authored_by_ai: boolean;
   status: string;
   created_by: string;
   created_at: string;
@@ -109,7 +87,7 @@ export type Clause = {
 export type ContractTemplate = {
   template_id: string;
   tenant_id: string;
-  name: string;
+  title: string;
   contract_type: string;
   description?: string;
   jurisdiction_id: string;
@@ -150,7 +128,10 @@ export async function listTemplates(identity?: Identity): Promise<ApiResult<Cont
 // ─── 3. Obligation Tracking ──────────────────────────────────────────────────
 
 export type ObligationType = "CONTRACTUAL" | "REGULATORY" | "STATUTORY" | "INTERNAL_POLICY";
-export type ObligationStatus = "PENDING" | "IN_PROGRESS" | "FULFILLED" | "BREACHED" | "WAIVED";
+/** obligation-tracking-svc's lifecycle (domain/types.go). */
+export type ObligationStatus =
+  | "CANDIDATE" | "PLANNED" | "ACTIVE" | "DUE" | "IN_PROGRESS"
+  | "SATISFIED" | "WAIVED" | "BREACHED" | "DISPUTED" | "SUPERSEDED";
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export type Obligation = {
@@ -218,7 +199,11 @@ export type BoardMeeting = {
 };
 
 export type ResolutionCategory = "GOVERNANCE" | "FINANCIAL" | "OPERATIONAL" | "EXECUTIVE" | "STATUTORY";
-export type ResolutionStatus = "PROPOSED" | "PASSED" | "REJECTED" | "RESCINDED";
+/** domain.ResolutionStatus: PROPOSED → OPEN (voting) → PASSED | FAILED;
+ *  PASSED → SUPERSEDED. */
+export type ResolutionStatus = "PROPOSED" | "OPEN" | "PASSED" | "FAILED" | "SUPERSEDED";
+
+export type VoteChoice = "FOR" | "AGAINST" | "ABSTAIN";
 
 export type BoardResolution = {
   resolution_id: string;
@@ -236,11 +221,44 @@ export type BoardResolution = {
   passed_at?: string;
   passed_by?: string;
   document_vault_id?: string;
+  /** Frozen at open-voting: how many roster votes must be cast. */
+  quorum_threshold?: number;
+  voting_opened_at?: string;
+  voting_closed_at?: string;
+  superseded_by?: string;
   effective_from: string;
   effective_to?: string;
   created_by: string;
   created_at: string;
   updated_at: string;
+};
+
+/** One principal entitled to vote, frozen when voting opened. */
+export type VoterRosterEntry = {
+  resolution_id: string;
+  voter_principal_id: string;
+  frozen_at: string;
+};
+
+/** One voter's vote. Append-only: a second vote from the same voter is 409. */
+export type CastVoteRecord = {
+  resolution_id: string;
+  voter_principal_id: string;
+  vote: VoteChoice;
+  cast_at: string;
+  cast_by: string;
+};
+
+/** The service's computed quorum position for an open or closed resolution. */
+export type QuorumEvidence = {
+  resolution_id: string;
+  roster_size: number;
+  quorum_threshold: number;
+  votes_cast: number;
+  votes_for: number;
+  votes_against: number;
+  abstentions: number;
+  quorum_met: boolean;
 };
 
 type MeetingsResponse = { meetings: BoardMeeting[]; total: number };
@@ -332,42 +350,124 @@ export async function createBoardResolution(
   }, { identity: input.identity });
 }
 
-export type RecordVotesInput = {
-  identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
+type BoardWriteIdentity = Identity & { principalId: string; tenantId: string };
+
+const resolutionPath = (id: string, suffix = "") =>
+  `/v1/resolutions/${encodeURIComponent(id)}${suffix}`;
+
+export type OpenVotingInput = {
+  identity: BoardWriteIdentity;
   resolutionId: string;
-  votesFor: number;
-  votesAgainst: number;
-  abstentions: number;
+  /** Principals entitled to vote. Frozen for the life of the vote. */
+  voterPrincipalIds: string[];
+  /** Votes that must be cast for quorum, 1..roster size. */
+  quorumThreshold: number;
 };
 
-/** Tally a resolution's votes. 409 once the resolution is finalized — voting
- *  only tallies, it does not change status. */
-export async function recordResolutionVotes(
-  input: RecordVotesInput,
+/** PROPOSED → OPEN. 400 for an empty roster or a threshold outside 1..roster. */
+export async function openResolutionVoting(
+  input: OpenVotingInput,
 ): Promise<ApiWriteResult<BoardResolution>> {
-  return apiPost<BoardResolution>("boardResolutions", `/v1/resolutions/${input.resolutionId}/vote`, {
-    votes_for: input.votesFor,
-    votes_against: input.votesAgainst,
-    abstentions: input.abstentions,
-  }, { identity: input.identity });
+  return apiPost<BoardResolution>(
+    "boardResolutions",
+    resolutionPath(input.resolutionId, "/open-voting"),
+    { voter_principal_ids: input.voterPrincipalIds, quorum_threshold: input.quorumThreshold },
+    { identity: input.identity },
+  );
 }
 
-export type PassResolutionInput = {
-  identity: Identity & { principalId: string; tenantId: string; legalEntityId: string };
+export type CastVoteInput = {
+  /** The voter is the principal on this identity — a vote cannot be cast for
+   *  someone else. */
+  identity: BoardWriteIdentity;
   resolutionId: string;
-  /** The principal the pass is attributed to. */
-  passedBy: string;
+  vote: VoteChoice;
 };
 
-/** Pass a resolution into force. The service enforces segregation of duties —
- *  the resolution's creator may not be the principal who passes it — and
- *  verifies evidence sufficiency (fail closed) before finalizing. */
-export async function passBoardResolution(
-  input: PassResolutionInput,
+/** Cast the caller's own vote. 409 if not OPEN or already voted, 403 if the
+ *  caller is not on the frozen roster. */
+export async function castResolutionVote(
+  input: CastVoteInput,
+): Promise<ApiWriteResult<CastVoteRecord>> {
+  return apiPost<CastVoteRecord>(
+    "boardResolutions",
+    resolutionPath(input.resolutionId, "/vote"),
+    { vote: input.vote },
+    { identity: input.identity },
+  );
+}
+
+export type CloseVotingInput = {
+  identity: BoardWriteIdentity;
+  resolutionId: string;
+  /** Minutes or other evidence document reference. */
+  documentVaultId?: string;
+};
+
+/**
+ * OPEN → PASSED or FAILED.
+ *
+ * PASSED when the votes cast reach the quorum threshold and FOR outnumbers
+ * AGAINST; FAILED otherwise. The proposer may not close their own resolution
+ * (403), and a pass is refused with 422 unless the evidence its category
+ * requires is on file.
+ */
+export async function closeResolutionVoting(
+  input: CloseVotingInput,
 ): Promise<ApiWriteResult<BoardResolution>> {
-  return apiPost<BoardResolution>("boardResolutions", `/v1/resolutions/${input.resolutionId}/pass`, {
-    passed_by: input.passedBy,
-  }, { identity: input.identity });
+  return apiPost<BoardResolution>(
+    "boardResolutions",
+    resolutionPath(input.resolutionId, "/close-voting"),
+    input.documentVaultId ? { document_vault_id: input.documentVaultId } : {},
+    { identity: input.identity },
+  );
+}
+
+/** PASSED → SUPERSEDED by a later resolution. */
+export async function supersedeResolution(input: {
+  identity: BoardWriteIdentity;
+  resolutionId: string;
+  supersededBy: string;
+}): Promise<ApiWriteResult<BoardResolution>> {
+  return apiPost<BoardResolution>(
+    "boardResolutions",
+    resolutionPath(input.resolutionId, "/supersede"),
+    { superseded_by: input.supersededBy },
+    { identity: input.identity },
+  );
+}
+
+export async function getResolutionRoster(
+  resolutionId: string,
+  identity: Identity,
+): Promise<ApiResult<VoterRosterEntry[]>> {
+  const res = await apiGet<{ roster: VoterRosterEntry[] | null }>(
+    "boardResolutions",
+    resolutionPath(resolutionId, "/roster"),
+    { identity },
+  );
+  return res.ok ? { ok: true, data: Array.isArray(res.data?.roster) ? res.data.roster : [] } : res;
+}
+
+export async function getResolutionVotes(
+  resolutionId: string,
+  identity: Identity,
+): Promise<ApiResult<CastVoteRecord[]>> {
+  const res = await apiGet<{ votes: CastVoteRecord[] | null }>(
+    "boardResolutions",
+    resolutionPath(resolutionId, "/votes"),
+    { identity },
+  );
+  return res.ok ? { ok: true, data: Array.isArray(res.data?.votes) ? res.data.votes : [] } : res;
+}
+
+export async function getResolutionQuorum(
+  resolutionId: string,
+  identity: Identity,
+): Promise<ApiResult<QuorumEvidence>> {
+  return apiGet<QuorumEvidence>("boardResolutions", resolutionPath(resolutionId, "/quorum"), {
+    identity,
+  });
 }
 
 // ─── Reading a board resolution without reading the schema ───────────────────
@@ -489,38 +589,43 @@ const STATUS_MEANING: Record<
   { label: string; meaning: string; tone: BoardTone; final: boolean }
 > = {
   PROPOSED: {
-    label: "Awaiting a decision",
+    label: "Proposed",
     meaning:
       "The resolution has been put to the board and nothing has been settled yet. It has " +
-      "no effect at this stage. Votes can still be recorded against it, and recording them " +
-      "does not decide it — someone other than the person who proposed it has to close it.",
+      "no effect at this stage. Voting has not opened: the board first fixes who may vote " +
+      "and how many votes make a quorum.",
+    tone: "info",
+    final: false,
+  },
+  OPEN: {
+    label: "Voting open",
+    meaning:
+      "The voter roster and quorum are fixed and each person on the roster can cast one " +
+      "vote. Nothing is decided until someone other than the proposer closes the vote.",
     tone: "warning",
     final: false,
   },
   PASSED: {
     label: "Passed",
     meaning:
-      "The board carried this resolution and it is in force. It is now closed: it cannot " +
-      "be voted on, reopened, or changed, and who closed it and when are recorded on it " +
-      "permanently.",
+      "Quorum was reached and more votes were cast for it than against. It is in force and " +
+      "closed: it cannot be voted on or changed, only superseded by a later resolution.",
     tone: "success",
     final: true,
   },
-  REJECTED: {
-    label: "Turned down",
+  FAILED: {
+    label: "Not carried",
     meaning:
-      "The board declined this resolution. It is closed and cannot be reopened — a fresh " +
-      "resolution would have to be proposed instead. Note that nothing in this console can " +
-      "put a resolution into this state; it can only have been set elsewhere.",
+      "The vote closed without carrying it — quorum was not reached, or the votes in favour " +
+      "did not outnumber the votes against. A fresh resolution would have to be proposed.",
     tone: "danger",
     final: true,
   },
-  RESCINDED: {
-    label: "Withdrawn",
+  SUPERSEDED: {
+    label: "Superseded",
     meaning:
-      "This resolution was withdrawn after the fact and no longer has any effect. The " +
-      "record is kept rather than deleted, so the decision and its withdrawal both stay " +
-      "on file. Nothing in this console can put a resolution into this state.",
+      "This resolution was passed and later replaced by another. The record is kept, so " +
+      "both the original decision and what replaced it stay on file.",
     tone: "neutral",
     final: true,
   },
@@ -638,11 +743,10 @@ export type VoteSummary = {
 /**
  * Read a vote tally.
  *
- * The service stores three integers and checks only that none is negative. It
- * does not check them against a quorum, against the size of the board, or
- * against each other — and passing a resolution does not require the tally to
- * favour it. So this reports what the numbers say and is careful never to imply
- * the numbers decided anything.
+ * The counts on a resolution are written by the service when voting closes,
+ * from the per-voter ledger; while voting is open, read getResolutionQuorum()
+ * for the live position. This reports what the numbers say — the status says
+ * whether they carried it.
  */
 export function summariseVotes(votes: {
   votes_for?: number;
@@ -729,10 +833,11 @@ export function explainResolution(resolution: BoardResolution): ResolutionExplan
   }
 
   const HEADLINE: Record<ResolutionStatus, string> = {
-    PROPOSED: `${name} is on the table and has not been decided`,
+    PROPOSED: `${name} is on the table; voting has not opened`,
+    OPEN: `${name} is open for voting`,
     PASSED: `${name} was passed and is in force`,
-    REJECTED: `${name} was turned down`,
-    RESCINDED: `${name} was withdrawn and no longer applies`,
+    FAILED: `${name} was not carried`,
+    SUPERSEDED: `${name} was superseded and no longer applies`,
   };
 
   return {
@@ -764,21 +869,25 @@ export function describeNextStep(resolution: BoardResolution): string {
     return "Nothing can be done with this record here until the stored status is confirmed.";
   }
   if (status.raw === "PASSED") {
-    return "Nothing further. This resolution is closed and in force, and its record cannot change.";
+    return "Nothing further. This resolution is in force; a later resolution can supersede it.";
   }
   if (status.final) {
     return "Nothing further. This resolution is closed, and a new one would have to be proposed to revisit the decision.";
   }
+  if (status.raw === "PROPOSED") {
+    return (
+      "Open voting: name everyone entitled to vote and how many votes make a quorum. Both are " +
+      "frozen once voting opens."
+    );
+  }
 
-  const votes = summariseVotes(resolution);
-  const tally = votes.anyRecorded
-    ? "The tally can be corrected at any point until it is closed."
-    : "Record how the board voted, if you are keeping the count here.";
-
+  const quorum = resolution.quorum_threshold
+    ? `Quorum is ${resolution.quorum_threshold} vote${resolution.quorum_threshold === 1 ? "" : "s"}. `
+    : "";
   return (
-    `${tally} To put it into force, someone other than the person who proposed it — and who ` +
-    "holds the authority to close resolutions — has to pass it, with the supporting evidence " +
-    "for this kind of decision already on file."
+    `${quorum}Each person on the roster casts their own vote. Someone other than the proposer ` +
+    "then closes the vote: it passes only if quorum is reached and more votes are for it than " +
+    "against, and only with the supporting evidence for this kind of decision on file."
   );
 }
 
@@ -930,8 +1039,35 @@ export function explainBoardError(message: string, context: BoardErrorContext = 
       "unchecked — try again shortly."
     );
   }
-  if (message.includes("vote counts may not be negative")) {
-    return "A vote count cannot be less than zero. Enter each figure as a whole number, using 0 for none.";
+  if (message.includes("resolution is not open for voting")) {
+    return (
+      "Nothing was changed. This resolution is not open for voting — voting has not been " +
+      "opened yet, or it has already closed. Reload to see where it stands."
+    );
+  }
+  if (message.includes("principal has already voted")) {
+    return "You have already voted on this resolution. A vote is recorded once and cannot be changed.";
+  }
+  if (message.includes("not on the resolution's voter roster")) {
+    return (
+      "You are not on the voter roster for this resolution, so your vote was not recorded. " +
+      "The roster was fixed when voting opened."
+    );
+  }
+  if (message.includes("voter roster must not be empty")) {
+    return "Name at least one person entitled to vote before opening the vote.";
+  }
+  if (message.includes("quorum threshold must be between")) {
+    return "The quorum must be at least 1 and no more than the number of people on the roster.";
+  }
+  if (message.includes("vote must be one of")) {
+    return "Choose For, Against, or Abstain.";
+  }
+  if (message.includes("only a passed resolution may be superseded")) {
+    return "Only a passed resolution can be superseded.";
+  }
+  if (message.includes("superseded_by is required")) {
+    return "Name the resolution that supersedes this one.";
   }
   if (message.includes("category must be one of")) {
     return (
@@ -1082,33 +1218,183 @@ export async function listCorporateActions(identity?: Identity): Promise<ApiResu
 
 // ─── 6. Counterparty Management ──────────────────────────────────────────────
 
+export type CounterpartyType =
+  | "VENDOR"
+  | "CUSTOMER"
+  | "PARTNER"
+  | "REGULATOR"
+  | "FINANCIAL_INSTITUTION"
+  | "OTHER";
+
+export type CounterpartyStatus =
+  | "ONBOARDING"
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "TERMINATED";
+
+export type RiskCategory = "LOW" | "MEDIUM" | "HIGH" | "RESTRICTED";
+
+/**
+ * Matches backend domain.Counterparty exactly (counterparty-management-svc, port 8124).
+ * Previously the frontend type had stale field names (legal_name, country,
+ * tax_identifier, risk_rating) that do not exist in the backend response;
+ * those are replaced here with the correct ones from the Go domain model.
+ */
 export type Counterparty = {
   counterparty_id: string;
   tenant_id: string;
+  legal_entity_id: string;
   name: string;
-  legal_name?: string;
-  counterparty_type: string;
+  counterparty_type: CounterpartyType;
   registration_number?: string;
-  tax_identifier?: string;
-  country: string;
-  compliance_status: string;
-  risk_rating: string;
+  tax_id?: string;
+  jurisdiction_id: string;
+  risk_category: RiskCategory;
+  status: CounterpartyStatus;
+  contact_email?: string;
+  phone?: string;
+  address?: string;
+  compliance_status: string; // VERIFIED | PENDING | REJECTED
+  effective_from: string;
+  effective_to?: string;
   created_by: string;
   created_at: string;
+  updated_at: string;
 };
 
 type CounterpartiesResponse = { counterparties: Counterparty[]; total: number };
 
-export async function listCounterparties(identity?: Identity): Promise<ApiResult<Counterparty[]>> {
+export async function listCounterparties(
+  identity?: Identity,
+  options?: {
+    legalEntityId?: string;
+    counterpartyType?: CounterpartyType;
+    status?: CounterpartyStatus;
+  },
+): Promise<ApiResult<Counterparty[]>> {
   const base = counterpartyManagementUrl();
-  const url = `${base}/v1/counterparties`;
+  const url = new URL(`${base}/v1/counterparties`);
+  if (options?.legalEntityId) url.searchParams.set("legal_entity_id", options.legalEntityId);
+  if (options?.counterpartyType) url.searchParams.set("counterparty_type", options.counterpartyType);
+  if (options?.status) url.searchParams.set("status", options.status);
 
   return fetchDomainService<CounterpartiesResponse, Counterparty[]>(
-    url,
+    url.toString(),
     base,
     "counterparty-management-svc",
     identity,
     (d) => d.counterparties ?? [],
+  );
+}
+
+export async function getCounterparty(
+  id: string,
+  identity?: Identity,
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties/${encodeURIComponent(id)}`;
+  return fetchDomainService<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    identity,
+    (d) => d,
+  );
+}
+
+/**
+ * counterparty-management-svc CreateCounterpartyRequest, minus the fields the
+ * session supplies. legal_entity_id and created_by used to be part of this
+ * input, so a caller could file a counterparty under any entity or author; the
+ * service refuses a created_by that is not the calling principal, and the
+ * entity is the session's. Both are now set from the identity here.
+ */
+export type CreateCounterpartyInput = {
+  name: string;
+  counterparty_type: CounterpartyType;
+  /** A jurisdiction-rules-svc jurisdiction_id (UUID), not a code. */
+  jurisdiction_id: string;
+  effective_from: string;
+  registration_number?: string;
+  tax_id?: string;
+  risk_category?: RiskCategory;
+  contact_email?: string;
+  phone?: string;
+  address?: string;
+};
+
+export const COUNTERPARTY_TYPES: readonly CounterpartyType[] = [
+  "VENDOR", "CUSTOMER", "PARTNER", "REGULATOR", "FINANCIAL_INSTITUTION", "OTHER",
+];
+export const RISK_CATEGORIES: readonly RiskCategory[] = ["LOW", "MEDIUM", "HIGH", "RESTRICTED"];
+
+export async function createCounterparty(
+  body: CreateCounterpartyInput,
+  identity: Identity & { principalId: string; legalEntityId: string },
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties`;
+  return fetchDomainServicePost<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    { ...body, legal_entity_id: identity.legalEntityId, created_by: identity.principalId },
+    identity,
+    (d) => d,
+  );
+}
+
+export type UpdateCounterpartyInput = {
+  updated_by: string;
+  name?: string;
+  counterparty_type?: CounterpartyType;
+  registration_number?: string;
+  tax_id?: string;
+  jurisdiction_id?: string;
+  risk_category?: RiskCategory;
+  status?: CounterpartyStatus;
+  contact_email?: string;
+  phone?: string;
+  address?: string;
+  effective_to?: string;
+};
+
+export async function updateCounterparty(
+  id: string,
+  body: UpdateCounterpartyInput,
+  identity?: Identity,
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties/${encodeURIComponent(id)}`;
+  return fetchDomainServicePut<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    body,
+    identity,
+    (d) => d,
+  );
+}
+
+export type UpdateComplianceStatusInput = {
+  compliance_status: string; // VERIFIED | PENDING | REJECTED
+  updated_by: string;
+};
+
+export async function updateCounterpartyComplianceStatus(
+  id: string,
+  body: UpdateComplianceStatusInput,
+  identity?: Identity,
+): Promise<ApiResult<Counterparty>> {
+  const base = counterpartyManagementUrl();
+  const url = `${base}/v1/counterparties/${encodeURIComponent(id)}/compliance`;
+  return fetchDomainServicePost<Counterparty, Counterparty>(
+    url,
+    base,
+    "counterparty-management-svc",
+    body,
+    identity,
+    (d) => d,
   );
 }
 
@@ -1138,70 +1424,139 @@ export async function createContract(
   );
 }
 
+/** clause-template-svc CreateClauseRequest; legal entity and author come from the session. */
 export type CreateClauseInput = {
   title: string;
-  category: string;
+  category: "CONFIDENTIALITY" | "INDEMNIFICATION" | "TERMINATION" | "LIABILITY" | "GOVERNING_LAW" | "PAYMENT_TERMS" | "OTHER";
   body: string;
   jurisdiction_id: string;
-  is_standard?: boolean;
-  status?: string;
+  effective_from: string;
 };
 
 export async function createClause(
   body: CreateClauseInput,
-  identity?: Identity,
+  identity: Identity & { principalId: string },
 ): Promise<ApiResult<Clause>> {
   const base = clauseTemplateUrl();
   const url = `${base}/v1/clauses`;
   return fetchDomainServicePost<{ clause?: Clause } | Clause, Clause>(
-    url, base, "clause-template-svc", body, identity,
+    url, base, "clause-template-svc",
+    { ...body, legal_entity_id: identity.legalEntityId, created_by: identity.principalId },
+    identity,
     (d) => (d as { clause?: Clause }).clause ?? (d as Clause),
   );
 }
 
+/**
+ * obligation-tracking-svc CreateObligationRequest, minus the session's fields.
+ *
+ * The service tracks contract-derived obligations only: obligation_type must be
+ * CONTRACTUAL (anything else is a 400 that points at obligations-svc) and the
+ * source is a CONTRACT or a CLAUSE. The old input offered REGULATORY/STATUTORY
+ * types, a `contract_id` the service has no field for, a caller-set status, and
+ * no effective_from; it also sent no legal entity or author.
+ */
+export type ObligationSourceType = "CONTRACT" | "CLAUSE";
+export const OBLIGATION_SOURCE_TYPES: readonly ObligationSourceType[] = ["CONTRACT", "CLAUSE"];
+export const RISK_LEVELS: readonly RiskLevel[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
 export type CreateObligationInput = {
+  source_type: ObligationSourceType;
+  source_id: string;
   title: string;
   description?: string;
-  due_date: string;
+  obligation_type: "CONTRACTUAL";
   risk_level: RiskLevel;
-  status?: ObligationStatus;
-  contract_id?: string;
-  source_type?: ObligationType;
+  /** YYYY-MM-DD. */
+  due_date: string;
+  assigned_to?: string;
+  /** YYYY-MM-DD. */
+  effective_from: string;
+  effective_to?: string;
 };
 
 export async function createObligation(
   body: CreateObligationInput,
-  identity?: Identity,
+  identity: Identity & { principalId: string; legalEntityId: string },
 ): Promise<ApiResult<Obligation>> {
   const base = obligationTrackingUrl();
   const url = `${base}/v1/obligations`;
   return fetchDomainServicePost<{ obligation?: Obligation } | Obligation, Obligation>(
-    url, base, "obligation-tracking-svc", body, identity,
+    url, base, "obligation-tracking-svc",
+    { ...body, legal_entity_id: identity.legalEntityId, created_by: identity.principalId },
+    identity,
     (d) => (d as { obligation?: Obligation }).obligation ?? (d as Obligation),
   );
 }
 
+/** corporate-actions-svc's ActionType constants (domain/types.go). The service
+ *  stores any string it is sent, so the form offers only the declared ones. */
+export const CORPORATE_ACTION_TYPES = [
+  "MERGER", "ACQUISITION", "SHARE_ISSUANCE", "SHARE_BUYBACK", "RESTRUCTURE", "DIVIDEND_DECLARATION", "NAME_CHANGE",
+] as const;
+
+/** corporate-actions-svc CreateCorporateActionRequest; the service pins created_by to the principal. */
 export type CreateCorporateActionInput = {
+  title: string;
   action_type: string;
-  description: string;
-  authorized_shares?: number;
-  share_class?: string;
-  status?: string;
+  description?: string;
+  resolution_id?: string;
+  effective_date: string;
+  valuation_amount?: number;
+  currency?: string;
 };
 
 export async function createCorporateAction(
   body: CreateCorporateActionInput,
-  identity?: Identity,
+  identity: Identity & { principalId: string },
 ): Promise<ApiResult<CorporateAction>> {
   const base = corporateActionsUrl();
   const url = `${base}/v1/corporate-actions`;
   return fetchDomainServicePost<{ action?: CorporateAction } | CorporateAction, CorporateAction>(
-    url, base, "corporate-actions-svc", body, identity,
+    url, base, "corporate-actions-svc",
+    {
+      ...body,
+      legal_entity_id: identity.legalEntityId,
+      effective_from: body.effective_date,
+      created_by: identity.principalId,
+    },
+    identity,
     (d) => (d as { action?: CorporateAction }).action ?? (d as CorporateAction),
   );
 }
 
 // ─── Shared Fetch Helpers ─────────────────────────────────────────────────────
+
+/**
+ * The registry key behind each base URL these helpers are given. They used to
+ * fetch on their own and sent only tenant/principal/legal entity, so every
+ * write failed the services' envelope check (400 envelope_incomplete: no
+ * X-Request-Id, X-Source-Channel or Idempotency-Key) and every refusal reached
+ * the UI as a bare status. They now go through apiGet/apiPost/apiPut.
+ */
+const SERVICE_KEY: Record<string, ServiceName> = {
+  "contract-lifecycle-svc": "contracts",
+  "clause-template-svc": "clauseTemplate",
+  "obligation-tracking-svc": "obligationTracking",
+  "board-resolutions-svc": "boardResolutions",
+  "corporate-actions-svc": "corporateActions",
+  "counterparty-management-svc": "counterparty",
+};
+
+/** counterparty-management-svc requires X-Purpose-Context on writes. */
+const WRITE_PURPOSE: Partial<Record<ServiceName, string>> = {
+  counterparty: "legal.counterparty.maintenance",
+};
+
+function serviceKey(serviceName: string): ServiceName {
+  const key = SERVICE_KEY[serviceName];
+  if (!key) throw new Error(`unknown legal service ${serviceName}`);
+  return key;
+}
+
+function unwrapWrite<TRaw, TOut>(res: ApiWriteResult<TRaw>, transform: (raw: TRaw) => TOut): ApiResult<TOut> {
+  return res.ok ? { ok: true, data: transform(res.data) } : res;
+}
 
 async function fetchDomainServicePost<TRaw, TOut>(
   urlStr: string,
@@ -1211,56 +1566,26 @@ async function fetchDomainServicePost<TRaw, TOut>(
   identity: Identity | undefined,
   transform: (raw: TRaw) => TOut,
 ): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    "X-Correlation-ID": correlationId,
-  };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
+  const key = serviceKey(serviceName);
+  return unwrapWrite(
+    await apiPost<TRaw>(key, urlStr.slice(base.length), body, { identity, purposeContext: WRITE_PURPOSE[key] }),
+    transform,
+  );
+}
 
-  let res: Response;
-  try {
-    res = await fetch(urlStr, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1200)),
-    });
-  } catch (cause) {
-    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
-    return {
-      ok: false,
-      error: {
-        kind: isTimeout ? "timeout" : "unreachable",
-        message: isTimeout
-          ? `${serviceName} timed out`
-          : `${serviceName} is unreachable at ${base}`,
-      },
-    };
-  }
-
-  if (!res.ok) {
-    return {
-      ok: false,
-      error: {
-        kind: "http",
-        status: res.status,
-        message: `${serviceName} returned ${res.status} for POST`,
-      },
-    };
-  }
-
-  try {
-    return { ok: true, data: transform((await res.json()) as TRaw) };
-  } catch {
-    return {
-      ok: false,
-      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
-    };
-  }
+async function fetchDomainServicePut<TRaw, TOut>(
+  urlStr: string,
+  base: string,
+  serviceName: string,
+  body: unknown,
+  identity: Identity | undefined,
+  transform: (raw: TRaw) => TOut,
+): Promise<ApiResult<TOut>> {
+  const key = serviceKey(serviceName);
+  return unwrapWrite(
+    await apiPut<TRaw>(key, urlStr.slice(base.length), body, { identity, purposeContext: WRITE_PURPOSE[key] }),
+    transform,
+  );
 }
 
 // ─── Shared Fetch Helper with Fallback ────────────────────────────────────────
@@ -1289,48 +1614,6 @@ async function fetchDomainService<TRaw, TOut>(
   identity: Identity | undefined,
   transform: (raw: TRaw) => TOut,
 ): Promise<ApiResult<TOut>> {
-  const correlationId = crypto.randomUUID();
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "X-Correlation-ID": correlationId,
-  };
-  if (identity?.tenantId) headers["X-Tenant-Id"] = identity.tenantId;
-  if (identity?.principalId) headers["X-Principal-Id"] = identity.principalId;
-  if (identity?.legalEntityId) headers["X-Legal-Entity-Id"] = identity.legalEntityId;
-
-  let res: Response;
-  try {
-    res = await fetch(urlStr, { headers, signal: AbortSignal.timeout(Number(process.env.ZOIKO_API_TIMEOUT_MS ?? 1200)) });
-  } catch (cause) {
-    const isTimeout = cause instanceof DOMException && cause.name === "TimeoutError";
-    return {
-      ok: false,
-      error: {
-        kind: isTimeout ? "timeout" : "unreachable",
-        message: isTimeout
-          ? `${serviceName} timed out`
-          : `${serviceName} is unreachable at ${base}`,
-      },
-    };
-  }
-
-  if (!res.ok) {
-    return {
-      ok: false,
-      error: {
-        kind: "http",
-        status: res.status,
-        message: `${serviceName} returned ${res.status} for ${urlStr.slice(base.length)}`,
-      },
-    };
-  }
-
-  try {
-    return { ok: true, data: transform((await res.json()) as TRaw) };
-  } catch {
-    return {
-      ok: false,
-      error: { kind: "malformed", message: `${serviceName} returned a non-JSON body` },
-    };
-  }
+  const res = await apiGet<TRaw>(serviceKey(serviceName), urlStr.slice(base.length), { identity });
+  return res.ok ? { ok: true, data: transform(res.data) } : res;
 }

@@ -11,7 +11,11 @@ import {
   PurchaseRequestLookup,
 } from "@/components/admin/purchase-requests";
 import { DOMAINS } from "@/lib/constants";
-import type { RequestStatus } from "@/lib/api/purchase-requests";
+import {
+  REQUEST_STATUSES,
+  normaliseRequestStatus,
+  type RequestStatus,
+} from "@/lib/api/purchase-requests";
 
 export const metadata: Metadata = { title: "Purchase Requests | Zoiko Suite" };
 
@@ -21,9 +25,11 @@ type PageProps = { searchParams: Promise<Record<string, string | string[] | unde
 
 const REQUEST_FILTERS: { label: string; value?: RequestStatus }[] = [
   { label: "All" },
-  { label: "Pending", value: "PENDING" },
+  { label: "Draft", value: "DRAFT" },
+  { label: "Pending", value: "PENDING_APPROVAL" },
   { label: "Approved", value: "APPROVED" },
   { label: "Rejected", value: "REJECTED" },
+  { label: "Cancelled", value: "CANCELLED" },
 ];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -40,11 +46,11 @@ function one(value: string | string[] | undefined): string | undefined {
 export default async function PurchaseRequestsPage({ searchParams }: PageProps) {
   const params = await searchParams;
 
-  const rawStatus = Array.isArray(params.status) ? params.status[0] : params.status;
-  const status: RequestStatus | undefined =
-    rawStatus === "PENDING" || rawStatus === "APPROVED" || rawStatus === "REJECTED"
-      ? rawStatus
-      : undefined;
+  // "PENDING" is still accepted so older bookmarked links keep working.
+  const rawStatus = normaliseRequestStatus(one(params.status));
+  const status: RequestStatus | undefined = (REQUEST_STATUSES as readonly string[]).includes(rawStatus)
+    ? (rawStatus as RequestStatus)
+    : undefined;
 
   // legal_entity_id is a uuid column, so a malformed value dies in the Postgres
   // driver and surfaces as a 503 that reads like an outage. Validated here and

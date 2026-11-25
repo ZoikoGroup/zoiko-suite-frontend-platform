@@ -12,9 +12,9 @@ export const SOURCE_CHANNEL = "web";
 
 /**
  * Caller identity, forwarded as the X-*-Id headers every backend trusts.
- *
- * In production these are set by Traefik from gateway-auth-svc's ForwardAuth
+ * * In production these are set by Traefik from gateway-auth-svc's ForwardAuth
  * check of the signed identity envelope, and a service that receives a request
+
  * without them fails closed. The local single-port gateway routes deliberately
  * carry no ForwardAuth middleware, so the console supplies them from the
  * session instead — see lib/auth.ts.
@@ -27,7 +27,7 @@ export type Identity = {
   principalId?: string;
   tenantId?: string;
   legalEntityId?: string;
-
+  
   envelopeJwt?: string;
 };
 
@@ -69,6 +69,13 @@ export type EnvelopeOptions = {
 
   /** §4 expected_version — optimistic concurrency, taken from a prior read. */
   expectedVersion?: string;
+
+  /**
+   * HTTP If-Match (API-3): the ETag of the last read of the record being
+   * changed, e.g. `"v3"`. Services that require it answer 428 without it and
+   * 412 when the record has moved on since.
+   */
+  ifMatch?: string;
 
   /** §4 workflow_instance_id / approval_reference — approval correlation. */
   workflowInstanceId?: string;
@@ -129,6 +136,7 @@ export function envelopeHeaders(input: BuildEnvelopeInput): Record<string, strin
   set("X-Causation-Id", input.causationId);
   set("X-Purpose-Context", input.purposeContext);
   set("X-Expected-Version", input.expectedVersion);
+  set("If-Match", input.ifMatch);
   set("X-Workflow-Instance-Id", input.workflowInstanceId);
   set("X-Approval-Reference", input.approvalReference);
   set("X-Occurred-At", input.occurredAt);

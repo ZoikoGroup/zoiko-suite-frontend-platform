@@ -141,15 +141,35 @@ type Caller = Identity & { principalId: string; tenantId: string };
 
 // ─── Reads ───────────────────────────────────────────────────────────────────
 
-/** PENDING and ESCALATED instances of the caller's tenant. WORKFLOW_READ at PLATFORM scope. */
-export function listPendingApprovals(
+/**
+ * PENDING and ESCALATED instances of the caller's tenant. WORKFLOW_READ at PLATFORM scope.
+ *
+ * workflow-svc answers `{records: [...]}`; older builds answered a bare array.
+ * Both are returned as the array, so callers can sort and filter it.
+ */
+export async function listPendingApprovals(
   identity: Identity,
   options: { limit?: number; offset?: number } = {},
 ): Promise<ApiResult<WorkflowInstance[]>> {
-  return apiGet<WorkflowInstance[]>(SERVICE, "/v1/workflows/pending", {
+  const r = await apiGet<WorkflowInstance[] | { records?: WorkflowInstance[] | null }>(SERVICE, "/v1/workflows/pending", {
     identity,
     query: { limit: options.limit, offset: options.offset },
   });
+  if (!r.ok) return r;
+  if (Array.isArray(r.data)) return { ok: true, data: r.data };
+  if (r.data && Array.isArray(r.data.records)) return { ok: true, data: r.data.records };
+  if (r.data && r.data.records === null) return { ok: true, data: [] };
+  return { ok: false, error: { kind: "malformed", message: "workflow-svc answered /v1/workflows/pending without a records list" } };
+}
+
+/** An instance and the ETag it was read at (API-3), for the If-Match a decision needs. */
+export async function getWorkflowVersioned(id: string, identity: Identity): Promise<ApiResult<{ data: WorkflowWithStages; etag?: string }>> {
+  let etag: string | undefined;
+  const r = await apiGet<WorkflowWithStages>(SERVICE, `/v1/workflows/${encodeURIComponent(id)}`, {
+    identity,
+    onHeaders: (h) => (etag = h.get("ETag") ?? undefined),
+  });
+  return r.ok ? { ok: true, data: { data: r.data, etag } } : r;
 }
 
 export function getWorkflow(id: string, identity: Identity): Promise<ApiResult<WorkflowWithStages>> {
@@ -221,21 +241,33 @@ export function createWorkflow(input: {
 /**
  * APPROVE or REJECT the current stage. QUORUM stages take a vote on a separate
  * route; `quorum` picks it.
+ *
+ * workflow-svc requires If-Match on every mutation of an existing instance
+ * (428 without it). Pass the ETag of the read the decider looked at; when a
+ * caller has none, the instance's current ETag is read first, so the decision
+ * still fails (412) if the instance moves between that read and the write.
  */
-export function decideWorkflow(input: {
+export async function decideWorkflow(input: {
   identity: Caller;
   workflowInstanceId: string;
   decision: "APPROVE" | "REJECT";
   rationale?: string;
   quorum: boolean;
   idempotencyKey: string;
+  ifMatch?: string;
 }): Promise<ApiWriteResult<WorkflowWithStages>> {
+  let ifMatch = input.ifMatch;
+  if (!ifMatch) {
+    const current = await getWorkflowVersioned(input.workflowInstanceId, input.identity);
+    if (!current.ok) return current;
+    ifMatch = current.data.etag;
+  }
   const route = input.quorum ? "quorum-votes" : "actions";
   return apiPost<WorkflowWithStages>(
     SERVICE,
     `/v1/workflows/${encodeURIComponent(input.workflowInstanceId)}/${route}`,
     { action: input.decision, ...(input.rationale ? { rationale: input.rationale } : {}) },
-    { identity: input.identity, idempotencyKey: input.idempotencyKey },
+    { identity: input.identity, idempotencyKey: input.idempotencyKey, ifMatch },
   );
 }
 

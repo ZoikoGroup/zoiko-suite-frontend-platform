@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AlertTriangle, TrendingUp, ShieldCheck, GitMerge, BarChart2, Lightbulb, ArrowLeftRight } from "lucide-react";
+import { AlertTriangle, TrendingUp, ShieldCheck, GitMerge } from "lucide-react";
+import { fetchPanelListOrNull } from "@/lib/panel-fetch";
 
 type Kpi = {
   icon: React.ElementType;
@@ -20,79 +21,82 @@ function useIntelligenceKpis(): { kpis: Kpi[]; loading: boolean } {
     let cancelled = false;
     async function fetch_() {
       try {
-        const [anomaliesRes, forecastsRes, scoresRes, reconRes] = await Promise.allSettled([
-          fetch("/api/v1/intelligence/anomalies", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/intelligence/forecasts", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/intelligence/risk-scores", { signal: AbortSignal.timeout(5000) }),
-          fetch("/api/v1/intelligence/reconciliations", { signal: AbortSignal.timeout(5000) }),
+        const [anomalies, forecasts, scores, recons] = await Promise.all([
+          fetchPanelListOrNull<{ severity?: string; status?: string }>("/api/v1/intelligence/anomalies", "anomalies"),
+          fetchPanelListOrNull<{ confidence_level?: number }>("/api/v1/intelligence/forecasts", "forecasts"),
+          fetchPanelListOrNull<{ composite_risk_score?: string }>("/api/v1/intelligence/risk-scores", "scores"),
+          fetchPanelListOrNull<{ unmatched_count?: number; total_processed_count?: number }>(
+            "/api/v1/intelligence/reconciliations",
+            "reconciliations",
+          ),
         ]);
         if (cancelled) return;
 
-        const anomaliesJson = anomaliesRes.status === "fulfilled" && anomaliesRes.value.ok
-          ? await anomaliesRes.value.json().catch(() => ({ anomalies: [], total: 0 }))
-          : { anomalies: [], total: 0 };
-        const forecastsJson = forecastsRes.status === "fulfilled" && forecastsRes.value.ok
-          ? await forecastsRes.value.json().catch(() => ({ forecasts: [], total: 0 }))
-          : { forecasts: [], total: 0 };
-        const scoresJson = scoresRes.status === "fulfilled" && scoresRes.value.ok
-          ? await scoresRes.value.json().catch(() => ({ scores: [], total: 0 }))
-          : { scores: [], total: 0 };
-        const reconJson = reconRes.status === "fulfilled" && reconRes.value.ok
-          ? await reconRes.value.json().catch(() => ({ reconciliations: [], total: 0 }))
-          : { reconciliations: [], total: 0 };
+        // A tile whose read failed says so; it never shows 0 or a green state.
+        const unavailable = (label: string, icon: Kpi["icon"], svc: string): Kpi => ({
+          icon,
+          label,
+          value: "Unavailable",
+          sub: `${svc} could not be read`,
+          accent: "text-amber-600 dark:text-amber-400",
+          bg: "bg-amber-100 dark:bg-amber-500/20",
+        });
 
-        const anomalies: Array<{ severity?: string; status?: string }> = anomaliesJson.anomalies ?? [];
-        const openAnomalies = anomalies.filter((a) => a.status === "OPEN").length;
-        const criticalAnomalies = anomalies.filter((a) => a.severity === "CRITICAL" || a.severity === "HIGH").length;
-        const forecasts: Array<{ status?: string; accuracy_score?: number }> = forecastsJson.forecasts ?? [];
-        const avgAccuracy = forecasts.length > 0
-          ? Math.round(forecasts.reduce((s, f) => s + (f.accuracy_score ?? 0), 0) / forecasts.length * 100)
-          : 0;
-        const scores: Array<{ risk_score?: number }> = scoresJson.scores ?? [];
-        const avgRisk = scores.length > 0
-          ? Math.round(scores.reduce((s, sc) => s + (sc.risk_score ?? 0), 0) / scores.length)
-          : 0;
-        const recons: Array<{ match_status?: string }> = reconJson.reconciliations ?? [];
-        const matched = recons.filter((r) => r.match_status === "MATCHED").length;
+        const unresolved = new Set(["OPEN", "UNDER_INVESTIGATION", "CONFIRMED_ANOMALY"]);
+        const openAnomalies = anomalies?.filter((a) => a.status && unresolved.has(a.status)).length ?? 0;
+        const criticalAnomalies = anomalies?.filter((a) => a.severity === "CRITICAL" || a.severity === "HIGH").length ?? 0;
+        const avgConfidence = forecasts && forecasts.length > 0
+          ? Math.round(forecasts.reduce((s, f) => s + (f.confidence_level ?? 0), 0) / forecasts.length)
+          : null;
+        const riskValues = (scores ?? []).map((s) => Number.parseFloat(s.composite_risk_score ?? "")).filter(Number.isFinite);
+        const avgRisk = riskValues.length > 0 ? Math.round(riskValues.reduce((a, b) => a + b, 0) / riskValues.length) : null;
+        const unmatched = recons?.reduce((s, r) => s + (r.unmatched_count ?? 0), 0) ?? 0;
+        const processed = recons?.reduce((s, r) => s + (r.total_processed_count ?? 0), 0) ?? 0;
 
         if (!cancelled) {
           setKpis([
-            {
-              icon: AlertTriangle,
-              label: "Open Anomalies",
-              value: String(openAnomalies),
-              sub: `${criticalAnomalies} critical / high severity`,
-              accent: openAnomalies > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400",
-              bg: openAnomalies > 0 ? "bg-red-100 dark:bg-red-500/20" : "bg-emerald-100 dark:bg-emerald-500/20",
-            },
-            {
-              icon: TrendingUp,
-              label: "Forecast Accuracy",
-              value: forecasts.length > 0 ? `${avgAccuracy}%` : "—",
-              sub: `${forecasts.length} forecasting models tracked`,
-              accent: "text-blue-600 dark:text-blue-400",
-              bg: "bg-blue-100 dark:bg-blue-500/20",
-            },
-            {
-              icon: ShieldCheck,
-              label: "Avg. Risk Score",
-              value: scores.length > 0 ? String(avgRisk) : "—",
-              sub: `${scores.length} entities evaluated`,
-              accent: avgRisk > 70 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
-              bg: avgRisk > 70 ? "bg-amber-100 dark:bg-amber-500/20" : "bg-emerald-100 dark:bg-emerald-500/20",
-            },
-            {
-              icon: GitMerge,
-              label: "Reconciled Records",
-              value: String(matched),
-              sub: `of ${recons.length} total reconciliations`,
-              accent: "text-purple-600 dark:text-purple-400",
-              bg: "bg-purple-100 dark:bg-purple-500/20",
-            },
+            anomalies
+              ? {
+                  icon: AlertTriangle,
+                  label: "Open Anomalies",
+                  value: String(openAnomalies),
+                  sub: `${criticalAnomalies} critical / high severity`,
+                  accent: openAnomalies > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400",
+                  bg: openAnomalies > 0 ? "bg-red-100 dark:bg-red-500/20" : "bg-emerald-100 dark:bg-emerald-500/20",
+                }
+              : unavailable("Open Anomalies", AlertTriangle, "anomaly-detection-svc"),
+            forecasts
+              ? {
+                  icon: TrendingUp,
+                  label: "Forecast Confidence",
+                  value: avgConfidence != null ? `${avgConfidence}%` : "—",
+                  sub: `${forecasts.length} forecasts`,
+                  accent: "text-blue-600 dark:text-blue-400",
+                  bg: "bg-blue-100 dark:bg-blue-500/20",
+                }
+              : unavailable("Forecast Confidence", TrendingUp, "forecasting-svc"),
+            scores
+              ? {
+                  icon: ShieldCheck,
+                  label: "Avg. Risk Score",
+                  value: avgRisk != null ? String(avgRisk) : "—",
+                  sub: `${scores.length} scores evaluated`,
+                  accent: (avgRisk ?? 0) > 70 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
+                  bg: (avgRisk ?? 0) > 70 ? "bg-amber-100 dark:bg-amber-500/20" : "bg-emerald-100 dark:bg-emerald-500/20",
+                }
+              : unavailable("Avg. Risk Score", ShieldCheck, "compliance-risk-scoring-svc"),
+            recons
+              ? {
+                  icon: GitMerge,
+                  label: "Unmatched Items",
+                  value: String(unmatched),
+                  sub: `of ${processed} processed in ${recons.length} analyses`,
+                  accent: "text-purple-600 dark:text-purple-400",
+                  bg: "bg-purple-100 dark:bg-purple-500/20",
+                }
+              : unavailable("Unmatched Items", GitMerge, "reconciliation-intelligence-svc"),
           ]);
         }
-      } catch {
-        if (!cancelled) setLoading(false);
       } finally {
         if (!cancelled) setLoading(false);
       }

@@ -11,6 +11,7 @@ import {
   type VendorCheckActionState,
 } from "@/app/admin/commercial-ops/state";
 import { STUB_DENYLIST } from "@/lib/api/vendor-due-diligence";
+import { PickList } from "@/components/admin/shared/PickList";
 
 /**
  * Tones for the four readings — and the one that matters is `screened-no-match`,
@@ -122,16 +123,9 @@ export function VendorCheckForm() {
 
         <div>
           <label htmlFor="counterparty_id" className={LABEL}>
-            Counterparty ID
+            Counterparty
           </label>
-          <input
-            id="counterparty_id"
-            name="counterparty_id"
-            required
-            placeholder="33333333-3333-3333-3333-333333333333"
-            className={`${FIELD} font-mono text-xs`}
-            autoComplete="off"
-          />
+          <PickList id="counterparty_id" name="counterparty_id" kind="counterparties" required className={FIELD} empty="No counterparty yet: add one on the Legal page." />
           <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
             From counterparty-management-svc. The outcome is pushed onto this record — a match sets
             it REJECTED with risk HIGH.
@@ -142,13 +136,7 @@ export function VendorCheckForm() {
           <label htmlFor="document_reference" className={LABEL}>
             Document reference <span className={OPTIONAL}>(optional)</span>
           </label>
-          <input
-            id="document_reference"
-            name="document_reference"
-            placeholder="vault-doc-9f2c"
-            className={FIELD}
-            autoComplete="off"
-          />
+          <PickList id="document_reference" name="document_reference" kind="documents" blank="None" className={FIELD} empty="No document of this entity in the vault." />
           <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
             Supporting material held elsewhere, recorded on the evidence row. Left blank it is
             stored as absent, not as an empty reference.

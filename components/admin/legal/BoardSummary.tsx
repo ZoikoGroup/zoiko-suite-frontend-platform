@@ -30,11 +30,8 @@ import {
 /**
  * A vote tally, as a sentence and three figures.
  *
- * Deliberately separate from the resolution's status. The service stores these
- * counts without checking them against a quorum or against each other, and
- * passing a resolution does not require the tally to favour it — so a reader
- * must not come away thinking the numbers carried the decision. That is why the
- * caveat sits under the figures rather than in a comment.
+ * The service writes these counts from the per-voter ledger when voting
+ * closes, and decides PASSED or FAILED from them and the frozen quorum.
  */
 export function VoteTally({
   resolution,
@@ -73,8 +70,8 @@ export function VoteTally({
         ))}
       </dl>
       <p className="text-xs leading-relaxed text-slate-400 dark:text-slate-500">
-        These are counts someone entered. Nothing checks them against a quorum or against the
-        size of the board, and they do not decide the resolution on their own.
+        Counted from the roster&apos;s individual votes when voting closed. A resolution passes
+        only if quorum was reached and more votes were for it than against.
       </p>
     </div>
   );

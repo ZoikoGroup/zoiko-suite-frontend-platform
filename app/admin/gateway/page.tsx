@@ -1,196 +1,449 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { cookies } from "next/headers";
-import { Badge, Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
-import { DetailList, PageHeader } from "@/components/admin/shared";
-import { CELL, HEAD } from "@/components/admin/shared/form";
+import Link from "next/link";
+import { BadgeCheck, Fingerprint, HeartPulse, KeyRound, ListChecks, Search, ShieldAlert, Timer } from "lucide-react";
+import { PageHeader } from "@/components/admin/shared";
+import {
+  ButtonLink,
+  ConsolePanel,
+  ControlsFooter,
+  DetailDrawer,
+  DrawerFacts,
+  DrawerNote,
+  KpiCard,
+  KpiGrid,
+  OrderedModel,
+  PanelCallout,
+  PanelGrid,
+  Pipeline,
+  RegisterBody,
+  RegisterCard,
+  RegisterPager,
+  RegisterTable,
+  RegisterToolbar,
+  RowLink,
+  TwoLine,
+  type KpiTone,
+} from "@/components/admin/console";
+import { SignInAgain } from "@/components/admin/authorization/kit";
+import { SessionChip } from "@/components/admin/authorization/console/SessionChip";
 import { GatewayVerifyForm } from "@/components/admin/gateway/GatewayVerifyForm";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { Badge } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
-import { DENIAL_REASONS, readGatewayHealth, type ProbeResult } from "@/lib/api/gateway-auth";
+import {
+  DENIAL_REASONS,
+  INJECTED_HEADERS,
+  readGatewayHealth,
+  type GatewayHealth,
+  type GatewayStage,
+  type ProbeResult,
+} from "@/lib/api/gateway-auth";
+import { currentSession, sessionTrust, type SessionTrust } from "@/lib/authz-inbox";
 
 export const metadata: Metadata = { title: "Gateway Authentication | Zoiko Suite" };
 
-function probeBadge(p: ProbeResult, okText: string) {
-  if (!p.reachable) return <Badge tone="danger">Not reachable</Badge>;
-  if (p.status >= 200 && p.status < 300) return <Badge tone="success">{okText}</Badge>;
-  return <Badge tone="warning">Answered {p.status}</Badge>;
+// gateway-auth-svc keeps no records of its own, so everything here is either
+// read live — its probes, the signing keys it verifies against, the viewer's
+// own session — or is the reference for the refusals it gives. Traffic counts
+// are deliberately absent: the gateway holds them in memory per replica, and
+// behind a load balancer each page load would land on a different replica.
+// Fleet traffic is in Grafana (gateway_* metrics); every denial goes to SIEM.
+
+const TABS = [
+  { key: "reasons", label: "Denial reasons" },
+  { key: "verify", label: "Verify my session" },
+  { key: "keys", label: "Signing keys" },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
+type Query = Record<string, string>;
+
+/** /verify's stages in handler order; each refusal in DENIAL_REASONS names one. */
+const STAGES: { key: GatewayStage; label: string; caption: string }[] = [
+  { key: "admission", label: "Admission", caption: "size, version, rate" },
+  { key: "identity", label: "Identity", caption: "envelope, session" },
+  { key: "risk", label: "Risk", caption: "carta-svc" },
+  { key: "tenant", label: "Tenant", caption: "registry, residency" },
+];
+
+const STATUSES = [...new Set(DENIAL_REASONS.map((r) => r.status))].sort((a, b) => a - b);
+
+const PAGE_SIZE = 20;
+
+/** Outside the component: "now" is a fact about this request, read once. */
+function requestTime(): number {
+  return Date.now();
 }
 
-async function Health() {
-  const h = await readGatewayHealth();
+function href(q: Query): string {
+  const qs = new URLSearchParams(Object.entries(q).filter(([, v]) => v)).toString();
+  return qs ? `/admin/gateway?${qs}` : "/admin/gateway";
+}
+
+function stageLabel(stage: GatewayStage): string {
+  return STAGES.find((s) => s.key === stage)?.label ?? stage;
+}
+
+/** 503 means nothing was decided; 4xx means the gateway decided against the request. */
+function statusTone(status: number): "danger" | "warning" | "info" {
+  if (status === 403) return "danger";
+  if (status === 401) return "info";
+  return "warning";
+}
+
+function minutes(seconds: number): string {
+  if (seconds < 60) return "under a minute";
+  const m = Math.round(seconds / 60);
+  return m < 120 ? `${m} min` : `${Math.round(m / 60)} h`;
+}
+
+function probeOk(p: ProbeResult): boolean {
+  return p.reachable && p.status >= 200 && p.status < 300;
+}
+
+// ── KPIs ─────────────────────────────────────────────────────────────────────
+
+function Kpis({ health, trust, now }: { health: GatewayHealth; trust: SessionTrust; now: number }) {
+  const { liveness, readiness, jwks } = health;
+  const seconds = now / 1000;
+
+  const live: { value: string; tone: KpiTone; status: string; helper?: string } = !liveness.reachable
+    ? { value: "Down", tone: "red", status: "Not reachable", helper: liveness.detail }
+    : probeOk(liveness)
+      ? { value: "Running", tone: "green", status: "Answering", helper: `/healthz in ${liveness.latencyMs} ms` }
+      : { value: String(liveness.status), tone: "amber", status: "Unexpected answer", helper: "/healthz" };
+
+  // /readyz pings the signing keys from inside the gateway. Not ready means it
+  // cannot verify anything, so every gated request is being refused.
+  const ready: { value: string; tone: KpiTone; status: string; helper?: string } = !readiness.reachable
+    ? { value: "—", tone: "neutral", status: "Could not be read", helper: readiness.detail }
+    : probeOk(readiness)
+      ? { value: "Ready", tone: "green", status: "Can verify", helper: "fetches identity-context-svc's keys" }
+      : { value: "Not ready", tone: "red", status: "Refusing every request", helper: readiness.detail };
+
+  const keys: { value: string; tone: KpiTone; status: string; helper?: string } = !jwks.reachable
+    ? { value: "—", tone: "neutral", status: "Could not be read", helper: jwks.detail }
+    : jwks.keys.length === 0
+      ? { value: "0", tone: "red", status: "None published", helper: "every envelope fails as invalid_token" }
+      : { value: String(jwks.keys.length), tone: "green", status: "Published", helper: "by identity-context-svc" };
+
+  // The envelope's own lifetime (minutes), not the session's: a session signed
+  // in through the identity service renews it before it lapses (proxy.ts).
+  const envelopeExp = trust.envelopeExpiresAt;
+  const expired = trust.signed && !trust.renews && !!envelopeExp && envelopeExp < seconds;
+  const envelope: { value: string; tone: KpiTone; status: string; helper?: string } = !trust.signed
+    ? { value: "None", tone: "amber", status: "No envelope", helper: "the gateway refuses this session as no_token" }
+    : expired
+      ? { value: "Expired", tone: "red", status: "Sign in again", helper: "the gateway answers invalid_token" }
+      : envelopeExp
+        ? {
+            value: minutes(Math.max(0, envelopeExp - seconds)),
+            tone: "green",
+            status: trust.renews ? "Valid · renews automatically" : "Valid",
+            helper: trust.renews && trust.expiresAt
+              ? `renewed until the session ends at ${formatDateTime(new Date(trust.expiresAt * 1000).toISOString())}`
+              : `until ${formatDateTime(new Date(envelopeExp * 1000).toISOString())}`,
+          }
+        : { value: "Present", tone: "green", status: "Valid", helper: "no expiry claim" };
+
+  const assurance: { value: string; tone: KpiTone; status: string; helper?: string } = !trust.signed
+    ? { value: "—", tone: "neutral", status: "Unknown", helper: "no envelope to read" }
+    : {
+        value: trust.mfa ? "MFA" : "Single factor",
+        tone: trust.mfa ? "green" : "navy",
+        status: trust.authTime ? `Signed in ${minutes(Math.max(0, seconds - trust.authTime))} ago` : "Sign-in age unknown",
+        helper: trust.authTime ? "sent as X-Authn-Age-Seconds" : "step-up treats an unknown age as not recent",
+      };
+
   return (
-    <DetailList
-      items={[
-        {
-          label: "Process",
-          value: probeBadge(h.liveness, "Running"),
-          hint: h.liveness.reachable ? `/healthz in ${h.liveness.latencyMs} ms` : h.liveness.detail,
-        },
-        {
-          label: "Able to verify sign-ins",
-          value: probeBadge(h.readiness, "Ready"),
-          hint: h.readiness.reachable
-            ? h.readiness.status >= 300
-              ? `The gateway cannot fetch identity-context-svc's keys, so it is refusing every gated request. ${h.readiness.detail ?? ""}`.trim()
-              : "/readyz — the gateway can fetch identity-context-svc's signing keys"
-            : h.readiness.detail,
-        },
-        {
-          label: "Signing keys published by identity-context-svc",
-          value: h.jwks.reachable
-            ? h.jwks.keys.length === 0
-              ? <Badge tone="danger">None</Badge>
-              : `${h.jwks.keys.length} key${h.jwks.keys.length === 1 ? "" : "s"}`
-            : <Badge tone="danger">Not reachable</Badge>,
-          hint: h.jwks.reachable
-            ? h.jwks.keys.map((k) => `${k.kid}${k.alg ? ` (${k.alg})` : ""}`).join(", ") || h.jwks.detail
-            : h.jwks.detail,
-          wide: true,
-        },
-      ]}
-    />
+    <KpiGrid>
+      <KpiCard label="Gateway process" icon={HeartPulse} {...live} />
+      <KpiCard label="Verifying sign-ins" icon={BadgeCheck} {...ready} />
+      <KpiCard label="Signing keys" icon={KeyRound} href={href({ tab: "keys" })} {...keys} />
+      <KpiCard label="Your envelope" icon={Timer} {...envelope} />
+      <KpiCard label="Your assurance level" icon={Fingerprint} href={href({ tab: "verify" })} {...assurance} />
+    </KpiGrid>
   );
 }
 
-/** Outside the component: whether an envelope has lapsed is a fact about this
- *  request, read once, not something a re-render should be able to change. */
-function hasLapsed(expiresAtSeconds: number | undefined): boolean {
-  return expiresAtSeconds !== undefined && expiresAtSeconds * 1000 < Date.now();
-}
+// ── panels ───────────────────────────────────────────────────────────────────
 
-async function SessionFacts() {
-  const store = await cookies();
-  const session = decodeSession(store.get(SESSION_COOKIE)?.value);
-  if (!session) return null;
+function Panels({ health }: { health: GatewayHealth }) {
   const viaGateway = process.env.ZOIKO_USE_GATEWAY === "true";
-  const expires = session.envelopeExpiresAt ? new Date(session.envelopeExpiresAt * 1000) : null;
-  const expired = hasLapsed(session.envelopeExpiresAt);
+  const ready = probeOk(health.readiness);
 
   return (
-    <DetailList
-      items={[
-        {
-          label: "Signed envelope",
-          value: session.envelopeJwt ? <Badge tone="success">Present</Badge> : <Badge tone="warning">None</Badge>,
-          hint: session.envelopeJwt
-            ? "Issued by identity-context-svc at sign-in. This is the credential the gateway verifies."
-            : "This session came from the offline fallback. The gateway refuses every gated request without an envelope.",
-        },
-        {
-          label: "Envelope expires",
-          value: expires ? (expired ? <Badge tone="warning">Expired {formatDateTime(expires.toISOString())}</Badge> : formatDateTime(expires.toISOString())) : undefined,
-          hint: expired ? "Sign in again — the gateway will answer invalid_token." : "Envelopes last minutes, not hours.",
-        },
-        {
-          label: "This console's traffic",
-          value: viaGateway ? "Goes through the gateway" : "Goes straight to each service",
-          hint: viaGateway
-            ? "ZOIKO_USE_GATEWAY=true: every page on this console is subject to the decision below."
-            : "ZOIKO_USE_GATEWAY is off, so the gateway is not in this console's path today. The check below shows what it would decide.",
-        },
-      ]}
-    />
+    <PanelGrid>
+      <ConsolePanel
+        title="What /verify checks"
+        description="In order. Each figure is how many refusals that stage can give."
+        link={{ label: "All reasons", href: href({ tab: "reasons" }) }}
+      >
+        <Pipeline
+          stages={[
+            ...STAGES.map((s) => ({
+              label: s.label,
+              value: DENIAL_REASONS.filter((r) => r.stage === s.key).length,
+              caption: s.caption,
+              href: href({ tab: "reasons", stage: s.key }),
+            })),
+            { label: "Admitted", value: INJECTED_HEADERS.length, caption: "headers set" },
+          ]}
+          note="Every refusal names itself in X-Auth-Denial-Reason, so a gateway refusal is never mistaken for the service's own 403."
+        />
+      </ConsolePanel>
+
+      <ConsolePanel
+        title="Who may set an identity header"
+        description="Services read identity from headers, so this order is the control."
+      >
+        <OrderedModel
+          steps={[
+            { title: "Client copies removed", caption: "gtrm-edge-strip blanks X-Zoiko-Resolved-*, assurance and audience", chip: "EDGE", tone: "red" },
+            { title: "Routing context stamped", caption: "GTRM resolves tenant and region from the hostname", chip: "GTRM" },
+            { title: "Envelope verified", caption: "signed by identity-context-svc; nothing taken from the caller", chip: "GATEWAY" },
+            { title: "Identity headers set", caption: `${INJECTED_HEADERS.length} headers from the verified claims and the registry`, chip: "GATEWAY", tone: "green" },
+            { title: "Only listed headers forwarded", caption: "Traefik copies authResponseHeaders over any client copy", chip: "TRAEFIK", tone: "green" },
+          ]}
+        />
+      </ConsolePanel>
+
+      <ConsolePanel
+        title="This console and the gateway"
+        description="Read live on each page load."
+        link={{ label: "Verify", href: href({ tab: "verify" }) }}
+      >
+        <DrawerFacts
+          items={[
+            { label: "This console's reads", value: viaGateway ? "Through the gateway" : "Straight to each service" },
+            {
+              label: "Gateway readiness",
+              value: health.readiness.reachable ? `${health.readiness.status} in ${health.readiness.latencyMs} ms` : "Not reachable",
+            },
+            { label: "Keys the console sees", value: health.jwks.reachable ? health.jwks.keys.length : "Not reachable" },
+          ]}
+        />
+        {!ready ? (
+          <PanelCallout tone="warning">
+            The gateway cannot confirm it can fetch identity-context-svc&apos;s keys. While that lasts, every gated request is
+            refused as invalid_token.
+          </PanelCallout>
+        ) : viaGateway ? (
+          <PanelCallout tone="info">ZOIKO_USE_GATEWAY is on: every page of this console passes these checks.</PanelCallout>
+        ) : (
+          <PanelCallout tone="info">
+            ZOIKO_USE_GATEWAY is off, so this console&apos;s own reads skip the gateway. Verify my session shows what it would
+            decide.
+          </PanelCallout>
+        )}
+      </ConsolePanel>
+    </PanelGrid>
   );
 }
 
-export default function GatewayPage() {
+// ── registers ────────────────────────────────────────────────────────────────
+
+function matchingReasons(q: Query) {
+  const needle = (q.q ?? "").trim().toLowerCase();
+  return DENIAL_REASONS.filter(
+    (r) =>
+      (!q.stage || r.stage === q.stage) &&
+      (!q.status || String(r.status) === q.status) &&
+      (!needle || [r.code, r.meaning, r.fix].some((t) => t.toLowerCase().includes(needle))),
+  );
+}
+
+function ReasonsRegister({ q }: { q: Query }) {
+  const rows = matchingReasons(q);
+  const page = Math.max(1, Number(q.page) || 1);
+  const shown = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const keep = { tab: "reasons", q: q.q ?? "", stage: q.stage ?? "", status: q.status ?? "" };
+  const selected = q.id ? DENIAL_REASONS.find((r) => r.code === q.id) : undefined;
+
+  const drawer = selected && (
+    <DetailDrawer
+      heading="Denial reason"
+      closeHref={href({ ...keep, page: q.page ?? "" })}
+      icon={ShieldAlert}
+      title={selected.code}
+      subtitle={`HTTP ${selected.status} · ${stageLabel(selected.stage)} stage`}
+      status={{ label: String(selected.status), tone: statusTone(selected.status) }}
+    >
+      <DrawerFacts
+        items={[
+          { label: "Response header", value: <code className="text-[11px]">X-Auth-Denial-Reason: {selected.code}</code> },
+          { label: "Stage", value: stageLabel(selected.stage) },
+          { label: "Decided", value: selected.status === 503 ? "No — nothing could be determined" : "Yes — the gateway refused" },
+          { label: "Retry helps", value: selected.status === 503 || selected.status === 429 ? "Yes, after Retry-After" : "No" },
+        ]}
+      />
+      <DrawerNote>
+        <strong className="text-navy-950 dark:text-slate-100">What it means.</strong> {selected.meaning}
+      </DrawerNote>
+      <DrawerNote>
+        <strong className="text-navy-950 dark:text-slate-100">What to do.</strong> {selected.fix}
+      </DrawerNote>
+    </DetailDrawer>
+  );
+
   return (
-    <div className="mx-auto max-w-7xl space-y-8 p-6">
+    <RegisterBody drawer={drawer}>
+      <RegisterToolbar
+        action="/admin/gateway"
+        keep={{ tab: "reasons" }}
+        search={{ name: "q", value: q.q ?? "", placeholder: "Paste an X-Auth-Denial-Reason, or search what it means…" }}
+        filters={[
+          { name: "stage", allLabel: "All stages", options: STAGES.map((s) => [s.key, s.label] as const), value: q.stage ?? "" },
+          { name: "status", allLabel: "All statuses", options: STATUSES.map((s) => [String(s), String(s)] as const), value: q.status ?? "" },
+        ]}
+        clearHref={q.q || q.stage || q.status ? href({ tab: "reasons" }) : undefined}
+      />
+      <RegisterTable
+        columns={[{ label: "Code" }, { label: "Status" }, { label: "Stage" }, { label: "Meaning" }]}
+        rows={shown.map((r) => {
+          const open = href({ ...keep, page: q.page ?? "", id: r.code });
+          return {
+            key: r.code,
+            href: open,
+            selected: r.code === q.id,
+            cells: [
+              <RowLink key="code" href={open}>
+                {r.code}
+              </RowLink>,
+              <Badge key="status" tone={statusTone(r.status)}>
+                {r.status}
+              </Badge>,
+              stageLabel(r.stage),
+              <TwoLine key="meaning" primary={r.meaning} secondary={r.fix} />,
+            ],
+          };
+        })}
+        empty="No refusal matches. A code the gateway sends that is not listed here is a gap in this page — report it."
+      />
+      <RegisterPager page={page} pageSize={PAGE_SIZE} total={rows.length} noun="reasons" hrefFor={(p) => href({ ...keep, page: String(p) })} />
+    </RegisterBody>
+  );
+}
+
+function KeysRegister({ health, q }: { health: GatewayHealth; q: Query }) {
+  const { jwks } = health;
+  const selected = q.id ? jwks.keys.find((k) => k.kid === q.id) : undefined;
+
+  const drawer = selected && (
+    <DetailDrawer heading="Signing key" closeHref={href({ tab: "keys" })} icon={KeyRound} title={selected.kid} subtitle="identity-context-svc JWKS">
+      <DrawerFacts
+        items={[
+          { label: "Key ID", value: <code className="text-[11px]">{selected.kid}</code> },
+          { label: "Algorithm", value: selected.alg ?? "not stated" },
+          { label: "Use", value: selected.use ?? "not stated" },
+        ]}
+      />
+      <DrawerNote>
+        The gateway verifies an envelope only against a key published here. It caches the set, so a key retired at
+        identity-context-svc stops verifying once that cache refreshes.
+      </DrawerNote>
+    </DetailDrawer>
+  );
+
+  return (
+    <RegisterBody drawer={drawer}>
+      <RegisterTable
+        columns={[{ label: "Key ID" }, { label: "Algorithm" }, { label: "Use" }]}
+        rows={jwks.keys.map((k) => {
+          const open = href({ tab: "keys", id: k.kid });
+          return {
+            key: k.kid,
+            href: open,
+            selected: k.kid === q.id,
+            cells: [
+              <RowLink key="kid" href={open}>
+                {k.kid}
+              </RowLink>,
+              k.alg ?? "—",
+              k.use ?? "—",
+            ],
+          };
+        })}
+        empty={jwks.reachable ? "identity-context-svc publishes no signing keys, so no envelope can verify." : jwks.detail}
+      />
+    </RegisterBody>
+  );
+}
+
+// ── page ─────────────────────────────────────────────────────────────────────
+
+export default async function GatewayPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const q: Query = Object.fromEntries(Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? (v[0] ?? "") : (v ?? "")]));
+  const tab: TabKey = TABS.some((t) => t.key === q.tab) ? (q.tab as TabKey) : "reasons";
+
+  const current = await currentSession();
+  if (!current) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <div className="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <SignInAgain returnTo="/admin/gateway" />
+        </div>
+      </div>
+    );
+  }
+
+  const now = requestTime();
+  const health = await readGatewayHealth();
+  const trust = sessionTrust(current.session, now);
+
+  return (
+    <div className="space-y-5">
       <PageHeader
         title="Gateway Authentication"
-        description="The check every gated request passes before it reaches a service: is the caller who they say they are, may their tenant transact, and does the risk engine object."
+        description="The check every gated request passes before it reaches a service: is the caller who they say they are, is the session still live, does the risk engine object, and may the tenant transact."
+        meta={<SessionChip session={current.session} now={now} />}
+        actions={
+          <>
+            <ButtonLink href={href({ tab: "reasons" })} icon={ListChecks} size="md">
+              Look up a refusal
+            </ButtonLink>
+            <Link
+              href={href({ tab: "verify" })}
+              scroll={false}
+              className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-gold-500 px-4 text-sm font-semibold text-white shadow-sm shadow-gold-600/20 transition-colors hover:bg-gold-600 active:bg-gold-700"
+            >
+              <Search className="h-4 w-4" />
+              Verify my session
+            </Link>
+          </>
+        }
       />
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
-        <p>
-          <strong className="text-slate-900 dark:text-slate-100">Nothing here is configured from this page.</strong>{" "}
-          gateway-auth-svc has no settings and no records of its own — it verifies the signed envelope
-          from identity-context-svc, asks the tenant registry whether the tenant may transact, and
-          sets the identity headers every service then trusts. This page shows whether it is healthy
-          and what it would decide for <em>you</em>.
-        </p>
-        <p className="mt-2">
-          <strong className="text-slate-900 dark:text-slate-100">It fails closed both ways.</strong>{" "}
-          A caller it cannot verify is refused, and so is a request it cannot decide: when the tenant
-          registry or the session check cannot answer it says 503 &ldquo;unresolved&rdquo;, never
-          403, because nothing was actually refused.
-        </p>
-      </div>
+      <Kpis health={health} trust={trust} now={now} />
+      <Panels health={health} />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Gateway health</CardTitle>
-            <CardDescription>Read live on each page load.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Suspense fallback={<Skeleton className="h-24 w-full rounded-lg" />}>
-              <Health />
-            </Suspense>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Your session</CardTitle>
-            <CardDescription>What you would present to the gateway.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Suspense fallback={<Skeleton className="h-24 w-full rounded-lg" />}>
-              <SessionFacts />
-            </Suspense>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Would the gateway let me through?</CardTitle>
-          <CardDescription>
-            Describes one request to the gateway with your own signed envelope and shows its
-            decision — and, when it allows it, the identity it would hand the service. Your envelope
-            stays on the server; nothing is minted or changed.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <GatewayVerifyForm />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>What each refusal means</CardTitle>
-          <CardDescription>
-            The gateway names its reason in the X-Auth-Denial-Reason header, which reaches the caller
-            unchanged. The same status codes mean different things depending on that reason.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-            <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-              <thead className="bg-slate-50 dark:bg-slate-900/60">
-                <tr>
-                  <th className={`${HEAD} text-left`}>Reason</th>
-                  <th className={`${HEAD} text-left`}>Status</th>
-                  <th className={`${HEAD} text-left`}>What happened</th>
-                  <th className={`${HEAD} text-left`}>What to do</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {DENIAL_REASONS.map((r) => (
-                  <tr key={r.code}>
-                    <td className={`${CELL} font-mono text-xs`}>{r.code}</td>
-                    <td className={CELL}>{r.status}</td>
-                    <td className={CELL}>{r.meaning}</td>
-                    <td className={CELL}>{r.fix}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <RegisterCard
+        active={tab}
+        tabs={TABS.map((t) => ({
+          key: t.key,
+          label: t.label,
+          count: t.key === "reasons" ? DENIAL_REASONS.length : t.key === "keys" && health.jwks.reachable ? health.jwks.keys.length : null,
+          href: href({ tab: t.key }),
+        }))}
+      >
+        {tab === "reasons" && <ReasonsRegister q={q} />}
+        {tab === "verify" && (
+          <div className="p-5">
+            <GatewayVerifyForm />
           </div>
-        </CardContent>
-      </Card>
+        )}
+        {tab === "keys" && <KeysRegister health={health} q={q} />}
+      </RegisterCard>
+
+      <ControlsFooter right="gateway-auth-svc · live probes">
+        No write commands: routes and policy are governed GTRM configuration. Fleet traffic is in Grafana (gateway_*
+        metrics) and every denial is in SIEM. Required controls: verified envelope · edge header sanitation · session
+        revocation within TTL · continuous risk scoring · tenant and residency context
+      </ControlsFooter>
     </div>
   );
 }

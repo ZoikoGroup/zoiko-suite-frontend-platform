@@ -3,6 +3,10 @@ import { CloudOff, Briefcase, Building2, ShieldAlert } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listCorporateActions, listCounterparties, type CorporateAction, type Counterparty } from "@/lib/api/legal";
+import { RowActions } from "@/components/admin/shared/RowActions";
+import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
+import { CreateCorporateActionForm, CreateCounterpartyForm } from "./LegalCreateForms";
+import { documentOptions, itemsOf } from "@/lib/form-options";
 
 export async function CorporateActionsAndCounterpartiesPanel() {
   const store = await cookies();
@@ -14,32 +18,36 @@ export async function CorporateActionsAndCounterpartiesPanel() {
 
   const identity = { principalId: session.principalId, tenantId: session.tenantId, legalEntityId: session.legalEntityId };
 
-  const [actionsRes, counterpartyRes] = await Promise.all([
+  const [actionsRes, counterpartyRes, jurisdictions, documents] = await Promise.all([
     listCorporateActions(identity),
     listCounterparties(identity),
+    loadJurisdictionOptions(),
+    documentOptions(identity),
   ]);
-
-  if (!actionsRes.ok && actionsRes.error.kind === "unreachable") {
-    return <PanelEmptyState icon={CloudOff} tone="warning" label="corporate-actions-svc unavailable" hint={actionsRes.error.message} />;
-  }
+  // Counterparty jurisdictions are register UUIDs; named from the register by id.
+  const jurisdictionName = new Map(jurisdictions.ok ? jurisdictions.items.map((j) => [j.id, `${j.code} — ${j.name}`]) : []);
 
   const actions: CorporateAction[] = actionsRes.ok ? actionsRes.data : [];
   const counterparties: Counterparty[] = counterpartyRes.ok ? counterpartyRes.data : [];
 
   return (
     <div className="space-y-6">
+      <CreateCorporateActionForm />
+
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Corporate Actions ({actions.length})
         </h3>
-        {actions.length === 0 ? (
+        {!actionsRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="corporate-actions-svc could not be read" hint={actionsRes.error.message} />
+        ) : actions.length === 0 ? (
           <PanelEmptyState icon={Briefcase} label="No corporate actions recorded" hint="Corporate actions in corporate-actions-svc will appear here." />
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Action Title", "Type", "Effective Date", "Status"].map((h) => (
+                  {["Action Title", "Type", "Effective Date", "Status", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -47,10 +55,16 @@ export async function CorporateActionsAndCounterpartiesPanel() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {actions.map((a) => (
                   <tr key={a.action_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{a.title}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
+                      {a.title}
+                      <span className="block font-mono text-[10px] font-normal text-slate-400">{a.action_id}</span>
+                    </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{a.action_type}</td>
                     <td className="px-4 py-3 text-xs font-semibold text-slate-700">{a.effective_date}</td>
                     <td className="px-4 py-3 text-xs font-medium text-indigo-600">{a.status}</td>
+                    <td className="px-4 py-3">
+                      <RowActions actions={["corporate-action.execute"]} recordId={a.action_id} status={a.status} fieldOptions={{ document_vault_id: itemsOf(documents) }} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -59,18 +73,22 @@ export async function CorporateActionsAndCounterpartiesPanel() {
         )}
       </div>
 
+      <CreateCounterpartyForm jurisdictions={jurisdictions} />
+
       <div>
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Managed Counterparties ({counterparties.length})
         </h3>
-        {counterparties.length === 0 ? (
+        {!counterpartyRes.ok ? (
+          <PanelEmptyState icon={CloudOff} tone="warning" label="counterparty-management-svc could not be read" hint={counterpartyRes.error.message} />
+        ) : counterparties.length === 0 ? (
           <PanelEmptyState icon={Building2} label="No counterparties registered" hint="Counterparties in counterparty-management-svc will appear here." />
         ) : (
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
-                  {["Name", "Type", "Country", "Risk Rating", "Compliance"].map((h) => (
+                  {["Name", "Type", "Jurisdiction", "Risk", "Compliance", "Actions"].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
                   ))}
                 </tr>
@@ -78,11 +96,17 @@ export async function CorporateActionsAndCounterpartiesPanel() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {counterparties.map((cp) => (
                   <tr key={cp.counterparty_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">{cp.name}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
+                      {cp.name}
+                      <span className="block font-mono text-[10px] font-normal text-slate-400">{cp.counterparty_id}</span>
+                    </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{cp.counterparty_type}</td>
-                    <td className="px-4 py-3 text-xs">{cp.country}</td>
-                    <td className="px-4 py-3 text-xs font-bold text-amber-600">{cp.risk_rating}</td>
+                    <td className="px-4 py-3 text-xs">{jurisdictionName.get(cp.jurisdiction_id) ?? cp.jurisdiction_id}</td>
+                    <td className="px-4 py-3 text-xs font-bold text-amber-600">{cp.risk_category}</td>
                     <td className="px-4 py-3 text-xs font-medium text-emerald-600">{cp.compliance_status}</td>
+                    <td className="px-4 py-3">
+                      <RowActions actions={["counterparty.compliance"]} recordId={cp.counterparty_id} status={cp.compliance_status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

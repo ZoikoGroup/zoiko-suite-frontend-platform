@@ -29,8 +29,15 @@ export async function KpiCardGrid() {
 
   const totalServices = domains.reduce((acc, d) => acc + d.total, 0);
   const readyServices = domains.reduce((acc, d) => acc + d.ready, 0);
-  const operationalPct = totalServices > 0 ? Math.round((readyServices / totalServices) * 100) : 100;
+  const operationalPct = totalServices > 0 ? Math.round((readyServices / totalServices) * 100) : null;
   const activeDomainsCount = domains.filter((d) => d.status === "operational").length;
+  const domainPct = domains.length > 0 ? Math.round((activeDomainsCount / domains.length) * 100) : null;
+
+  // Every figure below comes from the /readyz probes above. Wording and tone follow
+  // the result: nothing here claims health the probes did not report.
+  const notReady = totalServices - readyServices;
+  const allReady = totalServices > 0 && notReady === 0;
+  const degradedDomains = domains.length - activeDomainsCount;
 
   const kpis: Kpi[] = [
     {
@@ -38,44 +45,44 @@ export async function KpiCardGrid() {
       value: `${readyServices} / ${totalServices}`,
       icon: Server,
       delta: {
-        text: "37 targets active",
-        direction: "up",
-        tone: "positive",
+        text: totalServices === 0 ? "No targets configured" : allReady ? "All targets ready" : `${notReady} not ready`,
+        direction: allReady ? "up" : "down",
+        tone: allReady ? "positive" : "negative",
       },
-      helper: "Blocks 6–10 running in Docker",
+      helper: "Answered /readyz on this load",
     },
     {
-      label: "Domains Monitored",
+      label: "Domains Operational",
       value: `${activeDomainsCount} / ${domains.length}`,
       icon: Layers,
       delta: {
-        text: "100% operational",
-        direction: "up",
-        tone: "positive",
+        text: domainPct === null ? "Unknown" : `${domainPct}% operational`,
+        direction: degradedDomains === 0 ? "up" : "down",
+        tone: degradedDomains === 0 ? "positive" : "negative",
       },
-      helper: "Legal, Tax, Compliance, Ops, Security, Integrations",
+      helper: degradedDomains === 0 ? "Every domain has all services ready" : `${degradedDomains} domain(s) with a service down`,
     },
     {
       label: "Cluster Readiness",
-      value: `${operationalPct}%`,
+      value: operationalPct === null ? "—" : `${operationalPct}%`,
       icon: ShieldCheck,
       delta: {
-        text: "All probes responding",
-        direction: "up",
-        tone: "positive",
+        text: allReady ? "All probes responding" : `${notReady} probe(s) failing`,
+        direction: allReady ? "up" : "down",
+        tone: allReady ? "positive" : "negative",
       },
-      helper: "Zero container readiness failures",
+      helper: "Share of services answering /readyz with 2xx",
     },
     {
-      label: "Average Latency",
-      value: "< 10ms",
+      label: "Services Not Ready",
+      value: `${notReady}`,
       icon: Activity,
       delta: {
-        text: "High-throughput mock cluster",
-        direction: "up",
-        tone: "positive",
+        text: notReady === 0 ? "None" : "Not ready, or no answer within 1.5s",
+        direction: notReady === 0 ? "flat" : "down",
+        tone: notReady === 0 ? "positive" : "negative",
       },
-      helper: "Fast local HTTP response time",
+      helper: "See Domain Health for which ones",
     },
   ];
 

@@ -1,14 +1,19 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
-import { PageHeader } from "@/components/admin/shared";
+import { CloudOff } from "lucide-react";
 import {
-  EventFilterBar,
-  EventLogPanel,
-  ChainVerifyPanel,
-  ArchiveCreateForm,
-  ArchiveLookup,
-} from "@/components/admin/audit-events";
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Skeleton,
+} from "@/components/ui";
+import { PageHeader, PanelEmptyState } from "@/components/admin/shared";
+import { AuditEventLedgerPanel, EventFilterBar, EventLogPanel, ChainVerifyPanel, ArchiveCreateForm, ArchiveLookup } from "@/components/admin/audit-events";
+import { currentSession } from "@/lib/authz-inbox";
+import { getAuditEvents } from "@/lib/api/audit-events";
 import type { EventFilters } from "@/lib/api/audit-events";
 
 export const metadata: Metadata = { title: "Audit Events | Zoiko Suite" };
@@ -31,7 +36,14 @@ function LogSkeleton() {
 }
 
 export default async function AuditEventsPage({ searchParams }: PageProps) {
+  const current = await currentSession();
+  if (!current) redirect("/login");
+
   const params = await searchParams;
+
+  // Read with the session's own identity: audit-event-store-svc checks
+  // AUDIT_EVENT_READ and scopes the log to the caller's tenant.
+  const audit = await getAuditEvents(current.identity);
 
   const limitRaw = Number(one(params.limit));
   const offsetRaw = Number(one(params.offset));
@@ -45,45 +57,39 @@ export default async function AuditEventsPage({ searchParams }: PageProps) {
     limit: Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50,
     offset: Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : undefined,
   };
-
   const suspenseKey = JSON.stringify(filters);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Audit Events"
-        description="The append-only, audit-grade event store behind every material action in the suite. Records are written here automatically by the service that performed the action — nothing on this page edits or removes a row."
+        description="The append-only, audit-grade event store behind every material action in the suite. Each event carries the hash of the one before it, and nothing on this page edits or removes a row."
       />
 
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>What you are looking at</CardTitle>
-            <CardDescription>Worth knowing before you read anything below</CardDescription>
+            <CardTitle>Event ledger</CardTitle>
+            <CardDescription>Latest events from audit-event-store-svc for your tenant.</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
-          <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-            Every row below is a fact about something that happened — who did it, what it was done
-            to, and when — written once by the service that did it and{" "}
-            <strong className="font-medium">never edited or deleted afterwards</strong>. Each row is
-            linked to the one before it by a hash, so the chain as a whole can be checked for tampering
-            without trusting any single row in isolation. Access here is{" "}
-            <strong className="font-medium">
-              granted at the platform level (Compliance Auditor / System Admin)
-            </strong>
-            , not per tenant — if a section below reports you are not authorized, that is the grant to
-            ask about.
-          </p>
+          {audit.ok ? (
+            <AuditEventLedgerPanel events={audit.data} summary={audit.summary} />
+          ) : (
+            <PanelEmptyState icon={CloudOff} tone="warning" label="audit-event-store-svc could not be read" hint={audit.error} />
+          )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Event log</CardTitle>
+            <CardTitle>Search the full log</CardTitle>
             <CardDescription>
-              Newest first. Filters live in the URL, so a filtered view is linkable.
+              Server-side filters (actor, entity, event type, workflow, time range) and pagination over
+              the whole store — the ledger above shows one page with client-side search only. Filters
+              live in the URL, so a filtered view is linkable.
             </CardDescription>
           </div>
         </CardHeader>

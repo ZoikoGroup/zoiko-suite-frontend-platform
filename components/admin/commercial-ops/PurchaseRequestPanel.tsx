@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { CloudOff, ClipboardList, ShieldAlert, Hourglass, ThumbsUp, ThumbsDown } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession, toIdentity } from "@/lib/auth";
 import {
   listPurchaseRequests,
   summariseRequests,
@@ -9,16 +9,32 @@ import {
   type RequestStatus,
 } from "@/lib/api/purchase-requests";
 import { PurchaseRequestTable } from "./PurchaseRequestTable";
+import { vendorProfileOptions, itemsOf } from "@/lib/form-options";
 
 const TILE =
   "flex items-center gap-3 rounded-lg border border-slate-200 px-3.5 py-3 dark:border-slate-800";
 
-function formatAmount(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(amount);
+export function formatAmount(amount: number, currency?: string | null): string {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const cleanCode = typeof currency === "string" ? currency.trim().toUpperCase() : "";
+
+  if (/^[A-Z]{3}$/.test(cleanCode)) {
+    try {
+      return new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency: cleanCode,
+        maximumFractionDigits: 0,
+      }).format(safeAmount);
+    } catch {
+      // Fallback for unrecognised 3-letter currency code
+    }
+  }
+
+  const formatted = safeAmount.toLocaleString("en-GB", { maximumFractionDigits: 0 });
+  if (cleanCode && cleanCode !== "UNDEFINED" && cleanCode !== "UNSPECIFIED") {
+    return `${formatted} ${cleanCode}`;
+  }
+  return `${formatted} (Currency unspecified)`;
 }
 
 /**
@@ -53,15 +69,12 @@ export async function PurchaseRequestPanel({
     );
   }
 
-  const result = await listPurchaseRequests({
-    identity: {
-      principalId: session.principalId,
-      tenantId: session.tenantId,
-      legalEntityId: session.legalEntityId,
-    },
-    status,
-    legalEntityId,
-  });
+  // toIdentity carries the gateway envelope as well as tenant, principal and entity.
+  const sessionIdentity = toIdentity(session);
+  const [result, vendors] = await Promise.all([
+    listPurchaseRequests({ identity: sessionIdentity, status, legalEntityId }),
+    vendorProfileOptions(sessionIdentity),
+  ]);
 
   if (!result.ok) {
     return (
@@ -166,7 +179,7 @@ export async function PurchaseRequestPanel({
         </div>
       </div>
 
-      <PurchaseRequestTable requests={requests} />
+      <PurchaseRequestTable requests={requests} vendorProfiles={itemsOf(vendors)} />
     </div>
   );
 }

@@ -26,7 +26,7 @@ import {
 
 export const metadata: Metadata = {
   title: "Intelligence & Reporting | Zoiko Suite",
-  description: "Cross-domain ML forecasting, real-time anomaly detection, risk scoring, and automated reporting orchestration",
+  description: "Forecasts, anomaly records, compliance risk scores, reconciliation analysis, report definitions, recommendations and migration validation",
 };
 
 function PanelSkeleton({ rows = 3 }: { rows?: number }) {
@@ -43,13 +43,11 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
-  ports,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle: string;
-  ports: string;
   children: React.ReactNode;
 }) {
   return (
@@ -64,9 +62,6 @@ function SectionCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          :{ports}
-        </span>
       </div>
       <div className="p-5">{children}</div>
     </section>
@@ -74,19 +69,19 @@ function SectionCard({
 }
 
 const CORE_SERVICES = [
-  "anomaly-detection-svc :8160",
-  "forecasting-svc :8161",
-  "compliance-risk-scoring-svc :8162",
-  "reconciliation-intelligence-svc :8163",
-  "reporting-orchestration-svc :8164",
-  "decision-support-svc :8165",
-  "migration-integrity-svc :8166",
+  "anomaly-detection-svc",
+  "forecasting-svc",
+  "compliance-risk-scoring-svc",
+  "reconciliation-intelligence-svc",
+  "reporting-orchestration-svc",
+  "decision-support-svc",
+  "migration-integrity-svc",
 ];
 
 export default async function IntelligencePage() {
   const domain = DOMAINS.find((d) => d.key === "intelligence") ?? {
     label: "Intelligence & Reporting",
-    purpose: "Machine learning forecasting, automated reconciliation intelligence, risk scoring, and reporting orchestrations across all platform microservices.",
+    purpose: "Forecasts, anomaly records, risk scores, reconciliation analysis, report definitions, decision-support recommendations and migration validation, read from the Block 8 services.",
   };
 
   return (
@@ -130,9 +125,8 @@ export default async function IntelligencePage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SectionCard
           icon={AlertTriangle}
-          title="Real-Time Anomaly Detection"
+          title="Anomaly Detection"
           subtitle="anomaly-detection-svc — statistical drift and transaction anomalies"
-          ports="8160"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <AnomalyDetectionPanel />
@@ -143,7 +137,6 @@ export default async function IntelligencePage() {
           icon={TrendingUp}
           title="Predictive Forecasting"
           subtitle="forecasting-svc — multi-variate cashflow and operational projections"
-          ports="8161"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ForecastingPanel />
@@ -156,7 +149,6 @@ export default async function IntelligencePage() {
           icon={ShieldCheck}
           title="Compliance Risk Scoring"
           subtitle="compliance-risk-scoring-svc — dynamic entity posture and risk factors"
-          ports="8162"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <RiskScoringPanel />
@@ -166,8 +158,7 @@ export default async function IntelligencePage() {
         <SectionCard
           icon={GitMerge}
           title="Reconciliation Intelligence"
-          subtitle="reconciliation-intelligence-svc — automated fuzzy matching and exception resolution"
-          ports="8163"
+          subtitle="reconciliation-intelligence-svc — reconciliation analysis and suggested resolutions"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ReconciliationIntelligencePanel />
@@ -180,7 +171,6 @@ export default async function IntelligencePage() {
           icon={BarChart2}
           title="Reporting Orchestrations"
           subtitle="reporting-orchestration-svc — scheduled and on-demand report batches"
-          ports="8164"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ReportingOrchestrationPanel />
@@ -191,7 +181,6 @@ export default async function IntelligencePage() {
           icon={Lightbulb}
           title="Decision Support"
           subtitle="decision-support-svc — algorithmic recommendations and impact analyses"
-          ports="8165"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <DecisionSupportPanel />
@@ -201,8 +190,7 @@ export default async function IntelligencePage() {
         <SectionCard
           icon={ArrowLeftRight}
           title="Migration Integrity"
-          subtitle="migration-integrity-svc — legacy cutover checksums and ledger parity"
-          ports="8166"
+          subtitle="migration-integrity-svc — migration batch validation against control totals"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <MigrationIntegrityPanel />

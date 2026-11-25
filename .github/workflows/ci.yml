@@ -13,12 +13,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # Node 24: jsdom 30 (Vitest) needs >= 22.22 / 24.15, and the node tests
+      # import .ts files through Node 24's built-in type stripping.
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
 
       - name: Install dependencies
@@ -30,8 +32,123 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Assistant widget unit tests (Vitest incl. the import boundary) and
+      # node tests (Doc 07 §04 L1: deterministic CI, blocking on failure).
+      - name: Unit tests
+        run: npm test
+
       - name: Build Next.js Application
         run: npm run build
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
           NEXT_TELEMETRY_DISABLED: 1
+
+  # Doc 07 §04 L0: dependency (SCA) and secret scans. The audit reports
+  # production advisories without blocking until the Next.js upgrade lands
+  # (next, sharp, postcss advisories need next >= 16.4); gitleaks blocks.
+  security:
+    name: Dependency audit & secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: npm audit (production dependencies, report-only)
+        run: |
+          npm audit --omit=dev --audit-level=high || echo "::warning title=npm audit::High or critical advisories in production dependencies; see the log."
+
+      - name: Resolve commit range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "opts=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            echo "opts=-1 ${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "opts=${{ github.event.before }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: gitleaks (new commits)
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo             zricethezav/gitleaks:v8.21.2@sha256:0e99e8821643ea5b235718642b93bb32486af9c8162c8b8731f7cbdc951a7f46             git /repo --no-banner --redact --verbose --log-opts="${{ steps.range.outputs.opts }}"
+
+  # Doc 07 §04 L4 / §10: the assistant's browser tests (axe, keyboard, the
+  # public-only boundary, 52 cases) against a real public-ai-svc built from
+  # the backend repository. Needs the BACKEND_REPO_TOKEN secret (read-only
+  # access to ZoikoGroup/zoiko-suite-backend).
+  assistant-e2e:
+    name: Assistant browser tests (Playwright)
+    runs-on: ubuntu-latest
+    # Doc 07 §10: P0 accessibility and boundary tests always run. The backend
+    # repository is public, so the default token can check it out; a
+    # BACKEND_REPO_TOKEN secret is used instead when one is set.
+    needs: [validate]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # A widget PR that depends on an unmerged backend change names that
+      # branch in its description with a line "Backend-Ref: <branch>". It is
+      # used while it exists; otherwise (no line, or merged and deleted) the
+      # suite runs against the backend's main. The description is read from
+      # the environment and the ref limited to branch-name characters.
+      - name: Pick the assistant service ref
+        id: backend
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          ref=$(printf '%s\n' "$PR_BODY" | tr -d '\r' | sed -n 's/^Backend-Ref:[[:space:]]*\([A-Za-z0-9._/-]\{1,200\}\)[[:space:]]*$/\1/p' | head -n 1)
+          if [ -n "$ref" ] && git ls-remote --exit-code --heads https://github.com/ZoikoGroup/zoiko-suite-backend "refs/heads/$ref" > /dev/null; then
+            echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          else
+            ref=main
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Assistant service ref: $ref"
+
+      - name: Checkout the assistant service
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ZoikoGroup/zoiko-suite-backend
+          ref: ${{ steps.backend.outputs.ref }}
+          token: ${{ secrets.BACKEND_REPO_TOKEN || github.token }}
+          path: backend
+          sparse-checkout: services/public-ai-svc
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: stable
+          cache-dependency-path: backend/services/public-ai-svc/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies and the browser
+        run: |
+          npm ci
+          npx playwright install --with-deps msedge
+
+      - name: Build Next.js Application
+        run: npm run build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Playwright
+        run: npx playwright test --reporter=line,html
+        env:
+          PUBLIC_AI_SVC_DIR: ${{ github.workspace }}/backend/services/public-ai-svc
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: assistant-playwright-report
+          path: playwright-report
+          if-no-files-found: ignore

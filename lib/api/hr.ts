@@ -21,7 +21,13 @@ export type Employee = {
 type EmployeesResponse = { employees?: Employee[]; total?: number };
 
 export async function listEmployees(identity?: Identity): Promise<ApiResult<Employee[]>> {
-  const res = await apiGet<EmployeesResponse | Employee[]>("employeeMaster", "/v1/employees", { identity });
+  // employee-master-svc scopes the list by legal entity and answers 400
+  // missing_fields without it, which the employee panel used to show as an
+  // empty register.
+  const res = await apiGet<EmployeesResponse | Employee[]>("employeeMaster", "/v1/employees", {
+    identity,
+    query: { legal_entity_id: identity?.legalEntityId },
+  });
   if (!res.ok) return res;
   const list = Array.isArray(res.data) ? res.data : res.data.employees ?? [];
   return { ok: true, data: list };

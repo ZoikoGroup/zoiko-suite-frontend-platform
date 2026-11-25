@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { PurchaseRequestSummary } from "./PurchaseRequestSummary";
 import {
   submitPurchaseRequest,
+  submitRequestForApproval,
   submitRequestApproval,
   submitRequestRejection,
 } from "@/app/admin/commercial-ops/actions";
@@ -15,12 +16,18 @@ import {
   CURRENCIES,
   type RequestActionState,
 } from "@/app/admin/commercial-ops/state";
+import { PickList } from "@/components/admin/shared/PickList";
 
 const FEEDBACK = {
   created: {
     icon: CheckCircle2,
     className:
       "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300",
+  },
+  submitted: {
+    icon: CheckCircle2,
+    className:
+      "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300",
   },
   approved: {
     icon: ThumbsUp,
@@ -91,7 +98,7 @@ function Feedback({ state }: { state: RequestActionState }) {
   );
 }
 
-/** Step 1 — raise a requisition. It lands PENDING and authorises nothing. */
+/** Step 1 — raise a requisition. It lands DRAFT and authorises nothing. */
 export function RaiseRequestForm() {
   const [state, action, pending] = useActionState<RequestActionState, FormData>(
     submitPurchaseRequest,
@@ -165,14 +172,18 @@ export function RaiseRequestForm() {
 }
 
 /**
- * Step 2 — decide. Approve and reject share one form because they are two
- * branches of the same single transition out of PENDING, and both are terminal:
- * whichever button is pressed, the other is no longer possible.
+ * Step 2 — submit a DRAFT for approval, then approve or reject it (someone
+ * other than the requester). The action reads the request's current version
+ * and sends it as expected_version.
  *
  * The reason field is only sent by Reject; the service refuses an unexplained
  * rejection with a 400, so it is marked required on that path in the action.
  */
 export function DecideRequestForm() {
+  const [submitState, submitAction, submitPending] = useActionState<RequestActionState, FormData>(
+    submitRequestForApproval,
+    IDLE_REQUEST_STATE,
+  );
   const [approveState, approveAction, approvePending] = useActionState<
     RequestActionState,
     FormData
@@ -182,24 +193,19 @@ export function DecideRequestForm() {
     IDLE_REQUEST_STATE,
   );
 
-  // Only one of the two can have run most recently; showing both banners at once
-  // would leave a stale outcome on screen next to the current one.
-  const latest = rejectState.status !== "idle" ? rejectState : approveState;
+  // Show one outcome at a time; stacking banners would leave a stale result on
+  // screen next to the current one.
+  const latest =
+    [rejectState, approveState, submitState].find((s) => s.status !== "idle") ?? IDLE_REQUEST_STATE;
 
   return (
     <form className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="decide_request_id" className={LABEL}>
-            Purchase request ID <span className="font-normal text-slate-400">(UUID)</span>
+            Purchase request <span className="font-normal text-slate-400">(draft or awaiting approval)</span>
           </label>
-          <input
-            id="decide_request_id"
-            name="request_id"
-            required
-            className={`${FIELD} font-mono text-xs`}
-            autoComplete="off"
-          />
+          <PickList id="decide_request_id" name="request_id" kind="open-requests" required className={FIELD} empty="No requisition is in draft or awaiting approval." />
         </div>
         <div>
           <label htmlFor="reason" className={LABEL}>
@@ -216,6 +222,15 @@ export function DecideRequestForm() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="submit"
+          formAction={submitAction}
+          loading={submitPending}
+          size="sm"
+          variant="secondary"
+        >
+          {submitPending ? "Submitting…" : "Submit for approval"}
+        </Button>
         <Button type="submit" formAction={approveAction} loading={approvePending} size="sm">
           {approvePending ? "Approving…" : "Approve"}
         </Button>
@@ -234,7 +249,7 @@ export function DecideRequestForm() {
           {rejectPending ? "Rejecting…" : "Reject"}
         </Button>
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          Both decisions are terminal. A second decision is refused, not applied.
+          Submit a DRAFT first. Approval and rejection are terminal.
         </p>
       </div>
 

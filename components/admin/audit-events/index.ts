@@ -1,3 +1,5 @@
+// Client component rendering the KPI-card ledger (main's — the page's primary view).
+export { AuditEventLedgerPanel } from "./AuditEventLedgerPanel";
 export { EventFilterBar } from "./EventFilterBar";
 // Server component that reads audit-event-store-svc.
 export { EventLogPanel } from "./EventLogPanel";

@@ -2,18 +2,39 @@
 
 import { apiGet, apiPost, type ApiResult, type Identity } from "./client";
 
+/** An AI run as ai-governance-svc records it (internal/domain/types.go AIRun). */
 export type AIRun = {
-  run_id: string;
+  ai_run_id: string;
   tenant_id?: string;
-  legal_entity_id?: string;
-  model_provider: string;
-  model_name: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_estimate_usd: number;
-  guardrail_status: "PASSED" | "FLAGGED" | "BLOCKED";
-  purpose: string;
-  created_at?: string;
+  run_type: string;
+  model_id: string;
+  prompt_version: string;
+  tool_version?: string;
+  source_refs?: string[];
+  evidence_refs?: string[];
+  confidence?: number | null;
+  limitation?: string;
+  uncertainty_state?: string;
+  recommended_action?: string;
+  audit_id: string;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+/** ai-governance-svc CreateAIRunRequest: run_type, model_id, prompt_version and audit_id are required. */
+export type CreateAIRunBody = {
+  run_type: string;
+  model_id: string;
+  prompt_version: string;
+  audit_id: string;
+  correlation_id?: string;
+  tool_version?: string;
+  source_refs?: string[];
+  evidence_refs?: string[];
+  confidence?: number;
+  limitation?: string;
+  uncertainty_state?: string;
+  recommended_action?: string;
 };
 
 export type ActionRiskClassification = {
@@ -42,13 +63,7 @@ export type ModelProviderRegistration = {
 };
 
 export async function createAIRun(
-  body: {
-    model_provider: string;
-    model_name: string;
-    purpose: string;
-    prompt_tokens?: number;
-    completion_tokens?: number;
-  },
+  body: CreateAIRunBody,
   identity?: Identity
 ): Promise<ApiResult<AIRun>> {
   const res = await apiPost<{ run?: AIRun } | AIRun>("aiGovernance", "/v1/ai-runs", body, { identity });
@@ -124,3 +139,106 @@ export async function verifyModelProvider(
     { identity }
   );
 }
+
+// ─── Registers (list reads) ──────────────────────────────────────────────────
+// Shapes are the ones ai-governance-svc actually returns (internal/domain/types.go).
+// The service has no endpoint that lists AI runs; a run is read by id only.
+
+export type RiskClassificationRecord = {
+  action_type: string;
+  risk_category: string;
+  human_review_trigger: boolean;
+  requires_maker_checker: boolean;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export type ModelProviderRecord = {
+  provider_registration_id: string;
+  provider_name: string;
+  model_name: string;
+  training_use_posture: string;
+  data_region: string;
+  dpa_verified: boolean;
+  approved_data_classes?: string[];
+  approved_at?: string;
+  created_at: string;
+};
+
+export type AutomationPolicyRecord = {
+  automation_policy_id: string;
+  role: string;
+  risk_category: string;
+  tool: string;
+  action_type: string;
+  max_scope_amount?: number | string | null;
+  required_approvals: number;
+  dry_run_required: boolean;
+  kill_switch_engaged: boolean;
+  created_at: string;
+};
+
+export type AutomationActionRecord = {
+  automation_action_id: string;
+  action_type: string;
+  risk_category: string;
+  approval_status: string;
+  status: string;
+  proposed_by_principal_id: string;
+  created_at: string;
+};
+
+export type PolicyChangeApprovalRecord = {
+  policy_change_approval_id: string;
+  target_policy_ref: string;
+  proposed_by_principal_id: string;
+  decision?: string | null;
+  decided_at?: string | null;
+  created_at: string;
+};
+
+export type UseCaseRecord = {
+  use_case_id: string;
+  domain: string;
+  purpose: string;
+  automation_level: string;
+  lifecycle_state: string;
+  owner_principal_id: string;
+  created_at: string;
+};
+
+export type ModelReleaseRecord = {
+  model_release_id: string;
+  provider: string;
+  provider_model_id: string;
+  deployment_region: string;
+  release_state: string;
+  created_at: string;
+};
+
+async function listRegister<T>(path: string, key: string, identity?: Identity): Promise<ApiResult<T[]>> {
+  const res = await apiGet<Record<string, unknown>>("aiGovernance", path, { identity });
+  if (!res.ok) return res;
+  const value = res.data?.[key];
+  // Go encodes an empty slice it never allocated as null: that is "none", not an error.
+  if (value === null || value === undefined) return { ok: true, data: [] };
+  if (!Array.isArray(value)) {
+    return { ok: false, error: { kind: "malformed", message: `ai-governance-svc ${path} did not return a "${key}" list` } };
+  }
+  return { ok: true, data: value as T[] };
+}
+
+export const listRiskClassifications = (identity?: Identity) =>
+  listRegister<RiskClassificationRecord>("/v1/action-risk-classifications", "action_risk_classifications", identity);
+export const listModelProviders = (identity?: Identity) =>
+  listRegister<ModelProviderRecord>("/v1/model-providers", "model_providers", identity);
+export const listAutomationPolicies = (identity?: Identity) =>
+  listRegister<AutomationPolicyRecord>("/v1/automation-policies", "automation_policies", identity);
+export const listAutomationActions = (identity?: Identity) =>
+  listRegister<AutomationActionRecord>("/v1/automation-actions", "automation_actions", identity);
+export const listPolicyChangeApprovals = (identity?: Identity) =>
+  listRegister<PolicyChangeApprovalRecord>("/v1/policy-change-approvals", "policy_change_approvals", identity);
+export const listUseCases = (identity?: Identity) =>
+  listRegister<UseCaseRecord>("/v1/ai/use-cases", "use_cases", identity);
+export const listModelReleases = (identity?: Identity) =>
+  listRegister<ModelReleaseRecord>("/v1/ai/model-releases", "model_releases", identity);

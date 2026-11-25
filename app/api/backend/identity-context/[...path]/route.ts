@@ -44,7 +44,6 @@ import type { ApiResult, ApiWriteResult } from "@/lib/api/client";
 // and /health + /.well-known/jwks.json are public by contract. Every other
 // operation answers 401 without a session.
 
-const FALLBACK_ENTITY_ID = "22222222-2222-2222-2222-222222222222";
 
 type SessionIdentity = {
   tenantId: string;
@@ -60,7 +59,7 @@ async function sessionIdentity(): Promise<SessionIdentity | null> {
     return {
       tenantId: session.tenantId,
       principalId: session.principalId,
-      legalEntityId: session.legalEntityId || FALLBACK_ENTITY_ID,
+      legalEntityId: session.legalEntityId ?? "",
     };
   } catch {
     return null;

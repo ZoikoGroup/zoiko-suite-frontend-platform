@@ -13,6 +13,7 @@ import {
 } from "@/app/admin/legal/state";
 import { FIELD, LABEL, OPTIONAL } from "./field-styles";
 import { ActionFeedback } from "./ActionFeedback";
+import { PickList } from "@/components/admin/shared/PickList";
 
 /** Contract types read as acronyms; spell out the ones that are not obvious so
  *  the select is usable by someone who does not live in the domain. */
@@ -64,16 +65,9 @@ export function DraftContractForm() {
 
         <div>
           <label htmlFor="counterparty_id" className={LABEL}>
-            Counterparty ID
+            Counterparty
           </label>
-          <input
-            id="counterparty_id"
-            name="counterparty_id"
-            required
-            placeholder="cp-northwind-cloud"
-            className={FIELD}
-            autoComplete="off"
-          />
+          <PickList id="counterparty_id" name="counterparty_id" kind="counterparties" required className={FIELD} empty="No counterparty yet: add one under Corporate actions & counterparties." />
         </div>
 
         <div className="sm:col-span-2">
@@ -158,7 +152,7 @@ export function DraftContractForm() {
           {pending ? "Drafting…" : "Draft contract"}
         </Button>
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          Created as DRAFT at v1 — not in force until it is activated
+          Created as DRAFT at v1 — not in force until review, approval, and signature
         </p>
       </div>
 
@@ -169,7 +163,7 @@ export function DraftContractForm() {
           href={`/admin/legal/${state.contractId}`}
           className="inline-flex items-center gap-1.5 text-sm font-medium text-navy-700 hover:underline dark:text-navy-300"
         >
-          Open the contract to submit or activate it
+          Open the contract to submit it for review
           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       )}

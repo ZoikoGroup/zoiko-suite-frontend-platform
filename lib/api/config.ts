@@ -288,6 +288,18 @@ export function serviceUrl(service: ServiceName): string {
   return stripTrailingSlash(process.env[envKeyFor(service)] ?? DEFAULTS[service]);
 }
 
+/**
+ * The local port of every registered service. The developer dispatch routes
+ * accept only these, so they cannot be pointed at an arbitrary local port.
+ */
+export function registeredServicePorts(): ReadonlySet<number> {
+  return new Set(
+    Object.entries(DEFAULTS)
+      .filter(([name]) => name !== "gateway")
+      .map(([, url]) => Number(new URL(url).port)),
+  );
+}
+
 /** `purchaseOrder` → `ZOIKO_PURCHASE_ORDER_URL` */
 function envKeyFor(service: ServiceName): string {
   const snake = service.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();

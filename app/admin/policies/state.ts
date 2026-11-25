@@ -48,3 +48,11 @@ export type EvaluateState = {
 };
 
 export const IDLE_EVALUATE: EvaluateState = { status: "idle", message: "" };
+
+/** A control-test definition or a recorded test run: created, replayed, refused. */
+export type ControlWriteState = {
+  status: "idle" | "created" | "replayed" | "conflict" | "error";
+  message: string;
+};
+
+export const IDLE_CONTROL_WRITE: ControlWriteState = { status: "idle", message: "" };

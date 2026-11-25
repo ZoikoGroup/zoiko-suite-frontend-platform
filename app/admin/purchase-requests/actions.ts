@@ -21,8 +21,10 @@ import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, type SessionIdentity } from "@/lib/auth";
 import {
   createPurchaseRequest,
+  submitPurchaseRequestForApproval,
   approvePurchaseRequest,
   rejectPurchaseRequest,
+  cancelPurchaseRequest,
   getPurchaseRequest,
   explainRequestError,
 } from "@/lib/api/purchase-requests";
@@ -59,7 +61,8 @@ const EXPIRED: RequestActionState = {
 };
 
 /**
- * Raise a purchase request. It lands PENDING and grants nothing.
+ * Raise a purchase request. It lands DRAFT and grants nothing until it is
+ * submitted and approved.
  *
  * 201 means a request was created. 200 means the service recognised the
  * request as a replay and wrote nothing — reported as such rather than as a
@@ -114,7 +117,7 @@ export async function submitPurchaseRequest(
     ? {
       status: "created",
       requestId: request.request_id,
-      message: `Request raised for ${money}, status ${request.status} — ID ${request.request_id}. It authorises nothing until approved; an order cannot be issued against it yet.`,
+      message: `Request raised for ${money}, status ${request.status} — ID ${request.request_id}. Submit it for approval next; it authorises nothing until approved.`,
     }
     : {
       status: "replayed",
@@ -123,31 +126,48 @@ export async function submitPurchaseRequest(
     };
 }
 
-/** Approve a PENDING request. Terminal. */
+/** DRAFT → PENDING_APPROVAL. */
+export async function submitRequestForApproval(
+  _previous: RequestActionState,
+  formData: FormData,
+): Promise<RequestActionState> {
+  return transitionRequest(formData, "submit");
+}
+
+/** Approve a PENDING_APPROVAL request. */
 export async function submitRequestApproval(
   _previous: RequestActionState,
   formData: FormData,
 ): Promise<RequestActionState> {
-  return decideRequest(formData, "approve");
+  return transitionRequest(formData, "approve");
 }
 
-/** Reject a PENDING request, with a mandatory reason. Terminal. */
+/** Reject a PENDING_APPROVAL request, with a mandatory reason. Terminal. */
 export async function submitRequestRejection(
   _previous: RequestActionState,
   formData: FormData,
 ): Promise<RequestActionState> {
-  return decideRequest(formData, "reject");
+  return transitionRequest(formData, "reject");
 }
 
-/**
- * The two decisions share everything except the call and the wording, and
- * both are terminal — so a 422 is reported as "already decided" rather than
- * an error, because it is a fact about the record, not a failure.
- */
-async function decideRequest(
+/** Cancel a DRAFT, PENDING_APPROVAL or APPROVED request. Terminal. */
+export async function submitRequestCancellation(
+  _previous: RequestActionState,
   formData: FormData,
-  decision: "approve" | "reject",
 ): Promise<RequestActionState> {
+  return transitionRequest(formData, "cancel");
+}
+
+type Transition = "submit" | "approve" | "reject" | "cancel";
+
+/**
+ * Every transition is version-checked by the service, and the forms take a
+ * request by ID rather than from a rendered row. So the current record is read
+ * first and its version sent as expected_version: a change between that read
+ * and the write still answers 409 stale_version rather than being overwritten.
+ * A 422 means the step is not available from the request's status.
+ */
+async function transitionRequest(formData: FormData, kind: Transition): Promise<RequestActionState> {
   let identity: SessionIdentity;
   try {
     identity = await requireIdentity();
@@ -160,52 +180,74 @@ async function decideRequest(
     return { status: "error", message: "A purchase request ID is required." };
   }
   if (!isUuid(requestId)) {
-    // uuid column: a malformed id fails inside the Postgres driver and comes
-    // back as a 503 that reads like an outage rather than a typo.
     return { status: "error", message: "A purchase request ID must be a UUID." };
   }
 
-  let reason = "";
-  if (decision === "reject") {
-    reason = String(formData.get("reason") ?? "").trim();
-    if (!reason) {
-      return {
-        status: "error",
-        message:
-          "A reason is required to reject. The reason is the audit record for the refusal, so the service will not accept an unexplained one.",
-      };
-    }
+  const reason = String(formData.get("reason") ?? "").trim();
+  if ((kind === "reject" || kind === "cancel") && !reason) {
+    return {
+      status: "error",
+      message: `A reason is required to ${kind}. It is the audit record for the decision, so the service will not accept an unexplained one.`,
+    };
   }
 
+  const current = await getPurchaseRequest(requestId, identity);
+  if (!current.ok) {
+    return {
+      status: "error",
+      message:
+        current.error.status === 404
+          ? "No purchase request with that ID exists for your organisation."
+          : explainRequestError(current.error.message, { status: current.error.status }),
+    };
+  }
+  const version = current.data.version;
+
   const result =
-    decision === "approve"
-      ? await approvePurchaseRequest(requestId, identity)
-      : await rejectPurchaseRequest(requestId, reason, identity);
+    kind === "submit"
+      ? await submitPurchaseRequestForApproval(requestId, version, identity)
+      : kind === "approve"
+        ? await approvePurchaseRequest(requestId, version, identity)
+        : kind === "reject"
+          ? await rejectPurchaseRequest(requestId, reason, version, identity)
+          : await cancelPurchaseRequest(requestId, reason, version, identity);
 
   if (!result.ok) {
-    if (result.error.status === 422) {
-      return {
-        status: "already-decided",
-        message: explainRequestError(result.error.message),
-      };
-    }
-    return { status: "error", message: explainRequestError(result.error.message) };
+    const message = explainRequestError(result.error.message, { status: result.error.status });
+    return result.error.status === 422
+      ? { status: "already-decided", requestId, message }
+      : { status: "error", requestId, message };
   }
 
   refresh();
 
   const request = result.data;
-  return decision === "approve"
-    ? {
-      status: "approved",
-      requestId: request.request_id,
-      message: `Request APPROVED and attributed to you. An order can now be issued against it — paste this ID into the issue form: ${request.request_id}`,
-    }
-    : {
-      status: "rejected",
-      requestId: request.request_id,
-      message: `Request REJECTED, with your reason stored on the record. No order can be issued against it.`,
-    };
+  switch (kind) {
+    case "submit":
+      return {
+        status: "submitted",
+        requestId,
+        message: `Request submitted — now ${request.status}. Someone other than the requester has to approve or reject it.`,
+      };
+    case "approve":
+      return {
+        status: "approved",
+        requestId,
+        message: `Request APPROVED and attributed to you. An order can now be issued against it — paste this ID into the issue form: ${request.request_id}`,
+      };
+    case "reject":
+      return {
+        status: "rejected",
+        requestId,
+        message: "Request REJECTED, with your reason stored on the record. No order can be issued against it.",
+      };
+    case "cancel":
+      return {
+        status: "cancelled",
+        requestId,
+        message: "Request CANCELLED, with your reason stored on the record.",
+      };
+  }
 }
 
 /**

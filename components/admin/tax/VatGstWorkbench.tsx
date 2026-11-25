@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useActionState } from "react";
+import { JurisdictionSelect } from "./JurisdictionSelect";
+import type { JurisdictionOptions } from "./jurisdiction-options";
 import {
   Receipt,
   PlusCircle,
@@ -23,6 +25,7 @@ import {
 } from "@/app/admin/tax/vat-actions";
 import { type LookupState } from "@/components/admin/shared/lookup";
 import type { VATReturn } from "@/lib/api/tax";
+import { PickList } from "@/components/admin/shared/PickList";
 
 const IDLE_ACTION: VatActionState = { status: "idle" };
 const IDLE_LOOKUP_VAT: LookupState<VATReturn> = { status: "idle", message: "" };
@@ -85,15 +88,15 @@ function OutputInputBar({ output, input, currency }: { output: number; input: nu
   );
 }
 
-export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATReturn[] }) {
+export function VatGstWorkbench({ initialReturns = [], jurisdictions }: { initialReturns: VATReturn[]; jurisdictions: JurisdictionOptions }) {
   const [createState, createSubmit, createPending] = useActionState(createVatReturnAction, IDLE_ACTION);
   const [fileState, fileSubmit, filePending] = useActionState(fileVatReturnAction, IDLE_ACTION);
   const [lookupState, lookupSubmit, lookupPending] = useActionState(lookupVatReturnAction, IDLE_LOOKUP_VAT);
 
   // Form input states for dynamic calculation
-  const [outputTaxInput, setOutputTaxInput] = useState("100000");
-  const [inputTaxInput, setInputTaxInput] = useState("40000");
-  const [currencyInput, setCurrencyInput] = useState("GBP");
+  const [outputTaxInput, setOutputTaxInput] = useState("");
+  const [inputTaxInput, setInputTaxInput] = useState("");
+  const [currencyInput, setCurrencyInput] = useState("");
   const [activeTab, setActiveTab] = useState<"create" | "file" | "lookup">("create");
 
   // Quick fill target for filing / lookup
@@ -196,29 +199,17 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
           </CardHeader>
           <CardContent>
             <form action={createSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <p className={HINT}>Raised for the legal entity of your session.</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="vat-legal-entity" className={LABEL}>Legal Entity ID</label>
-                  <input
-                    id="vat-legal-entity"
-                    name="legal_entity_id"
-                    defaultValue="11111111-1111-1111-1111-111111111111"
-                    className={FIELD}
-                    required
-                  />
-                  <p className={HINT}>Zoiko UK Operating Entity</p>
-                </div>
-
-                <div>
-                  <label htmlFor="vat-jurisdiction" className={LABEL}>Jurisdiction ID</label>
-                  <input
+                  <JurisdictionSelect
                     id="vat-jurisdiction"
                     name="jurisdiction_id"
-                    defaultValue="GB"
+                    label="Jurisdiction"
+                    options={jurisdictions}
+                    labelClassName={LABEL}
                     className={FIELD}
-                    required
                   />
-                  <p className={HINT}>HMRC / Statutory Jurisdiction Code</p>
                 </div>
 
                 <div>
@@ -226,7 +217,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                   <input
                     id="vat-tax-reg"
                     name="tax_registration_number"
-                    defaultValue="GB-987654321"
                     className={FIELD}
                     required
                   />
@@ -240,7 +230,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                   <input
                     id="vat-period"
                     name="tax_period"
-                    defaultValue="2026-Q2"
                     placeholder="2026-Q2"
                     className={FIELD}
                     required
@@ -256,7 +245,9 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     value={currencyInput}
                     onChange={(e) => setCurrencyInput(e.target.value)}
                     className={FIELD}
+                    required
                   >
+                    <option value="">Select…</option>
                     <option value="GBP">GBP (£)</option>
                     <option value="EUR">EUR (€)</option>
                     <option value="USD">USD ($)</option>
@@ -270,7 +261,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     id="vat-effective-from"
                     name="effective_from"
                     type="date"
-                    defaultValue="2026-04-01"
                     className={FIELD}
                     required
                   />
@@ -286,7 +276,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     name="total_sales_amount"
                     type="number"
                     step="any"
-                    defaultValue="500000"
                     className={FIELD}
                     required
                   />
@@ -300,7 +289,6 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
                     name="total_purchase_amount"
                     type="number"
                     step="any"
-                    defaultValue="200000"
                     className={FIELD}
                     required
                   />
@@ -418,35 +406,36 @@ export function VatGstWorkbench({ initialReturns = [] }: { initialReturns: VATRe
             <form action={fileSubmit} className="space-y-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="file-return-id" className={LABEL}>VAT Return ID</label>
-                  <input
+                  <label htmlFor="file-return-id" className={LABEL}>VAT return (DRAFT)</label>
+                  <PickList
                     id="file-return-id"
                     name="return_id"
+                    kind="draft-vat-returns"
+                    reloadKey={JSON.stringify(createState)}
                     value={targetReturnId}
-                    onChange={(e) => setTargetReturnId(e.target.value)}
-                    placeholder="vret-..."
-                    className={FIELD}
+                    onChange={setTargetReturnId}
                     required
+                    className={FIELD}
+                    empty="No DRAFT return yet: raise one in step 1."
                   />
-                  <p className={HINT}>Paste ID from Step 1 or select a Draft from the table below</p>
+                  <p className={HINT}>Or choose File on a DRAFT row in the table below.</p>
                 </div>
 
                 <div>
-                  <label htmlFor="file-filed-by" className={LABEL}>Filed By (Signatory Officer)</label>
+                  <label htmlFor="file-evidence-refs" className={LABEL}>Evidence references</label>
                   <input
-                    id="file-filed-by"
-                    name="filed_by"
-                    defaultValue="Lingaraj (Super Admin)"
+                    id="file-evidence-refs"
+                    name="evidence_refs"
                     className={FIELD}
                     required
                   />
-                  <p className={HINT}>Authorized legal entity filing representative</p>
+                  <p className={HINT}>Comma-separated. Filed under your signed-in identity.</p>
                 </div>
               </div>
 
               <div className="flex justify-end pt-2">
                 <Button type="submit" disabled={filePending} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">
-                  {filePending ? "Filing with Authority..." : "File Return with Statutory Gateway"}
+                  {filePending ? "Filing..." : "File Return"}
                 </Button>
               </div>
             </form>

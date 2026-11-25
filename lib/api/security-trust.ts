@@ -15,10 +15,32 @@
 //    ISOLATE / DENY with a trust score. The previous version of this file
 //    modeled equity grants and vesting schedules here — that was never a real
 //    endpoint on this service.
+//
+// Every call carries the caller's identity as headers. These services take the
+// tenant from X-Tenant-Id only (a tenant_id query parameter is ignored and a
+// body tenant_id is refused), and every list requires legal_entity_id: it is
+// the authorization scope, and a list without it is a 400.
 
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, type ApiResult, type Identity } from "./client";
 
 type ListEnvelope<T> = { data: T[]; count: number };
+
+async function listData<T>(
+  service: Parameters<typeof apiGet>[0],
+  path: string,
+  identity: Identity,
+  query: Record<string, string | undefined> = {},
+): Promise<ApiResult<T[]>> {
+  const res = await apiGet<ListEnvelope<T>>(service, path, {
+    identity,
+    query: { ...query, legal_entity_id: identity.legalEntityId },
+  });
+  if (!res.ok) return res;
+  if (!Array.isArray(res.data?.data)) {
+    return { ok: false, error: { kind: "malformed", message: `${service} answered ${path} without a "data" list` } };
+  }
+  return { ok: true, data: res.data.data };
+}
 
 // ── mTLS Management ─────────────────────────────────────────────────────────
 
@@ -63,36 +85,36 @@ export type CommunicationPolicy = {
   created_at: string;
 };
 
-export async function listMtlsCertificates(tenantId: string) {
-  const res = await apiGet<ListEnvelope<MtlsCertificate>>("mtlsManagement", "/v1/mtls/certificates", {
-    query: { tenant_id: tenantId },
-  });
-  if (!res.ok) return res;
-  return { ok: true as const, data: res.data.data };
+export async function listMtlsCertificates(identity: Identity) {
+  return listData<MtlsCertificate>("mtlsManagement", "/v1/mtls/certificates", identity);
 }
 
+/**
+ * The private key is returned once and never stored, so a replayed request
+ * (same Idempotency-Key) is refused with 409 idempotency_secret_not_replayable
+ * rather than answered again.
+ */
 export async function provisionMtlsCertificate(
-  tenantId: string,
-  body: { legal_entity_id: string; service_name: string; common_name: string; rotation_days?: number; auto_rotate?: boolean }
+  identity: Identity,
+  body: { service_name: string; common_name: string; rotation_days: number; auto_rotate: boolean }
 ) {
-  return apiPost<ProvisionCertResult>("mtlsManagement", "/v1/mtls/certificates", {
-    tenant_id: tenantId,
-    ...body,
+  return apiPost<ProvisionCertResult>("mtlsManagement", "/v1/mtls/certificates", { ...body, legal_entity_id: identity.legalEntityId }, {
+    identity,
+    purposeContext: "security.mtls.certificate.issue",
   });
 }
 
-export async function rotateMtlsCertificate(tenantId: string, certId: string) {
-  return apiPost<ProvisionCertResult>("mtlsManagement", `/v1/mtls/certificates/${certId}/rotate`, {
-    tenant_id: tenantId,
-  });
+export async function rotateMtlsCertificate(identity: Identity, certId: string) {
+  return apiPost<ProvisionCertResult>(
+    "mtlsManagement",
+    `/v1/mtls/certificates/${encodeURIComponent(certId)}/rotate`,
+    {},
+    { identity, purposeContext: "security.mtls.certificate.rotate" },
+  );
 }
 
-export async function listMtlsPolicies(tenantId: string) {
-  const res = await apiGet<ListEnvelope<CommunicationPolicy>>("mtlsManagement", "/v1/mtls/policies", {
-    query: { tenant_id: tenantId },
-  });
-  if (!res.ok) return res;
-  return { ok: true as const, data: res.data.data };
+export async function listMtlsPolicies(identity: Identity) {
+  return listData<CommunicationPolicy>("mtlsManagement", "/v1/mtls/policies", identity);
 }
 
 // ── SIEM Integration ────────────────────────────────────────────────────────
@@ -107,6 +129,11 @@ export type SiemExporter = {
   name: string;
   platform: SiemPlatform;
   endpoint_url: string;
+  status: string;
+  events_sent: number;
+  last_streamed?: string;
+  created_at: string;
+  updated_at: string;
   // auth_token is never serialised by the backend — write-only.
 };
 
@@ -123,29 +150,91 @@ export type SiemEvent = {
   timestamp: string;
 };
 
-export async function listSiemEvents(tenantId: string) {
-  const res = await apiGet<ListEnvelope<SiemEvent>>("siemIntegration", "/v1/siem/events", {
-    query: { tenant_id: tenantId },
-  });
-  if (!res.ok) return res;
-  return { ok: true as const, data: res.data.data };
+/** Events are scoped to one exporter: GET /v1/siem/events requires exporter_id. */
+export async function listSiemEvents(identity: Identity, exporterId: string) {
+  return listData<SiemEvent>("siemIntegration", "/v1/siem/events", identity, { exporter_id: exporterId });
 }
 
-export async function listSiemExporters(tenantId: string) {
-  const res = await apiGet<ListEnvelope<SiemExporter>>("siemIntegration", "/v1/siem/exporters", {
-    query: { tenant_id: tenantId },
-  });
-  if (!res.ok) return res;
-  return { ok: true as const, data: res.data.data };
+/** Most exporters read for the events view; one read per exporter. */
+const SIEM_EXPORTER_LIMIT = 20;
+
+/**
+ * The entity's events across its exporters, newest first. Fails if the
+ * exporter list or any exporter's events cannot be read, so a partial view is
+ * never shown as the whole.
+ */
+export async function listSiemEventsForEntity(
+  identity: Identity,
+): Promise<ApiResult<{ events: SiemEvent[]; exporters: SiemExporter[]; exportersRead: number }>> {
+  const exporters = await listSiemExporters(identity);
+  if (!exporters.ok) return exporters;
+  const read = exporters.data.slice(0, SIEM_EXPORTER_LIMIT);
+  const results = await Promise.all(read.map((x) => listSiemEvents(identity, x.id)));
+  const events: SiemEvent[] = [];
+  for (const r of results) {
+    if (!r.ok) return r;
+    events.push(...r.data);
+  }
+  events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return { ok: true, data: { events, exporters: exporters.data, exportersRead: read.length } };
 }
 
+export async function listSiemExporters(identity: Identity) {
+  return listData<SiemExporter>("siemIntegration", "/v1/siem/exporters", identity);
+}
+
+/**
+ * Register an exporter. auth_token is write-only: the service seals it and
+ * never returns it, and answers 503 credential_sealing_unavailable when no
+ * sealing key is configured rather than storing it in the clear.
+ */
 export async function createSiemExporter(
-  tenantId: string,
-  body: { legal_entity_id: string; name: string; platform: SiemPlatform; endpoint_url: string; auth_token?: string }
+  identity: Identity,
+  body: { name: string; platform: SiemPlatform; endpoint_url: string; auth_token?: string }
 ) {
-  return apiPost<SiemExporter>("siemIntegration", "/v1/siem/exporters", {
-    tenant_id: tenantId,
-    ...body,
+  const payload: Record<string, string> = {
+    legal_entity_id: identity.legalEntityId ?? "",
+    name: body.name,
+    platform: body.platform,
+    endpoint_url: body.endpoint_url,
+  };
+  if (body.auth_token) payload.auth_token = body.auth_token;
+  return apiPost<SiemExporter>("siemIntegration", "/v1/siem/exporters", payload, {
+    identity,
+    purposeContext: "security.siem.exporter.register",
+  });
+}
+
+export async function getSiemExporter(identity: Identity, exporterId: string) {
+  return apiGet<SiemExporter>("siemIntegration", `/v1/siem/exporters/${encodeURIComponent(exporterId)}`, {
+    identity,
+    query: { legal_entity_id: identity.legalEntityId },
+  });
+}
+
+/**
+ * Record an event against an exporter (POST /v1/siem/stream).
+ *
+ * The service stores the event with status "DELIVERED" and increments the
+ * exporter's events_sent, but it has no delivery code: nothing is sent to the
+ * exporter's endpoint. Present the stored event as recorded, never delivered
+ * (components/admin/security-trust/siem-caveat.ts).
+ */
+export async function streamSiemEvent(
+  identity: Identity,
+  body: { exporter_id: string; source_service: string; event_type: string; severity: EventSeverity; message: string; payload?: string }
+) {
+  const payload: Record<string, string> = {
+    exporter_id: body.exporter_id,
+    source_service: body.source_service,
+    event_type: body.event_type,
+    severity: body.severity,
+    message: body.message,
+  };
+  if (body.payload) payload.payload = body.payload;
+  return apiPost<SiemEvent>("siemIntegration", "/v1/siem/stream", payload, {
+    identity,
+    purposeContext: "security.siem.event.record",
   });
 }
 
@@ -171,33 +260,45 @@ export type CustomerKey = {
   updated_at: string;
 };
 
-export async function listKmsKeys(tenantId: string) {
-  const res = await apiGet<ListEnvelope<CustomerKey>>("keyManagement", "/v1/keys", {
-    query: { tenant_id: tenantId },
-  });
-  if (!res.ok) return res;
-  return { ok: true as const, data: res.data.data };
+/**
+ * key-management-svc records key metadata only (alias, provider, ARN, version,
+ * state). It performs no cryptographic operation: do not present it as a KMS.
+ */
+export async function listKmsKeys(identity: Identity) {
+  return listData<CustomerKey>("keyManagement", "/v1/keys", identity);
 }
 
+/**
+ * Register a customer key's METADATA (alias, model, provider, external ARN).
+ * Nothing is generated, imported or wrapped: the key itself stays in the
+ * customer's own KMS/HSM. The service requires external_key_arn for BYOK and
+ * HYOK and answers 400 without it; the ARN's format is not checked by it.
+ */
 export async function registerKmsKey(
-  tenantId: string,
-  body: { legal_entity_id: string; key_alias: string; key_provider: KeyProvider; key_model?: KeyModel; external_key_arn?: string }
+  identity: Identity,
+  body: { key_alias: string; key_model: KeyModel; key_provider: KeyProvider; external_key_arn?: string }
 ) {
-  return apiPost<CustomerKey>("keyManagement", "/v1/keys", {
-    tenant_id: tenantId,
-    ...body,
+  const payload: Record<string, string> = {
+    legal_entity_id: identity.legalEntityId ?? "",
+    key_alias: body.key_alias,
+    key_model: body.key_model,
+    key_provider: body.key_provider,
+  };
+  if (body.external_key_arn) payload.external_key_arn = body.external_key_arn;
+  return apiPost<CustomerKey>("keyManagement", "/v1/keys", payload, { identity, purposeContext: "security.kms.key.register" });
+}
+
+export async function rotateKmsKey(identity: Identity, keyId: string) {
+  return apiPost<CustomerKey>("keyManagement", `/v1/keys/${encodeURIComponent(keyId)}/rotate`, {}, {
+    identity,
+    purposeContext: "security.key.rotate",
   });
 }
 
-export async function rotateKmsKey(tenantId: string, keyId: string) {
-  return apiPost<CustomerKey>("keyManagement", `/v1/keys/${keyId}/rotate`, {
-    tenant_id: tenantId,
-  });
-}
-
-export async function disableKmsKey(tenantId: string, keyId: string) {
-  return apiPost<{ message: string }>("keyManagement", `/v1/keys/${keyId}/disable`, {
-    tenant_id: tenantId,
+export async function disableKmsKey(identity: Identity, keyId: string) {
+  return apiPost<{ message: string }>("keyManagement", `/v1/keys/${encodeURIComponent(keyId)}/disable`, {}, {
+    identity,
+    purposeContext: "security.key.disable",
   });
 }
 
@@ -235,19 +336,12 @@ export type CartaAssessment = {
 };
 
 export async function evaluateCartaAccess(
-  tenantId: string,
+  identity: Identity,
   body: { legal_entity_id: string; context: AccessContext }
 ) {
-  return apiPost<CartaAssessment>("carta", "/v1/carta/evaluate", {
-    tenant_id: tenantId,
-    ...body,
-  });
+  return apiPost<CartaAssessment>("carta", "/v1/carta/evaluate", body, { identity, purposeContext: "security.access.evaluate" });
 }
 
-export async function listCartaAssessments(tenantId: string) {
-  const res = await apiGet<ListEnvelope<CartaAssessment>>("carta", "/v1/carta/assessments", {
-    query: { tenant_id: tenantId },
-  });
-  if (!res.ok) return res;
-  return { ok: true as const, data: res.data.data };
+export async function listCartaAssessments(identity: Identity) {
+  return listData<CartaAssessment>("carta", "/v1/carta/assessments", identity);
 }

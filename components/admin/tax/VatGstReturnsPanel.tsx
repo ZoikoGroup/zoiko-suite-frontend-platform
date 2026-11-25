@@ -4,6 +4,7 @@ import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 import { listVATReturns, type VATReturn } from "@/lib/api/tax";
 import { VatGstWorkbench } from "./VatGstWorkbench";
+import { loadJurisdictionOptions } from "@/components/admin/tax/jurisdiction-options";
 
 export async function VatGstReturnsPanel() {
   const store = await cookies();
@@ -26,9 +27,9 @@ export async function VatGstReturnsPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const result = await listVATReturns(identity);
+  const [result, jurisdictions] = await Promise.all([listVATReturns(identity), loadJurisdictionOptions()]);
 
-  if (!result.ok && result.error.kind === "unreachable") {
+  if (!result.ok) {
     return (
       <PanelEmptyState
         icon={CloudOff}
@@ -42,5 +43,5 @@ export async function VatGstReturnsPanel() {
   const vatReturns: VATReturn[] = result.ok ? result.data : [];
   const sorted = [...vatReturns].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
-  return <VatGstWorkbench initialReturns={sorted} />;
+  return <VatGstWorkbench initialReturns={sorted} jurisdictions={jurisdictions} />;
 }

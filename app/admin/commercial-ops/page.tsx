@@ -1,3 +1,4 @@
+import { IssueOrderSection } from "@/components/admin/commercial-ops/IssueOrderSection";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
@@ -5,7 +6,6 @@ import { Wallet, ShoppingCart, GitBranch } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Skeleton } from "@/components/ui";
 import { PageHeader, LookupById } from "@/components/admin/shared";
 import {
-  IssueOrderForm,
   PurchaseOrderPanel,
   PurchaseRequestPanel,
   RaiseRequestForm,
@@ -24,7 +24,11 @@ import {
 } from "@/components/admin/commercial-ops";
 import { DOMAINS } from "@/lib/constants";
 import type { OrderStatusFilter } from "@/lib/api/purchase-orders";
-import type { RequestStatus } from "@/lib/api/purchase-requests";
+import {
+  REQUEST_STATUSES,
+  normaliseRequestStatus,
+  type RequestStatus,
+} from "@/lib/api/purchase-requests";
 import {
   lookupOrder,
   lookupOrderAmendments,
@@ -48,7 +52,8 @@ const FILTERS: { label: string; value?: OrderStatusFilter }[] = [
 // silently re-filter the orders too.
 const REQUEST_FILTERS: { label: string; value?: RequestStatus }[] = [
   { label: "All" },
-  { label: "Pending", value: "PENDING" },
+  { label: "Draft", value: "DRAFT" },
+  { label: "Pending", value: "PENDING_APPROVAL" },
   { label: "Approved", value: "APPROVED" },
   { label: "Rejected", value: "REJECTED" },
 ];
@@ -98,13 +103,11 @@ function SectionCard({
   icon: Icon,
   title,
   subtitle,
-  ports,
   children,
 }: {
   icon: React.ElementType;
   title: string;
   subtitle: string;
-  ports: string;
   children: React.ReactNode;
 }) {
   return (
@@ -119,9 +122,6 @@ function SectionCard({
             <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-mono font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-          :{ports}
-        </span>
       </div>
       <div className="p-5">{children}</div>
     </section>
@@ -164,10 +164,12 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
   const rawRequest = Array.isArray(params.request_status)
     ? params.request_status[0]
     : params.request_status;
-  const requestStatus: RequestStatus | undefined =
-    rawRequest === "PENDING" || rawRequest === "APPROVED" || rawRequest === "REJECTED"
-      ? rawRequest
-      : undefined;
+  const normalisedRequest = normaliseRequestStatus(rawRequest);
+  const requestStatus: RequestStatus | undefined = (REQUEST_STATUSES as readonly string[]).includes(
+    normalisedRequest,
+  )
+    ? (normalisedRequest as RequestStatus)
+    : undefined;
 
   // Both services accept legal_entity_id on their list route and compare it
   // against a uuid column, so a malformed value dies in the Postgres driver and
@@ -535,7 +537,7 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
           </div>
         </CardHeader>
         <CardContent>
-          <IssueOrderForm />
+          <IssueOrderSection />
         </CardContent>
       </Card>
 
@@ -725,7 +727,6 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
           icon={ShoppingCart}
           title="Procurement & Spend Controls"
           subtitle="purchase-order-svc & spend-controls-svc — purchase order management and departmental spend limits"
-          ports="8129, 8131"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <PurchaseOrdersAndSpendPanel />
@@ -736,9 +737,8 @@ export default async function CommercialOpsPage({ searchParams }: PageProps) {
       <div className="mt-6">
         <SectionCard
           icon={GitBranch}
-          title="Procurement Lifecycle Workflows"
-          subtitle="procurement-workflow-svc — end-to-end procurement orchestrations, step transitions, and approvals"
-          ports="8134"
+          title="Procurement Cases"
+          subtitle="procurement-workflow-svc — spend-checked cases, approval, and purchase-order issue"
         >
           <Suspense fallback={<PanelSkeleton rows={4} />}>
             <ProcurementWorkflowPanel />

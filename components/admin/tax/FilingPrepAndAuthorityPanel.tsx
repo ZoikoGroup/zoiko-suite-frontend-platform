@@ -2,28 +2,126 @@ import { cookies } from "next/headers";
 import { CloudOff, FileCheck, ShieldAlert, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { PanelEmptyState } from "@/components/admin/shared";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
-import { listFilingDrafts, listTaxAuthorityInterfaces, type FilingDraft, type TaxAuthorityInterface } from "@/lib/api/tax";
-import { TestConnectionButton } from "./TestConnectionButton";
+import {
+  listFilingDrafts,
+  listTaxAuthorityFilings,
+  listTaxAuthorityInterfaces,
+  type FilingDraft,
+  type TaxAuthorityFiling,
+  type TaxAuthorityInterface,
+} from "@/lib/api/tax";
+import { RowActions } from "@/components/admin/shared/RowActions";
+import { SubmissionHealthButton } from "./TestConnectionButton";
+import { refresh } from "next/cache";
+import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordForm";
+import { opts, type CreateState, type FieldSpec } from "@/components/admin/intelligence/create-state";
+import { sessionIdentity, expired, missing, invalid, text, toState, show } from "@/app/admin/intelligence/create-support";
+import { apiGet, type Identity } from "@/lib/api/client";
+import { loadJurisdictionOptions, type JurisdictionOptions } from "./jurisdiction-options";
+import { registerAuthorityInterface } from "@/lib/api/tax-authority";
+import { isUuid } from "@/lib/api/tenants";
 
+// ── Authority interface registration ──
+// Records the interface in tax-authority-interface-svc for the session's legal
+// entity. It does not connect to the authority: submissions stay PENDING while
+// the authority adapter is off.
+
+/** The interface form, with the jurisdiction and provider picked from their registers. */
+function authorityFields(jurisdictions: JurisdictionOptions, providers: ProviderKeys): FieldSpec[] {
+  return [
+    {
+      name: "jurisdiction",
+      label: "Jurisdiction",
+      kind: "select",
+      required: true,
+      // The interface stores the jurisdiction code (e.g. GB), not the register id.
+      options: jurisdictions.ok ? jurisdictions.items.map((j) => ({ value: j.code, label: `${j.code} — ${j.name}` })) : [],
+      hint: jurisdictions.ok ? undefined : `The jurisdiction register could not be read: ${jurisdictions.error}`,
+    },
+    { name: "authority_name", label: "Authority name", kind: "text", required: true },
+    { name: "protocol", label: "Protocol", kind: "text" },
+    {
+      name: "provider_key",
+      label: "Authority provider",
+      kind: "select",
+      options: providers.ok ? providers.keys.map((k) => ({ value: k, label: k })) : [],
+      hint: providers.ok
+        ? providers.keys.length
+          ? "Blank: no adapter is bound and nothing is sent to the authority."
+          : "No certified provider profile yet; the interface is registered without an adapter."
+        : `Provider profiles could not be read (${providers.error}); the interface is registered without an adapter.`,
+    },
+    { name: "adapter_kind", label: "Adapter kind", kind: "select", options: opts("TAX", "EINVOICE"), hint: "Only with a provider. Blank: TAX." },
+    { name: "connector_id", label: "Approved connector id", kind: "text", hint: "Required with a provider: the approved integration connector (a UUID)." },
+  ];
+}
+
+type ProviderKeys = { ok: true; keys: string[] } | { ok: false; error: string };
+
+/** Certified provider profiles from tax-authority-interface-svc; 503 while the authority adapter is off. */
+async function loadProviderKeys(identity: Identity): Promise<ProviderKeys> {
+  const res = await apiGet<{ profiles?: { provider_key: string; status: string }[] }>(
+    "taxAuthorityInterface",
+    "/v1/tax-authority/provider-profiles",
+    { identity },
+  );
+  if (!res.ok) return { ok: false, error: res.error.message };
+  const keys = [...new Set((res.data?.profiles ?? []).filter((p) => p.status === "CERTIFIED").map((p) => p.provider_key))].sort();
+  return { ok: true, keys };
+}
+
+async function registerAuthorityInterfaceAction(previous: CreateState, fd: FormData): Promise<CreateState> {
+  "use server";
+  const identity = await sessionIdentity();
+  if (!identity) return expired(previous, fd);
+  const refusal = missing(previous, fd, [["jurisdiction", "Jurisdiction"], ["authority_name", "Authority name"]]);
+  if (refusal) return refusal;
+  const provider = text(fd, "provider_key");
+  const kind = text(fd, "adapter_kind");
+  const connector = text(fd, "connector_id");
+  // tax-authority-interface-svc: a provider needs an approved connector; a
+  // connector or EINVOICE kind without a provider is refused.
+  if (provider && !isUuid(connector)) {
+    return invalid(previous, fd, "A provider needs the approved connector's id (a UUID).");
+  }
+  if (!provider && (connector || kind === "EINVOICE")) {
+    return invalid(previous, fd, "A connector or the EINVOICE adapter kind needs a provider.");
+  }
+  if (kind && kind !== "TAX" && kind !== "EINVOICE") return invalid(previous, fd, "Choose an adapter kind.");
+  const res = await registerAuthorityInterface(identity, {
+    jurisdiction: text(fd, "jurisdiction"),
+    authority_name: text(fd, "authority_name"),
+    protocol: text(fd, "protocol") || undefined,
+    provider_key: provider || undefined,
+    adapter_kind: provider && kind ? kind : undefined,
+    connector_id: provider ? connector : undefined,
+  });
+  if (res.ok) refresh();
+  return toState(previous, fd, res, "tax-authority-interface-svc", (i) => [
+    ["Interface ID", show(i.interface_id)],
+    ["Status", show(i.status)],
+    ["Authority", `${show(i.authority_name)} (${show(i.jurisdiction)})`],
+    ["Adapter", show(i.provider_key) || "none bound"],
+  ]);
+}
+
+// filing-preparation-svc's states: DRAFT → VALIDATING → PREPARED (or BLOCKED),
+// then finalize → READY_FOR_SUBMISSION. "FINALIZED" and "UNVALIDATED" were
+// never states of the service.
 const VALIDATION_STATUS_CONFIG: Record<
   string,
   { bar: string; pct: number; label: string; badge: string }
 > = {
-  UNVALIDATED: { bar: "bg-slate-300",  pct: 0,   label: "Not started",  badge: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400" },
-  PREPARED:    { bar: "bg-blue-500",   pct: 50,  label: "Half-way",     badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
-  FINALIZED:   { bar: "bg-emerald-500",pct: 100, label: "Ready to file",badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" },
-  BLOCKED:     { bar: "bg-red-500",    pct: 0,   label: "Blocked",      badge: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300" },
+  DRAFT:                { bar: "bg-slate-300",   pct: 0,   label: "Not validated", badge: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400" },
+  VALIDATING:           { bar: "bg-blue-400",    pct: 25,  label: "Validating",    badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
+  PREPARED:             { bar: "bg-blue-500",    pct: 50,  label: "Validated",     badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
+  READY_FOR_SUBMISSION: { bar: "bg-emerald-500", pct: 100, label: "Ready to file", badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" },
+  BLOCKED:              { bar: "bg-red-500",     pct: 0,   label: "Blocked",       badge: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300" },
 };
 
 const AUTHORITY_STATUS_COLORS: Record<string, string> = {
   ACTIVE:   "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
   INACTIVE: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-400",
-};
-
-const AUTH_TYPE_COLORS: Record<string, string> = {
-  "OAuth2":           "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
-  "mTLS + SAML2":     "bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300",
-  "Singpass / Corppass OIDC": "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300",
 };
 
 function DueDateCountdown({ dueDate }: { dueDate?: string }) {
@@ -75,7 +173,7 @@ function DueDateCountdown({ dueDate }: { dueDate?: string }) {
 }
 
 function ReadinessBar({ status }: { status: string }) {
-  const cfg = VALIDATION_STATUS_CONFIG[status] ?? VALIDATION_STATUS_CONFIG.UNVALIDATED;
+  const cfg = VALIDATION_STATUS_CONFIG[status] ?? VALIDATION_STATUS_CONFIG.DRAFT;
   const isBlocked = status === "BLOCKED";
 
   return (
@@ -89,15 +187,6 @@ function ReadinessBar({ status }: { status: string }) {
       </div>
       <p className="text-[10px] text-slate-500 dark:text-slate-400">{cfg.label}</p>
     </div>
-  );
-}
-
-function AuthTypeBadge({ authType }: { authType: string }) {
-  const cls = AUTH_TYPE_COLORS[authType] ?? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>
-      {authType}
-    </span>
   );
 }
 
@@ -122,22 +211,16 @@ export async function FilingPrepAndAuthorityPanel() {
     legalEntityId: session.legalEntityId,
   };
 
-  const [draftsRes, authorityRes] = await Promise.all([
+  const [draftsRes, authorityRes, filingsRes, jurisdictionOptions, providerKeys] = await Promise.all([
     listFilingDrafts(identity),
     listTaxAuthorityInterfaces(identity),
+    listTaxAuthorityFilings(identity),
+    loadJurisdictionOptions(),
+    loadProviderKeys(identity),
   ]);
 
-  if (!draftsRes.ok && draftsRes.error.kind === "unreachable") {
-    return (
-      <PanelEmptyState
-        icon={CloudOff}
-        tone="warning"
-        label="filing-preparation-svc unavailable"
-        hint={draftsRes.error.message}
-      />
-    );
-  }
-
+  // Each section reports its own failed read. Only "unreachable" used to be
+  // shown; a 401, 403 or 5xx rendered as "No filing drafts".
   const drafts: FilingDraft[] = draftsRes.ok ? draftsRes.data : [];
   const interfaces: TaxAuthorityInterface[] = authorityRes.ok ? authorityRes.data : [];
 
@@ -148,7 +231,14 @@ export async function FilingPrepAndAuthorityPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Filing Preparation Drafts ({drafts.length})
         </h3>
-        {drafts.length === 0 ? (
+        {!draftsRes.ok ? (
+          <PanelEmptyState
+            icon={CloudOff}
+            tone="warning"
+            label="filing-preparation-svc could not be read"
+            hint={draftsRes.error.message}
+          />
+        ) : drafts.length === 0 ? (
           <PanelEmptyState
             icon={FileCheck}
             label="No filing drafts"
@@ -200,7 +290,7 @@ export async function FilingPrepAndAuthorityPanel() {
                           "bg-slate-100 text-slate-600"
                         }`}
                       >
-                        {d.validation_status === "FINALIZED" && (
+                        {d.validation_status === "READY_FOR_SUBMISSION" && (
                           <CheckCircle2 className="h-3 w-3 mr-1" />
                         )}
                         {d.validation_status}
@@ -227,7 +317,23 @@ export async function FilingPrepAndAuthorityPanel() {
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Tax Authority Connections ({interfaces.length})
         </h3>
-        {interfaces.length === 0 ? (
+        <div className="mb-3">
+          <CreateRecordForm
+            title="Register authority interface"
+            description="tax-authority-interface-svc records the interface. Nothing is sent to the authority: submissions stay PENDING while its adapter is off."
+            fields={authorityFields(jurisdictionOptions, providerKeys)}
+            action={registerAuthorityInterfaceAction}
+            submitLabel="Register interface"
+          />
+        </div>
+        {!authorityRes.ok ? (
+          <PanelEmptyState
+            icon={CloudOff}
+            tone="warning"
+            label="tax-authority-interface-svc could not be read"
+            hint={authorityRes.error.message}
+          />
+        ) : interfaces.length === 0 ? (
           <PanelEmptyState
             icon={FileCheck}
             label="No authority connections registered"
@@ -239,13 +345,12 @@ export async function FilingPrepAndAuthorityPanel() {
               <thead className="bg-slate-50 dark:bg-slate-800/60">
                 <tr>
                   {[
-                    "Authority Code",
-                    "Authority Name",
+                    "Authority",
+                    "Jurisdiction",
                     "Protocol",
-                    "Auth Type",
-                    "Endpoint",
+                    "Adapter",
                     "Status",
-                    "Action",
+                    "Submissions",
                   ].map((h) => (
                     <th
                       key={h}
@@ -262,20 +367,18 @@ export async function FilingPrepAndAuthorityPanel() {
                     key={iface.interface_id}
                     className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                   >
-                    <td className="px-4 py-3 font-mono text-xs font-medium text-slate-700 dark:text-slate-300">
-                      {iface.authority_code}
-                    </td>
                     <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-200">
                       {iface.authority_name}
+                      <p className="text-[10px] font-mono text-slate-400 dark:text-slate-500">{iface.interface_id}</p>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-300">
+                      {iface.jurisdiction}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                      {iface.protocol}
+                      {iface.protocol || "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      <AuthTypeBadge authType={iface.auth_type} />
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400 max-w-[180px] truncate">
-                      {iface.api_endpoint}
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">
+                      {iface.provider_key || "None bound"}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -290,10 +393,7 @@ export async function FilingPrepAndAuthorityPanel() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <TestConnectionButton
-                        interfaceId={iface.interface_id}
-                        authorityCode={iface.authority_code}
-                      />
+                      <SubmissionHealthButton providerKey={iface.provider_key} />
                     </td>
                   </tr>
                 ))}
@@ -302,6 +402,50 @@ export async function FilingPrepAndAuthorityPanel() {
           </div>
         )}
       </div>
+
+      <AuthorityFilings result={filingsRes} />
+    </div>
+  );
+}
+
+/** Filings held by tax-authority-interface-svc, with the transitions it accepts. */
+function AuthorityFilings({ result }: { result: Awaited<ReturnType<typeof listTaxAuthorityFilings>> }) {
+  const filings: TaxAuthorityFiling[] = result.ok ? result.data : [];
+  return (
+    <div>
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+        Authority Filings ({filings.length})
+      </h3>
+      {!result.ok ? (
+        <PanelEmptyState icon={CloudOff} tone="warning" label="tax-authority-interface-svc filings could not be read" hint={result.error.message} />
+      ) : filings.length === 0 ? (
+        <PanelEmptyState icon={FileCheck} label="No filings" hint="Filings prepared in tax-authority-interface-svc will appear here." />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800/60">
+              <tr>
+                {["Filing", "Type", "Period", "Status", "Actions"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filings.map((f) => (
+                <tr key={f.submission_id}>
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-600 dark:text-slate-300">{f.submission_id}</td>
+                  <td className="px-4 py-3 text-xs">{f.filing_type || "—"}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{f.tax_period || "—"}</td>
+                  <td className="px-4 py-3 text-xs font-medium">{f.status}</td>
+                  <td className="px-4 py-3 min-w-[160px]">
+                    <RowActions actions={["tax-filing.validate", "tax-filing.submit", "tax-filing.poll"]} recordId={f.submission_id} status={f.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
