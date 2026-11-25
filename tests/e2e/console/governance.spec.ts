@@ -149,12 +149,13 @@ test.describe("Governance Log console (read-only, D-DL-2)", () => {
       }),
     });
     expect(wf.status, `start workflow: ${await wf.clone().text()}`).toBe(201);
-    const { workflow_instance } = (await wf.json()) as { workflow_instance: { workflow_instance_id: string; causation_decision_id?: string } };
-    expect(workflow_instance.causation_decision_id).toBe(decisionId);
+    // The instance fields sit at the top level of the answer, beside its stages.
+    const started = (await wf.json()) as { workflow_instance_id: string; causation_decision_id?: string; row_version: number };
+    expect(started.causation_decision_id).toBe(decisionId);
 
-    const act = await fetch(`${H}:8090/v1/workflows/${workflow_instance.workflow_instance_id}/actions`, {
+    const act = await fetch(`${H}:8090/v1/workflows/${started.workflow_instance_id}/actions`, {
       method: "POST",
-      headers: headers(approver, { "Idempotency-Key": randomUUID() }),
+      headers: headers(approver, { "Idempotency-Key": randomUUID(), "If-Match": `"v${started.row_version}"` }),
       body: JSON.stringify({ action: "APPROVE", rationale: "UI e2e: within the delegated limit" }),
     });
     expect(act.status, `approve: ${await act.clone().text()}`).toBe(200);

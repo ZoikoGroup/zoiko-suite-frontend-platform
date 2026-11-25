@@ -22,6 +22,7 @@ import {
   createWorkflowDefinition,
   decideWorkflow,
   describeWorkflowStatus,
+  etagFor,
   explainWorkflowError,
   getApprovalEvidence,
   getWorkflow,
@@ -32,6 +33,7 @@ import {
   type LifecycleCommand,
   type ReleaseVerification,
   type StageInput,
+  type WorkflowDefinition,
 } from "@/lib/api/workflow";
 import type {
   DecideWorkflowState,
@@ -188,8 +190,12 @@ export async function startWorkflowAction(
   const escalationTarget = text(formData, "escalation_target");
   const definitionId = text(formData, "workflow_definition_id");
   const idempotencyKey = text(formData, "idempotency_key");
+  const causationId = text(formData, "causation_id");
 
   if (!workflowType) return { status: "error", message: "A workflow type is required." };
+  if (causationId && !/^[A-Za-z0-9._:-]{1,128}$/.test(causationId)) {
+    return { status: "error", message: "The governance decision ID is at most 128 letters, digits, dots, dashes, underscores or colons." };
+  }
   if (!UUID.test(legalEntityId)) return { status: "error", message: "The legal entity must be a UUID." };
   if (Boolean(subjectType) !== Boolean(subjectId)) {
     return { status: "error", message: "Give both the subject type and the subject ID, or neither." };
@@ -217,6 +223,7 @@ export async function startWorkflowAction(
     workflowDefinitionId: definitionId || undefined,
     stages: parsed.stages,
     idempotencyKey,
+    causationId: causationId || undefined,
   });
 
   if (!result.ok) return refusedOrError(result.error.status, result.error.message);
@@ -254,14 +261,18 @@ export async function decideWorkflowAction(
   const id = text(formData, "workflow_instance_id");
   const decision = text(formData, "decision");
   const rationale = text(formData, "rationale");
-  const quorum = formData.get("quorum") === "on";
+  const quorum = formData.get("quorum") === "on" || formData.get("quorum") === "true";
   const idempotencyKey = text(formData, "idempotency_key");
+  // The version the decider was looking at: the decision is refused (412)
+  // rather than applied if the workflow moved on since the page was read.
+  const ifMatch = etagFor(text(formData, "row_version"));
 
   if (!UUID.test(id)) return { status: "error", message: "Enter the workflow ID (a UUID)." };
   if (decision !== "APPROVE" && decision !== "REJECT") return { status: "error", message: "Choose approve or reject." };
   if (decision === "REJECT" && !rationale) {
     return { status: "error", message: "A rejection needs a reason. It is recorded with the decision." };
   }
+  if (rationale.length > 1000) return { status: "error", message: "Keep the comment to 1,000 characters." };
 
   const result = await decideWorkflow({
     identity,
@@ -269,7 +280,8 @@ export async function decideWorkflowAction(
     decision,
     rationale: rationale || undefined,
     quorum,
-    idempotencyKey,
+    idempotencyKey: idempotencyKey || crypto.randomUUID(),
+    ifMatch,
   });
   if (!result.ok) return refusedOrError(result.error.status, result.error.message);
 
@@ -313,21 +325,28 @@ export async function lifecycleAction(_prev: LifecycleState, formData: FormData)
   const escalationTarget = text(formData, "escalation_target");
   const reasonCode = text(formData, "reason_code");
   const narrative = text(formData, "narrative");
-  const expectedVersion = text(formData, "expected_version");
+  // The row_version the operator read, sent as If-Match. Older forms named it
+  // expected_version.
+  const rowVersion = text(formData, "row_version") || text(formData, "expected_version");
   const idempotencyKey = text(formData, "idempotency_key");
 
   if (!UUID.test(id)) return { status: "error", message: "Enter the workflow ID (a UUID)." };
   if (!(command in LIFECYCLE)) return { status: "error", message: "Choose what to do." };
   if (command === "escalate-to") {
     if (!escalationTarget) return { status: "error", message: "Name who to escalate to." };
+    if (escalationTarget === identity.principalId) return { status: "error", message: "You cannot escalate a workflow to yourself." };
     if (!reasonCode) return { status: "error", message: "Give a reason code for the escalation." };
+  }
+  if (command === "request-changes" && !narrative) {
+    return { status: "error", message: "Say what needs to change. It is recorded and shown to the initiator." };
   }
   if (command === "invalidate") {
     if (!reasonCode) return { status: "error", message: "Choose a governed reason for the invalidation." };
-    if (!/^\d+$/.test(expectedVersion)) {
-      return { status: "error", message: "Enter the version you last read (look the workflow up above — it is shown there)." };
+    if (!/^\d+$/.test(rowVersion)) {
+      return { status: "error", message: "Invalidating needs the version you last read. Reload the page and try again." };
     }
   }
+  if (rowVersion && !/^\d+$/.test(rowVersion)) return { status: "error", message: "The version read with the page is not a number. Reload and try again." };
 
   const result = await runLifecycleCommand({
     identity,
@@ -336,8 +355,8 @@ export async function lifecycleAction(_prev: LifecycleState, formData: FormData)
     escalationTarget: escalationTarget || undefined,
     reasonCode: reasonCode || undefined,
     narrative: narrative || undefined,
-    expectedVersion: command === "invalidate" ? expectedVersion : undefined,
-    idempotencyKey,
+    rowVersion: rowVersion || undefined,
+    idempotencyKey: idempotencyKey || crypto.randomUUID(),
   });
   if (!result.ok) return refusedOrError(result.error.status, result.error.message);
 
@@ -365,11 +384,13 @@ export async function verifyReleaseAction(_prev: ReleaseState, formData: FormDat
   }
   if (version && !/^\d+$/.test(version)) return { status: "error", message: "The subject version must be a whole number." };
 
+  const rowVersion = text(formData, "row_version");
   const result = await verifyRelease({
     identity,
     workflowInstanceId: id,
     currentSubjectFingerprint: fingerprint,
     expectedSubjectVersion: version ? Number(version) : undefined,
+    rowVersion: /^\d+$/.test(rowVersion) ? rowVersion : undefined,
   });
 
   if (!result.ok) {
@@ -433,24 +454,55 @@ export async function defineWorkflowAction(
   });
   if (!result.ok) return refusedOrError(result.error.status, result.error.message);
 
+  // "Save & send for validation": the draft goes straight to
+  // VALIDATION_PENDING, where someone other than the author approves it.
+  if (text(formData, "then") === "validate" && result.data.status === "DRAFT") {
+    const sent = await runDefinitionCommand({
+      identity,
+      workflowDefinitionId: result.data.workflow_definition_id,
+      command: "validate",
+      rowVersion: result.data.row_version,
+    });
+    refresh();
+    if (!sent.ok) {
+      return {
+        status: "defined",
+        definition: result.data,
+        message: `Saved v${result.data.version} as a draft, but sending it for validation failed: ${explainWorkflowError(sent.error.message)}`,
+      };
+    }
+    const after = "status" in sent.data && sent.data.status ? { ...result.data, ...(sent.data as WorkflowDefinition) } : result.data;
+    return {
+      status: "defined",
+      definition: after,
+      message: `Saved ${result.data.name || result.data.workflow_type} v${result.data.version} and sent it for validation. Someone other than you approves it next.`,
+    };
+  }
+
   refresh();
   return {
     status: "defined",
     definition: result.data,
-    message: `Registered ${result.data.workflow_type} v${result.data.version}. It is active now — new workflows of this type can start from it.`,
+    message:
+      result.data.status === "DRAFT"
+        ? `Saved ${result.data.name || result.data.workflow_type} v${result.data.version} as a draft. Validate it, have someone else approve it, then publish it.`
+        : `Registered ${result.data.workflow_type} v${result.data.version}.`,
   };
 }
 
-// Retire is worded exactly like suspend because the service stores them the
-// same way — both clear is_active, and either can be activated again. Calling
-// retirement final here would claim a control workflow-svc does not have.
+// What each command did, in the reader's terms. Suspend and retire differ in
+// the WFC-01 lifecycle: a suspended route can be activated again, a retired
+// one cannot.
 const DEFINITION_DONE: Record<DefinitionCommand, string> = {
-  activate: "Activated. New workflows can start from this definition.",
+  validate: "Sent for validation. Someone other than the author now approves the route.",
+  approve: "Validation approved. Submit it for publication approval next.",
+  reject: "Rejected. Nothing can start from it; register a corrected version.",
+  "submit-approval": "Submitted for publication approval.",
+  publish: "Published. New workflows of this type can start from it.",
+  activate: "Activated. New workflows can start from this definition again.",
   suspend: "Suspended. Nothing new can start from it; workflows already running keep the route they started with.",
-  retire:
-    "Retired. Nothing new can start from it; workflows already running keep the route they started with. workflow-svc records this exactly as a suspension, so it can still be activated again.",
-  supersede:
-    "Superseded. This definition is now inactive and points at its replacement, which is active.",
+  retire: "Retired. Nothing new can start from it; workflows already running keep the route they started with.",
+  supersede: "Superseded. This definition is now inactive and points at its replacement.",
 };
 
 export async function definitionCommandAction(
@@ -467,19 +519,37 @@ export async function definitionCommandAction(
   const definitionId = text(formData, "workflow_definition_id");
   const command = text(formData, "command") as DefinitionCommand;
   const newDefinitionId = text(formData, "new_definition_id");
+  const rowVersion = text(formData, "row_version");
+  const reasonCode = text(formData, "reason_code");
+  const narrative = text(formData, "narrative");
+  const effectiveFrom = text(formData, "effective_from");
 
   if (!UUID.test(definitionId)) return { status: "error", message: "Choose a definition." };
   if (!(command in DEFINITION_DONE)) return { status: "error", message: "Choose what to do." };
+  if (!/^\d+$/.test(rowVersion)) return { status: "error", message: "The version read with the page is missing. Reload the page and try again." };
   if (command === "supersede") {
     if (!UUID.test(newDefinitionId)) return { status: "error", message: "Choose the definition that replaces it." };
     if (newDefinitionId === definitionId) return { status: "error", message: "A definition cannot supersede itself." };
+  }
+  if ((command === "approve" || command === "reject") && !reasonCode) {
+    return { status: "error", message: "Choose a reason. It is recorded with the decision." };
+  }
+  let effectiveIso: string | undefined;
+  if (command === "publish" && effectiveFrom) {
+    const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom) ? `${effectiveFrom}T00:00:00Z` : effectiveFrom);
+    if (Number.isNaN(d.getTime())) return { status: "error", message: "The effective date could not be read." };
+    effectiveIso = d.toISOString().replace(/\.\d{3}Z$/, "Z");
   }
 
   const result = await runDefinitionCommand({
     identity,
     workflowDefinitionId: definitionId,
     command,
+    rowVersion,
     newDefinitionId: newDefinitionId || undefined,
+    reasonCode: reasonCode || undefined,
+    narrative: narrative || undefined,
+    effectiveFrom: effectiveIso,
   });
   if (!result.ok) return refusedOrError(result.error.status, result.error.message);
 
