@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as governance from "./governance";
 import {
   decisionTitle,
   explainDecisionError,
   getDecisionStats,
   listDecisionRecords,
-  recordDecision,
   splitRuleBasis,
   statusView,
 } from "./governance";
@@ -63,22 +63,10 @@ describe("governance client", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("records a decision with a generated id, an idempotency key, and the causation in body and header alike", async () => {
-    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(json(201, { decision_id: "d", display_ref: "GD-2026-0001" }));
-    const r = await recordDecision(
-      { actionType: "X", outcome: "APPROVED", ruleBasis: "R", legalEntityId: "e-2", causationId: "parent", tags: ["a"], priority: "HIGH" },
-      identity,
-    );
-    expect(r.ok && r.status).toBe(201);
-    const [, init] = fetch.mock.calls[0] as [string, RequestInit];
-    const headers = init.headers as Record<string, string>;
-    const body = JSON.parse(String(init.body));
-    expect(body.decision_id).toMatch(/[0-9a-f-]{36}/);
-    expect(body.causation_id).toBe("parent");
-    expect(headers["X-Causation-Id"]).toBe("parent");
-    expect(headers["Idempotency-Key"]).toBeTruthy();
-    expect(headers["X-Legal-Entity-Id"]).toBe("e-2");
-    expect(body.legal_entity_id).toBe("e-2");
+  it("has no write to the ledger: decisions are recorded by services, never from the console (D-DL-2)", () => {
+    for (const name of ["recordDecision", "replayDecision", "sealPackage"]) {
+      expect(name in governance).toBe(false);
+    }
   });
 
   it("builds the overview stats from the summary endpoint", async () => {

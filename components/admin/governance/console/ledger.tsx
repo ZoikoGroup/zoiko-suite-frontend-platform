@@ -10,7 +10,7 @@ import { person } from "@/lib/directory";
 import { humanizeCode } from "@/lib/humanize";
 import type { DecisionSummary, EvidencePackage, ReplayManifest } from "@/lib/api/governance";
 import { BASE, href, type Query } from "./data";
-import { SealDialog, VerifyChainDialog, VerifyPackageDialog } from "./forms";
+import { VerifyChainDialog, VerifyPackageDialog } from "./forms";
 import { Pager } from "./register";
 
 const TH = "whitespace-nowrap px-3 py-2.5 text-left text-[11.5px] font-semibold text-slate-500 first:pl-5 dark:text-slate-400";
@@ -116,7 +116,7 @@ export function EvidenceTab({
           <p className="max-w-2xl text-[12.5px] leading-relaxed text-slate-600 dark:text-slate-300">
             Every decision is hash-linked to the one before it by the database the moment it is stored. A sealed package commits to
             the chain with an RFC 6962 Merkle root, so re-verifying it later proves no sealed decision was changed — even by
-            someone able to rewrite the database.
+            someone able to rewrite the database. The ledger seals itself every hour; nobody seals or edits it by hand.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <VerifyChainDialog />
@@ -125,7 +125,6 @@ export function EvidenceTab({
               <Download className="h-4 w-4" />
               Export Evidence
             </a>
-            <SealDialog unsealed={unsealed} />
           </div>
         </div>
         <dl className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">

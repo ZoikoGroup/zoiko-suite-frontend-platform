@@ -9,7 +9,7 @@
 // decision naming the earlier one as its causation (a follow-up).
 
 import { REQUEST_TIMEOUT_MS, serviceLabel, serviceUrl } from "./config";
-import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
+import { apiGet, type ApiResult, type Identity } from "./client";
 import { envelopeHeaders } from "./envelope";
 import { humanizeCode } from "../humanize";
 
@@ -307,79 +307,12 @@ export async function exportEvidenceBundle(
 }
 
 // ── writes ───────────────────────────────────────────────────────────────────
-
-export type RecordDecisionInput = {
-  actionType: string;
-  outcome: string;
-  ruleBasis: string;
-  legalEntityId: string;
-  title?: string;
-  summary?: string;
-  domain?: string;
-  priority?: string;
-  tags?: string[];
-  jurisdiction?: string;
-  relatedObligationId?: string;
-  subjectType?: string;
-  subjectId?: string;
-  /** The decision this one follows up (resolves, overrides, corrects). */
-  causationId?: string;
-  evaluationContext?: unknown;
-  /** RFC3339 — when the decision was made, not when it is logged. */
-  decidedAt?: string;
-};
-
-/**
- * Append one decision. decision_id and the correlation id are generated here:
- * decision_id is the service's dedup key, and a human-chosen one would collide.
- * 201 = recorded; 200 = an identical decision was already recorded.
- */
-export function recordDecision(input: RecordDecisionInput, identity: Identity): Promise<ApiWriteResult<GovernanceDecision>> {
-  const correlationId = crypto.randomUUID();
-  const body: Record<string, unknown> = {
-    decision_id: crypto.randomUUID(),
-    legal_entity_id: input.legalEntityId,
-    action_type: input.actionType,
-    outcome: input.outcome,
-    rule_basis: input.ruleBasis,
-    correlation_id: correlationId,
-    decided_at: input.decidedAt ?? new Date().toISOString(),
-  };
-  const optional: [string, unknown][] = [
-    ["title", input.title],
-    ["summary", input.summary],
-    ["domain", input.domain],
-    ["priority", input.priority],
-    ["tags", input.tags?.length ? input.tags : undefined],
-    ["jurisdiction_context", input.jurisdiction],
-    ["related_obligation_id", input.relatedObligationId],
-    ["action_subject_type", input.subjectType],
-    ["action_subject_id", input.subjectId],
-    ["causation_id", input.causationId],
-    ["evaluation_context", input.evaluationContext],
-  ];
-  for (const [k, v] of optional) if (v !== undefined && v !== "") body[k] = v;
-  return apiPost<GovernanceDecision>("governance", "/v1/decisions", body, {
-    identity: { ...identity, legalEntityId: input.legalEntityId },
-    correlationId,
-    causationId: input.causationId,
-  });
-}
-
-export function replayDecision(decisionId: string, identity: Identity): Promise<ApiWriteResult<ReplayManifest>> {
-  return apiPost<ReplayManifest>("governance", `/v1/decisions/${encodeURIComponent(decisionId)}/replay`, {}, { identity });
-}
-
-export function sealPackage(
-  input: { throughDecisionId?: string; label?: string; reason?: string },
-  identity: Identity,
-): Promise<ApiWriteResult<EvidencePackage>> {
-  const body: Record<string, string> = {};
-  if (input.throughDecisionId) body.through_decision_id = input.throughDecisionId;
-  if (input.label) body.label = input.label;
-  if (input.reason) body.reason = input.reason;
-  return apiPost<EvidencePackage>("governance", "/v1/evidence/packages/seal", body, { identity });
-}
+//
+// None. The console is read-only (decision D-DL-2, 25 Nov 2026): every
+// governance engine appends its own decisions over mTLS as its service
+// principal, escalations are resolved through Workflows & Approvals, the ledger
+// seals itself hourly and replay stays at the API for auditors. Verify Chain and
+// Verify Package re-compute and write nothing (see verifyChain, verifyPackage).
 
 // ── presentation helpers ─────────────────────────────────────────────────────
 
