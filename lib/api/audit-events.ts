@@ -1,271 +1,337 @@
-import { apiGet, apiPost } from "./client";
+// audit-event-store-svc (:8084) — the append-only, audit-grade event store.
+//
+// 03-microservices.md §14.1: "Stores append-only, audit-grade event records
+// correlated to source actions." Critical constraint: "Records must be
+// immutable and queryable by actor, entity, action, workflow, or time range."
+//
+// Two halves to this service's surface:
+//
+//  1. GET /v1/events + POST /v1/events/verify — Doc 03 §14.1's query API and
+//     live hash-chain verification. Every row is linked to the previous one by
+//     hash (previous_hash / hash_signature), so a broken link anywhere in the
+//     chain is detectable without trusting any single row.
+//
+//  2. POST /v1/archives, GET /v1/archives/{id}, POST /v1/archives/{id}/verify,
+//     GET /v1/archives/{id}/verifications — AUD-10 "Audit Trail / Data
+//     Export"'s archive half: a permanent, re-verifiable claim that a sequence
+//     range formed an unbroken chain as of its creation. Archives are never
+//     mutated after creation (migration 000004's reject_archive_mutation
+//     trigger) and an archive can be re-verified many times over its life —
+//     every verification attempt is itself a permanent row, never overwritten.
+//
+// Both halves require X-Principal-Id (401 principal_required without it) and
+// are authorized against a PLATFORM scope, not the caller's tenant — this
+// service's own SoD model assigns AUDIT_EVENT_READ / AUDIT_ARCHIVE_MANAGE to
+// platform-level roles (Compliance Auditor, System Admin), not per-tenant
+// business users. A caller without the grant gets 403; if authorization-svc
+// itself is unreachable the service fails CLOSED with 503 rather than
+// admitting the request — an evidence ledger must never silently open up
+// because its authorization dependency is down.
+//
+// X-Tenant-Id is still mandatory on every route (401 tenant_required without
+// it) — it scopes which tenant's events/archives come back, even though the
+// permission check itself is platform-wide.
 
-export interface AuditEvent {
+import { apiGet, apiPost, type ApiResult, type ApiWriteResult, type Identity } from "./client";
+
+/** Wire shape from the backend. Field names match the Go json tags exactly. */
+export type AuditEvent = {
   id: string;
-  correlation_id: string;
-  tenant_id: string;
-  principal_id: string;
-  principal_name: string;
+  event_id: string;
+  event_type: string;
   action: string;
-  domain: "tax" | "legal" | "commercial-ops" | "finance" | "payroll" | "hr" | "compliance";
-  resource: string;
-  resource_id: string;
-  status: "AUTHORIZED" | "ESCALATED" | "DENIED" | "COMMITTED";
+  tenant_id: string;
+  legal_entity_id: string;
+  principal_id: string;
+  principal_name?: string;
+  domain?: string;
+  resource?: string;
+  resource_id?: string;
+  status?: string;
+  source_service: string;
+  schema_version: string;
+  /** Free-form JSON — whatever the source service attached to the event. */
+  payload: unknown;
+  stored_at: string;
   timestamp: string;
+  correlation_id: string;
+  causation_id?: string;
+  sequence_number: number;
+  payload_hash: string;
   hash_signature: string;
   previous_hash: string;
-  ip_address: string;
-  metadata: Record<string, string | number | boolean>;
-}
+  metadata?: Record<string, unknown>;
+};
 
-export interface AuditEventSummary {
-  totalEvents: number;
-  hashChainVerified: boolean;
-  authorizedCount: number;
-  escalatedCount: number;
-  deniedCount: number;
-  throughputPerMin: number;
-}
+export type QueryEventsResult = {
+  events: AuditEvent[];
+  total: number;
+  /** Whether the hash chain across the RETURNED page is intact. A full-store
+   *  verification is a separate call — see verifyEventsChain(). */
+  hash_chain_valid: boolean;
+};
 
-const FALLBACK_AUDIT_EVENTS: AuditEvent[] = [
-  {
-    id: "evt-2026-90812",
-    correlation_id: "corr-8f921a-4421-9980",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-admin-001",
-    principal_name: "Eleanor Vance (Chief Governance Officer)",
-    action: "ISSUE_PURCHASE_ORDER",
-    domain: "commercial-ops",
-    resource: "PurchaseOrder",
-    resource_id: "PO-2026-0414",
-    status: "COMMITTED",
-    timestamp: "2026-07-31T16:20:15Z",
-    hash_signature: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    previous_hash: "a189f72bc91028e47b01d32a901e82847291a182049281a02931818290318294",
-    ip_address: "192.168.1.42",
-    metadata: { amount: 450000, vendor: "Acme Cloud Infrastructure Inc.", currency: "USD" },
-  },
-  {
-    id: "evt-2026-90811",
-    correlation_id: "corr-7e112b-3310-8871",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-legal-004",
-    principal_name: "Marcus Aurelius (General Counsel)",
-    action: "EXECUTE_CONTRACT",
-    domain: "legal",
-    resource: "Contract",
-    resource_id: "cnt-2026-001",
-    status: "AUTHORIZED",
-    timestamp: "2026-07-31T15:45:00Z",
-    hash_signature: "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-    previous_hash: "8f7e2a1b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f",
-    ip_address: "10.0.4.19",
-    metadata: { contract_title: "Global Enterprise Cloud MSA", risk_rating: "LOW" },
-  },
-  {
-    id: "evt-2026-90810",
-    correlation_id: "corr-6d001c-2209-7762",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-tax-002",
-    principal_name: "Sarah Jenkins (Global Tax Director)",
-    action: "EVALUATE_TAX_DETERMINATION",
-    domain: "tax",
-    resource: "TaxDetermination",
-    resource_id: "det-uk-vat-2026",
-    status: "COMMITTED",
-    timestamp: "2026-07-31T14:12:30Z",
-    hash_signature: "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969",
-    previous_hash: "2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3",
-    ip_address: "192.168.1.88",
-    metadata: { jurisdiction: "GB", vat_rate: 20, net_amount: 1250000 },
-  },
-  {
-    id: "evt-2026-90809",
-    correlation_id: "corr-5c990d-1108-6653",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-payroll-009",
-    principal_name: "David Chen (VP Head of Payroll)",
-    action: "TRIGGER_PAY_RUN",
-    domain: "payroll",
-    resource: "PayRun",
-    resource_id: "pr-2026-07-monthly",
-    status: "ESCALATED",
-    timestamp: "2026-07-31T13:05:44Z",
-    hash_signature: "36579075782782e4e1a0670846503c513e9a117075c3ca57223e7178c7b8e235",
-    previous_hash: "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4",
-    ip_address: "10.0.2.14",
-    metadata: { employee_count: 1420, gross_total: 4850000, escalation_reason: "High overtime threshold exceeded" },
-  },
-  {
-    id: "evt-2026-90808",
-    correlation_id: "corr-4b889e-0097-5544",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-hr-003",
-    principal_name: "Amara Diallo (People Operations Officer)",
-    action: "ONBOARD_EMPLOYEE",
-    domain: "hr",
-    resource: "EmployeeRecord",
-    resource_id: "emp-2026-0891",
-    status: "COMMITTED",
-    timestamp: "2026-07-31T11:30:12Z",
-    hash_signature: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-    previous_hash: "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5",
-    ip_address: "192.168.1.104",
-    metadata: { position: "Senior Cloud Architect", department: "Engineering" },
-  },
-  {
-    id: "evt-2026-90807",
-    correlation_id: "corr-3a778f-9986-4433",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-comp-007",
-    principal_name: "Victor Sterling (Head of Regulatory Compliance)",
-    action: "FILE_STATUTORY_DECLARATION",
-    domain: "compliance",
-    resource: "StatutoryFiling",
-    resource_id: "fil-sec-10k-2026",
-    status: "AUTHORIZED",
-    timestamp: "2026-07-31T10:15:22Z",
-    hash_signature: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
-    previous_hash: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6",
-    ip_address: "10.0.1.5",
-    metadata: { jurisdiction: "US-SEC", compliance_status: "PASSED" },
-  },
-  {
-    id: "evt-2026-90806",
-    correlation_id: "corr-2z667e-8875-3322",
-    tenant_id: "tenant-zoiko-dev-01",
-    principal_id: "usr-unauth-099",
-    principal_name: "External Service Account (API)",
-    action: "MUTATE_FEES_SCHEDULE",
-    domain: "finance",
-    resource: "FeeSchedule",
-    resource_id: "sched-2026-v1",
-    status: "DENIED",
-    timestamp: "2026-07-31T09:04:11Z",
-    hash_signature: "f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8",
-    previous_hash: "6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7",
-    ip_address: "203.0.113.88",
-    metadata: { refusal_reason: "RBAC principal lacks mutate:finance permission" },
-  },
-];
-
-/**
- * Fetch all logged audit events from audit-event-store-svc.
- */
-export async function getAuditEvents(): Promise<{
-  data: AuditEvent[];
-  summary: AuditEventSummary;
-  isMock: boolean;
-  error: string | null;
-}> {
-  const res = await apiGet<AuditEvent[]>("auditEventStore", "/v1/events");
-
-  if (!res.ok) {
-    return {
-      data: FALLBACK_AUDIT_EVENTS,
-      summary: {
-        totalEvents: FALLBACK_AUDIT_EVENTS.length,
-        hashChainVerified: true,
-        authorizedCount: FALLBACK_AUDIT_EVENTS.filter((e) => e.status === "AUTHORIZED").length,
-        escalatedCount: FALLBACK_AUDIT_EVENTS.filter((e) => e.status === "ESCALATED").length,
-        deniedCount: FALLBACK_AUDIT_EVENTS.filter((e) => e.status === "DENIED").length,
-        throughputPerMin: 142,
-      },
-      isMock: true,
-      error: res.error.message,
-    };
-  }
-
-  const raw = res.data;
-  // audit-event-store-svc returns { events: [...], total, hash_chain_valid }
-  // apiGet<AuditEvent[]> passes the raw object through — extract the array safely.
-  const events: AuditEvent[] = Array.isArray(raw)
-    ? raw
-    : Array.isArray((raw as unknown as Record<string, unknown>)?.events)
-    ? ((raw as unknown as Record<string, unknown>).events as AuditEvent[])
-    : [];
-
-  return {
-    data: events,
-    summary: {
-      totalEvents: events.length,
-      hashChainVerified: true,
-      authorizedCount: events.filter((e) => e.status === "AUTHORIZED").length,
-      escalatedCount: events.filter((e) => e.status === "ESCALATED").length,
-      deniedCount: events.filter((e) => e.status === "DENIED").length,
-      throughputPerMin: 180,
-    },
-    isMock: false,
-    error: null,
-  };
-}
-
-/**
- * Perform cryptographic hash verification on an audit event log chain.
- */
-export async function verifyAuditChain(): Promise<{
-  verified: boolean;
-  timestamp: string;
-  checkedEvents: number;
-}> {
-  const res = await apiPost<{ verified?: boolean; checkedEvents?: number; hash_chain_valid?: boolean; status?: string }>(
-    "auditEventStore",
-    "/v1/events/verify",
-    {}
-  );
-
-  if (!res.ok) {
-    return {
-      verified: true,
-      timestamp: new Date().toISOString(),
-      checkedEvents: FALLBACK_AUDIT_EVENTS.length,
-    };
-  }
-
-  const raw = res.data;
-  const isVerified =
-    raw.verified === true ||
-    raw.hash_chain_valid === true ||
-    raw.status === "INGESTED" ||
-    (raw.verified !== false && raw.hash_chain_valid !== false);
-
-  return {
-    verified: isVerified,
-    timestamp: new Date().toISOString(),
-    checkedEvents: raw.checkedEvents ?? FALLBACK_AUDIT_EVENTS.length,
-  };
-}
-
-// ─── Write: Ingest Audit Event ────────────────────────────────────────────────
-
-export type IngestAuditEventInput = {
-  event_type?: string;
-  source_module?: string;
+/** Every filter GET /v1/events accepts. All optional, AND-composed. */
+export type EventFilters = {
+  /** Matches principal_id. */
   actor?: string;
-  action: string;
-  resource: string;
-  outcome?: string;
-  details?: string;
+  /** Matches legal_entity_id. */
+  entity?: string;
+  /** Matches event_type. */
+  action?: string;
+  /** Matches correlation_id — "every event from this workflow/request". */
+  workflow?: string;
+  /** RFC3339. The service answers 400 `invalid_from` on anything else. */
+  from?: string;
+  to?: string;
+  /** Service caps at 200 and defaults to 50. */
+  limit?: number;
+  offset?: number;
+  identity?: Identity;
 };
 
 /**
- * POST a new audit event to audit-event-store-svc.
+ * List audit events with the service's full filter set.
  *
- * Used by the service-inputs manual test console to record that a test run
- * was executed, leaving a tamper-evident trace in the audit log chain.
+ * Unlike governance-decision-log-svc, this route reports `total` and
+ * `hash_chain_valid` alongside the page — so pagination here does not need the
+ * "ask for one extra row" probe the Governance log uses.
  */
-export async function ingestAuditEvent(
-  body: IngestAuditEventInput,
-): Promise<{ ok: boolean; eventId?: string; error?: string }> {
-  const res = await apiPost<{ event_id?: string; id?: string }>(
+export async function listEvents(
+  filters: EventFilters = {},
+): Promise<ApiResult<QueryEventsResult>> {
+  return apiGet<QueryEventsResult>("auditEventStore", "/v1/events", {
+    identity: filters.identity,
+    query: {
+      actor: filters.actor,
+      entity: filters.entity,
+      action: filters.action,
+      workflow: filters.workflow,
+      from: filters.from,
+      to: filters.to,
+      limit: filters.limit ?? 50,
+      offset: filters.offset,
+    },
+  });
+}
+
+export type ChainVerification = {
+  verified: boolean;
+  /** The service sends both spellings on the wire; this is the canonical one. */
+  checked_events: number;
+  timestamp: string;
+};
+
+/**
+ * Verify the full store's hash chain, end to end.
+ *
+ * Distinct from `hash_chain_valid` on a query page (which only covers the rows
+ * returned): this walks every event the tenant can see and confirms each one's
+ * previous_hash matches the prior row's hash_signature. A broken link anywhere
+ * comes back as `verified: false` — the service does not say where; a snapped
+ * chain is a store-integrity incident, not a filterable fact.
+ */
+export async function verifyEventsChain(identity?: Identity): Promise<ApiResult<ChainVerification>> {
+  const result = await apiPost<{ verified: boolean; checkedEvents: number; checked_events: number; timestamp: string }>(
     "auditEventStore",
-    "/v1/events",
-    body,
+    "/v1/events/verify",
+    {},
+    {
+      identity,
+      // This service's §4 policy (internal/envelope/contract.go) requires
+      // purpose_context on every material write, and verify is a POST despite
+      // reading nothing back that the caller wrote — see
+      // Policy.materialWrite(), which keys off HTTP method, not semantics.
+      // Confirmed live: omitting this gets 400 envelope_incomplete.
+      purposeContext: "AUDIT_CHAIN_VERIFY",
+    },
   );
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    data: {
+      verified: result.data.verified,
+      checked_events: result.data.checked_events ?? result.data.checkedEvents,
+      timestamp: result.data.timestamp,
+    },
+  };
+}
 
-  if (!res.ok) {
-    return { ok: false, error: res.error.message };
+export type Archive = {
+  archive_id: string;
+  tenant_id: string;
+  from_sequence: number;
+  to_sequence: number;
+  event_count: number;
+  archive_digest: string;
+  first_event_hash: string;
+  last_event_hash: string;
+  created_by_principal_id: string;
+  created_at: string;
+};
+
+export type VerificationResult = "VERIFIED" | "DIVERGED";
+
+export type ArchiveVerificationRecord = {
+  verification_id: string;
+  archive_id: string;
+  tenant_id: string;
+  verified_by_principal_id: string;
+  verified_at: string;
+  result: VerificationResult;
+  /** Present only when result is DIVERGED — the first sequence number where the
+   *  chain no longer matches what the archive recorded. */
+  first_divergent_sequence?: number;
+};
+
+export type CreateArchiveInput = {
+  fromSequence: number;
+  toSequence: number;
+  /** Idempotency-Key. Left unset, apiPost generates a fresh one per call — set
+   *  this when a resubmit of the SAME archive request must collapse rather
+   *  than be evaluated as a second, distinct request. */
+  idempotencyKey?: string;
+  identity?: Identity;
+};
+
+/**
+ * Create an archive over [fromSequence, toSequence].
+ *
+ * 201 means a new archive was sealed. 200 means the Idempotency-Key had
+ * already been used for this exact request (same principal, same range) and
+ * nothing new was written — the original archive is returned either way.
+ * Reusing the same key for a DIFFERENT range or a different principal is a
+ * 409 `idempotency_mismatch`, not a silent substitution.
+ *
+ * The service verifies the chain across the range before sealing it: a break
+ * anywhere inside [fromSequence, toSequence] is a 409 `chain_broken` and no
+ * archive row is created — there is nothing reproducible to archive.
+ */
+export async function createArchive(input: CreateArchiveInput): Promise<ApiWriteResult<Archive>> {
+  return apiPost<Archive>(
+    "auditEventStore",
+    "/v1/archives",
+    { from_sequence: input.fromSequence, to_sequence: input.toSequence },
+    {
+      identity: input.identity,
+      idempotencyKey: input.idempotencyKey,
+      // Required on every material write by this service's §4 policy —
+      // confirmed live: omitting it gets 400 envelope_incomplete.
+      purposeContext: "AUDIT_ARCHIVE_CREATE",
+    },
+  );
+}
+
+export async function getArchive(archiveId: string, identity?: Identity): Promise<ApiResult<Archive>> {
+  return apiGet<Archive>("auditEventStore", `/v1/archives/${encodeURIComponent(archiveId)}`, {
+    identity,
+  });
+}
+
+/**
+ * Re-verify a sealed archive against the current store.
+ *
+ * This is how a tamper-evident archive earns that description after the fact:
+ * every call appends a new ArchiveVerification row (VERIFIED or DIVERGED) and
+ * none of them ever overwrite an earlier one — the full verification history
+ * is itself evidence.
+ */
+export async function verifyArchive(
+  archiveId: string,
+  identity?: Identity,
+): Promise<ApiWriteResult<ArchiveVerificationRecord>> {
+  return apiPost<ArchiveVerificationRecord>(
+    "auditEventStore",
+    `/v1/archives/${encodeURIComponent(archiveId)}/verify`,
+    {},
+    {
+      identity,
+      // Required on every material write by this service's §4 policy —
+      // confirmed live: omitting it gets 400 envelope_incomplete.
+      purposeContext: "AUDIT_ARCHIVE_VERIFY",
+    },
+  );
+}
+
+export async function listVerifications(
+  archiveId: string,
+  identity?: Identity,
+): Promise<ApiResult<ArchiveVerificationRecord[]>> {
+  const result = await apiGet<ArchiveVerificationRecord[]>(
+    "auditEventStore",
+    `/v1/archives/${encodeURIComponent(archiveId)}/verifications`,
+    { identity },
+  );
+  if (!result.ok) return result;
+  if (!Array.isArray(result.data)) {
+    return {
+      ok: false,
+      error: { kind: "malformed", message: "audit-event-store-svc returned a non-array verification list" },
+    };
   }
+  return result;
+}
 
-  return { ok: true, eventId: res.data.event_id ?? res.data.id };
+/**
+ * Turn a backend failure into something an operator can act on.
+ *
+ * The client folds the error body's `message` field into `ApiError.message` —
+ * this service's own `code` (e.g. "tenant_required") is NOT part of that
+ * folded text (see readErrorDetail in lib/api/client.ts), so matching is on
+ * the literal sentences handler.go sends, not on the machine code.
+ */
+export function explainAuditEventError(message: string): string {
+  if (message.includes("envelope_incomplete")) {
+    // Should not happen from this console's own calls — every write here sets
+    // purpose_context, and request_id/source_channel/idempotency_key are set
+    // automatically by lib/api/client.ts. Left as a real explanation rather
+    // than a bare passthrough in case the contract changes under this code.
+    return `The request was missing required fields: ${message}`;
+  }
+  if (message.includes("X-Principal-Id header is required")) {
+    return "Your session is missing a principal id — sign in again.";
+  }
+  if (message.includes("X-Tenant-Id header is required")) {
+    return "Your session is missing a tenant id — sign in again.";
+  }
+  if (message.includes("not authorized to perform this action")) {
+    return "You are not authorized for this action. Audit event and archive access is granted at the platform level (Compliance Auditor / System Admin), not per tenant — ask whoever administers those grants.";
+  }
+  if (message.includes("authorization service unavailable")) {
+    return "authorization-svc could not be reached, so the request was refused rather than silently allowed. Nothing was read or written.";
+  }
+  if (message.includes("limit must be an integer")) {
+    return "limit must be an integer between 1 and 200.";
+  }
+  if (message.includes("offset must be an integer")) {
+    return "offset must be an integer of 0 or more.";
+  }
+  if (message.includes("RFC 3339 timestamp")) {
+    return "The date range was not valid RFC3339. Use a full timestamp, e.g. 2026-07-30T00:00:00Z.";
+  }
+  if (message.includes("from must not be after to")) {
+    return "The From date must not be after the To date.";
+  }
+  if (message.includes("to_sequence must be greater than or equal to from_sequence")) {
+    return "to_sequence must be greater than or equal to from_sequence.";
+  }
+  if (message.includes("no events exist in the requested sequence range")) {
+    return "No events exist in that sequence range — nothing to archive.";
+  }
+  if (message.includes("hash chain is broken")) {
+    return "The hash chain is broken somewhere inside that sequence range, so this range cannot be archived as a reproducible claim. This is a store-integrity finding, not a usage mistake — escalate it.";
+  }
+  if (message.includes("Idempotency-Key was already used")) {
+    return "That Idempotency-Key was already used for a different request (a different range, or a different principal). Use a new key, or confirm this is really meant to be the same request.";
+  }
+  if (message.includes("archive not found")) {
+    return "No archive with that id exists, or it is not visible to your tenant.";
+  }
+  if (message.includes("Idempotency-Key must be at most")) {
+    return "The idempotency key is too long (255 characters max).";
+  }
+  if (message.includes("is unreachable") || message.includes("did not respond")) {
+    return "audit-event-store-svc could not be reached. Nothing was read or written.";
+  }
+  return message;
 }
