@@ -58,8 +58,18 @@ export type WorkflowInstance = {
   workflow_definition_id?: string | null;
   workflow_definition_version?: number | null;
   row_version?: number;
+  /** When it started; the service's lists are ordered by it, newest first. */
+  started_at?: string;
+  /** Set once it reaches a terminal state. */
+  completed_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  /** The governance decision this workflow resolves (an escalated policy,
+   *  signatory or authorization decision), when one started it. */
+  causation_decision_id?: string | null;
+  invalidated_at?: string | null;
+  invalidation_reason_code?: string | null;
+  invalidation_narrative?: string | null;
 };
 
 export type WorkflowStage = {
@@ -116,7 +126,41 @@ export type WorkflowDefinition = {
   is_active: boolean;
   expiry_hours?: number | null;
   escalation_target?: string | null;
+  /** The If-Match every lifecycle command needs, as `"v<row_version>"`. */
+  row_version?: number;
+  updated_at?: string;
+  /** WFC-01 publication lifecycle (DefinitionStatus). Absent on builds that predate it. */
+  status?: DefinitionStatus | string | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  validated_by?: string | null;
+  validated_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  published_by?: string | null;
+  published_at?: string | null;
+  /** sha256 of the canonical route, fixed when it is published. */
+  checksum?: string | null;
+  /** The route parsed by the service, when it sends it (GET by id). */
+  stages?: StageInput[] | null;
 };
+
+/**
+ * WFC-01: DRAFT → (validate) VALIDATION_PENDING → (approve, by someone other
+ * than the author) VALIDATED → (submit-approval) APPROVAL_PENDING → (publish)
+ * PUBLISHED. Either pending state can be rejected. A published route can be
+ * suspended, superseded or retired; a suspended one activated again.
+ */
+export type DefinitionStatus =
+  | "DRAFT"
+  | "VALIDATION_PENDING"
+  | "VALIDATED"
+  | "APPROVAL_PENDING"
+  | "PUBLISHED"
+  | "REJECTED"
+  | "SUSPENDED"
+  | "SUPERSEDED"
+  | "RETIRED";
 
 /** A stage as a caller describes it, for an instance or a definition. */
 export type StageInput = {
@@ -186,18 +230,64 @@ export function getApprovalEvidence(
   });
 }
 
-export function listWorkflowDefinitions(
+/** API-3 ETag for a row_version the console read: `"v3"`. */
+export function etagFor(rowVersion: number | string | undefined | null): string | undefined {
+  const n = Number(rowVersion);
+  return Number.isInteger(n) && n > 0 ? `"v${n}"` : undefined;
+}
+
+/**
+ * Instances of the caller's tenant, newest first. WORKFLOW_READ at PLATFORM
+ * scope. One page only (≤ 200): workflow-svc appends its cursor clause after
+ * the ORDER BY, so following next_cursor fails — the console reads the latest
+ * page and says so when it is full.
+ */
+export async function listWorkflows(
+  identity: Identity,
+  filters: { status?: string; workflowType?: string; legalEntityId?: string; limit?: number } = {},
+): Promise<ApiResult<{ records: WorkflowInstance[]; nextCursor?: string }>> {
+  const r = await apiGet<WorkflowInstance[] | { records?: WorkflowInstance[] | null; next_cursor?: string }>(SERVICE, "/v1/workflows", {
+    identity,
+    query: {
+      workflow_status: filters.status,
+      workflow_type: filters.workflowType,
+      legal_entity_id: filters.legalEntityId,
+      limit: filters.limit ?? 200,
+    },
+  });
+  if (!r.ok) return r;
+  if (Array.isArray(r.data)) return { ok: true, data: { records: r.data } };
+  if (r.data && (Array.isArray(r.data.records) || r.data.records === null)) {
+    return { ok: true, data: { records: r.data.records ?? [], nextCursor: r.data.next_cursor || undefined } };
+  }
+  return { ok: false, error: { kind: "malformed", message: "workflow-svc answered /v1/workflows without a records list" } };
+}
+
+export function getWorkflowDefinition(id: string, identity: Identity): Promise<ApiResult<WorkflowDefinition>> {
+  return apiGet<WorkflowDefinition>(SERVICE, `/v1/workflow-definitions/${encodeURIComponent(id)}`, { identity });
+}
+
+export async function listWorkflowDefinitions(
   identity: Identity,
   options: { workflowType?: string; isActive?: boolean } = {},
 ): Promise<ApiResult<WorkflowDefinition[]>> {
-  return apiGet<WorkflowDefinition[]>(SERVICE, "/v1/workflow-definitions", {
-    identity,
-    query: {
-      workflow_type: options.workflowType,
-      is_active: options.isActive === undefined ? undefined : String(options.isActive),
-      limit: 200,
+  const r = await apiGet<WorkflowDefinition[] | { records?: WorkflowDefinition[] | null; definitions?: WorkflowDefinition[] | null }>(
+    SERVICE,
+    "/v1/workflow-definitions",
+    {
+      identity,
+      query: {
+        workflow_type: options.workflowType,
+        is_active: options.isActive === undefined ? undefined : String(options.isActive),
+        limit: 200,
+      },
     },
-  });
+  );
+  if (!r.ok) return r;
+  if (Array.isArray(r.data)) return { ok: true, data: r.data };
+  const rows = r.data?.records ?? r.data?.definitions;
+  if (Array.isArray(rows) || rows === null) return { ok: true, data: rows ?? [] };
+  return { ok: false, error: { kind: "malformed", message: "workflow-svc answered /v1/workflow-definitions without a list" } };
 }
 
 // ─── Instance commands ───────────────────────────────────────────────────────
@@ -212,6 +302,10 @@ export function createWorkflow(input: {
   workflowDefinitionId?: string;
   stages?: StageInput[];
   idempotencyKey: string;
+  /** The governance decision this approval resolves (an ESCALATED policy
+   *  evaluation, say). workflow-svc stores it, and the workflow's ledger
+   *  records carry it as causation_id, so the Governance Log links the two. */
+  causationId?: string;
 }): Promise<ApiWriteResult<WorkflowWithStages>> {
   return apiPost<WorkflowWithStages>(
     SERVICE,
@@ -225,6 +319,7 @@ export function createWorkflow(input: {
       ...(input.escalationTarget ? { escalation_target: input.escalationTarget } : {}),
       ...(input.workflowDefinitionId ? { workflow_definition_id: input.workflowDefinitionId } : {}),
       ...(input.stages?.length ? { stages: input.stages } : {}),
+      ...(input.causationId ? { causation_id: input.causationId } : {}),
     },
     {
       // The body's legal entity is what is authorized and stored; the header
@@ -273,17 +368,26 @@ export async function decideWorkflow(input: {
 
 export type LifecycleCommand = "escalate" | "escalate-to" | "cancel" | "request-changes" | "invalidate";
 
-export function runLifecycleCommand(input: {
+export async function runLifecycleCommand(input: {
   identity: Caller;
   workflowInstanceId: string;
   command: LifecycleCommand;
   escalationTarget?: string;
   reasonCode?: string;
   narrative?: string;
-  /** invalidate only — the row_version the operator last read. */
-  expectedVersion?: string;
+  /** The row_version the operator last read; sent as If-Match (API-3). */
+  rowVersion?: number | string;
   idempotencyKey: string;
 }): Promise<ApiWriteResult<WorkflowInstance | { status: string }>> {
+  // Every lifecycle command but request-changes answers 428 without If-Match.
+  // Without a version from the caller, read the current one: the command then
+  // still fails (412) if the instance moves between that read and the write.
+  let ifMatch = etagFor(input.rowVersion);
+  if (!ifMatch) {
+    const current = await getWorkflowVersioned(input.workflowInstanceId, input.identity);
+    if (!current.ok) return current;
+    ifMatch = current.data.etag ?? etagFor(current.data.data.row_version);
+  }
   const path = `/v1/workflows/${encodeURIComponent(input.workflowInstanceId)}/${input.command}`;
   let body: unknown = undefined;
   switch (input.command) {
@@ -304,7 +408,7 @@ export function runLifecycleCommand(input: {
   return apiPost<WorkflowInstance | { status: string }>(SERVICE, path, body, {
     identity: input.identity,
     idempotencyKey: input.idempotencyKey,
-    expectedVersion: input.expectedVersion,
+    ifMatch,
   });
 }
 
@@ -313,12 +417,19 @@ export function runLifecycleCommand(input: {
  * now? 409 with can_release=false is an ANSWER, not a failure — the caller in
  * lib/api/client.ts reports it as an http error, so the action reads the body.
  */
-export function verifyRelease(input: {
+export async function verifyRelease(input: {
   identity: Caller;
   workflowInstanceId: string;
   currentSubjectFingerprint: string;
   expectedSubjectVersion?: number;
+  rowVersion?: number | string;
 }): Promise<ApiWriteResult<ReleaseVerification>> {
+  let ifMatch = etagFor(input.rowVersion);
+  if (!ifMatch) {
+    const current = await getWorkflowVersioned(input.workflowInstanceId, input.identity);
+    if (!current.ok) return current;
+    ifMatch = current.data.etag ?? etagFor(current.data.data.row_version);
+  }
   return apiPost<ReleaseVerification>(
     SERVICE,
     `/v1/workflows/${encodeURIComponent(input.workflowInstanceId)}/verify-release`,
@@ -328,7 +439,7 @@ export function verifyRelease(input: {
         ? { expected_subject_version: input.expectedSubjectVersion }
         : {}),
     },
-    { identity: input.identity },
+    { identity: input.identity, ifMatch },
   );
 }
 
@@ -366,20 +477,91 @@ export function createWorkflowDefinition(input: {
   );
 }
 
-export type DefinitionCommand = "activate" | "suspend" | "retire" | "supersede";
+export type DefinitionCommand =
+  | "activate"
+  | "suspend"
+  | "retire"
+  | "supersede"
+  | "validate"
+  | "approve"
+  | "reject"
+  | "submit-approval"
+  | "publish";
 
+/**
+ * One definition lifecycle command. Every one needs If-Match with the
+ * row_version the operator read, so a command never lands on a definition
+ * somebody moved on since. approve and reject need a reason code; publish
+ * takes an optional effective window.
+ */
 export function runDefinitionCommand(input: {
   identity: Caller;
   workflowDefinitionId: string;
   command: DefinitionCommand;
+  rowVersion?: number | string;
   newDefinitionId?: string;
-}): Promise<ApiWriteResult<{ status: string }>> {
-  return apiPost<{ status: string }>(
+  reasonCode?: string;
+  narrative?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+}): Promise<ApiWriteResult<WorkflowDefinition | { status: string }>> {
+  let body: Record<string, unknown> = {};
+  switch (input.command) {
+    case "supersede":
+      body = { new_definition_id: input.newDefinitionId };
+      break;
+    case "approve":
+    case "reject":
+      body = { reason_code: input.reasonCode, ...(input.narrative ? { narrative: input.narrative } : {}) };
+      break;
+    case "publish":
+      body = {
+        ...(input.effectiveFrom ? { effective_from: input.effectiveFrom } : {}),
+        ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
+      };
+      break;
+  }
+  return apiPost<WorkflowDefinition | { status: string }>(
     SERVICE,
     `/v1/workflow-definitions/${encodeURIComponent(input.workflowDefinitionId)}/${input.command}`,
-    input.command === "supersede" ? { new_definition_id: input.newDefinitionId } : {},
-    { identity: input.identity },
+    body,
+    { identity: input.identity, ifMatch: etagFor(input.rowVersion) },
   );
+}
+
+/** What a definition's status allows next (workflow-svc's transition table). */
+export const DEFINITION_NEXT: Record<string, DefinitionCommand[]> = {
+  DRAFT: ["validate", "retire"],
+  VALIDATION_PENDING: ["approve", "reject"],
+  VALIDATED: ["submit-approval"],
+  APPROVAL_PENDING: ["publish", "reject"],
+  PUBLISHED: ["suspend", "supersede", "retire"],
+  SUSPENDED: ["activate", "retire"],
+  SUPERSEDED: ["retire"],
+  REJECTED: [],
+  RETIRED: [],
+};
+
+const DEFINITION_STATUS_TEXT: Record<string, { label: string; tone: "success" | "warning" | "danger" | "neutral" | "info" }> = {
+  DRAFT: { label: "Draft", tone: "warning" },
+  VALIDATION_PENDING: { label: "Awaiting validation", tone: "info" },
+  VALIDATED: { label: "Validated", tone: "info" },
+  APPROVAL_PENDING: { label: "Awaiting approval", tone: "info" },
+  PUBLISHED: { label: "Published", tone: "success" },
+  REJECTED: { label: "Rejected", tone: "danger" },
+  SUSPENDED: { label: "Suspended", tone: "warning" },
+  SUPERSEDED: { label: "Superseded", tone: "neutral" },
+  RETIRED: { label: "Retired", tone: "neutral" },
+};
+
+/** A definition's lifecycle state in words. Builds without WFC-01 report only
+ *  is_active, shown as Active / Inactive rather than guessed. */
+export function describeDefinitionStatus(d: Pick<WorkflowDefinition, "status" | "is_active">): {
+  label: string;
+  tone: "success" | "warning" | "danger" | "neutral" | "info";
+} {
+  if (d.status) return DEFINITION_STATUS_TEXT[d.status] ?? { label: d.status, tone: "neutral" };
+  return d.is_active ? { label: "Active", tone: "success" } : { label: "Inactive", tone: "neutral" };
 }
 
 // ─── Reading ─────────────────────────────────────────────────────────────────
@@ -469,6 +651,24 @@ const ERRORS: [string, string][] = [
   ["legal_entity_mismatch", "The legal entity on the request does not match the one you are acting for."],
   ["registry_unavailable", "tenant-entity-registry-svc could not be reached to confirm the legal entity, so the workflow was refused rather than started on an unverified entity. Nothing was written."],
   ["invalid_transition", "The workflow is not in a state that allows that. A finished workflow cannot be escalated, cancelled or decided."],
+  // workflow-svc's domain error texts, for answers that carry no code.
+  ["may not approve or decide on their own submission", "You started this workflow, so you may not decide it. Segregation of duties holds whatever grants you have."],
+  ["may not appear as an approver in any stage", "You named yourself as an approver of a workflow you are starting. The initiator can never approve their own submission — choose somebody else."],
+  ["actor is not the approver for the current stage", "You are not the approver for the stage that is waiting. Only its named approver, a delegate of that approver, a holder of its role, or the escalation target may decide it."],
+  ["not an eligible approver for this quorum stage", "You are not in the approver pool for this quorum stage."],
+  ["the current stage is not a QUORUM stage", "The current stage is not a quorum stage — submit an ordinary decision instead of a vote."],
+  ["invalid workflow status transition", "The workflow is not in a state that allows that. A finished workflow cannot be escalated, cancelled or decided."],
+  ["authorization denied for this approval action", "authorization-svc refused this for your principal: you need WORKFLOW_APPROVE for this workflow type and stage."],
+  ["workflow was modified by another request", "Somebody changed this workflow while you were looking at it. Reload the page and decide again."],
+  ["workflow is not approved", "The workflow is not approved, so nothing can be released against it."],
+  ["approval has been invalidated", "The approval was invalidated, so nothing can be released against it."],
+  ["subject fingerprint does not match", "Do not release: the subject changed after it was approved."],
+  ["no bound subject fingerprint", "This workflow has no subject fingerprint bound, so a release cannot be verified against it."],
+  ["precondition_required", "workflow-svc needs the version you read (If-Match) for this change. Reload the page and try again."],
+  ["stale_version", "Somebody changed this record after you opened it, so nothing was written. Reload the page to see where it stands now, then decide again."],
+  ["invalid_if_match", "The version sent with this change could not be read. Reload the page and try again."],
+  ["approver cannot be the creator", "You authored this definition, so somebody else must approve it. Maker-checker holds whatever grants you have."],
+  ["cannot transition from", "The definition is not in a state that allows that. Reload the page to see where it stands now."],
   ["concurrency_conflict", "Somebody changed this workflow while you were looking at it. Look it up again and retry."],
   ["missing_expected_version", "Invalidating needs the version you last read, so an invalidation never lands on a workflow that moved on underneath you."],
   ["invalid_reason_code", "That reason is not a governed reason code (ZS-STATE-001 Appendix B)."],

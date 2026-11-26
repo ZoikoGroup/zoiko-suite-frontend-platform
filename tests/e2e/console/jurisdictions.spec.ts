@@ -11,13 +11,40 @@ const USERS = {
   maker: { email: "admin@zoikosuite.com", password: "Zoiko@Governance1" },
   checker: { email: "legal.counsel@zoikosuite.com", password: "Zoiko@Legal2026!" },
   third: { email: "tax.officer@zoikosuite.com", password: "Zoiko@Tax2026!" },
+  // A hotfix needs two independent approving reviewers besides the certifier,
+  // so a fourth person with JURISDICTION grants on the platform scope.
+  fourth: { email: "cfo@zoikosuite.com", password: "Zoiko@Finance2026!" },
 } as const;
+const FOURTH_ID = "55555555-5555-5555-5555-555555555555";
 type Who = keyof typeof USERS;
 
 const J = "/admin/jurisdictions";
 const RUN = randomBytes(3).toString("hex").toUpperCase().slice(0, 5);
 const CODE = `E2E${RUN}`;
 const PAGE_ERROR = /This page couldn.t load|server error occurred|Application error|Internal Server Error/i;
+
+// Typed rule parameters (ZS-JUR-001 decision-rule parameters): rates are decimal strings.
+const TAX_BANDS = JSON.stringify({ family: "TAX_BANDS", bands: [{ up_to: "1000", rate: "0.1" }, { up_to: null, rate: "0.2" }], rounding: { mode: "HALF_UP", scale: 2 } });
+const EINVOICE_PROFILE = JSON.stringify({
+  family: "EINVOICE_PROFILE",
+  profile: {
+    channel: "PEPPOL",
+    document_type: "INVOICE",
+    profile_version: "1.0",
+    syntax: "UBL_XML",
+    transmission_mode: "EXCHANGE",
+    timing: { retry_window_hours: 72, correction_window_days: 30 },
+    corrections: ["CREDIT_NOTE", "CANCEL"],
+    dependencies: [{ kind: "SCHEMA", ref: "peppol.pint.ubl", version: "2026.1", valid_from: "2026-01-01", valid_to: "2026-12-31" }],
+    semantic_mapping: [{ from: "invoice.number", to: "cbc:ID" }],
+    lifecycle: {
+      initial: "SUBMITTED",
+      terminal: ["ACCEPTED", "REJECTED"],
+      transitions: [["SUBMITTED", "PROCESSING"], ["SUBMITTED", "ACCEPTED"], ["SUBMITTED", "REJECTED"], ["PROCESSING", "PROCESSING"], ["PROCESSING", "ACCEPTED"], ["PROCESSING", "REJECTED"]],
+      receipt_required: ["ACCEPTED"],
+    },
+  },
+});
 
 type Result = { status: "done" | "pending" | "refused" | "error" | "closed" | "other"; text: string; details: Record<string, string>; rows: string[] };
 
@@ -85,6 +112,8 @@ async function run(page: Page, opts: { path?: string; button: string; row?: stri
       const hit =
         value === "__first__"
           ? options.find((o) => o.v)
+          : value === "__second__"
+            ? options.filter((o) => o.v)[1]
           : (options.find((o) => o.v === value) ?? options.find((o) => o.t === value) ?? options.find((o) => o.t.includes(value) || (o.v && o.v.includes(value))));
       expect(hit, `no option "${value}" in "${name}": ${options.map((o) => o.t).join(" | ")}`).toBeTruthy();
       await el.selectOption(hit!.v);
@@ -132,6 +161,7 @@ test.describe("Jurisdictions & Rules console (live)", () => {
   let maker: Page;
   let checker: Page;
   let third: Page;
+  let fourth: Page;
   const S: Record<string, string> = {};
 
   test.beforeAll(async ({ browser }) => {
@@ -141,10 +171,11 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     test.skip(/The jurisdiction register unavailable|could not be reached/.test(body), "jurisdiction-rules-svc is not reachable from this console");
     checker = await signIn(browser, "checker");
     third = await signIn(browser, "third");
+    fourth = await signIn(browser, "fourth");
   });
 
   test.afterAll(async () => {
-    for (const p of [maker, checker, third]) await p?.context().close();
+    for (const p of [maker, checker, third, fourth]) await p?.context().close();
   });
 
   test("a jurisdiction, and an import applied by a second person", async () => {
@@ -196,6 +227,8 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     });
     S.rid = r.details["Rule id"];
     await must(maker, ["done"], { path: `${J}?tab=rules&id=${S.rid}&pane=provenance`, button: "Set provenance", fields: { regime_id: "VAT", interpretation_id: S.iid, source_ids: S.sid, precedence: "1", published_on: "2026-01-01" } });
+    // Typed parameters, set while DRAFT (frozen once active): the pack calculates with them.
+    await must(maker, ["done"], { path: `${J}?tab=rules&id=${S.rid}&pane=provenance`, button: "Set parameters", fields: { parameters: TAX_BANDS } });
     const ask = await must(maker, ["pending"], { path: `${J}?tab=rules&id=${S.rid}`, button: "Request approval", fields: { approver: "Legal" } });
     expect(ask.details["Approval reference"]).toMatch(/^[0-9a-f-]{36}$/);
     await open(maker, `${J}?tab=rules&id=${S.rid}`);
@@ -216,7 +249,9 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     S.cal = `${CODE}-cal`.toLowerCase();
     const at = `${J}?tab=calendars&id=${S.cal}`;
     await must(maker, ["done"], { path: `${J}?tab=calendars`, button: "New calendar", fields: { calendar_code: S.cal.toUpperCase(), jurisdiction_id: CODE, authority: "E2E authority" } });
-    await must(maker, ["pending"], { path: at, button: "New version", fields: { effective_from: "2026-01-01", timezone: "Europe/London", weekend_days: "0 6", holidays: "2026-12-25 Christmas Day\n2026-12-28 Boxing Day (substitute)" } });
+    const v1 = await must(maker, ["pending"], { path: at, button: "New version", fields: { effective_from: "2026-01-01", timezone: "Europe/London", weekend_days: "0 6", holidays: "2026-12-25 Christmas Day\n2026-12-28 Boxing Day (substitute)" } });
+    S.calV1 = v1.details["Version id"];
+    expect(S.calV1, "the new calendar version names its id").toMatch(/^[0-9a-f-]{36}$/);
     await open(checker, at);
     expect(await offered(checker, "Publish"), "Publish offered before a source is cited").toBe(false);
     await must(maker, ["done"], { path: at, button: "Set sources", fields: { version: "1", source_ids: S.sid } });
@@ -242,6 +277,46 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     expect(due.rows.length, "the explanation lists its steps").toBeGreaterThan(1);
   });
 
+  test("a submission profile and an obligation rule, ready to be packed", async () => {
+    // An e-invoice profile is a rule whose typed parameters are the profile.
+    const p = await must(maker, ["pending"], {
+      path: `${J}?tab=rules`,
+      button: "Propose rule change",
+      fields: { jurisdiction_id: CODE, rule_domain: "EINVOICE_PROFILE", rule_code: "PEPPOL_INVOICE", rule_name: `E2E e-invoice profile ${RUN}`, effective_from: "2026-01-01", rule_payload: '{"channel": "PEPPOL"}' },
+    });
+    S.pid = p.details["Rule id"];
+    await must(maker, ["done"], { path: `${J}?tab=rules&id=${S.pid}&pane=provenance`, button: "Set provenance", fields: { regime_id: "VAT", interpretation_id: S.iid, source_ids: S.sid, precedence: "1", published_on: "2026-01-01" } });
+    await must(maker, ["done"], { path: `${J}?tab=rules&id=${S.pid}&pane=provenance`, button: "Set parameters", fields: { parameters: EINVOICE_PROFILE } });
+    await must(maker, ["pending"], { path: `${J}?tab=rules&id=${S.pid}`, button: "Request approval", fields: { approver: "Legal" } });
+    const act = await must(checker, ["done"], { path: `${J}?tab=rules&id=${S.pid}`, button: "Approve and activate" });
+    expect(act.text).toMatch(/PEPPOL_INVOICE is ACTIVE/);
+
+    // A due-date rule counted on the published calendar, published by a second person.
+    const o = await must(maker, ["pending"], {
+      path: `${J}?tab=obligations`,
+      button: "New obligation rule",
+      fields: {
+        jurisdiction_id: CODE,
+        obligation_code: "VAT_RETURN",
+        name: `E2E VAT return ${RUN}`,
+        period_basis: "MONTHLY",
+        anchor: "PERIOD_END",
+        offset_months: "1",
+        offset_days: "7",
+        offset_to_month_end: "true",
+        business_day_adjustment: "NEXT",
+        calendar_code: S.cal,
+        effective_from: "2026-01-01",
+      },
+    });
+    S.oid = o.details["Obligation rule id"];
+    expect(S.oid, "the new obligation rule names its id").toMatch(/^[0-9a-f-]{36}$/);
+    await must(maker, ["done"], { path: `${J}?tab=obligations&id=${S.oid}`, button: "Set provenance", fields: { regime_id: "VAT", interpretation_id: S.iid, source_ids: S.sid } });
+    await open(maker, `${J}?tab=obligations&id=${S.oid}`);
+    expect(await offered(maker, "Publish"), "the author publishes their own obligation rule").toBe(false);
+    await must(checker, ["done"], { path: `${J}?tab=obligations&id=${S.oid}`, button: "Publish" });
+  });
+
   test("a pack signed, verified, certified by a third person, published, deployed and resolved", async () => {
     const pub = generateKeyPairSync("ed25519").publicKey.export({ format: "der", type: "spki" }).subarray(-32).toString("base64");
     S.key = `e2e-${RUN.toLowerCase()}`;
@@ -255,7 +330,11 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     const ver = "2026.11.1";
     const at = (pane = "") => `${J}?tab=packs&id=${S.ref}&ver=${ver}${pane ? `&pane=${pane}` : ""}`;
     await must(maker, ["done"], { path: `${J}?tab=packs`, button: "New pack", fields: { pack_ref: S.ref, pack_name: `E2E tax core ${RUN}`, owner: "Tax Engineering" } });
-    await must(maker, ["done"], { path: `${J}?tab=packs&id=${S.ref}`, button: "New version", fields: { pack_version: ver, effective_from: "2026-01-01", jurisdiction_codes: CODE, regimes: "VAT", rule_modules: S.rid } });
+    await must(maker, ["done"], {
+      path: `${J}?tab=packs&id=${S.ref}`,
+      button: "New version",
+      fields: { pack_version: ver, effective_from: "2026-01-01", jurisdiction_codes: CODE, regimes: "VAT", rule_modules: `${S.rid}\n${S.pid}`, calendar_modules: S.calV1, obligation_modules: S.oid },
+    });
     await open(maker, at());
     expect(await offered(maker, "Compile"), "Compile offered on a DRAFT version").toBe(false);
     await must(maker, ["done"], { path: at(), button: "Submit for review" });
@@ -264,7 +343,30 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     const verified = await must(maker, ["done"], { path: at(), button: "Verify" });
     expect(verified.text).toMatch(/^Verified/);
 
-    const kase = (id: string, cls: string, effectiveAt: string, expectOutcome: Record<string, string>, jurisdiction = CODE) => ({ id, class: cls, description: id, input: { jurisdiction, rule_domain: "TAX", rule_code: "STD", effective_at: effectiveAt }, expect: expectOutcome });
+    const kase = (id: string, cls: string, effectiveAt: string, expectOutcome: Record<string, string>, jurisdiction = CODE, domain = "TAX", code = "STD") => ({
+      id,
+      class: cls,
+      description: id,
+      input: { jurisdiction, rule_domain: domain, rule_code: code, effective_at: effectiveAt },
+      expect: expectOutcome,
+    });
+    // TAX_BANDS: 10% up to 1000, 20% above, HALF_UP to 2 places. The harness
+    // requires a golden calculation, each band limit, a rounded result and a refusal.
+    const calc = (id: string, cls: string, amount: string, expectOutcome: Record<string, string>) => ({
+      id,
+      class: cls,
+      description: id,
+      input: { jurisdiction: CODE, rule_domain: "TAX", rule_code: "STD", effective_at: "2026-09-01T00:00:00Z", taxable_amount: amount },
+      expect: { rule_id: S.rid, ...expectOutcome },
+    });
+    // The obligation: period end + 1 month to month end + 7 days, moved to the next business day.
+    const due = (id: string, cls: string, input: Record<string, unknown>, expectOutcome: Record<string, string>) => ({
+      id,
+      class: cls,
+      description: id,
+      input: { jurisdiction: CODE, obligation_code: "VAT_RETURN", ...input },
+      expect: expectOutcome,
+    });
     const bundle = {
       bundle_version: "1",
       cases: [
@@ -272,9 +374,22 @@ test.describe("Jurisdictions & Rules console (live)", () => {
         kase("starts", "BOUNDARY", "2026-01-01T00:00:00Z", { outcome: "RESOLVED", rule_id: S.rid }),
         kase("before", "BOUNDARY", "2025-12-31T23:59:59.999999999Z", { outcome: "NO_RULE" }),
         kase("outside", "NEGATIVE", "2026-09-01T00:00:00Z", { outcome: "UNSUPPORTED_JURISDICTION" }, "ZZ-NOT-IN-PACK"),
+        calc("calc-golden", "GOLDEN", "5000", { outcome: "CALCULATED", tax_amount: "900.00" }),
+        calc("calc-band", "BOUNDARY", "1000", { outcome: "CALCULATED", tax_amount: "100.00" }),
+        calc("calc-rounded", "BOUNDARY", "1000.01", { outcome: "CALCULATED", tax_amount: "100.00" }),
+        calc("calc-negative", "NEGATIVE", "-5", { outcome: "INVALID_FACTS" }),
+        // JUR-T030: a stated value (here the profile version) is checked deliberately.
+        kase("profile", "GOLDEN", "2026-09-01T00:00:00Z", { outcome: "RESOLVED", rule_id: S.pid, parameter_amount: "1.0" }, CODE, "EINVOICE_PROFILE", "PEPPOL_INVOICE"),
+        kase("profile-starts", "BOUNDARY", "2026-01-01T00:00:00Z", { outcome: "RESOLVED", rule_id: S.pid }, CODE, "EINVOICE_PROFILE", "PEPPOL_INVOICE"),
+        kase("profile-before", "BOUNDARY", "2025-12-31T23:59:59.999999999Z", { outcome: "NO_RULE" }, CODE, "EINVOICE_PROFILE", "PEPPOL_INVOICE"),
+        due("due-golden", "GOLDEN", { period_end: "2026-08-31" }, { outcome: "DUE_DATE_CALCULATED", due_date: "2026-10-07", obligation_rule_id: S.oid }),
+        // 2026-11-07 is a Saturday: the due date moves to Monday 2026-11-09.
+        due("due-weekend", "BOUNDARY", { period_end: "2026-09-30" }, { outcome: "DUE_DATE_CALCULATED", due_date: "2026-11-09" }),
+        due("due-extension", "NEGATIVE", { period_end: "2026-09-30", extension_days: 1, extension_evidence_ref: `E2E-${RUN}` }, { outcome: "EXTENSION_NOT_PERMITTED" }),
       ],
     };
-    await must(maker, ["done"], { path: at("certification"), button: "Submit test bundle", fields: { bundle: JSON.stringify(bundle) } });
+    S.bundle = JSON.stringify(bundle);
+    await must(maker, ["done"], { path: at("certification"), button: "Submit test bundle", fields: { bundle: S.bundle } });
     const runResult = await must(maker, ["done"], { path: at("certification"), button: "Run tests" });
     expect(runResult.text).toMatch(/passed/);
     await open(maker, at("certification"));
@@ -290,6 +405,80 @@ test.describe("Jurisdictions & Rules console (live)", () => {
     const resolved = await must(maker, ["done"], { path: `${J}?tab=applicability`, button: "Resolve a rule", fields: { jurisdiction: CODE, rule_domain: "TAX", rule_code: "STD", effective_at: "2026-09-01" } });
     expect(resolved.details.Outcome).toBe("RESOLVED");
     expect(resolved.details.Pack).toBe(`${S.ref}@${ver}`);
+  });
+
+  test("positive answers from the released pack: a calculation, a due date and a submission", async () => {
+    const calcResult = await must(maker, ["done"], {
+      path: `${J}?tab=applicability`,
+      button: "Evaluate",
+      fields: {
+        kind: "calculation",
+        body: JSON.stringify({ jurisdiction: CODE, rule_domain: "TAX", rule_code: "STD", effective_at: "2026-09-01T00:00:00Z", taxable_amount: "1500", currency: "GBP" }),
+      },
+    });
+    expect(calcResult.text).toMatch(/calculated/i);
+    expect(Object.values(calcResult.details)).toContain("200.00");
+
+    const dueResult = await must(maker, ["done"], {
+      path: `${J}?tab=obligations&id=${S.oid}`,
+      button: "Calculate a due date",
+      fields: { body: JSON.stringify({ jurisdiction: CODE, obligation_code: "VAT_RETURN", period_end: "2026-09-30" }) },
+    });
+    expect(dueResult.text).toMatch(/due date calculated/i);
+    // Saturday 2026-11-07 moved to Monday; the answer states the instant the due day ends.
+    expect(Object.values(dueResult.details).join(" ")).toMatch(/2026-11-09/);
+
+    const sub = await must(maker, ["done"], {
+      path: `${J}?tab=applicability`,
+      button: "Register submission",
+      fields: { jurisdiction: CODE, kind: "EINVOICE", profile_code: "PEPPOL_INVOICE", subject_ref: `INV-E2E-${RUN}`, payload_hash: `sha256:${randomBytes(32).toString("hex")}` },
+    });
+    expect(sub.text).toMatch(/^Submission registered as /);
+    expect(sub.details["Submission id"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("a hotfix: two independent reviewers, then the incident commander's ring-order exception", async () => {
+    const v1 = "2026.11.1";
+    const hv = "2026.11.2";
+    const at = (ver: string, pane = "") => `${J}?tab=packs&id=${S.ref}&ver=${ver}${pane ? `&pane=${pane}` : ""}`;
+    // The released version also runs in the second ring: the known-good fallback there.
+    await must(maker, ["done"], { path: at(v1, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region } });
+
+    await must(maker, ["done"], {
+      path: `${J}?tab=packs&id=${S.ref}`,
+      button: "New version",
+      fields: { pack_version: hv, effective_from: "2026-01-01", jurisdiction_codes: CODE, regimes: "VAT", rule_modules: `${S.rid}\n${S.pid}`, calendar_modules: S.calV1, obligation_modules: S.oid },
+    });
+    await must(maker, ["done"], {
+      path: at(hv, "release"),
+      button: "Declare hotfix",
+      fields: { severity: "P0", incident_ref: `INC-E2E-${RUN}`, incident_commander: FOURTH_ID, rollback_target_version: v1, scope_summary: "Correct the reduced-rate threshold before the filing deadline" },
+    });
+    await must(maker, ["done"], { path: at(hv), button: "Submit for review" });
+    await must(maker, ["done"], { path: at(hv), button: "Compile" });
+    await must(maker, ["done"], { path: at(hv), button: "Sign" });
+    await must(maker, ["done"], { path: at(hv, "certification"), button: "Submit test bundle", fields: { bundle: S.bundle } });
+    expect((await must(maker, ["done"], { path: at(hv, "certification"), button: "Run tests" })).text).toMatch(/passed/);
+
+    // Enhanced review (JUR-NEG-14): one approving reviewer is not enough for a hotfix.
+    await must(checker, ["done"], { path: at(hv, "certification"), button: "Add review", fields: { role: "TAX", decision: "APPROVE", findings: "Threshold correction checked" } });
+    const early = await must(third, ["refused", "error"], { path: at(hv, "certification"), button: "Certify" });
+    expect(early.text).toMatch(/2 required|two independent|insufficient/i);
+    await must(fourth, ["done"], { path: at(hv, "certification"), button: "Add review", fields: { role: "LEGAL", decision: "APPROVE", findings: "Scope limited to the threshold" } });
+    await must(third, ["done"], { path: at(hv, "certification"), button: "Certify" });
+    await must(maker, ["done"], { path: at(hv), button: "Publish" });
+
+    // Ring order holds for a hotfix too; only its incident commander may take the exception.
+    const inOrder = await must(maker, ["refused", "error"], { path: at(hv, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region } });
+    expect(inOrder.text).toMatch(/previous_ring_not_deployed|previous ring/i);
+    const notIC = await must(maker, ["refused", "error"], { path: at(hv, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region, exception_reason: "Filing deadline in two hours" } });
+    expect(notIC.text).toMatch(/exception_requires_incident_commander|incident commander/i);
+    const byIC = await must(fourth, ["done"], { path: at(hv, "release"), button: "Deploy", fields: { ring: "__second__", region: S.region, exception_reason: "Filing deadline in two hours" } });
+    expect(byIC.text).toMatch(/^Deployed to /);
+
+    await must(fourth, ["done"], { path: at(hv, "release"), button: "Record retrospective", fields: { note: "Root cause: threshold transcribed from the draft guidance. Added a boundary case at the threshold." } });
+    const released = await open(maker, at(hv, "release"));
+    expect(released).toMatch(/retrospective done/);
   });
 
   test("a negative answer is shown with its recorded decision", async () => {

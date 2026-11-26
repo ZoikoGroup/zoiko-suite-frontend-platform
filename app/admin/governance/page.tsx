@@ -25,7 +25,6 @@ import { GovernanceKpis, GovernancePanels } from "@/components/admin/governance/
 import { DecisionTable, DecisionToolbar, Pager } from "@/components/admin/governance/console/register";
 import { DecisionDrawer } from "@/components/admin/governance/console/drawer";
 import { EvidenceTab, PackageDrawer, ReplaysTab } from "@/components/admin/governance/console/ledger";
-import { NewDecisionDialog } from "@/components/admin/governance/console/forms";
 
 export const metadata: Metadata = { title: "Governance Log | Zoiko Suite" };
 
@@ -109,7 +108,7 @@ export default async function GovernancePage({
     <div className="space-y-5">
       <PageHeader
         title="Governance Log"
-        description="A complete record of governance decisions, approvals, escalations and related actions across all entities, jurisdictions and domains."
+        description="Every governance decision, recorded automatically by the service that made it — policy, authorization, workflow, jurisdiction, obligations and evidence — across all entities, jurisdictions and domains. Escalations are resolved in Workflows & Approvals; the chain is sealed hourly."
         actions={
           <>
             <PeriodSelect query={query} />
@@ -120,7 +119,6 @@ export default async function GovernancePage({
               <Upload className="h-4 w-4" />
               Export
             </a>
-            <NewDecisionDialog entities={entityList} domains={summary?.facets.domains ?? []} defaultEntity={identity.legalEntityId} />
           </>
         }
       />

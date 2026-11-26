@@ -37,6 +37,13 @@ export const REASONS = {
     ["ERROR_CORRECTION", "Correcting a mistake"],
     ["OTHER", "Other (explain in the note)"],
   ],
+  suspend: [
+    ["SECURITY_CONCERN", "Security concern"],
+    ["INVESTIGATION", "Under investigation"],
+    ["LEAVE_OF_ABSENCE", "Leave of absence"],
+    ["REVIEW_OUTCOME", "Access review outcome"],
+    ["OTHER", "Other (explain in the note)"],
+  ],
   restore: [
     ["ACCESS_REINSTATED", "Access reinstated"],
     ["ERROR_CORRECTION", "Correcting a mistake"],

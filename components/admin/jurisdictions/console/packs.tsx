@@ -373,13 +373,15 @@ async function PackDrawer({
 
 function NewVersion({ refId }: { refId: string }) {
   return (
-    <Cmd command="pack.version" label="New version" icon={<Plus className="h-4 w-4" />} title={`New version of ${refId}`} hidden={{ ref: refId }} description="A DRAFT version: the manifest names its jurisdictions, regimes and the rules it carries.">
+    <Cmd command="pack.version" label="New version" icon={<Plus className="h-4 w-4" />} title={`New version of ${refId}`} hidden={{ ref: refId }} description="A DRAFT version: the manifest names its jurisdictions, regimes, and the rules, calendars and obligations it carries.">
       <FieldGrid>
         <Field name="pack_version" label="Version" placeholder="2026.11.1" />
         <Field name="effective_from" label="Effective from" type="date" />
         <Field name="jurisdiction_codes" label="Jurisdiction codes" placeholder="GB, GB-SCT" className="sm:col-span-2" />
         <Field name="regimes" label="Regimes" placeholder="VAT" className="sm:col-span-2" />
         <TextArea name="rule_modules" label="Rule ids" className="sm:col-span-2" hint="One per line: the rules (with provenance) this version carries." />
+        <TextArea name="calendar_modules" label="Calendar version ids" optional className="sm:col-span-2" hint="One per line: published calendar versions due dates are counted on (Calendars tab)." />
+        <TextArea name="obligation_modules" label="Obligation rule ids" optional className="sm:col-span-2" hint="One per line: published obligation rules whose due dates this version answers (Obligation rules tab)." />
         <Field name="source_register_version" label="Source register version" type="number" optional />
         <TextArea name="dependencies" label="Dependencies (JSON)" optional placeholder='[{"ref":"ref.iso4217","version":"2026.06"}]' className="sm:col-span-2" />
       </FieldGrid>

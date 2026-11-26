@@ -29,6 +29,7 @@ export type EvidenceData = {
   requirements: Read<EvidenceRequirement>;
   evaluations: Read<EvidenceEvaluation>;
   requests: Read<EvidenceRequest>;
+  myRequests: Read<EvidenceRequest>;
   /** Whether the signed-in person holds EVIDENCE_REQUEST_MANAGE at their entity
    *  (the scan-result command is shown only then). null = could not be asked. */
   canManageRequests: boolean | null;
@@ -40,11 +41,12 @@ function read<T>(r: ApiResult<{ rows: T[]; more: boolean }>): Read<T> {
 
 export async function loadEvidence(identity: SessionIdentity): Promise<EvidenceData> {
   const who = { ...identity, tenantId: identity.tenantId };
-  const [summary, requirements, evaluations, requests, manage] = await Promise.all([
+  const [summary, requirements, evaluations, requests, myRequests, manage] = await Promise.all([
     getEvidenceSummary(who),
     readAll((p) => listEvidenceRequirements(who, {}, p)),
     readAll((p) => listEvaluations(who, {}, p), EVALUATION_WINDOW),
     readAll((p) => listEvidenceRequests(who, { open: false }, p)),
+    readAll((p) => listEvidenceRequests(who, { open: false, legalEntityId: identity.legalEntityId, assignedTo: identity.principalId }, p)),
     authorize({ identity, principalId: identity.principalId, legalEntityId: identity.legalEntityId, actionType: "EVIDENCE_REQUEST_MANAGE" }),
   ]);
   return {
@@ -52,6 +54,7 @@ export async function loadEvidence(identity: SessionIdentity): Promise<EvidenceD
     requirements: read(requirements),
     evaluations: read(evaluations),
     requests: read(requests),
+    myRequests: read(myRequests),
     canManageRequests: manage.ok ? manage.data.decision_outcome === "GRANTED" : null,
   };
 }

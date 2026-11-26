@@ -63,6 +63,14 @@ export type RoleAssignment = {
   /** The holder's standing, projected from identity-context-svc. */
   principal_status?: string | null;
   /**
+   * Suspension (ORG-06 SuspendAssignment, 000038). A suspended grant gives
+   * nothing until someone other than its holder resumes it; it stays on
+   * record and can still be revoked or reach its end date.
+   */
+  suspended_at?: string | null;
+  suspended_by?: string | null;
+  suspension_reason?: string | null;
+  /**
    * API-3 version (000038). Approve, reject and revoke send it back as
    * expected_version: authorization-svc requires it since AZ-1 (428 without,
    * 412 when stale).
@@ -251,6 +259,84 @@ export async function decideRoleAssignment(input: {
     commandBody(input.reason),
     { identity: input.identity },
   );
+}
+
+/**
+ * Suspend a grant (`iam.assignment.suspend`): it grants nothing from the next
+ * permission check, but is still held. A reason is required, and the record's
+ * version (428 without it, 412 when stale). An ended grant is
+ * `409 assignment_ended`; one already suspended is `409 assignment_not_suspendable`.
+ */
+export async function suspendRoleAssignment(input: {
+  identity: Identity;
+  assignmentId: string;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<RoleAssignment>> {
+  return apiPost<RoleAssignment>(
+    SERVICE,
+    `/v1/admin/role-assignments/${encodeURIComponent(input.assignmentId)}/suspend`,
+    commandBody(input.reason),
+    { identity: input.identity },
+  );
+}
+
+/**
+ * Lift a suspension (`iam.assignment.resume`). Resuming restores access, so it
+ * takes what granting took: never by the holder (`403 self_resume_not_allowed`),
+ * `iam.assignment.approve_privileged` for a privileged role, and no
+ * separation-of-duties conflict with what the holder has now (`409 sod_conflict`).
+ */
+export async function resumeRoleAssignment(input: {
+  identity: Identity;
+  assignmentId: string;
+  reason: CommandReason;
+}): Promise<ApiWriteResult<RoleAssignment>> {
+  return apiPost<RoleAssignment>(
+    SERVICE,
+    `/v1/admin/role-assignments/${encodeURIComponent(input.assignmentId)}/resume`,
+    commandBody(input.reason),
+    { identity: input.identity },
+  );
+}
+
+/** One suspension of a grant, open until someone resumes it. */
+export type AssignmentSuspension = {
+  suspension_id: string;
+  principal_role_assignment_id: string;
+  suspended_by: string;
+  suspended_at: string;
+  suspension_reason: string;
+  resumed_by?: string | null;
+  resumed_at?: string | null;
+  resume_reason?: string | null;
+};
+
+/** Every suspension of one grant, oldest first (`iam.assignment.read`). */
+export async function listAssignmentSuspensions(
+  identity: Identity,
+  assignmentId: string,
+): Promise<ApiResult<AssignmentSuspension[]>> {
+  return apiGet<AssignmentSuspension[]>(
+    SERVICE,
+    `/v1/admin/role-assignments/${encodeURIComponent(assignmentId)}/suspensions`,
+    { identity },
+  );
+}
+
+export type AssignmentsAsOf = { as_of: string; assignments: RoleAssignment[] };
+
+/**
+ * The grants that were in force at one instant: approved by then, inside
+ * their effective window and not suspended. `asOf` is RFC 3339 or YYYY-MM-DD.
+ */
+export async function getAssignmentsAsOf(
+  identity: Identity,
+  options: { asOf: string; principalId?: string },
+): Promise<ApiResult<AssignmentsAsOf>> {
+  return apiGet<AssignmentsAsOf>(SERVICE, "/v1/admin/role-assignments/as-of", {
+    identity,
+    query: { as_of: options.asOf, principal_id: options.principalId || undefined },
+  });
 }
 
 export type CreateSoDRuleInput = {
@@ -2185,6 +2271,11 @@ const ADMIN_ERRORS: [string, string][] = [
   ["stale_version", "Somebody changed this since you loaded the page. Reload and try again."],
   ["precondition_required", "The page did not say which version of this you were looking at. Reload and try again."],
   ["version_conflict", "Somebody changed this since you loaded the page. Reload and try again."],
+  ["self_resume_not_allowed", "You cannot resume a grant you hold yourself; someone else decides it."],
+  ["assignment_not_suspendable", "This grant cannot be suspended now: it is already suspended, not yet approved, or no longer in force."],
+  ["assignment_not_suspended", "This grant is not suspended, so there is nothing to resume. Reload to see where it stands."],
+  ["assignment_ended", "This grant has already ended, so it cannot be suspended or resumed."],
+  ["role_assignment_not_found", "No such grant in your organisation."],
   ["sod_conflict", "Refused: this would give somebody two duties that must not be held together."],
   ["protected_privilege_not_delegable", "Access-administration and platform powers cannot be lent."],
   ["self_delegation_not_allowed", "You cannot lend authority to yourself."],
@@ -2208,8 +2299,8 @@ const ADMIN_ERRORS: [string, string][] = [
  * `missing_field: reason_code` is handled first because the console always
  * sends a reason — seeing it means the form let one through empty.
  */
-export function explainAuthzError(error: { message: string; status?: number }): string {
-  const m = error.message;
+export function explainAuthzError(error: { message: string; status?: number; body?: unknown }): string {
+  const m = refusalText(error);
   // Unreachable or slow: nothing was decided either way. Said briefly — it is
   // shown once per register on a page that may hold several.
   if (m.includes("is unreachable at")) {
@@ -2417,9 +2508,22 @@ export async function commandAuthorityLimit(input: {
 
 /** The outcome of an authorization-svc call that a person has to act on
  *  before anything else can happen: prove a second factor, or sign in again. */
-export function needsAttention(error: { status?: number; message: string }): "step_up" | "signin" | null {
+export function needsAttention(error: { status?: number; message: string; body?: unknown }): "step_up" | "signin" | null {
   if (error.status !== 401) return null;
-  if (error.message.includes("step_up_required")) return "step_up";
-  if (/identity_assertion_(required|invalid)|session_revoked/.test(error.message)) return "signin";
+  const m = refusalText(error);
+  if (m.includes("step_up_required")) return "step_up";
+  if (/identity_assertion_(required|invalid)|session_revoked/.test(m)) return "signin";
   return null;
+}
+
+/**
+ * The refusal's machine code and its words, for matching. RFC 9457 answers
+ * (412 `stale_version`, for one) carry the code only as `code`, which the
+ * client does not fold into `message`; without it a stale page read as an
+ * unknown refusal instead of "somebody changed this".
+ */
+function refusalText(error: { message: string; body?: unknown }): string {
+  const body = error.body && typeof error.body === "object" ? (error.body as Record<string, unknown>) : {};
+  const code = typeof body.code === "string" ? body.code : "";
+  return code && !error.message.includes(code) ? `${code}: ${error.message}` : error.message;
 }

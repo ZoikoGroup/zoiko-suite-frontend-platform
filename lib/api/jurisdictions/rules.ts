@@ -82,7 +82,8 @@ export type RulePack = {
 export const RULE_STATUSES = ["DRAFT", "ACTIVE", "SUPERSEDED", "RETIRED"] as const;
 export const DRIFT_STATES = ["CURRENT", "DRIFTED", "UNDER_REVIEW"] as const;
 /** Data in the service, not an enum; offered as suggestions. */
-export const RULE_DOMAINS = ["TAX", "PAYROLL", "EMPLOYMENT", "FILING", "RETENTION", "BENEFITS", "REGISTRATION"] as const;
+// EINVOICE_PROFILE and STATUTORY_FILING carry submission profiles as typed parameters (ZS-JUR-001 Wave 5).
+export const RULE_DOMAINS = ["TAX", "PAYROLL", "EMPLOYMENT", "FILING", "RETENTION", "BENEFITS", "REGISTRATION", "EINVOICE_PROFILE", "STATUTORY_FILING"] as const;
 
 /** A rule still in force that is known to have diverged from the law it encodes. */
 export function isDriftedInForce(rule: Pick<JurisdictionRule, "rule_status" | "legal_drift_state">): boolean {

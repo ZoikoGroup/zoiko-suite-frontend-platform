@@ -511,3 +511,531 @@ export function resolveRegistryConflict(
     { identity, correlationId },
   );
 }
+
+// ── TER-FE-1: Registry Summary ────────────────────────────────────────────────
+
+export type RegistrySummary = {
+  active_tenants: number;
+  active_legal_entities: number;
+  approvals_awaiting_decision: number;
+  open_registry_conflicts: number;
+  open_party_resolution_cases: number;
+};
+
+/**
+ * GetRegistrySummary returns KPIs for the console header.
+ * TER-FE-1: Summary route for the Tenants & Entities console page.
+ */
+export function getRegistrySummary(
+  tenantId: string,
+  identity: Identity,
+): Promise<ApiResult<RegistrySummary>> {
+  return apiGet<RegistrySummary>("tenantRegistry", `/v1/registry/summary`, { identity });
+}
+
+// ── Approvals (ORG-02/03 Maker-Checker) ──────────────────────────────────────
+
+export type ApprovalRequest = {
+  approval_request_id: string;
+  tenant_id: string;
+  subject_type: string;
+  subject_id: string;
+  command_name: string;
+  payload_fingerprint: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "STALE";
+  requested_by_principal_id: string;
+  requested_at: string;
+  expires_at: string;
+  decided_by_principal_id?: string;
+  decided_at?: string;
+  decision_note?: string;
+};
+
+export type ApproveRequestBody = {
+  payload_fingerprint: string;
+  decision_note?: string;
+  correlation_id?: string;
+};
+
+export type RejectRequestBody = {
+  payload_fingerprint: string;
+  decision_note?: string;
+  correlation_id?: string;
+};
+
+export function listApprovalRequests(
+  identity: Identity,
+  pendingOnly = false,
+): Promise<ApiResult<ApprovalRequest[]>> {
+  const query = pendingOnly ? "?status=pending" : "?status=all";
+  return apiGet<ApprovalRequest[]>("tenantRegistry", `/v1/approval-requests${query}`, { identity });
+}
+
+export function getApprovalRequest(
+  approvalRequestId: string,
+  identity: Identity,
+): Promise<ApiResult<ApprovalRequest>> {
+  return apiGet<ApprovalRequest>("tenantRegistry", `/v1/approval-requests/${approvalRequestId}`, { identity });
+}
+
+export function approveApprovalRequest(
+  approvalRequestId: string,
+  input: ApproveRequestBody,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/approval-requests/${approvalRequestId}/approve`, input, { identity, correlationId });
+}
+
+export function rejectApprovalRequest(
+  approvalRequestId: string,
+  input: RejectRequestBody,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/approval-requests/${approvalRequestId}/reject`, input, { identity, correlationId });
+}
+
+// ── Ownership & Control (ORG-04) ──────────────────────────────────────────────
+
+export type OwnershipRelationship = {
+  relationship_id: string;
+  tenant_id: string;
+  parent_legal_entity_id: string;
+  child_legal_entity_id: string;
+  relationship_kind: string;
+  ownership_pct: number;
+  voting_pct: number;
+  control_type: string;
+  status: "PROPOSED" | "ACTIVE" | "SUPERSEDED" | "ENDED";
+  valid_from: string;
+  valid_to?: string;
+  evidence_ref: string;
+  reason: string;
+  proposed_by_principal_id: string;
+  decided_by_principal_id?: string;
+  decided_at?: string;
+  ended_by_principal_id?: string;
+  ended_at?: string;
+  record_version: number;
+};
+
+export type OwnershipGraph = {
+  root_legal_entity_id: string;
+  as_of: string;
+  relationships: Array<{
+    parent_legal_entity_id: string;
+    child_legal_entity_id: string;
+    ownership_pct: number;
+    voting_pct: number;
+    control_type: string;
+    path: string[];
+  }>;
+};
+
+export type ControlChain = {
+  chains: Array<{
+    path: string[];
+    effective_ownership_pct: number;
+    effective_voting_pct: number;
+  }>;
+};
+
+export type SoDValidationRequest = {
+  parent_legal_entity_id: string;
+  child_legal_entity_id: string;
+  relationship_kind: string;
+  ownership_pct: number;
+  voting_pct: number;
+};
+
+export type SoDValidationResult = {
+  allowed: boolean;
+  violations: string[];
+};
+
+export function listOwnershipRelationships(
+  identity: Identity,
+  asOf?: string,
+): Promise<ApiResult<OwnershipRelationship[]>> {
+  const query = asOf ? `?as_of=${asOf}` : "";
+  return apiGet<OwnershipRelationship[]>("tenantRegistry", `/v1/ownership-relationships${query}`, { identity });
+}
+
+export function getOwnershipRelationship(
+  relationshipId: string,
+  identity: Identity,
+): Promise<ApiResult<OwnershipRelationship>> {
+  return apiGet<OwnershipRelationship>("tenantRegistry", `/v1/ownership-relationships/${relationshipId}`, { identity });
+}
+
+export function getOwnershipGraph(
+  rootEntityId: string,
+  asOf: string,
+  identity: Identity,
+): Promise<ApiResult<OwnershipGraph>> {
+  return apiGet<OwnershipGraph>("tenantRegistry", `/v1/ownership-graph?as_of=${asOf}&root=${rootEntityId}`, { identity });
+}
+
+export function getEntityGroup(
+  entityId: string,
+  asOf: string,
+  identity: Identity,
+): Promise<ApiResult<{ group: { parent_legal_entity_id: string; child_legal_entity_id: string; ownership_pct: number }[] }>> {
+  return apiGet("tenantRegistry", `/v1/entities/${entityId}/group?as_of=${asOf}`, { identity });
+}
+
+export function getEntityParents(
+  entityId: string,
+  asOf: string,
+  identity: Identity,
+): Promise<ApiResult<{ parents: { parent_legal_entity_id: string; ownership_pct: number }[] }>> {
+  return apiGet("tenantRegistry", `/v1/entities/${entityId}/parents?as_of=${asOf}`, { identity });
+}
+
+export function getControlChain(
+  entityId: string,
+  asOf: string,
+  identity: Identity,
+): Promise<ApiResult<ControlChain>> {
+  return apiGet<ControlChain>("tenantRegistry", `/v1/entities/${entityId}/control-chain?as_of=${asOf}`, { identity });
+}
+
+export function validateSoD(
+  input: SoDValidationRequest,
+  identity: Identity,
+): Promise<ApiResult<SoDValidationResult>> {
+  return apiPost<SoDValidationResult>("tenantRegistry", `/v1/sod/validate`, input, { identity });
+}
+
+// ── Parties & Golden Record (ORG-07/MDM-05) ──────────────────────────────────
+
+export type Party = {
+  party_id: string;
+  tenant_id: string;
+  party_kind: string;
+  source_class: string;
+  legal_name: string;
+  golden_record_version: number;
+  created_at: string;
+  created_by_principal_id: string;
+};
+
+export type PartySummary = {
+  party_id: string;
+  party_kind: string;
+  source_class: string;
+  legal_name: string;
+  current_version: number;
+};
+
+export type PartyView = {
+  party: Party;
+  version: any;
+  facts: any[];
+  identifiers: any[];
+  roles: any[];
+  contact_points: any[];
+  addresses: any[];
+  registrations: any[];
+  establishments: any[];
+  merge_history: any[];
+};
+
+export type CreatePartyRequest = {
+  create_request_id?: string;
+  party_kind: string;
+  source_class: string;
+  legal_name: string;
+  correlation_id?: string;
+};
+
+export type PartySearchQuery = {
+  text?: string;
+  party_kind?: string;
+  source_class?: string;
+  limit?: number;
+  after?: string;
+};
+
+export type PartyIdentifier = {
+  identifier_id: string;
+  scheme: string;
+  value: string;
+  issuer?: string;
+  added_by_principal_id: string;
+  added_at: string;
+};
+
+export type LinkIdentifierRequest = {
+  scheme: string;
+  value: string;
+  issuer?: string;
+  correlation_id?: string;
+};
+
+export type PartyRole = {
+  role_id: string;
+  role_type: string;
+  entity_id: string;
+  effective_from: string;
+  effective_to?: string;
+  added_by_principal_id: string;
+  added_at: string;
+};
+
+export type AddPartyRoleRequest = {
+  role_type: string;
+  entity_id: string;
+  effective_from: string;
+  correlation_id?: string;
+};
+
+export function createParty(
+  input: CreatePartyRequest,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<{ party_id: string; golden_record_version: number }>> {
+  return apiPost("tenantRegistry", `/v1/parties`, input, { identity, correlationId });
+}
+
+export function getParty(
+  partyId: string,
+  identity: Identity,
+  asOf?: string,
+  knownAt?: string,
+  revealSensitive?: boolean,
+): Promise<ApiResult<PartyView>> {
+  const params = new URLSearchParams();
+  if (asOf) params.set("as_of", asOf);
+  if (knownAt) params.set("known_at", knownAt);
+  if (revealSensitive !== undefined) params.set("reveal_sensitive", String(revealSensitive));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiGet<PartyView>("tenantRegistry", `/v1/parties/${partyId}${query}`, { identity });
+}
+
+export function listParties(
+  identity: Identity,
+  query?: PartySearchQuery,
+): Promise<ApiResult<{ items: PartySummary[]; next_cursor: string }>> {
+  const params = new URLSearchParams();
+  if (query?.text) params.set("text", query.text);
+  if (query?.party_kind) params.set("party_kind", query.party_kind);
+  if (query?.source_class) params.set("source_class", query.source_class);
+  if (query?.limit) params.set("limit", String(query.limit));
+  if (query?.after) params.set("cursor", query.after);
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return apiGet("tenantRegistry", `/v1/parties${qs}`, { identity });
+}
+
+export function findPartiesByIdentifier(
+  scheme: string,
+  value: string,
+  identity: Identity,
+): Promise<ApiResult<PartySummary[]>> {
+  return apiPost<PartySummary[]>("tenantRegistry", `/v1/identifiers:find`, { identifiers: [{ scheme, value }] }, { identity });
+}
+
+export function proposePartyFact(
+  partyId: string,
+  input: { fact_type: string; value: string; evidence_ref: string; correlation_id?: string },
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/parties/${partyId}/facts:propose`, input, { identity, correlationId });
+}
+
+export function linkPartyIdentifier(
+  partyId: string,
+  input: LinkIdentifierRequest,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/parties/${partyId}/identifiers`, input, { identity, correlationId });
+}
+
+export function addPartyRole(
+  partyId: string,
+  input: AddPartyRoleRequest,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/parties/${partyId}/roles`, input, { identity, correlationId });
+}
+
+export function removePartyRole(
+  partyId: string,
+  roleId: string,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/parties/${partyId}/roles/${roleId}/remove`, { correlation_id: correlationId ?? "" }, { identity, correlationId });
+}
+
+// ── Party Resolution (ORG-07) ────────────────────────────────────────────────
+
+export type ResolutionCase = {
+  case_id: string;
+  tenant_id: string;
+  case_type: "DUPLICATE_REVIEW" | "SPLIT_REVIEW";
+  status: "OPEN" | "MERGED" | "SPLIT" | "DISMISSED";
+  candidate_party_ids: string[];
+  survivor_party_id?: string;
+  created_at: string;
+  created_by_principal_id: string;
+  decided_by_principal_id?: string;
+  decided_at?: string;
+  decision_note?: string;
+};
+
+export type ResolutionDecision = {
+  decision: "MERGE" | "SPLIT" | "DISMISS";
+  survivor_party_id?: string;
+  new_party_ids?: string[];
+  reason: string;
+  correlation_id?: string;
+};
+
+export function listResolutionCases(
+  identity: Identity,
+  status?: "open" | "all",
+  caseType?: string,
+): Promise<ApiResult<ResolutionCase[]>> {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (caseType) params.set("case_type", caseType);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiGet<ResolutionCase[]>("tenantRegistry", `/v1/resolution-cases${query}`, { identity });
+}
+
+export function decideResolutionCase(
+  caseId: string,
+  input: ResolutionDecision,
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/resolution-cases/${caseId}/decide`, input, { identity, correlationId });
+}
+
+export function mergeParties(
+  caseId: string,
+  input: { survivor_party_id: string; correlation_id?: string },
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/resolution/${caseId}:merge`, input, { identity, correlationId });
+}
+
+export function splitParties(
+  caseId: string,
+  input: { new_party_ids: string[]; correlation_id?: string },
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<void>> {
+  return apiPost<void>("tenantRegistry", `/v1/resolution/${caseId}:split`, input, { identity, correlationId });
+}
+
+export function getMergeHistory(
+  partyId: string,
+  identity: Identity,
+): Promise<ApiResult<any[]>> {
+  return apiGet("tenantRegistry", `/v1/parties/${partyId}/merge-history`, { identity });
+}
+
+// ── Tax Identity Bundles (ORG-03) ────────────────────────────────────────────
+
+export type TaxIdentityBundle = {
+  tax_identity_bundle_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  jurisdiction_id: string;
+  status: "PENDING" | "VERIFIED" | "ACTIVE" | "SUSPENDED" | "REVOKED";
+  effective_from: string;
+  effective_to?: string;
+  data_classification: "PUBLIC" | "INTERNAL" | "RESTRICTED" | "CONFIDENTIAL";
+  record_version: number;
+  created_at: string;
+  updated_at: string;
+  created_by_principal_id: string;
+  updated_by_principal_id: string;
+};
+
+export type TaxIdentityBundleDetail = TaxIdentityBundle & {
+  facts: Array<{
+    fact_type: string;
+    value: string;
+    evidence_ref: string;
+    classification: string;
+    recorded_at: string;
+    recorded_by: string;
+  }>;
+};
+
+export function listTaxIdentityBundles(
+  entityId: string,
+  identity: Identity,
+  revealSensitive = false,
+): Promise<ApiResult<TaxIdentityBundle[]>> {
+  const query = revealSensitive ? "?reveal_sensitive=true" : "";
+  return apiGet<TaxIdentityBundle[]>("tenantRegistry", `/v1/entities/${entityId}/tax-identity-bundles${query}`, { identity });
+}
+
+export function getTaxIdentityBundle(
+  bundleId: string,
+  identity: Identity,
+  revealSensitive = false,
+): Promise<ApiResult<TaxIdentityBundleDetail>> {
+  const query = revealSensitive ? "?reveal_sensitive=true" : "";
+  return apiGet<TaxIdentityBundleDetail>("tenantRegistry", `/v1/tax-identity-bundles/${bundleId}${query}`, { identity });
+}
+
+// ── Residency (GOV-02) ──────────────────────────────────────────────────────
+
+export type ResidencyPolicy = {
+  data_residency_policy_id: string;
+  tenant_id: string;
+  policy_name: string;
+  policy_code: string;
+  residency_mode: "STRICT" | "PREFER" | "DENY";
+  conflict_resolution_mode: "REJECT" | "QUEUE" | "LOG";
+  residency_region_id: string;
+  active_flag: boolean;
+  record_version: number;
+};
+
+export function listResidencyPolicies(
+  identity: Identity,
+): Promise<ApiResult<ResidencyPolicy[]>> {
+  return apiGet<ResidencyPolicy[]>("tenantRegistry", `/v1/residency-policies`, { identity });
+}
+
+export function getResidencyPolicy(
+  policyId: string,
+  identity: Identity,
+): Promise<ApiResult<ResidencyPolicy>> {
+  return apiGet<ResidencyPolicy>("tenantRegistry", `/v1/residency-policies/${policyId}`, { identity });
+}
+
+export function createResidencyPolicy(
+  input: {
+    tenant_id: string;
+    policy_name: string;
+    policy_code: string;
+    residency_mode: "STRICT" | "PREFER" | "DENY";
+    conflict_resolution_mode: "REJECT" | "QUEUE" | "LOG";
+    residency_region_id: string;
+    active_flag: boolean;
+    correlation_id?: string;
+  },
+  identity: Identity,
+  correlationId?: string,
+): Promise<ApiWriteResult<ResidencyPolicy>> {
+  return apiPost<ResidencyPolicy>("tenantRegistry", `/v1/residency-policies`, input, { identity, correlationId });
+}
+
+export function getTenantResidencyRegion(
+  tenantId: string,
+  identity: Identity,
+): Promise<ApiResult<{ tenant_id: string; region_code: string }>> {
+  return apiGet("tenantRegistry", `/v1/tenants/${tenantId}/residency-region`, { identity });
+}

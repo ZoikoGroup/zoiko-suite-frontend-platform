@@ -7,17 +7,33 @@ import type { ReactNode } from "react";
 import { DetailDrawer, DrawerFacts, DrawerNote } from "@/components/admin/console";
 import {
   describeAdminStatus,
+  explainAuthzError,
   type BreakGlassSession,
   type PrivilegedSession,
+  type SessionActivity,
+  type SessionKind,
   type StepUpEvidence,
   type SupportSession,
 } from "@/lib/api/authorization";
+import type { ApiResult } from "@/lib/api/client";
 import { formatDate, formatDateTime } from "@/lib/format";
 import type { AuthzData } from "./data";
 import { ReviewSessionDialog } from "./forms";
-import { ActionChips, Command, Mono, PersonCell, StatusChip, short, who, type Ctx, type RegisterSpec } from "./register";
+import { ActionChips, Chip, Command, Mono, PersonCell, StatusChip, short, who, type Ctx, type RegisterSpec } from "./register";
 
 type Kind = "jit" | "break_glass" | "support";
+
+/** The service's name for each kind, as its activity route spells it. */
+const SERVICE_KIND: Record<Kind, SessionKind> = { jit: "privileged", break_glass: "break_glass", support: "support" };
+
+/** Which kind of session an id is, so the page can read its activity from the right route. */
+export function sessionKindOf(data: AuthzData, id: string): SessionKind | null {
+  const x = allSessions(data).find((s) => s.s.session_id === id);
+  return x ? SERVICE_KIND[x.kind] : null;
+}
+
+/** How many of a session's decisions the drawer lists; the counts cover them all. */
+const ACTIVITY_SHOWN = 25;
 
 const KIND: Record<Kind, { label: string; icon: LucideIcon; command: string }> = {
   jit: { label: "Just-in-time", icon: Timer, command: "jit" },
@@ -58,7 +74,7 @@ function stepUp(e: StepUpEvidence | null | undefined): string {
   return e ? `${e.assurance} at ${formatDateTime(e.authn_at)}` : "—";
 }
 
-export function sessionsRegister(data: AuthzData, ctx: Ctx): RegisterSpec {
+export function sessionsRegister(data: AuthzData, ctx: Ctx, activity: ApiResult<SessionActivity> | null = null): RegisterSpec {
   const sessions = allSessions(data);
   const byId = new Map(sessions.map((x) => [x.s.session_id, x]));
 
@@ -117,6 +133,7 @@ export function sessionsRegister(data: AuthzData, ctx: Ctx): RegisterSpec {
       const panes = [
         { key: "overview", label: "Overview", href: links.paneHref("overview") },
         ...(x.kind === "support" ? [] : [{ key: "approval", label: "Approval", href: links.paneHref("approval") }, { key: "review", label: "Review", href: links.paneHref("review") }]),
+        { key: "activity", label: "Activity", href: links.paneHref("activity") },
       ];
       const pane = panes.some((p) => p.key === links.pane) ? links.pane : "overview";
       const { actions, note } = sessionCommands(x, ctx.me);
@@ -160,11 +177,59 @@ export function sessionsRegister(data: AuthzData, ctx: Ctx): RegisterSpec {
               ]}
             />
           )}
+          {pane === "activity" && <ActivityPane result={activity} />}
           {note}
         </DetailDrawer>
       );
     },
   };
+}
+
+/** What was done under one session: counts, what it touched, and the latest decisions. */
+function ActivityPane({ result }: { result: ApiResult<SessionActivity> | null }) {
+  if (!result) return <DrawerNote>The session&apos;s activity was not read.</DrawerNote>;
+  if (!result.ok) return <DrawerNote>The session&apos;s activity could not be read: {explainAuthzError(result.error)}</DrawerNote>;
+  const a = result.data;
+  const decisions = a.decisions ?? [];
+  return (
+    <>
+      <DrawerFacts
+        items={[
+          { label: "Allowed", value: String(a.granted) },
+          { label: "Refused", value: String(a.denied) },
+          { label: "Actions used", value: a.actions?.length ? <Mono>{a.actions.join(", ")}</Mono> : "None" },
+          { label: "Records touched", value: a.resources?.length ? <Mono>{a.resources.join(", ")}</Mono> : "None" },
+        ]}
+      />
+      {decisions.length === 0 ? (
+        <DrawerNote>Nothing has been done under this session.</DrawerNote>
+      ) : (
+        <ol className="mt-3 space-y-1.5" aria-label="Session decisions">
+          {decisions.slice(0, ACTIVITY_SHOWN).map((d) => {
+            const allowed = d.decision_outcome === "GRANTED" || d.decision === "PERMIT";
+            return (
+              <li key={d.access_decision_id} className="flex items-center justify-between gap-2 text-[12px]">
+                <span className="min-w-0 truncate">
+                  <Mono>{d.action_type}</Mono>
+                  {d.resource_id ? <span className="text-slate-500"> · {d.resource_type ? `${d.resource_type} ` : ""}{short(d.resource_id)}</span> : null}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="tabular-nums text-slate-500">{formatDateTime(d.decided_at)}</span>
+                  <Chip label={allowed ? "Allowed" : "Refused"} tone={allowed ? "success" : "danger"} />
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {(a.truncated || decisions.length > ACTIVITY_SHOWN) && (
+        <DrawerNote>
+          Showing the latest {Math.min(decisions.length, ACTIVITY_SHOWN)} decisions
+          {a.truncated ? "; the service stops at 500, so the counts above cover only those." : "; the Decision log has every one."}
+        </DrawerNote>
+      )}
+    </>
+  );
 }
 
 function overviewFacts(x: Session) {

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Badge } from "@/components/ui";
 import {
   DetailList,
@@ -325,6 +326,27 @@ export function EvaluationSummary({
       <StoredAs code={explained.raw} />
 
       <DetailList items={details} />
+
+      {explained.outcome === "approval-required" && decisionId && (
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-3 dark:border-slate-700">
+          <Link
+            href={`/admin/workflows/builder?tab=start&type=THRESHOLD_APPROVAL&resolves=${encodeURIComponent(decisionId)}`}
+            className="inline-flex h-8 items-center rounded-lg bg-gold-500 px-3 text-[12.5px] font-semibold text-white hover:bg-gold-600"
+            data-testid="start-approval"
+          >
+            Start the approval
+          </Link>
+          <Link
+            href={`/admin/governance/decisions/${encodeURIComponent(decisionId)}`}
+            className="text-[12.5px] font-medium text-navy-700 hover:underline dark:text-navy-300"
+          >
+            See it in the Governance Log
+          </Link>
+          <p className="w-full text-xs text-slate-500 dark:text-slate-400">
+            The escalation is recorded. An approver settles it through Workflows &amp; Approvals, and the approval is linked to it there.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
