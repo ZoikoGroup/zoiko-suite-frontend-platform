@@ -63,6 +63,16 @@ describe("explainJurisdictionProblem", () => {
     expect(life).toMatch(/DRAFT or REVIEW, this one is RELEASED/);
   });
 
+  it("lists the certification gates a refused certify did not meet", () => {
+    const blocked: ApiError = {
+      kind: "http",
+      status: 409,
+      message: "x (409)",
+      body: { status: 409, code: "certification_blocked", detail: "one or more certification gates are not met", reasons: ["insufficient_reviews: 1 independent approving reviewer(s), 2 required"] },
+    };
+    expect(explainJurisdictionProblem(blocked)).toBe("Not done, 1 gate(s) not met: insufficient_reviews: 1 independent approving reviewer(s), 2 required.");
+  });
+
   it("says unreachable and timeout plainly, and a 412 without a code still reads as a stale page", () => {
     expect(explainJurisdictionProblem({ kind: "unreachable", message: "" })).toMatch(/could not be reached/);
     expect(explainJurisdictionProblem({ kind: "timeout", message: "" })).toMatch(/did not answer in time/);

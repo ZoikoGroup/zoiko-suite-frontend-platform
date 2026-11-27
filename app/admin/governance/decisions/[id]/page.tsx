@@ -15,7 +15,6 @@ import { listEntities } from "@/lib/api/tenants";
 import { decisionTitle, explainDecisionError } from "@/lib/api/governance";
 import { BASE, entityName, href, loadDetail } from "@/components/admin/governance/console/data";
 import { PriorityMark, StatusBadge } from "@/components/admin/governance/console/register";
-import { FollowUpDialog, ReplayDialog } from "@/components/admin/governance/console/forms";
 
 export const metadata: Metadata = { title: "Governance Decision | Zoiko Suite" };
 
@@ -82,13 +81,7 @@ export default async function DecisionRecordPage({ params }: { params: Promise<{
       <PageHeader
         title={`${d.display_ref} · ${decisionTitle(d)}`}
         description={d.summary ?? undefined}
-        actions={
-          <>
-            {back}
-            {d.action_type === "APPROVAL_THRESHOLD" && <ReplayDialog decision={d} />}
-            <FollowUpDialog decision={d} entities={[...entityMap.values()]} />
-          </>
-        }
+        actions={back}
       />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">

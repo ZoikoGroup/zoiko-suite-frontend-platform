@@ -2,30 +2,24 @@
 
 // Server Actions for governance-decision-log-svc (:8083).
 //
+// The console is read-only (decision D-DL-2, 25 Nov 2026): decisions are
+// recorded by the governance services that make them, resolved through
+// Workflows & Approvals, and sealed hourly by the ledger itself. What is left
+// re-computes and writes nothing: verify the chain, verify a package.
+//
 // Server Actions are reachable by direct POST, not only through this UI, so
 // the session is verified inside every action. The service authorizes every
-// write itself (GOVERNANCE_DECISION_RECORD / _REPLAY, GOVERNANCE_EVIDENCE_SEAL)
-// and fails closed; the console only relays its answer, in words.
+// read itself (GOVERNANCE_DECISION_READ) and fails closed; the console only
+// relays its answer, in words.
 //
 // Every action returns the AuthzResult shape so the shared ActionDialog can
 // show it (done / refused / error / signin).
 
 import { cookies } from "next/headers";
-import { refresh } from "next/cache";
 import { SESSION_COOKIE, decodeSession, toIdentity, type SessionIdentity } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import type { ApiError } from "@/lib/api/client";
-import {
-  PRIORITIES,
-  decisionTitle,
-  explainDecisionError,
-  recordDecision,
-  replayDecision,
-  sealPackage,
-  statusView,
-  verifyChain,
-  verifyPackage,
-} from "@/lib/api/governance";
+import { explainDecisionError, verifyChain, verifyPackage } from "@/lib/api/governance";
 import type { AuthzResult } from "@/app/admin/authorization/state";
 
 const EXPIRED: AuthzResult = { status: "signin", message: "Your session has expired — sign in again." };
@@ -49,135 +43,6 @@ function fail(error: ApiError): AuthzResult {
 
 function short(hash: string | undefined): string {
   return hash ? `${hash.slice(0, 12)}…${hash.slice(-6)}` : "—";
-}
-
-/**
- * Record a decision — a new one, or a follow-up of an earlier one when the
- * form carries causation_id (the drawer's "Record follow-up").
- */
-export async function recordDecisionAction(_prev: AuthzResult, fd: FormData): Promise<AuthzResult> {
-  const identity = await requireIdentity();
-  if (!identity) return EXPIRED;
-
-  const actionType = text(fd, "action_type").toUpperCase().replace(/\s+/g, "_");
-  const outcome = text(fd, "outcome").toUpperCase();
-  const ruleBasis = text(fd, "rule_basis");
-  const legalEntityId = text(fd, "legal_entity_id") || identity.legalEntityId || "";
-  const priority = text(fd, "priority").toUpperCase();
-  if (!actionType) return { status: "error", message: "Say what kind of action was decided (action type)." };
-  if (!outcome) return { status: "error", message: "Choose the outcome." };
-  if (!ruleBasis) return { status: "error", message: "A rule basis is required — an outcome without its basis is not evidence." };
-  if (!legalEntityId) return { status: "error", message: "Choose the legal entity the decision belongs to." };
-  if (priority && !(PRIORITIES as string[]).includes(priority)) return { status: "error", message: "Choose a priority from the list." };
-
-  let evaluationContext: unknown;
-  const contextRaw = text(fd, "evaluation_context");
-  if (contextRaw) {
-    try {
-      evaluationContext = JSON.parse(contextRaw);
-    } catch {
-      return { status: "error", message: "Evaluation context must be valid JSON, or left blank." };
-    }
-  }
-  let decidedAt: string | undefined;
-  const decidedRaw = text(fd, "decided_at");
-  if (decidedRaw) {
-    const d = new Date(decidedRaw);
-    if (Number.isNaN(d.getTime())) return { status: "error", message: "The decision date is not a valid date." };
-    decidedAt = d.toISOString();
-  }
-  const tags = [...new Set(text(fd, "tags").split(",").map((t) => t.trim()).filter(Boolean))];
-
-  const result = await recordDecision(
-    {
-      actionType,
-      outcome,
-      ruleBasis,
-      legalEntityId,
-      title: text(fd, "title") || undefined,
-      summary: text(fd, "summary") || undefined,
-      domain: text(fd, "domain") || undefined,
-      priority: priority || undefined,
-      tags,
-      jurisdiction: text(fd, "jurisdiction") || undefined,
-      relatedObligationId: text(fd, "related_obligation_id") || undefined,
-      subjectType: text(fd, "subject_type") || undefined,
-      subjectId: text(fd, "subject_id") || undefined,
-      causationId: text(fd, "causation_id") || undefined,
-      evaluationContext,
-      decidedAt,
-    },
-    identity,
-  );
-  if (!result.ok) return fail(result.error);
-  refresh();
-  const d = result.data;
-  const followUp = !!d.causation_id;
-  return {
-    status: "done",
-    message:
-      result.status === 201
-        ? `${followUp ? "Follow-up recorded" : "Decision recorded"} as ${d.display_ref}. It is now immutable and linked into the evidence chain.`
-        : `This exact decision was already recorded as ${d.display_ref}; nothing new was written.`,
-    details: [
-      { label: "Reference", value: d.display_ref },
-      { label: "Decision", value: decisionTitle(d) },
-      { label: "Status", value: statusView(d).label },
-      { label: "Domain", value: d.domain },
-      ...(followUp ? [{ label: "Follows up", value: d.causation_id ?? "" }] : []),
-      { label: "Chain position", value: `#${d.chain_seq}` },
-      { label: "Chain hash", value: short(d.curr_hash) },
-    ],
-  };
-}
-
-/** Re-evaluate a decision against the exact policy version it used. */
-export async function replayDecisionAction(_prev: AuthzResult, fd: FormData): Promise<AuthzResult> {
-  const identity = await requireIdentity();
-  if (!identity) return EXPIRED;
-  const decisionId = text(fd, "decision_id");
-  if (!decisionId) return { status: "error", message: "No decision to replay." };
-  const result = await replayDecision(decisionId, identity);
-  if (!result.ok) return fail(result.error);
-  refresh();
-  const m = result.data;
-  return {
-    status: "done",
-    message: m.outcomes_match
-      ? "The replay reproduced the recorded outcome. The manifest is now part of the record."
-      : "The replay did NOT reproduce the recorded outcome. The mismatch is recorded in the manifest for review.",
-    details: [
-      { label: "Original outcome", value: m.original_outcome },
-      { label: "Replayed outcome", value: m.replayed_outcome },
-      { label: "Reproduced", value: m.outcomes_match ? "Yes" : "No" },
-      { label: "Policy version", value: m.policy_version_id },
-      { label: "Replayed", value: formatDateTime(m.replayed_at) },
-    ],
-  };
-}
-
-/** Seal the chain (through a decision, or to the head) into a package. */
-export async function sealPackageAction(_prev: AuthzResult, fd: FormData): Promise<AuthzResult> {
-  const identity = await requireIdentity();
-  if (!identity) return EXPIRED;
-  const result = await sealPackage(
-    { throughDecisionId: text(fd, "through_decision_id") || undefined, label: text(fd, "label") || undefined, reason: text(fd, "reason") || undefined },
-    identity,
-  );
-  if (!result.ok) return fail(result.error);
-  refresh();
-  const p = result.data;
-  return {
-    status: "done",
-    message: `Package #${p.package_seq} sealed decisions 1–${p.to_seq}. Re-verifying it later proves none of them changed.`,
-    details: [
-      { label: "Package", value: p.package_id },
-      { label: "Decisions sealed", value: String(p.leaf_count) },
-      { label: "Merkle root", value: short(p.merkle_root) },
-      { label: "Package hash", value: short(p.package_hash) },
-      { label: "Sealed", value: formatDateTime(p.sealed_at) },
-    ],
-  };
 }
 
 /** Re-compute every link and every package of the tenant's chain. */

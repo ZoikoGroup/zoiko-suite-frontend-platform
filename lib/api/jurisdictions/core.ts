@@ -199,8 +199,10 @@ export function explainJurisdictionProblem(error: ApiError): string {
   const code = problemCode(error);
   const detail = problemDetail(error);
   if (code === "missing_field") return `A required field is empty: ${detail || "see the form"}.`;
-  // Every unmet gate is reported together in `reasons`; the person needs each of them.
-  if (code === "operation_blocked") {
+  // Every unmet gate is reported together in `reasons`; the person needs each of
+  // them. Release operations answer operation_blocked, certification
+  // certification_blocked (e.g. "insufficient_reviews: 1 … 2 required").
+  if (code === "operation_blocked" || code === "certification_blocked") {
     const reasons = (error.body as { reasons?: unknown } | undefined)?.reasons;
     const list = Array.isArray(reasons) ? reasons.filter((r): r is string => typeof r === "string") : [];
     return list.length ? `Not done, ${list.length} gate(s) not met: ${list.join("; ")}.` : `Not done: ${detail || "a gate is not met"}.`;

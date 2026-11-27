@@ -122,6 +122,49 @@ export const RESPONSIBLE_FUNCTIONS = [
   "HR",
 ] as const;
 
+export type ObligationStatus = typeof OBLIGATION_STATUSES[number];
+
+/** Applicability check result from the backend. */
+export type ApplicabilityDecision = {
+  obligation_id: string;
+  applicable: boolean;
+  reason: string;
+  checked_at: string;
+  checked_by_principal_id: string;
+};
+
+/** Current applicability state for an obligation. */
+export type CurrentApplicability = {
+  obligation_id: string;
+  applicable: boolean;
+  last_checked_at: string | null;
+  last_checked_by: string | null;
+  next_check_due: string | null;
+};
+
+/** Obligation definition from the registry. */
+export type ObligationDefinition = {
+  definition_id: string;
+  obligation_code: string;
+  obligation_type: string;
+  description: string;
+  default_severity: string;
+  default_responsible_function: string;
+  jurisdiction_id: string;
+  source_type: string;
+  source_reference: string;
+  is_active: boolean;
+};
+
+/** Entity mapping for obligation definitions. */
+export type ObligationEntityMapping = {
+  definition_id: string;
+  legal_entity_id: string;
+  tenant_id: string;
+  is_active: boolean;
+  created_at: string;
+};
+
 /**
  * CLOSED is the only terminal state, and the only one that means the duty is
  * discharged. Named rather than compared inline so the register and the state
@@ -339,6 +382,297 @@ export async function addFilingRequirement(input: {
   );
 }
 
+// ── WF-3: Deadline Clocks ────────────────────────────────────────────────────
+
+/** Clock classes (data, not code). */
+export const CLOCK_CLASSES = ["HARD_LEGAL", "SOFT_INTERNAL", "ADVISORY", "EXTENSION"] as const;
+export type ClockClass = typeof CLOCK_CLASSES[number];
+
+/** Clock states (state machine). */
+export const CLOCK_STATES = [
+  "PLANNED",
+  "ACTIVE",
+  "DUE_SOON",
+  "DUE",
+  "OVERDUE",
+  "FULFILLED",
+  "WAIVED",
+  "NOT_APPLICABLE",
+  "SUPERSEDED",
+] as const;
+export type ClockState = typeof CLOCK_STATES[number];
+
+/** Legal clock state transitions. */
+export const CLOCK_TRANSITIONS: Record<ClockState, readonly ClockState[]> = {
+  PLANNED: ["ACTIVE", "SUPERSEDED"],
+  ACTIVE: ["DUE_SOON", "DUE", "FULFILLED", "WAIVED", "NOT_APPLICABLE", "SUPERSEDED"],
+  DUE_SOON: ["DUE", "FULFILLED", "WAIVED", "NOT_APPLICABLE", "SUPERSEDED"],
+  DUE: ["OVERDUE", "FULFILLED", "WAIVED", "NOT_APPLICABLE", "SUPERSEDED"],
+  OVERDUE: ["FULFILLED", "WAIVED", "NOT_APPLICABLE", "SUPERSEDED"],
+  FULFILLED: [],
+  WAIVED: [],
+  NOT_APPLICABLE: [],
+  SUPERSEDED: [],
+};
+
+/** Display labels for clock states. */
+export const CLOCK_STATE_LABEL: Record<ClockState, { label: string; tone: "neutral" | "success" | "warning" | "danger" | "info" }> = {
+  PLANNED: { label: "Planned", tone: "neutral" },
+  ACTIVE: { label: "Active", tone: "info" },
+  DUE_SOON: { label: "Due Soon", tone: "warning" },
+  DUE: { label: "Due", tone: "warning" },
+  OVERDUE: { label: "Overdue", tone: "danger" },
+  FULFILLED: { label: "Fulfilled", tone: "success" },
+  WAIVED: { label: "Waived", tone: "neutral" },
+  NOT_APPLICABLE: { label: "Not Applicable", tone: "neutral" },
+  SUPERSEDED: { label: "Superseded", tone: "neutral" },
+};
+
+/** Display labels for clock classes. */
+export const CLOCK_CLASS_LABEL: Record<ClockClass, { label: string; tone: "neutral" | "success" | "warning" | "danger" | "info" }> = {
+  HARD_LEGAL: { label: "Hard Legal", tone: "danger" },
+  SOFT_INTERNAL: { label: "Soft Internal", tone: "warning" },
+  ADVISORY: { label: "Advisory", tone: "info" },
+  EXTENSION: { label: "Extension", tone: "info" },
+};
+
+export type EscalationStep = {
+  step_order: number;
+  after_overdue_by: string; // e.g. "24h"
+  escalated_to_role: string;
+  action_type: "NOTIFY" | "REASSIGN" | "INVALIDATE";
+};
+
+export type Clock = {
+  clock_id: string;
+  obligation_id: string;
+  tenant_id: string;
+  legal_entity_id: string;
+  clock_class: ClockClass;
+  clock_state: ClockState;
+  calendar_code: string;
+  calendar_rule_id: string;
+  calendar_rule_version: number;
+  computed_deadline: string;
+  due_soon_threshold: string; // duration string
+  escalation_ladder: EscalationStep[];
+  satisfied_at: string | null;
+  satisfied_by_principal_id: string | null;
+  satisfied_evidence_ids: string[];
+  waived_at: string | null;
+  waived_by_principal_id: string | null;
+  waived_reason: string | null;
+  waived_evidence_ids: string[];
+  not_applicable_at: string | null;
+  not_applicable_by_principal_id: string | null;
+  not_applicable_reason: string | null;
+  superseded_at: string | null;
+  superseded_by_clock_id: string | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+};
+
+export type ListClocksInput = {
+  identity?: Identity;
+  obligationId?: string;
+  legalEntityId?: string;
+  clockClass?: ClockClass;
+  clockState?: ClockState;
+  limit?: number;
+  offset?: number;
+  cursor?: string;
+};
+
+/** List clocks on an obligation (or all clocks for an entity). */
+export async function listClocks(
+  input: ListClocksInput = {},
+): Promise<ApiResult<Clock[]>> {
+  const result = await apiGet<Clock[]>("obligations", "/v1/obligations", {
+    identity: input.identity,
+    query: {
+      limit: input.limit,
+      offset: input.offset,
+      cursor: input.cursor,
+      obligation_id: input.obligationId,
+      legal_entity_id: input.legalEntityId,
+      clock_class: input.clockClass,
+      clock_state: input.clockState,
+    },
+  });
+
+  if (!result.ok) return result;
+  if (!Array.isArray(result.data)) {
+    return { ok: false, error: { kind: "malformed", message: "clocks returned a non-array list" } };
+  }
+  return { ok: true, data: result.data };
+}
+
+/** Get one clock by ID. */
+export async function getClock(
+  obligationId: string,
+  clockId: string,
+  identity?: Identity,
+): Promise<ApiResult<Clock>> {
+  return apiGet<Clock>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(obligationId)}/clocks/${encodeURIComponent(clockId)}`,
+    { identity },
+  );
+}
+
+export type CreateClockInput = {
+  identity: Identity;
+  obligationId: string;
+  clockClass: ClockClass;
+  calendarCode: string;
+  calendarRuleId: string;
+  calendarRuleVersion: number;
+  /** RFC3339. */
+  computedDeadline: string;
+  /** Go duration string, e.g. "168h" for 7 days. */
+  dueSoonThreshold: string;
+  escalationLadder: EscalationStep[];
+  correlationId?: string;
+};
+
+/** Create a clock on an obligation. */
+export async function createClock(
+  input: CreateClockInput,
+): Promise<ApiWriteResult<Clock>> {
+  return apiPost<Clock>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(input.obligationId)}/clocks`,
+    {
+      clock_class: input.clockClass,
+      calendar_code: input.calendarCode,
+      calendar_rule_id: input.calendarRuleId,
+      calendar_rule_version: input.calendarRuleVersion,
+      computed_deadline: input.computedDeadline,
+      due_soon_threshold: input.dueSoonThreshold,
+      escalation_ladder: input.escalationLadder,
+    },
+    { correlationId: input.correlationId, identity: input.identity },
+  );
+}
+
+export type TransitionClockInput = {
+  obligationId: string;
+  clockId: string;
+  clockState: ClockState;
+  identity: Identity;
+  expectedVersion?: number;
+  correlationId?: string;
+  evidenceEvaluationIds?: string[];
+  reason?: string;
+  authorityPrincipalId?: string;
+  supersededByClockId?: string;
+};
+
+/** Transition a clock to a new state. */
+export async function transitionClock(
+  input: TransitionClockInput,
+): Promise<ApiWriteResult<Clock>> {
+  return apiPost<Clock>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(input.obligationId)}/clocks/${encodeURIComponent(input.clockId)}/status`,
+    {
+      clock_state: input.clockState,
+      expected_version: input.expectedVersion,
+      evidence_evaluation_ids: input.evidenceEvaluationIds,
+      reason: input.reason,
+      authority_principal_id: input.authorityPrincipalId,
+      superseded_by_clock_id: input.supersededByClockId,
+    },
+    { correlationId: input.correlationId, identity: input.identity },
+  );
+}
+
+/** Satisfy a clock (FULFILLED) with evidence. */
+export async function satisfyClock(
+  obligationId: string,
+  clockId: string,
+  evidenceEvaluationIds: string[],
+  identity: Identity,
+  expectedVersion?: number,
+  correlationId?: string,
+): Promise<ApiWriteResult<Clock>> {
+  return apiPost<Clock>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(obligationId)}/clocks/${encodeURIComponent(clockId)}/satisfy`,
+    {
+      evidence_evaluation_ids: evidenceEvaluationIds,
+      expected_version: expectedVersion,
+    },
+    { correlationId, identity },
+  );
+}
+
+/** Waive a clock (WAIVED) with authority + reason + evidence. */
+export async function waiveClock(
+  obligationId: string,
+  clockId: string,
+  reason: string,
+  authorityPrincipalId: string,
+  identity: Identity,
+  expectedVersion?: number,
+  evidenceEvaluationIds: string[] = [],
+  correlationId?: string,
+): Promise<ApiWriteResult<Clock>> {
+  return apiPost<Clock>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(obligationId)}/clocks/${encodeURIComponent(clockId)}/waive`,
+    {
+      reason,
+      authority_principal_id: authorityPrincipalId,
+      evidence_evaluation_ids: evidenceEvaluationIds,
+      expected_version: expectedVersion,
+    },
+    { correlationId, identity },
+  );
+}
+
+/** Mark a clock as NOT_APPLICABLE with authority + reason. */
+export async function notApplicableClock(
+  obligationId: string,
+  clockId: string,
+  reason: string,
+  authorityPrincipalId: string,
+  identity: Identity,
+  expectedVersion?: number,
+  correlationId?: string,
+): Promise<ApiWriteResult<Clock>> {
+  return apiPost<Clock>(
+    "obligations",
+    `/v1/obligations/${encodeURIComponent(obligationId)}/clocks/${encodeURIComponent(clockId)}/not-applicable`,
+    {
+      reason,
+      authority_principal_id: authorityPrincipalId,
+      expected_version: expectedVersion,
+    },
+    { correlationId, identity },
+  );
+}
+
+/** Summary route for console v2.0 KPIs. */
+export type ObligationSummary = {
+  open: number;
+  due_soon: number;
+  overdue: number;
+  filing_pending: number;
+  unassessed_applicability: number;
+  obligations_by_jurisdiction: Record<string, number>;
+  obligations_by_clock_class: Record<string, number>;
+  clock_pipeline: Record<ClockState, number>;
+  escalation_ladder: Array<{ step: number; overdue_count: number; role: string }>;
+};
+
+export async function getObligationSummary(
+  identity?: Identity,
+): Promise<ApiResult<ObligationSummary>> {
+  return apiGet<ObligationSummary>("obligations", "/v1/obligations/summary", { identity });
+}
+
 // ── Interpretation ──────────────────────────────────────────────────────────
 
 /**
@@ -411,7 +745,7 @@ export function explainObligationError(message: string): string {
 
 // ── Roll-ups ────────────────────────────────────────────────────────────────
 
-export type ObligationSummary = {
+export type ObligationStats = {
   total: number;
   open: number;
   inProgress: number;
@@ -423,7 +757,7 @@ export type ObligationSummary = {
   dueWithin7Days: number;
 };
 
-export function summariseObligations(obligations: Obligation[]): ObligationSummary {
+export function summariseObligations(obligations: Obligation[]): ObligationStats {
   let open = 0;
   let inProgress = 0;
   let overdue = 0;
@@ -506,7 +840,7 @@ export async function listUpcomingObligations(
   return { ok: true, data: upcoming };
 }
 
-export type ObligationStats = {
+export type ObligationKpiStats = {
   open: number;
   overdue: number;
   dueWithin7Days: number;
@@ -522,7 +856,7 @@ export type ObligationStats = {
  */
 export async function getObligationStats(
   identity?: Identity,
-): Promise<ApiResult<ObligationStats>> {
+): Promise<ApiResult<ObligationKpiStats>> {
   const result = await apiGet<Obligation[]>("obligations", "/v1/obligations", { identity });
 
   if (!result.ok) return result;

@@ -5,7 +5,7 @@ import { PanelEmptyState, PayloadDetails, CopyableId } from "@/components/admin/
 import { CELL, HEAD } from "@/components/admin/shared/form";
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
+import { SESSION_COOKIE, decodeSession, toIdentity } from "@/lib/auth";
 import {
   listApplicablePolicyVersions,
   describePolicyType,
@@ -53,6 +53,7 @@ export async function ApplicablePolicyPanel({
     legalEntityId: scope === "entity" ? session.legalEntityId : undefined,
     // A global-only read still has to say who is asking.
     callerTenantId: session.tenantId,
+    caller: toIdentity(session),
   });
 
   if (!result.ok) {

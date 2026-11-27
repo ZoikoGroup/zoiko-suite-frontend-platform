@@ -30,7 +30,6 @@ import { person } from "@/lib/directory";
 import type { LegalEntity } from "@/lib/api/tenants";
 import { decisionTitle, splitRuleBasis, statusView, type GovernanceDecision } from "@/lib/api/governance";
 import { BASE, entityName, href, type DecisionDetail, type Query } from "./data";
-import { FollowUpDialog, ReplayDialog } from "./forms";
 import { PriorityMark, StatusBadge } from "./register";
 
 /** Label (with its icon) in the first column, the value left-aligned in the
@@ -234,8 +233,6 @@ export function DecisionDrawer({
   const owner = person(d.actor_id);
   const basis = splitRuleBasis(d.rule_basis);
   const ev = detail.evidence.data;
-  const entityList = [...entities.values()];
-
   return (
     <Shell
       closeHref={closeHref}
@@ -256,14 +253,11 @@ export function DecisionDrawer({
         </>
       }
       actions={
-        <>
-          <Link href={`${BASE}/decisions/${encodeURIComponent(d.decision_id)}`}
-            className="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-medium text-navy-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-            View Full Record
-            <ExternalLink className="h-3.5 w-3.5" />
-          </Link>
-          <FollowUpDialog decision={d} entities={entityList} />
-        </>
+        <Link href={`${BASE}/decisions/${encodeURIComponent(d.decision_id)}`}
+          className="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-medium text-navy-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+          View Full Record
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
       }
     >
       {pane === "details" && (
@@ -326,7 +320,7 @@ export function DecisionDrawer({
               <p className="flex items-center gap-1.5 text-[12px] text-slate-500">
                 <CornerDownRight className="h-3.5 w-3.5" />
                 {d.status_category === "PENDING" || d.status_category === "ESCALATED"
-                  ? "Still open: no decision has resolved it yet. Record its outcome below."
+                  ? "Still open: no decision has resolved it yet. It is resolved through Workflows & Approvals, and the approval appears here."
                   : "No follow-up recorded."}
               </p>
             )}
@@ -371,12 +365,6 @@ export function DecisionDrawer({
               <Fact icon={<ScrollText className="h-3.5 w-3.5" />} label="Policy version">{d.policy_version_id ? <Mono>{d.policy_version_id}</Mono> : "—"}</Fact>
             </dl>
           ) : null}
-          {d.action_type === "APPROVAL_THRESHOLD" && (
-            <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2.5 dark:bg-slate-800/50">
-              <p className="text-[12px] text-slate-600 dark:text-slate-300">Re-run it against the exact policy version it used.</p>
-              <ReplayDialog decision={d} />
-            </div>
-          )}
           {d.evaluation_context !== undefined && d.evaluation_context !== null && (
             <pre className="max-h-48 overflow-auto rounded-lg bg-slate-50 p-3 text-[11px] text-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
               {JSON.stringify(d.evaluation_context, null, 2)}

@@ -15,6 +15,7 @@
     "test:e2e:blocks": "playwright test -c playwright.blocks.config.ts"
   },
   "dependencies": {
+    "@radix-ui/react-select": "^2.4.1",
     "@swc/helpers": "^0.5.15",
     "clsx": "^2.1.1",
     "lucide-react": "^1.29.0",

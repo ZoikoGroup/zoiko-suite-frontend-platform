@@ -12,6 +12,7 @@ export function href(q: Query): string {
 
 export type EvidenceCtx = {
   me: string;
+  tenantId: string;
   /** Read once per request. */
   now: number;
   canManageRequests: boolean | null;

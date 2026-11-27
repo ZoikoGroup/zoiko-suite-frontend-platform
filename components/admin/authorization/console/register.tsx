@@ -86,6 +86,10 @@ export type RegisterSpec = {
   base?: string;
   /** Shown instead of the Authorization console's read problem when the register is unreadable. */
   problem?: (error: ApiError) => ReactNode;
+  /** Query keys that frame the whole register (an "as of" instant), carried by every link and search. */
+  keep?: Query;
+  /** Shown above the table whatever it holds: what frame the register is read in. */
+  banner?: ReactNode;
 };
 
 export function RegisterView({ spec, query }: { spec: RegisterSpec; query: Query }) {
@@ -105,8 +109,10 @@ export function RegisterView({ spec, query }: { spec: RegisterSpec; query: Query
   const selected = query.id === undefined ? shown[0]?.id : query.id || undefined;
 
   const filtered = Boolean(q) || Object.values(values).some(Boolean);
+  const frame: Query = Object.fromEntries(Object.entries(spec.keep ?? {}).filter(([, v]) => v));
   const state: Query = {
     tab: query.tab,
+    ...frame,
     q: q || undefined,
     ...Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v || undefined])),
   };
@@ -126,16 +132,21 @@ export function RegisterView({ spec, query }: { spec: RegisterSpec; query: Query
     <RegisterBody drawer={drawer}>
       <RegisterToolbar
         action={base}
-        keep={query.tab ? { tab: query.tab } : {}}
+        keep={{ ...(query.tab ? { tab: query.tab } : {}), ...(frame as Record<string, string>) }}
         search={{ name: "q", value: q, placeholder: spec.searchPlaceholder }}
         filters={spec.filters.map((f) => ({ ...f, value: values[f.name] }))}
-        clearHref={filtered ? href({ tab: query.tab }) : undefined}
+        clearHref={filtered ? href({ tab: query.tab, ...frame }) : undefined}
       />
+      {spec.banner && (
+        <p role="note" className="border-b border-slate-100 bg-sky-50/60 px-5 py-2.5 text-[12.5px] text-sky-900 dark:border-slate-800 dark:bg-sky-500/10 dark:text-sky-200">
+          {spec.banner}
+        </p>
+      )}
       {unreadable ? (
         spec.problem ? (
           spec.problem(spec.error!)
         ) : (
-          <ReadProblem error={spec.error!} what={spec.what} returnTo={href({ tab: query.tab })} />
+          <ReadProblem error={spec.error!} what={spec.what} returnTo={href({ tab: query.tab, ...frame })} />
         )
       ) : (
         <>

@@ -56,3 +56,18 @@ export type ControlWriteState = {
 };
 
 export const IDLE_CONTROL_WRITE: ControlWriteState = { status: "idle", message: "" };
+
+/**
+ * One governed command from the drawer: a version lifecycle step, a test-suite
+ * run, a waiver, an attestation, an evidence re-drive or a family retirement.
+ *
+ * `refused` is its own state: a maker–checker or permission refusal is a
+ * control working, not a fault, and reads differently from an outage.
+ * `stale` means someone else moved the record since the page was read.
+ */
+export type CommandState = {
+  status: "idle" | "done" | "unchanged" | "refused" | "stale" | "conflict" | "error";
+  message: string;
+};
+
+export const IDLE_COMMAND: CommandState = { status: "idle", message: "" };

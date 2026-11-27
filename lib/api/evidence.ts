@@ -266,6 +266,8 @@ export type EvidenceRequestFilters = {
   status?: EvidenceRequestStatus;
   /** false lists closed and satisfied requests too. Default: open only. */
   open?: boolean;
+  /** Filter to requests assigned to a specific principal (assignee view). */
+  assignedTo?: string;
 };
 
 /** The evidence request register, soonest due first (GET /v1/pbc/requests). */
@@ -277,6 +279,7 @@ export function listEvidenceRequests(identity: TenantIdentity, filters: Evidence
         legal_entity_id: filters.legalEntityId,
         status: filters.status,
         open: filters.open === false ? "false" : undefined,
+        assigned_to: filters.assignedTo,
       },
       page,
     ),
@@ -477,6 +480,53 @@ export function recordScanResult(input: { identity: WriteIdentity; responseId: s
   return apiPost<unknown>("evidence", `/v1/pbc/responses/${encodeURIComponent(input.responseId)}/scan-result`, { result: input.result }, {
     identity: input.identity,
   });
+}
+
+// ─── Assignee-side PBC commands (ER-FE-3) ──────────────────────────────────────
+
+/** Open a request as the assignee — records the view (POST …/view; assignee only). */
+export function viewEvidenceRequest(input: { identity: WriteIdentity; requestId: string }): Promise<ApiWriteResult<EvidenceRequest>> {
+  return apiPost<EvidenceRequest>(
+    "evidence",
+    `/v1/pbc/requests/${encodeURIComponent(input.requestId)}/view`,
+    {},
+    { identity: input.identity },
+  );
+}
+
+/** Submit a response as the assignee (POST …/responses; no If-Match). */
+export type SubmitResponseInput = {
+  identity: WriteIdentity;
+  requestId: string;
+  correlationId: string;
+};
+export function submitEvidenceResponse(input: SubmitResponseInput): Promise<ApiWriteResult<{ response_id: string; version: number }>> {
+  return apiPost<{ response_id: string; version: number }>(
+    "evidence",
+    `/v1/pbc/requests/${encodeURIComponent(input.requestId)}/responses`,
+    { correlation_id: input.correlationId },
+    { identity: input.identity },
+  );
+}
+
+/** Add a shared note as the assignee or manager (POST …/notes). */
+export function addEvidenceRequestNote(input: { identity: WriteIdentity; requestId: string; note: string }): Promise<ApiWriteResult<EvidenceRequest>> {
+  return apiPost<EvidenceRequest>(
+    "evidence",
+    `/v1/pbc/requests/${encodeURIComponent(input.requestId)}/notes`,
+    { note: input.note },
+    { identity: input.identity },
+  );
+}
+
+/** Manager: acknowledge a response (POST /v1/pbc/responses/{id}/acknowledge). */
+export function acknowledgeEvidenceResponse(input: { identity: WriteIdentity; responseId: string }): Promise<ApiWriteResult<unknown>> {
+  return apiPost<unknown>(
+    "evidence",
+    `/v1/pbc/responses/${encodeURIComponent(input.responseId)}/acknowledge`,
+    {},
+    { identity: input.identity },
+  );
 }
 
 // ─── Derived views ───────────────────────────────────────────────────────────

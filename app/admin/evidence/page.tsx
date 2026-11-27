@@ -10,7 +10,7 @@ import { loadEvidence, type EvidenceData } from "@/components/admin/evidence/con
 import { evaluationsRegister } from "@/components/admin/evidence/console/evaluations";
 import { AddRequirementDialog, CheckEvidenceDialog, NewEvidenceRequestDialog } from "@/components/admin/evidence/console/forms";
 import { EvidenceKpis, EvidencePanels } from "@/components/admin/evidence/console/overview";
-import { requestsRegister } from "@/components/admin/evidence/console/pbc";
+import { requestsRegister, myRequestsRegister } from "@/components/admin/evidence/console/pbc";
 import { requirementsRegister } from "@/components/admin/evidence/console/requirements";
 import { href, type EvidenceCtx } from "@/components/admin/evidence/console/shared";
 import { needsAttention } from "@/lib/api/authorization";
@@ -23,6 +23,7 @@ const TABS = [
   { key: "evaluations", label: "Evaluations" },
   { key: "missing", label: "Missing" },
   { key: "requests", label: "Evidence requests" },
+  { key: "my-requests", label: "My evidence requests" },
   { key: "check", label: "Check evidence" },
 ] as const;
 
@@ -43,6 +44,8 @@ function count(data: EvidenceData, tab: TabKey): number | null | undefined {
       return data.evaluations.error ? null : data.evaluations.rows.filter((e) => e.outcome === "MISSING").length;
     case "requests":
       return data.requests.error ? null : data.requests.rows.length;
+    case "my-requests":
+      return data.myRequests.error ? null : data.myRequests.rows.length;
     default:
       return undefined;
   }
@@ -58,6 +61,8 @@ function registerFor(tab: TabKey, data: EvidenceData, ctx: EvidenceCtx): Registe
       return evaluationsRegister(data, { missingOnly: true });
     case "requests":
       return requestsRegister(data, ctx);
+    case "my-requests":
+      return myRequestsRegister(data, ctx);
     case "check":
       return null;
   }
@@ -67,6 +72,8 @@ function tabActions(tab: TabKey, legalEntityId: string): ReactNode {
   switch (tab) {
     case "requests":
       return <NewEvidenceRequestDialog legalEntityId={legalEntityId} />;
+    case "my-requests":
+      return null;
     default:
       return null;
   }
@@ -95,7 +102,12 @@ export default async function EvidencePage({
 
   const now = requestTime();
   const data = await loadEvidence(current.identity);
-  const ctx: EvidenceCtx = { me: current.identity.principalId, now, canManageRequests: data.canManageRequests };
+  const ctx: EvidenceCtx = {
+    me: current.identity.principalId,
+    tenantId: current.identity.tenantId,
+    now,
+    canManageRequests: data.canManageRequests,
+  };
   const signedOut = [data.summary.error, data.requirements.error].some((e) => e && needsAttention(e) === "signin");
   const spec = signedOut ? null : registerFor(tab, data, ctx);
   const entity = current.identity.legalEntityId;
