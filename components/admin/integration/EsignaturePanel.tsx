@@ -5,6 +5,7 @@ import { FileSignature, RefreshCw } from "lucide-react";
 import { fetchPanelList } from "@/lib/panel-fetch";
 import { EnvelopeCreateForm, SignatureProfilesSection } from "./IntegrationCreateForms";
 import type { EsignatureEnvelope } from "@/lib/api/integration";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 const STATUS_COLORS: Record<string, string> = {
   SIGNED: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
@@ -40,6 +41,7 @@ export function EsignaturePanel() {
 
   return (
     <div className="space-y-4">
+      <ProviderStatusNote service="esignature-integration-svc" />
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>Signature envelopes (no DocuSign/Adobe adapter configured)</span>

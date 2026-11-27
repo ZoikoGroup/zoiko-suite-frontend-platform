@@ -172,7 +172,7 @@ export function RiskScoreCreateForm({ onCreated }: OnCreated) {
 
 const RECON_FIELDS: FieldSpec[] = [
   { name: "job_name", label: "Job name", kind: "text", required: true },
-  { name: "bank_reconciliation_run_id", label: "Bank reconciliation run ID", kind: "text", required: true, hint: "The bank-reconciliation-svc run to analyze (a UUID)." },
+  { name: "bank_reconciliation_run_id", label: "Bank reconciliation run ID", kind: "text", required: true, pickList: "reconciliation-runs", allowOther: true, hint: "Suggested: each bank account's latest run and latest certified run of the past year (bank-reconciliation-svc). Another run's ID may be entered." },
 ];
 
 export function ReconciliationCreateForm({ onCreated }: OnCreated) {

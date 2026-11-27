@@ -37,6 +37,8 @@ type Props = {
   initial?: string[];
   /** Change it to read the register again. */
   reloadKey?: string | number;
+  /** Uncontrolled single value at first, e.g. what the reader entered before a refusal. */
+  defaultValue?: string;
 };
 
 async function fetchOptions(kind: PickListKind): Promise<Options> {
@@ -64,6 +66,7 @@ export function PickList({
   multiple,
   initial,
   reloadKey,
+  defaultValue,
 }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
 
@@ -137,7 +140,9 @@ export function PickList({
           required={required}
           autoComplete="off"
           className={className}
-          {...(value !== undefined ? { value, onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange?.(e.target.value) } : {})}
+          {...(value !== undefined
+            ? { value, onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange?.(e.target.value) }
+            : { defaultValue: defaultValue ?? "" })}
         />
         <datalist id={listId}>
           {options?.ok &&
@@ -147,15 +152,29 @@ export function PickList({
               </option>
             ))}
         </datalist>
+        {options && !options.ok && (
+          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">No suggestions: {options.error}. Enter the ID.</p>
+        )}
       </>
     );
   }
 
   const controlled =
-    value !== undefined ? { value, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => onChange?.(e.target.value) } : { defaultValue: "" };
+    value !== undefined
+      ? { value, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => onChange?.(e.target.value) }
+      : { defaultValue: defaultValue ?? "" };
   return (
     <>
-      <select id={id} name={name} required={required} aria-required={required} className={className} {...controlled}>
+      <select
+        id={id}
+        name={name}
+        required={required}
+        aria-required={required}
+        className={className}
+        // An uncontrolled first value applies only once its option exists.
+        key={defaultValue && value === undefined ? (options ? "loaded" : "loading") : undefined}
+        {...controlled}
+      >
         <option value="">{options === null ? "Loading…" : blank}</option>
         {options?.ok &&
           options.items.map((o) => (

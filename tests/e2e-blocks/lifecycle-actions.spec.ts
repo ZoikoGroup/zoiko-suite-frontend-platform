@@ -135,7 +135,7 @@ test("recommendation: reject needs a reason and is recorded", async ({ page, req
   expect(list(after.json, "recommendations").find((r) => r.recommendation_id === id)?.status).toBe("REJECTED");
 });
 
-test("compliance gap: recorded through the form and resolved", async ({ page }) => {
+test("compliance gap: recorded through the form, resolution refused to its author, resolved by a second principal", async ({ page, context }) => {
   await open(page, "/admin/compliance");
   await page.getByRole("button", { name: "Record a compliance gap" }).click();
   const form = page.getByRole("form", { name: "Record a compliance gap" });
@@ -151,7 +151,19 @@ test("compliance gap: recorded through the form and resolved", async ({ page }) 
   await open(page, "/admin/compliance");
   const gapRow = page.getByRole("row").filter({ hasText: `MISSING_FILING_${TAG}` });
   await expect(gapRow).toHaveCount(1);
-  const actions = gapRow.locator("[data-row-actions]");
+  let actions = gapRow.locator("[data-row-actions]");
+  await click(actions, "Resolve");
+  await actions.getByLabel(/Remediation notes/).fill("Filed late; penalty accepted.");
+  await actions.getByRole("form", { name: "Resolve" }).getByRole("button", { name: "Resolve" }).click();
+  // Segregation of duties (compliance-status-svc): whoever logged the gap may
+  // not resolve it. The service's 403 and reason are shown as given.
+  await expect(actions.getByRole("alert")).toContainText("HTTP 403");
+  await expect(actions.getByRole("alert")).toContainText("may not resolve it");
+
+  await context.clearCookies();
+  await signIn(context, sessionValue(ID.principal2));
+  await open(page, "/admin/compliance");
+  actions = page.getByRole("row").filter({ hasText: `MISSING_FILING_${TAG}` }).locator("[data-row-actions]");
   await click(actions, "Resolve");
   await actions.getByLabel(/Remediation notes/).fill("Filed late; penalty accepted.");
   await actions.getByRole("form", { name: "Resolve" }).getByRole("button", { name: "Resolve" }).click();

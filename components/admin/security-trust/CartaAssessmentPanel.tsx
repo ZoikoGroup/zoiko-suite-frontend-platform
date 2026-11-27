@@ -17,6 +17,7 @@ import {
   Bot
 } from "lucide-react";
 import { RowActions } from "@/components/admin/shared/RowActions";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 export type CartaDecision = "ALLOW" | "STEP_UP_MFA" | "ISOLATE" | "DENY";
 export type CartaRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -169,6 +170,7 @@ export function CartaAssessmentPanel() {
 
   return (
     <div className="space-y-4">
+      <ProviderStatusNote service="carta-svc" />
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>Continuous Adaptive Risk & Trust Assessment (CARTA)</span>

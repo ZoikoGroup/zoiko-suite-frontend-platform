@@ -16,6 +16,7 @@ import { opts, type FieldSpec } from "@/components/admin/intelligence/create-sta
 import { createSiemExporterAction, sendSiemTestEventAction, loadSiemExporters, loadSiemEvents } from "@/app/admin/security/actions";
 import { SIEM_NO_DELIVERY, siemStatusText } from "./siem-caveat";
 import { RowActions } from "@/components/admin/shared/RowActions";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 const SEVERITY_BADGES: Record<string, string> = {
   CRITICAL: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 border-red-200 dark:border-red-900",
@@ -105,6 +106,7 @@ export function SiemIntegrationPanel() {
 
   return (
     <div className="space-y-4">
+      <ProviderStatusNote service="siem-integration-svc" />
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>SIEM exporters and recorded events (no external delivery is configured)</span>

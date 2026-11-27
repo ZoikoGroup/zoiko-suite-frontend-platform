@@ -20,6 +20,8 @@ import {
   draftVatReturnOptions,
   certifiedProfileOptions,
   secretPolicyOptions,
+  evidenceManifestOptions,
+  reconciliationRunOptions,
   type Options,
 } from "@/lib/form-options";
 
@@ -39,6 +41,8 @@ export const PICK_LIST_KINDS = [
   "draft-vat-returns",
   "certified-profiles",
   "secret-policies",
+  "evidence-manifests",
+  "reconciliation-runs",
 ] as const;
 
 export type PickListKind = (typeof PICK_LIST_KINDS)[number];
@@ -80,5 +84,9 @@ export async function loadPickList(kind: PickListKind): Promise<Options | null> 
       return certifiedProfileOptions(identity);
     case "secret-policies":
       return secretPolicyOptions(identity);
+    case "evidence-manifests":
+      return evidenceManifestOptions(identity);
+    case "reconciliation-runs":
+      return reconciliationRunOptions(identity);
   }
 }

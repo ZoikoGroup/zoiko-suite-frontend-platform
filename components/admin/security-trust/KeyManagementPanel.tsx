@@ -7,6 +7,7 @@ import type { CustomerKey } from "@/lib/api/security-trust";
 import { CreateRecordForm } from "@/components/admin/intelligence/CreateRecordForm";
 import { opts, type FieldSpec } from "@/components/admin/intelligence/create-state";
 import { registerKeyAction, disableKeyAction } from "@/app/admin/security/actions";
+import { ProviderStatusNote } from "@/components/admin/shared/ProviderStatusNote";
 
 const KEY_FIELDS: FieldSpec[] = [
   { name: "key_alias", label: "Key alias", kind: "text", required: true },
@@ -89,6 +90,7 @@ export function KeyManagementPanel() {
 
   return (
     <div className="space-y-4">
+      <ProviderStatusNote service="key-management-svc" />
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-2">
           <span>Customer key registry: key metadata only, no cryptographic operations</span>
