@@ -43,6 +43,10 @@ const PLATFORM_CLIENTS = new Set([
   "internal/siem/client.go",
   "internal/clients/bankaccount.go",
   "internal/clients/vault.go",
+  // banking-connector-svc keeps a statement's raw file in document-vault-svc
+  // (DOCUMENT_VAULT_SERVICE_URL, default http://document-vault-svc:8094): a
+  // platform service, not a bank.
+  "internal/documentvault/client.go",
   "internal/tokenization/client.go",
 ]);
 const OUTBOUND = /http\.NewRequest|NewRequestWithContext|http\.(Get|Post)\(|\.Do\(req/;

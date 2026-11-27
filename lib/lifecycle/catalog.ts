@@ -245,18 +245,15 @@ const INTELLIGENCE = {
   },
 
   "forecast.submit": {
-    backendRelease: "blocks-6-10-final",
     service: "forecasting", serviceLabel: "forecasting-svc", method: "POST",
     path: "/v1/forecasts/{id}/submit", label: "Submit for review", from: ["CALCULATED"], version: "if-match-v",
   },
   "forecast.approve": {
-    backendRelease: "blocks-6-10-final",
     service: "forecasting", serviceLabel: "forecasting-svc", method: "POST",
     path: "/v1/forecasts/{id}/approve", label: "Approve", from: ["REVIEWED"], version: "if-match-v",
     note: "The approver must be neither the creator nor the submitter.",
   },
   "forecast.publish": {
-    backendRelease: "blocks-6-10-final",
     service: "forecasting", serviceLabel: "forecasting-svc", method: "POST",
     path: "/v1/forecasts/{id}/publish", label: "Publish", from: ["APPROVED"], version: "if-match-v", confirm: true,
   },
@@ -270,7 +267,6 @@ const INTELLIGENCE = {
     ],
   },
   "forecast.reforecast": {
-    backendRelease: "blocks-6-10-final",
     service: "forecasting", serviceLabel: "forecasting-svc", method: "POST",
     path: "/v1/forecasts/{id}/reforecast", label: "Reforecast", from: ["APPROVED", "PUBLISHED"], version: "if-match-v",
     note: "Creates a new forecast from this one; this forecast is not changed.",
@@ -286,7 +282,6 @@ const INTELLIGENCE = {
 
   // review is offered by review_status, archive by status: the panel passes each.
   "risk-score.review": {
-    backendRelease: "blocks-6-10-final",
     service: "complianceRiskScoring", serviceLabel: "compliance-risk-scoring-svc", method: "POST",
     path: "/v1/risk-scores/{id}/review", label: "Review", from: ["PENDING_REVIEW"], version: "if-match",
     note: "The person who calculated the score cannot review it.",
@@ -297,7 +292,6 @@ const INTELLIGENCE = {
   },
   // An escalated score can only be confirmed or dismissed; escalating again is refused.
   "risk-score.review-escalated": {
-    backendRelease: "blocks-6-10-final",
     service: "complianceRiskScoring", serviceLabel: "compliance-risk-scoring-svc", method: "POST",
     path: "/v1/risk-scores/{id}/review", label: "Decide escalation", from: ["ESCALATED"], version: "if-match",
     note: "The person who calculated the score cannot review it.",
@@ -307,7 +301,6 @@ const INTELLIGENCE = {
     ],
   },
   "risk-score.archive": {
-    backendRelease: "blocks-6-10-final",
     service: "complianceRiskScoring", serviceLabel: "compliance-risk-scoring-svc", method: "POST",
     path: "/v1/risk-scores/{id}/archive", label: "Archive", from: ["ACTIVE", "SUPERSEDED"], version: "if-match", danger: true,
     fields: [reason("Reason", false)],
@@ -372,7 +365,6 @@ const INTELLIGENCE = {
   },
 
   "recommendation.accept": {
-    backendRelease: "blocks-6-10-final",
     service: "decisionSupport", serviceLabel: "decision-support-svc", method: "POST",
     path: "/v1/recommendations/{id}/accept", label: "Accept", from: ["REVIEW_REQUIRED"], version: "if-match",
     note: "An O3 recommendation needs an approval reference. The requester cannot accept an O2 or O3 recommendation.",
@@ -383,20 +375,17 @@ const INTELLIGENCE = {
     ],
   },
   "recommendation.reject": {
-    backendRelease: "blocks-6-10-final",
     service: "decisionSupport", serviceLabel: "decision-support-svc", method: "POST",
     path: "/v1/recommendations/{id}/reject", label: "Reject", from: ["REVIEW_REQUIRED"], version: "if-match", danger: true,
     fields: [reason()],
   },
   "recommendation.expire": {
-    backendRelease: "blocks-6-10-final",
     service: "decisionSupport", serviceLabel: "decision-support-svc", method: "POST",
     path: "/v1/recommendations/{id}/expire", label: "Expire", from: ["REVIEW_REQUIRED"], version: "if-match",
     note: "A reason is required before the review deadline.",
     fields: [reason("Reason", false)],
   },
   "recommendation.supersede": {
-    backendRelease: "blocks-6-10-final",
     service: "decisionSupport", serviceLabel: "decision-support-svc", method: "POST",
     path: "/v1/recommendations/{id}/supersede", label: "Supersede", from: ["REVIEW_REQUIRED"], version: "if-match",
     dynamicFields: ["replacement_recommendation_id"],
@@ -410,9 +399,9 @@ const INTELLIGENCE = {
 
 // ── Security (Block 9) ───────────────────────────────────────────────────────
 
-// The exporter lifecycle routes are served by the Blocks 6-10 backend release only.
+// The exporter lifecycle routes (pause, resume, disable) are served by backend main.
 const siem = (path: string, label: string, from: readonly string[], extra: Partial<LifecycleActionSpec> = {}): LifecycleActionSpec => ({
-  service: "siemIntegration", serviceLabel: "siem-integration-svc", method: "POST", backendRelease: "blocks-6-10-final",
+  service: "siemIntegration", serviceLabel: "siem-integration-svc", method: "POST",
   path: `/v1/siem/exporters/{id}/${path}`, label, from, ...extra,
 });
 
@@ -421,7 +410,6 @@ const SECURITY: Record<string, LifecycleActionSpec> = {
   "siem.resume": siem("resume", "Resume", ["PAUSED"]),
   "siem.disable": siem("disable", "Disable", ["ACTIVE", "PAUSED"], { confirm: true, danger: true, note: "Disabling is final." }),
   "carta.reevaluate": {
-    backendRelease: "blocks-6-10-final",
     service: "carta", serviceLabel: "carta-svc", method: "POST",
     path: "/v1/carta/assessments/{id}/reevaluate", label: "Re-evaluate", purposeContext: "security.access.evaluate",
     note: "Scores the recorded context again with the current model and records a new assessment; this one is kept as it was.",
@@ -432,7 +420,6 @@ const SECURITY: Record<string, LifecycleActionSpec> = {
 
 const VENDOR: Record<string, LifecycleActionSpec> = {
   "vendor-profile.approve": {
-    backendRelease: "blocks-6-10-final",
     service: "vendorDueDiligence", serviceLabel: "vendor-due-diligence-svc", method: "POST",
     path: "/v1/vendor-profiles/{id}/approve", label: "Approve vendor", from: ["PENDING"],
     purposeContext: "vendor_due_diligence", confirm: true,
