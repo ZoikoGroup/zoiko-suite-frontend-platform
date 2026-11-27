@@ -82,7 +82,7 @@ export function Pipeline({ stages, note }: { stages: PipelineStage[]; note?: Rea
                   last ? "text-emerald-700 dark:text-emerald-300" : "text-navy-950 dark:text-white",
                 )}
               >
-                {s.value}
+                {typeof s.value === "number" && Number.isNaN(s.value) ? "—" : s.value}
               </span>
               <span className="mt-2 text-[11px] leading-snug text-slate-500 dark:text-slate-400">{s.caption}</span>
             </div>

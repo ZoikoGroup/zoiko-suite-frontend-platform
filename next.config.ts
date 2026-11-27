@@ -45,6 +45,7 @@ const nextConfig: NextConfig = {
     // is empty" errors caused by disk-full SST write failures (os error 112).
     // Re-enable once disk space is freed.
     turbopackFileSystemCacheForDev: false,
+    agentUpgrade: "security",
   },
 };
 

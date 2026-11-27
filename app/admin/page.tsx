@@ -7,6 +7,7 @@ import {
   KpiCardGrid,
   DomainStatusGrid,
   ActiveServicesTable,
+  ConsoleView,
 } from "@/components/admin/overview";
 import { SESSION_COOKIE, decodeSession } from "@/lib/auth";
 
@@ -60,6 +61,15 @@ export default async function AdminOverviewPage() {
         </h2>
         <Suspense fallback={<DomainGridSkeleton />}>
           <DomainStatusGrid />
+        </Suspense>
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-base font-semibold tracking-tight text-navy-950 dark:text-slate-100">
+          Console View
+        </h2>
+        <Suspense fallback={<Skeleton className="h-[480px] w-full rounded-xl" />}>
+          <ConsoleView />
         </Suspense>
       </div>
 

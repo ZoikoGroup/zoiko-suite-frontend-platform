@@ -4,6 +4,8 @@ import { Card, Badge } from "@/components/ui";
 import { DOMAINS } from "@/lib/constants";
 import type { DomainStatus } from "@/lib/constants";
 import { getDomainHealth } from "@/lib/api/health";
+import { Scale, SquarePercent as Percent, ShieldCheck, ShoppingCart, ClipboardList, Lock, Plug, BrainCircuit } from "lucide-react";
+import { DomainKey } from "@/lib/constants";
 
 const STATUS_CONFIG: Record<DomainStatus, { label: string; tone: "success" | "warning" | "danger" }> = {
   operational: { label: "Operational", tone: "success" },
@@ -11,12 +13,6 @@ const STATUS_CONFIG: Record<DomainStatus, { label: string; tone: "success" | "wa
   "action-required": { label: "Action required", tone: "danger" },
 };
 
-/**
- * Domain status derived from live /readyz probes, not from the hardcoded status
- * in lib/constants.ts. A domain is only "operational" when every service in it
- * is ready; if none respond it is "action-required", which is accurate — nothing
- * in that domain can serve a request.
- */
 export async function DomainStatusGrid() {
   const health = await getDomainHealth();
 
@@ -25,6 +21,22 @@ export async function DomainStatusGrid() {
       {DOMAINS.map((domain, i) => {
         const domainHealth = health[domain.key];
         const status = STATUS_CONFIG[domainHealth.status];
+        const iconComponent = {
+          legal: Scale,
+          tax: Percent,
+          compliance: ShieldCheck,
+          "commercial-ops": ShoppingCart,
+          "purchase-requests": ClipboardList,
+          security: Lock,
+          integrations: Plug,
+          integration: Plug,
+          intelligence: BrainCircuit,
+          delegations: ClipboardList,
+          evidence: ClipboardList,
+        };
+
+        const Icon = iconComponent[domain.key as DomainKey];
+
         return (
           <Link
             key={domain.key}
@@ -34,8 +46,8 @@ export async function DomainStatusGrid() {
           >
             <Card className="flex h-full flex-col gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-navy-300 dark:hover:border-navy-500">
               <div className="flex items-start justify-between gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-navy-50 transition-colors duration-200 group-hover:bg-navy-900 dark:bg-navy-500/10 dark:group-hover:bg-navy-700">
-                  <domain.icon className="h-4.5 w-4.5 text-navy-700 transition-colors duration-200 group-hover:text-gold-300 dark:text-navy-300" />
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-navy-50 transition-colors duration-200 group-hover:bg-navy-900 dark:bg-navy-700 dark:group-hover:bg-navy-500/10">
+                  <Icon className="h-4.5 w-4.5 text-navy-700 transition-colors duration-200 group-hover:text-gold-300 dark:text-navy-300" />
                 </span>
                 <Badge tone={status.tone} title={domainHealth.down.length ? `Not ready: ${domainHealth.down.join(", ")}` : undefined}>
                   {status.label}
