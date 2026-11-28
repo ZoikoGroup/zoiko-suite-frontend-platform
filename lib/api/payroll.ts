@@ -211,7 +211,7 @@ export async function listPayrollTaxProfiles(identity?: Identity): Promise<ApiRe
 // ─── 5. Payroll Exceptions ────────────────────────────────────────────────────
 
 export type ExceptionSeverity = "INFO" | "WARNING" | "CRITICAL" | "BLOCKER";
-export type ExceptionStatus = "OPEN" | "RESOLVED" | "WAIVED";
+export type ExceptionStatus = "OPEN" | "IN_REVIEW" | "RESOLVED" | "WAIVED";
 
 export type PayrollException = {
   exception_id: string;
@@ -225,17 +225,47 @@ export type PayrollException = {
   created_at: string;
 };
 
-type ExceptionsResponse = { exceptions: PayrollException[]; total: number };
+/**
+ * domain.PayrollException as payroll-exceptions-svc sends it. The service
+ * returns a BARE ARRAY from GET /v1/payroll-exceptions and names the type
+ * `exception_code`, so both are mapped here rather than assumed at the call
+ * site — reading a `{exceptions}` wrapper from a bare array silently produced
+ * an empty list no matter how many exceptions were open.
+ */
+type PayrollExceptionWire = {
+  exception_id: string;
+  tenant_id: string;
+  payroll_run_id: string;
+  employee_id?: string;
+  exception_code: string;
+  severity: ExceptionSeverity;
+  status: string;
+  description: string;
+  created_at: string;
+};
 
 export async function listPayrollExceptions(identity?: Identity): Promise<ApiResult<PayrollException[]>> {
   const base = payrollExceptionsUrl();
   const url = `${base}/v1/payroll-exceptions`;
-  return fetchDomainService<ExceptionsResponse, PayrollException[]>(
+  return fetchDomainService<PayrollExceptionWire[], PayrollException[]>(
     url,
     base,
     "payroll-exceptions-svc",
     identity,
-    (d) => d.exceptions ?? [],
+    (d) => {
+      if (!Array.isArray(d)) throw new Error("payroll-exceptions-svc returned a non-array exception list");
+      return d.map((e) => ({
+        exception_id: e.exception_id,
+        tenant_id: e.tenant_id,
+        payroll_run_id: e.payroll_run_id,
+        employee_id: e.employee_id ?? "",
+        exception_type: e.exception_code,
+        severity: e.severity,
+        status: e.status as ExceptionStatus,
+        description: e.description,
+        created_at: e.created_at,
+      }));
+    },
   );
 }
 

@@ -248,36 +248,55 @@ export async function createComplianceGap(input: CreateComplianceGapInput): Prom
 // ─── 3. Exception Escalation (exception-escalation-svc, /v1/exception-escalation) ─
 
 export type ExceptionSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-export type ExceptionCaseStatus = "OPEN" | "UNDER_INVESTIGATION" | "ESCALATED" | "RESOLVED" | "CLOSED";
+export type ExceptionCaseStatus = "OPEN" | "INVESTIGATING" | "ESCALATED" | "RESOLVED" | "CLOSED";
 
 /** Wire shape of domain.ExceptionCase. */
 export type EscalatedException = {
   exception_case_id: string;
   tenant_id: string;
   legal_entity_id: string;
-  jurisdiction_id: string;
   exception_type: string;
   severity_level: ExceptionSeverity;
   linked_object_type: string;
   linked_object_id: string;
-  description: string;
+  /** The jurisdiction the case was raised under; the backend may not echo it back. */
+  jurisdiction_id?: string;
+  /** Backend does not currently send a description; kept optional so panels can render it defensively. */
+  description?: string;
   case_status: ExceptionCaseStatus;
   assigned_to_role?: string;
   assigned_to_user?: string;
   escalated_at?: string | null;
   closed_at?: string | null;
-  closed_by?: string;
-  closure_reason?: string;
-  created_by: string;
+  closed_by?: string | null;
+  closure_reason?: string | null;
+  /** Backend sends this as `created_by_principal_id`. */
+  created_by_principal_id: string;
   created_at: string;
   updated_at: string;
 };
 
-export async function listEscalatedExceptions(identity?: Identity): Promise<ApiResult<EscalatedException[]>> {
+export async function listEscalatedExceptions(
+  identity?: Identity,
+  options: {
+    status?: ExceptionCaseStatus;
+    assignedToUser?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<ApiResult<EscalatedException[]>> {
   const res = await apiGet<{ exception_cases?: EscalatedException[] | null }>(
     "exceptionEscalation",
-    "/v1/exception-escalation/exceptions",
-    { identity },
+    "/v1/exceptions",
+    {
+      identity,
+      query: {
+        case_status: options.status,
+        assigned_to_user: options.assignedToUser,
+        limit: options.limit,
+        offset: options.offset,
+      },
+    },
   );
   if (!res.ok) return res;
   return { ok: true, data: res.data?.exception_cases ?? [] };
@@ -300,7 +319,7 @@ export async function createEscalatedException(
 ): Promise<ApiWriteResult<EscalatedException>> {
   return apiPost<EscalatedException>(
     "exceptionEscalation",
-    "/v1/exception-escalation/exceptions",
+    "/v1/exceptions",
     {
       legal_entity_id: input.identity.legalEntityId,
       jurisdiction_id: input.jurisdictionId,
@@ -310,7 +329,7 @@ export async function createEscalatedException(
       linked_object_id: input.linkedObjectId,
       description: input.description,
       ...(input.assignedToRole ? { assigned_to_role: input.assignedToRole } : {}),
-      created_by: input.identity.principalId,
+      created_by_principal_id: input.identity.principalId,
     },
     { identity: input.identity },
   );

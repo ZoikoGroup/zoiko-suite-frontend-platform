@@ -188,7 +188,7 @@ export type ListObligationsInput = {
   /** RFC3339. The service 400s on anything else and names the field. */
   dueBefore?: string;
   dueAfter?: string;
-  /** 1–500, default 100. */
+  /** 1–200, default 100. Values above 200 are clamped here: the service refuses them. */
   limit?: number;
   offset?: number;
 };
@@ -209,10 +209,11 @@ export type ListObligationsInput = {
 export async function listObligations(
   input: ListObligationsInput = {},
 ): Promise<ApiResult<Obligation[]>> {
+  const limit = input.limit === undefined ? undefined : Math.min(Math.max(input.limit, 1), 200);
   const result = await apiGet<Obligation[]>("obligations", "/v1/obligations", {
     identity: input.identity,
     query: {
-      limit: input.limit,
+      limit,
       offset: input.offset,
       legal_entity_id: input.legalEntityId,
       jurisdiction_id: input.jurisdictionId,

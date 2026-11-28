@@ -8,6 +8,7 @@ import { currentSession } from "@/lib/authz-inbox";
 import { listEscalatedExceptions, type EscalatedException } from "@/lib/api/compliance";
 import { listSoDExceptions, type SoDException } from "@/lib/api/authorization";
 import { listPayrollExceptions, type PayrollException } from "@/lib/api/payroll";
+import type { ApiResult } from "@/lib/api/client";
 import { formatDateTime } from "@/lib/format";
 import { humanizeCode } from "@/lib/humanize";
 
@@ -15,18 +16,41 @@ export const metadata: Metadata = {
   title: "Exceptions | Zoiko Suite",
 };
 
-const OPEN_CASE = new Set(["OPEN", "UNDER_INVESTIGATION", "ESCALATED"]);
+const OPEN_CASE_STATUSES = ["OPEN", "INVESTIGATING", "ESCALATED"] as const;
+const ACTIVE_SOD_STATUSES = ["REQUESTED", "APPROVED"] as const;
+
+/**
+ * One register, read once per active status. Asking a service for the newest
+ * page across ALL statuses and filtering here hides an old open case behind
+ * newer closed ones — the register would claim there is no open work when
+ * there is.
+ */
+function mergeReads<T extends { created_at: string }>(reads: ApiResult<T[]>[]): ApiResult<T[]> {
+  const failed = reads.find((r) => !r.ok);
+  if (failed) return failed;
+  return {
+    ok: true,
+    data: reads
+      .flatMap((r) => (r.ok ? r.data : []))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+  };
+}
 
 export default async function ExceptionsPage() {
   const current = await currentSession();
   if (!current) redirect("/login");
   const { identity } = current;
 
-  const [cases, sod, payroll] = await Promise.all([
-    listEscalatedExceptions(identity),
-    listSoDExceptions(identity),
+  const [caseReads, sodReads, payroll] = await Promise.all([
+    Promise.all(
+      OPEN_CASE_STATUSES.map((status) => listEscalatedExceptions(identity, { status, limit: 200 })),
+    ),
+    Promise.all(ACTIVE_SOD_STATUSES.map((status) => listSoDExceptions(identity, { status }))),
     listPayrollExceptions(identity),
   ]);
+
+  const cases = mergeReads(caseReads);
+  const sod = mergeReads(sodReads);
 
   return (
     <div className="space-y-6">
@@ -39,7 +63,7 @@ export default async function ExceptionsPage() {
         title="Compliance exception cases"
         description="Cases that are open, under investigation or escalated."
         service="exception-escalation-svc"
-        read={cases.ok ? { ok: true, data: cases.data.filter((c) => OPEN_CASE.has(c.case_status)) } : cases}
+        read={cases}
         rowKey={(c) => c.exception_case_id}
         emptyLabel="No open compliance exception"
         link={{ href: "/admin/compliance", label: "Open compliance" }}
@@ -48,7 +72,7 @@ export default async function ExceptionsPage() {
           { header: "Type", cell: (c) => humanizeCode(c.exception_type) },
           { header: "Severity", cell: (c) => <Badge tone={severityTone(c.severity_level)}>{humanizeCode(c.severity_level)}</Badge> },
           { header: "Status", cell: (c) => humanizeCode(c.case_status) },
-          { header: "Assigned to", cell: (c) => c.assigned_to_user || c.assigned_to_role || "Unassigned" },
+          { header: "Raised by", cell: (c) => <CopyableId value={c.created_by_principal_id} /> },
           { header: "Raised", cell: (c) => formatDateTime(c.created_at) },
         ]}
       />
@@ -57,7 +81,7 @@ export default async function ExceptionsPage() {
         title="Duty-conflict exceptions"
         description="Segregation-of-duties exceptions requested or in force."
         service="authorization-svc"
-        read={sod.ok ? { ok: true, data: (sod.data ?? []).filter((e) => e.status === "REQUESTED" || e.status === "APPROVED") } : sod}
+        read={sod}
         rowKey={(e) => e.sod_exception_id}
         emptyLabel="No duty-conflict exception is requested or in force"
         link={{ href: "/admin/authorization", label: "Open authorization" }}

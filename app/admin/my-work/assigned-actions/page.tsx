@@ -21,8 +21,8 @@ export default async function AssignedActionsPage() {
   const me = identity.principalId;
 
   const [cases, obligations] = await Promise.all([
-    listEscalatedExceptions(identity),
-    listObligations({ identity, legalEntityId: identity.legalEntityId, limit: 500 }),
+    listEscalatedExceptions(identity, { assignedToUser: me, limit: 200 }),
+    listObligations({ identity, legalEntityId: identity.legalEntityId, limit: 200 }),
   ]);
 
   return (
